@@ -22,6 +22,7 @@ import type {
   ChatModelOption,
   ChatRuntimePhase,
   ChatSlashCommandWorkflow,
+  ChatWorkflow,
   LiliaBatchApplyInput,
   LiliaThreadGoal,
   LiliaReviewTarget,
@@ -100,6 +101,7 @@ import {
   syncPendingInteractionsForTimelineEvents,
 } from "./usePendingInteractionActions";
 import { installUnlistenFns } from "../../utils/eventListeners";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
 import { singleFlight } from "../../utils/singleFlight";
 
@@ -289,9 +291,68 @@ export function useTaskComposerController(options: {
   let cancelRuntimeSnapshotHydrationPaint: (() => void) | null = null;
   let cancelComposerStateHydrationPaint: (() => void) | null = null;
   const modelOptionsLoads: Partial<Record<ChatBackendKind, Promise<ChatModelOption[]>>> = {};
-  let guideDispatchLoad: Promise<GuideDispatchController> | null = null;
-  let pendingInteractionResolversLoad: Promise<PendingInteractionResolvers> | null = null;
-  let liliaWorkflowActionsLoad: Promise<LiliaWorkflowActionHandlers> | null = null;
+  const guideDispatchLoad = createLazyLoadState<GuideDispatchController>(() =>
+    measurePerfAsync(
+      "task-detail.guide-dispatch.load",
+      async () => {
+        const { useGuideDispatch } = await import("../../composables/useGuideDispatch");
+        return useGuideDispatch({
+          taskId: () => props.taskId,
+          ensureReady: context.ensureTaskReadyForMessage,
+          sendAgentMessage: (content, outgoingAttachments, guideId) =>
+            sendAgentMessage({ turn: { content, outgoingAttachments, guideId } }),
+          ensureDispatchReady: async () => {
+            await ensureComposerLoaded();
+          },
+          hasBlockingPendingAgentAction: () =>
+            blockingPendingAgentActions.value.length > 0,
+          isTurnRunning: () => isTurnRunning.value,
+          clearAttachments: () => {
+            attachments.value = [];
+          },
+          reportError: (message) => {
+            timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
+          },
+        });
+      },
+      { detail: props.taskId },
+    )
+  );
+  const liliaWorkflowActionsLoad = createLazyLoadState<LiliaWorkflowActionHandlers>(() =>
+    measurePerfAsync(
+      "task-detail.workflows.load",
+      async () => {
+        const { useLiliaWorkflowActions } = await import("./useLiliaWorkflowActions");
+        return useLiliaWorkflowActions({
+          hasContext: context.hasContext,
+          isTurnRunning,
+          blockingPendingAgentActions,
+          attachments,
+          sendAgentMessage,
+        });
+      },
+      { detail: props.taskId },
+    )
+  );
+  const pendingInteractionResolversLoad = createLazyLoadState<PendingInteractionResolvers>(() =>
+    measurePerfAsync(
+      "task-detail.pending-interactions.load",
+      async () => {
+        const { usePendingInteractionResolvers } = await import("./usePendingInteractionResolvers");
+        return usePendingInteractionResolvers({
+          taskId: () => props.taskId,
+          pendingAskUser,
+          pendingAskUsers,
+          pendingTitleUpdateRequestIds,
+          pendingToolConsent,
+          pendingToolConsents,
+          pendingAgentInteractions,
+          pendingArchitectureChanges,
+        });
+      },
+      { detail: props.taskId },
+    )
+  );
 
   const composerForView = computed<ChatComposerState>(() =>
     withActiveBackend(composer.value ?? {
@@ -553,37 +614,7 @@ export function useTaskComposerController(options: {
   }
 
   async function getGuideDispatch(): Promise<GuideDispatchController> {
-    if (!guideDispatchLoad) {
-      guideDispatchLoad = measurePerfAsync(
-        "task-detail.guide-dispatch.load",
-        async () => {
-          const { useGuideDispatch } = await import("../../composables/useGuideDispatch");
-          return useGuideDispatch({
-            taskId: () => props.taskId,
-            ensureReady: context.ensureTaskReadyForMessage,
-            sendAgentMessage: (content, outgoingAttachments, guideId) =>
-              sendAgentMessage({ turn: { content, outgoingAttachments, guideId } }),
-            ensureDispatchReady: async () => {
-              await ensureComposerLoaded();
-            },
-            hasBlockingPendingAgentAction: () =>
-              blockingPendingAgentActions.value.length > 0,
-            isTurnRunning: () => isTurnRunning.value,
-            clearAttachments: () => {
-              attachments.value = [];
-            },
-            reportError: (message) => {
-              timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
-            },
-          });
-        },
-        { detail: props.taskId },
-      ).catch((err) => {
-        guideDispatchLoad = null;
-        throw err;
-      });
-    }
-    return guideDispatchLoad;
+    return guideDispatchLoad.load();
   }
 
   async function createGuideFromComposer(
@@ -717,6 +748,7 @@ export function useTaskComposerController(options: {
     content: string,
     outgoingAttachments: ChatAttachment[] = [],
     outgoingConversationReferences: ChatConversationReference[] = [],
+    workflow: ChatWorkflow | null = null,
   ) {
     if (!context.hasContext.value) return;
     if (reportTaskRunBlock()) return;
@@ -729,6 +761,7 @@ export function useTaskComposerController(options: {
       const branchAnchor = pendingBranchAnchor.value;
       await sendAgentMessage({
         turn: { content, outgoingAttachments, outgoingConversationReferences },
+        workflow,
         runtimeCommand: branchAnchor
           ? {
             type: "session_fork",
@@ -877,26 +910,7 @@ export function useTaskComposerController(options: {
   }
 
   async function getLiliaWorkflowActions() {
-    if (!liliaWorkflowActionsLoad) {
-      liliaWorkflowActionsLoad = measurePerfAsync(
-        "task-detail.workflows.load",
-        async () => {
-          const { useLiliaWorkflowActions } = await import("./useLiliaWorkflowActions");
-          return useLiliaWorkflowActions({
-            hasContext: context.hasContext,
-            isTurnRunning,
-            blockingPendingAgentActions,
-            attachments,
-            sendAgentMessage,
-          });
-        },
-        { detail: props.taskId },
-      ).catch((err) => {
-        liliaWorkflowActionsLoad = null;
-        throw err;
-      });
-    }
-    return liliaWorkflowActionsLoad;
+    return liliaWorkflowActionsLoad.load();
   }
 
   async function onStartLiliaReview(
@@ -994,29 +1008,7 @@ export function useTaskComposerController(options: {
   }
 
   async function getPendingInteractionResolvers() {
-    if (!pendingInteractionResolversLoad) {
-      pendingInteractionResolversLoad = measurePerfAsync(
-        "task-detail.pending-interactions.load",
-        async () => {
-          const { usePendingInteractionResolvers } = await import("./usePendingInteractionResolvers");
-          return usePendingInteractionResolvers({
-            taskId: () => props.taskId,
-            pendingAskUser,
-            pendingAskUsers,
-            pendingTitleUpdateRequestIds,
-            pendingToolConsent,
-            pendingToolConsents,
-            pendingAgentInteractions,
-            pendingArchitectureChanges,
-          });
-        },
-        { detail: props.taskId },
-      ).catch((err) => {
-        pendingInteractionResolversLoad = null;
-        throw err;
-      });
-    }
-    return pendingInteractionResolversLoad;
+    return pendingInteractionResolversLoad.load();
   }
 
   async function onResolveAskUser(result: AskUserResult) {

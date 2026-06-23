@@ -27,13 +27,18 @@ import {
 import { useAgentTimelineEntries } from "./useAgentTimelineEntries";
 import { useTimelineRailMask } from "./useTimelineRailMask";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const timelineEntryItemLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.entry-item.load",
+    async () => (await import("./TimelineEntryItem.vue")).default,
+  )
+);
 
 const TimelineEntryItem = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.entry-item.load",
-    async () => (await import("./TimelineEntryItem.vue")).default,
-  ),
+  loader: () => timelineEntryItemLoad.load(),
 });
 
 const TIMELINE_RENDER_WINDOW_SIZE = 160;

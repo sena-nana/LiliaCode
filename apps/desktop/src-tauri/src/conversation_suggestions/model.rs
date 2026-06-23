@@ -5,6 +5,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 
 use crate::chat::state::default_model_for_backend;
+use crate::prompt_contract;
 use crate::provider::{
     assistant_ai_secret, backend_api_key_env, backend_direct_url, codex_account_spark_enabled,
     is_codex_account_spark_request, load_active_backend, load_assistant_ai_config,
@@ -14,8 +15,6 @@ use crate::provider::{
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
 use super::types::{ModelRequest, SuggestionSettings, SuggestionSource};
-
-const SUGGESTION_SPARK_INSTRUCTION: &str = "只输出严格 JSON。";
 
 pub(super) fn resolve_model_requests(
     app: &AppHandle,
@@ -115,8 +114,12 @@ pub(super) fn request_model(
     prompt: &str,
 ) -> Result<String, String> {
     if is_codex_spark_request(model) {
-        return request_codex_account_spark(app, prompt, SUGGESTION_SPARK_INSTRUCTION)
-            .map_err(|err| format!("Codex Spark 请求失败：{err}"));
+        return request_codex_account_spark(
+            app,
+            prompt,
+            prompt_contract::suggestion_system_instruction(),
+        )
+        .map_err(|err| format!("Codex Spark 请求失败：{err}"));
     }
     let client = Client::builder()
         .timeout(Duration::from_secs(12))
@@ -141,7 +144,7 @@ fn request_openai_compatible(
         .json(&json!({
             "model": model.model,
             "messages": [
-                { "role": "system", "content": "只输出严格 JSON。" },
+                { "role": "system", "content": prompt_contract::suggestion_system_instruction() },
                 { "role": "user", "content": prompt }
             ],
             "temperature": 0.2,
@@ -185,7 +188,7 @@ fn request_anthropic(
             "model": model.model,
             "max_tokens": 700,
             "temperature": 0.2,
-            "system": "只输出严格 JSON。",
+            "system": prompt_contract::suggestion_system_instruction(),
             "messages": [{ "role": "user", "content": prompt }]
         }))
         .send()

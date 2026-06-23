@@ -9,6 +9,7 @@ use super::generation::{
 use super::github_context::{normalize_github_events, parse_github_repo_url};
 use super::scope::{build_scope_from_parts, load_task_samples, summarize_scope_sources};
 use super::types::*;
+use crate::agent_timeline;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value as JsonValue};
 
@@ -35,21 +36,6 @@ fn create_schema(conn: &Connection) {
               sort_order INTEGER NOT NULL DEFAULT 0,
               pinned INTEGER NOT NULL DEFAULT 0
             );
-            CREATE TABLE agent_timeline_events (
-              id TEXT PRIMARY KEY,
-              task_id TEXT NOT NULL,
-              turn_id TEXT,
-              backend TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              status TEXT NOT NULL,
-              title TEXT NOT NULL,
-              summary TEXT,
-              payload TEXT NOT NULL,
-              created_at INTEGER NOT NULL,
-              updated_at INTEGER NOT NULL,
-              turn_seq INTEGER NOT NULL,
-              intra_turn_order INTEGER NOT NULL
-            );
             CREATE TABLE task_todos (
               id           TEXT PRIMARY KEY,
               task_id      TEXT NOT NULL,
@@ -66,6 +52,13 @@ fn create_schema(conn: &Connection) {
             "#,
         )
         .unwrap();
+    agent_timeline::create_timeline_schema(conn).unwrap();
+}
+
+fn conn() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    create_schema(&conn);
+    conn
 }
 
 fn empty_project_context() -> ProjectContext {
@@ -173,8 +166,7 @@ fn insert_event(conn: &Connection, task_id: &str, updated_at: i64, content: &str
 
 #[test]
 fn task_sampling_uses_recent_unarchived_project_tasks() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "old", "p1", false);
     insert_task(&conn, "new", "p1", false);
     insert_task(&conn, "archived", "p1", true);
@@ -221,8 +213,7 @@ fn prompt_builder_truncates_long_history() {
 
 #[test]
 fn scope_ignores_recent_tasks_without_unfinished_signals() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "done", "p1", false);
     insert_event(&conn, "done", 20, "最近对话");
     insert_todo(&conn, "done", "已完成事项", true, 0);
@@ -236,8 +227,7 @@ fn scope_ignores_recent_tasks_without_unfinished_signals() {
 
 #[test]
 fn scope_uses_unfinished_task_todos_in_prompt() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "todo-task", "p1", false);
     insert_event(&conn, "todo-task", 20, "继续做权限检查");
     insert_todo(&conn, "todo-task", "补齐权限失败回退", false, 0);
@@ -256,8 +246,7 @@ fn scope_uses_unfinished_task_todos_in_prompt() {
 
 #[test]
 fn todo_list_payload_samples_only_unfinished_items() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "timeline-todo", "p1", false);
     insert_event(&conn, "timeline-todo", 20, "处理同步");
     insert_todo_list_event(
@@ -356,8 +345,7 @@ fn github_events_normalize_pr_issue_and_push_only() {
 
 #[test]
 fn scope_can_use_github_activity_without_unfinished_tasks() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "done", "p1", false);
     insert_event(&conn, "done", 20, "最近对话");
     insert_todo(&conn, "done", "已完成事项", true, 0);
@@ -382,8 +370,7 @@ fn scope_can_use_github_activity_without_unfinished_tasks() {
 
 #[test]
 fn source_probe_reports_task_and_github_sources() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "task-1", "p1", false);
     insert_event(&conn, "task-1", 20, "最近对话");
     insert_todo(&conn, "task-1", "继续处理建议展示", false, 0);
@@ -471,8 +458,7 @@ fn prompt_includes_github_activity_ids() {
 
 #[test]
 fn scope_can_use_local_git_context_without_unfinished_tasks() {
-    let conn = Connection::open_in_memory().unwrap();
-    create_schema(&conn);
+    let conn = conn();
     insert_task(&conn, "done", "p1", false);
     insert_event(&conn, "done", 20, "最近对话");
     insert_todo(&conn, "done", "已完成事项", true, 0);

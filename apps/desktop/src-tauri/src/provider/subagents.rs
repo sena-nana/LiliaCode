@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use uuid::Uuid;
 
+use crate::prompt_contract::codex_subagent_prompts;
 use crate::store::resolve_lilia_home;
 
 use super::types::CustomSubagentDefinition;
@@ -123,14 +124,25 @@ fn slugify_agent_name(raw: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+fn compose_lilia_subagent_prompt(instruction: &str) -> String {
+    let prompts = codex_subagent_prompts();
+    format!(
+        "{}\n\n{}\n{}",
+        prompts.baseline_prompt, prompts.agent_role_label, instruction
+    )
+}
+
 fn compile_codex_subagent_instructions(subagents: &[CustomSubagentDefinition]) -> Option<String> {
     if subagents.is_empty() {
         return None;
     }
+    let prompts = codex_subagent_prompts();
     let mut lines = vec![
-        "You may delegate focused work to specialized subagents when it improves speed or clarity."
-            .to_string(),
-        "Available subagents:".to_string(),
+        prompts.delegation_header.clone(),
+        prompts.baseline_intro.clone(),
+        prompts.baseline_label.clone(),
+        prompts.baseline_prompt.clone(),
+        prompts.available_label.clone(),
     ];
     for item in subagents {
         let summary = if item.description.is_empty() {
@@ -139,16 +151,19 @@ fn compile_codex_subagent_instructions(subagents: &[CustomSubagentDefinition]) -
             item.description.as_str()
         };
         lines.push(format!("- {}: {}", item.name, summary));
-        lines.push(format!("  Working instructions: {}", item.instruction));
+        lines.push(format!(
+            "  {}: {}",
+            prompts.agent_specific_instruction_label, item.instruction
+        ));
     }
-    lines.extend([
-        "Delegation rules:".to_string(),
-        "1. Delegate only self-contained subtasks with a clear objective.".to_string(),
-        "2. Avoid sending the same work to multiple subagents unless the tasks are independent."
-            .to_string(),
-        "3. Prefer one subagent at a time unless parallel work is clearly justified.".to_string(),
-        "4. Synthesize the final answer yourself after reviewing subagent output.".to_string(),
-    ]);
+    lines.push(prompts.delegation_rules_label.clone());
+    lines.extend(
+        prompts
+            .delegation_rules
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| format!("{}. {}", index + 1, rule)),
+    );
     Some(lines.join("\n"))
 }
 
@@ -172,7 +187,7 @@ fn compile_claude_managed_subagents(subagents: &[CustomSubagentDefinition]) -> O
                 } else {
                     format!("{}: {}", item.name, item.description)
                 },
-                "prompt": item.instruction,
+                "prompt": compose_lilia_subagent_prompt(&item.instruction),
             }),
         );
     }
@@ -291,6 +306,7 @@ mod tests {
 
     #[test]
     fn codex_and_claude_compilers_compile_enabled_agents() {
+        let prompts = codex_subagent_prompts();
         let compiled_codex = compile_codex_subagent_instructions(&[CustomSubagentDefinition {
             id: "agent-1".to_string(),
             name: "Reviewer".to_string(),
@@ -300,6 +316,8 @@ mod tests {
         }])
         .unwrap();
         assert!(compiled_codex.contains("Reviewer"));
+        assert!(compiled_codex.contains(prompts.baseline_prompt.as_str()));
+        assert!(compiled_codex.contains(prompts.agent_specific_instruction_label.as_str()));
 
         let compiled_claude = compile_claude_managed_subagents(&[CustomSubagentDefinition {
             id: "agent-1".to_string(),
@@ -309,9 +327,10 @@ mod tests {
             enabled: true,
         }])
         .unwrap();
-        assert_eq!(
-            compiled_claude["agents"]["lilia-reviewer"]["prompt"],
-            JsonValue::String("Review code changes and summarize risk.".to_string())
-        );
+        let compiled_claude_prompt = compiled_claude["agents"]["lilia-reviewer"]["prompt"]
+            .as_str()
+            .unwrap();
+        assert!(compiled_claude_prompt.contains(prompts.baseline_prompt.as_str()));
+        assert!(compiled_claude_prompt.contains("Review code changes and summarize risk."));
     }
 }

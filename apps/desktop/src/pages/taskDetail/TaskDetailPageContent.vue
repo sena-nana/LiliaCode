@@ -26,6 +26,7 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 
 const props = withDefaults(defineProps<{
   projectId?: string;
@@ -37,10 +38,7 @@ const props = withDefaults(defineProps<{
 
 const TaskDetailChatSurface = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "task-detail.surface.load",
-    async () => (await import("./TaskDetailChatSurface.vue")).default,
-  ),
+  loader: () => taskDetailChatSurfaceLoad.load(),
 });
 
 const routeProps = props as TaskDetailRouteProps;
@@ -69,8 +67,26 @@ const draftProjectPickerProjects = shallowRef<Project[]>([]);
 let suggestionsSeq = 0;
 let draftProjectPickerSeq = 0;
 let deferredHydrationSeq = 0;
-let taskDetailDeferredUiLoad: Promise<typeof import("./taskDetailDeferredUi")> | null = null;
-let taskDetailSidebarPanelsLoad: Promise<typeof import("./taskDetailSidebarPanels")> | null = null;
+const taskDetailChatSurfaceLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "task-detail.surface.load",
+    async () => (await import("./TaskDetailChatSurface.vue")).default,
+  )
+);
+const taskDetailDeferredUiLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "task-detail.deferred-ui.load",
+    async () => await import("./taskDetailDeferredUi"),
+    { detail: taskDetailPerfDetail() },
+  )
+);
+const taskDetailSidebarPanelsLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "task-detail.sidebar-panels.module.load",
+    async () => await import("./taskDetailSidebarPanels"),
+    { detail: taskDetailPerfDetail() },
+  )
+);
 let deferredSettingsHydrationHandle: number | null = null;
 let contextUsageListenerInstallHandle: number | null = null;
 let dragDropListenerInstallHandle: number | null = null;
@@ -209,31 +225,11 @@ const shouldShowDraftProjectPicker = computed(() =>
 );
 
 async function loadTaskDetailDeferredUiModule() {
-  if (!taskDetailDeferredUiLoad) {
-    taskDetailDeferredUiLoad = measurePerfAsync(
-      "task-detail.deferred-ui.load",
-      async () => await import("./taskDetailDeferredUi"),
-      { detail: taskDetailPerfDetail() },
-    ).catch((err) => {
-      taskDetailDeferredUiLoad = null;
-      throw err;
-    });
-  }
-  return taskDetailDeferredUiLoad;
+  return taskDetailDeferredUiLoad.load();
 }
 
 async function loadTaskDetailSidebarPanelsModule() {
-  if (!taskDetailSidebarPanelsLoad) {
-    taskDetailSidebarPanelsLoad = measurePerfAsync(
-      "task-detail.sidebar-panels.module.load",
-      async () => await import("./taskDetailSidebarPanels"),
-      { detail: taskDetailPerfDetail() },
-    ).catch((err) => {
-      taskDetailSidebarPanelsLoad = null;
-      throw err;
-    });
-  }
-  return taskDetailSidebarPanelsLoad;
+  return taskDetailSidebarPanelsLoad.load();
 }
 
 async function loadSuggestions(forceRefresh = false) {

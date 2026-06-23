@@ -11,24 +11,16 @@ import {
   type ChatAttachment,
   type ChatConversationReference,
 } from "@lilia/contracts";
+import { timelineEventFixture } from "./timelineTestHelpers";
 
 function event(overrides: Partial<AgentTimelineEvent>): AgentTimelineEvent {
-  return {
+  return timelineEventFixture(overrides, {
     id: "event",
     taskId: "t-1",
     turnId: null,
     backend: "claude",
     kind: "info",
-    status: "success",
-    title: "事件",
-    summary: null,
-    payload: null,
-    createdAt: 1,
-    updatedAt: 1,
-    turnSeq: 1,
-    intraTurnOrder: 1,
-    ...overrides,
-  };
+  });
 }
 
 const attachment: ChatAttachment = {

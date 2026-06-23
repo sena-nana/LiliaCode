@@ -266,9 +266,17 @@ pub(crate) fn normalize_agent_interaction_settings(
         non_interrupt_mode: settings.non_interrupt_mode,
         debug: settings.debug,
         permission_mode: normalize_permission_mode(&settings.permission_mode),
+        main_agent_prompt_mode: normalize_main_agent_prompt_mode(&settings.main_agent_prompt_mode),
         codex_profile: normalize_codex_profile_settings(settings.codex_profile),
         subagent_mode: normalize_subagent_mode_settings(settings.subagent_mode),
         auto_turn_decision: settings.auto_turn_decision,
+    }
+}
+
+pub(crate) fn normalize_main_agent_prompt_mode(value: &str) -> String {
+    match value {
+        "aggressive" => "aggressive".to_string(),
+        _ => "conservative".to_string(),
     }
 }
 
@@ -566,6 +574,12 @@ mod tests {
         assert!(normalized.claude.enabled);
         assert!(normalized.claude.forward_subagent_text);
         assert!(normalized.claude.agent_progress_summaries);
+    }
+
+    #[test]
+    fn main_agent_prompt_mode_normalizes_to_known_modes() {
+        assert_eq!(normalize_main_agent_prompt_mode("aggressive"), "aggressive");
+        assert_eq!(normalize_main_agent_prompt_mode("unknown"), "conservative");
     }
 
     #[test]

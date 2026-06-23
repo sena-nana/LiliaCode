@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { shallowRef } from "vue";
 import type { SidebarConversationSummary } from "@lilia/contracts";
 import {
   TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
   TASKS_CHANGED_EVENT_NAME,
 } from "@lilia/contracts";
+import { addDomEventListener } from "../utils/eventListeners";
 import { measurePerfAsync } from "../utils/perf";
 
 export const SIDEBAR_CONVERSATIONS = shallowRef<SidebarConversationSummary[]>([]);
@@ -15,6 +16,8 @@ const loaded = shallowRef(false);
 let loadPromise: Promise<SidebarConversationSummary[]> | null = null;
 let listenerInstalled = false;
 let listenerInstallPromise: Promise<void> | null = null;
+let listenerUnlisten: UnlistenFn | null = null;
+let beforeUnloadUnlisten: UnlistenFn | null = null;
 let revision = 0;
 
 async function refreshSidebarConversations(): Promise<SidebarConversationSummary[]> {
@@ -44,8 +47,10 @@ function installSidebarConversationListener() {
       console.error("[sidebar-conversations] refresh failed", err);
     });
   })
-    .then(() => {
+    .then((unlisten) => {
+      listenerUnlisten = unlisten;
       listenerInstalled = true;
+      installSidebarConversationBeforeUnloadCleanup();
     })
     .catch((err) => {
       console.error(`[sidebar-conversations] listen ${TASKS_CHANGED_EVENT_NAME} failed`, err);
@@ -53,6 +58,25 @@ function installSidebarConversationListener() {
     .finally(() => {
       listenerInstallPromise = null;
     });
+}
+
+function installSidebarConversationBeforeUnloadCleanup() {
+  if (beforeUnloadUnlisten || typeof window === "undefined") return;
+  beforeUnloadUnlisten = addDomEventListener(
+    window,
+    "beforeunload",
+    disposeSidebarConversationListener,
+    { once: true },
+  );
+}
+
+export function disposeSidebarConversationListener() {
+  listenerUnlisten?.();
+  listenerUnlisten = null;
+  listenerInstalled = false;
+  listenerInstallPromise = null;
+  beforeUnloadUnlisten?.();
+  beforeUnloadUnlisten = null;
 }
 
 installSidebarConversationListener();

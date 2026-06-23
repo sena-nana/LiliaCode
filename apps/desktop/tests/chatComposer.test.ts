@@ -13,6 +13,7 @@ import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
 import { mockInvoke, setMockClipboardFilePaths } from "./tauriMock";
+import { domRect, placeEditableCaret } from "./domTestHelpers";
 
 const baseState: ChatComposerState = {
   taskId: "task-1",
@@ -97,45 +98,36 @@ const codexCommandToolConsent: ToolConsentRequest = {
 
 const projectCwd = "D:\\PROJECT\\workspace\\Lilia";
 
-function renderRunningComposer() {
+function renderComposer(
+  props: { state?: ChatComposerState; attachments?: ChatAttachment[]; [key: string]: unknown } = {},
+) {
   return render(ChatComposer, {
     props: {
       state: baseState,
       attachments: [],
-      sending: true,
+      ...props,
     },
   });
+}
+
+function renderRunningComposer() {
+  return renderComposer({ sending: true });
 }
 
 const scrollHeights: number[] = [];
 let scrollHeightDescriptor: PropertyDescriptor | undefined;
 
-async function flushContextSearch() {
+async function flushDeferredComposerWork(promiseTicks = 5) {
   await vi.advanceTimersByTimeAsync(32);
   await vi.dynamicImportSettled();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < promiseTicks; index += 1) {
+    await Promise.resolve();
+  }
 }
 
-async function flushPasteTasks() {
-  await vi.advanceTimersByTimeAsync(32);
-  await vi.dynamicImportSettled();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
-async function flushToolbarLoad() {
-  await vi.advanceTimersByTimeAsync(32);
-  await vi.dynamicImportSettled();
-  await Promise.resolve();
-  await Promise.resolve();
-}
+const flushContextSearch = flushDeferredComposerWork;
+const flushPasteTasks = flushDeferredComposerWork;
+const flushToolbarLoad = () => flushDeferredComposerWork(2);
 
 async function requestComposerChrome(view: ReturnType<typeof render>) {
   const composer = view.container.querySelector(".chat-composer");
@@ -143,20 +135,6 @@ async function requestComposerChrome(view: ReturnType<typeof render>) {
   await fireEvent.pointerEnter(composer as HTMLElement);
   await fireEvent.focusIn(view.getByRole("textbox"));
   await flushToolbarLoad();
-}
-
-function placeEditableCaret(element: HTMLElement, offset: number) {
-  const selection = window.getSelection();
-  const range = document.createRange();
-  const textNode = element.firstChild;
-  if (textNode?.nodeType === Node.TEXT_NODE) {
-    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
-  } else {
-    range.selectNodeContents(element);
-    range.collapse(false);
-  }
-  selection?.removeAllRanges();
-  selection?.addRange(range);
 }
 
 async function setComposerText(view: ReturnType<typeof render>, text: string) {
@@ -178,6 +156,58 @@ function composerText(input: HTMLElement): string {
 async function openComposerActionMenu(view: ReturnType<typeof render>) {
   await requestComposerChrome(view);
   await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }));
+}
+
+function installComposerMenuGeometryMock(input: { triggerY: number; popoverY: number; innerHeight?: number }) {
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+  const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  const originalInnerHeight = window.innerHeight;
+  if (input.innerHeight !== undefined) {
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: input.innerHeight,
+    });
+  }
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: function mockRect(this: HTMLElement) {
+      if (this.classList.contains("chat-composer__action-menu") ||
+        this.classList.contains("chat-composer__action-trigger")) {
+        return domRect(100, input.triggerY, 28, 28);
+      }
+      if (this.classList.contains("chat-composer__action-menu-popover")) {
+        return domRect(100, input.popoverY, 190, 124);
+      }
+      return originalGetBoundingClientRect.call(this);
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get() {
+      return this.classList.contains("chat-composer__action-menu-popover") ? 190 : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get() {
+      return this.classList.contains("chat-composer__action-menu-popover") ? 124 : 0;
+    },
+  });
+  return () => {
+    if (input.innerHeight !== undefined) {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+    }
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: originalGetBoundingClientRect,
+    });
+    if (originalOffsetWidth) Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
+    if (originalOffsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+  };
 }
 
 function createTextPasteEvent(text: string, html = ""): ClipboardEvent {
@@ -262,12 +292,7 @@ describe("ChatComposer", () => {
       return nextId;
     }));
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await setComposerText(view, "@read");
     const lastFrameId = frameIds.at(-1);
@@ -296,18 +321,13 @@ describe("ChatComposer", () => {
     await setComposerText(view, "补充上下文");
     await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
 
-    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", [], []]);
+    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", [], [], null]);
     expect(view.emitted("interrupt")).toBeUndefined();
   });
 
 
   it("主输入框只有空格时隐藏 placeholder 且不能发送", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     const input = await setComposerText(view, "   ");
 
@@ -320,12 +340,7 @@ describe("ChatComposer", () => {
   });
 
   it("空输入时禁用提示词优化", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await requestComposerChrome(view);
 
@@ -333,12 +348,7 @@ describe("ChatComposer", () => {
   });
 
   it("提示词优化按钮在发送按钮左侧且成功后替换草稿", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer({ projectCwd });
     const input = await setComposerText(view, "修一下输入框按钮");
     await requestComposerChrome(view);
 
@@ -356,19 +366,44 @@ describe("ChatComposer", () => {
         prompt: "修一下输入框按钮",
         attachments: [],
         conversationReferences: [],
+        projectCwd,
+        taskId: "task-1",
       },
     }, undefined);
     expect(view.emitted("send")).toBeUndefined();
   });
 
+  it("提示词优化只展示 workflow 建议，应用后随发送透传", async () => {
+    const view = renderComposer({ projectCwd });
+    const input = await setComposerText(view, "请 review 当前改动");
+    await requestComposerChrome(view);
+
+    await fireEvent.click(view.getByRole("button", { name: "优化提示词" }));
+
+    await waitFor(() => {
+      expect(composerText(input)).toBe("优化后：请 review 当前改动");
+    });
+    expect(view.emitted("send")).toBeUndefined();
+
+    expect(await view.findByText("建议作为 代码审查 发送")).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "应用" }));
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    expect(view.emitted("send")?.[0]).toEqual([
+      "优化后：请 review 当前改动",
+      [],
+      [],
+      {
+        type: "lilia_review",
+        target: { type: "uncommittedChanges" },
+        delivery: "inline",
+      },
+    ]);
+  });
+
 
   it("主输入框清空后只有浏览器填充 br 时显示 placeholder", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     const input = await setComposerText(view, "写点东西");
     input.replaceChildren(document.createElement("br"));
@@ -380,13 +415,7 @@ describe("ChatComposer", () => {
 
 
   it("@ 搜索选中结果后转为上下文附件并清理 mention", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
     const input = view.getByRole("textbox") as HTMLElement;
 
     await setComposerText(view, "参考 @read");
@@ -408,13 +437,7 @@ describe("ChatComposer", () => {
   });
 
   it("@ 搜索会在首帧后再触发上下文查询，避免阻塞当前输入事件", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
 
     mockInvoke.mockClear();
     await setComposerText(view, "参考 @read");
@@ -430,13 +453,7 @@ describe("ChatComposer", () => {
 
 
   it("@ 搜索目录时 Tab 进入目录且不生成附件", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
     const input = view.getByRole("textbox") as HTMLElement;
 
     await setComposerText(view, "@big");
@@ -451,13 +468,7 @@ describe("ChatComposer", () => {
 
 
   it("@ 绝对路径不存在时提示且不创建附件", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
     const input = view.getByRole("textbox") as HTMLElement;
 
     await setComposerText(view, "@D:\\PROJECT\\workspace\\Lilia\\missing.md");
@@ -471,13 +482,7 @@ describe("ChatComposer", () => {
   });
 
   it("@ 普通无结果继续输入会自动收起搜索面板", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
 
     await setComposerText(view, "@zzzz");
     await flushContextSearch();
@@ -490,13 +495,7 @@ describe("ChatComposer", () => {
   });
 
   it("@ 无结果自动收起后删回裸 @ 会重新打开搜索面板", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
 
     await setComposerText(view, "@zzzz");
     await flushContextSearch();
@@ -510,13 +509,7 @@ describe("ChatComposer", () => {
   });
 
   it("@ 路径型无结果继续输入时不会自动收起搜索面板", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
 
     await setComposerText(view, "@dist/not-there");
     await flushContextSearch();
@@ -528,13 +521,7 @@ describe("ChatComposer", () => {
   });
 
   it("输入 / 时展示斜杠命令并可选择执行", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
     const input = view.getByRole("textbox") as HTMLElement;
 
     await setComposerText(view, "/he");
@@ -556,13 +543,7 @@ describe("ChatComposer", () => {
   });
 
   it("斜杠命令不会影响 @ 文件上下文选择", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
     const input = view.getByRole("textbox") as HTMLElement;
 
     await setComposerText(view, "参考 @read");
@@ -576,12 +557,7 @@ describe("ChatComposer", () => {
   });
 
   it("文本粘贴会转成纯文本并去除富文本样式", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
     const input = await setComposerText(view, "前  后");
     placeEditableCaret(input, 1);
     const event = createTextPasteEvent(
@@ -600,12 +576,7 @@ describe("ChatComposer", () => {
   });
 
   it("未达到阈值的长文本粘贴仍直接插入输入框", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
     const input = await setComposerText(view, "前  后");
     placeEditableCaret(input, 1);
     const text = "a".repeat(1999);
@@ -620,12 +591,7 @@ describe("ChatComposer", () => {
   });
 
   it("达到阈值的长文本粘贴会保存为临时文本上下文", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
     const input = await setComposerText(view, "参考  继续");
     placeEditableCaret(input, 3);
     const text = "b".repeat(2000);
@@ -658,12 +624,7 @@ describe("ChatComposer", () => {
       "D:\\PROJECT\\workspace\\Lilia\\README.md",
       "D:\\PROJECT\\workspace\\Lilia\\big-dir",
     ]);
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
     const input = await setComposerText(view, "参考  继续");
     placeEditableCaret(input, 3);
     const event = createFilePasteEvent([createPasteFile({ name: "README.md" })]);
@@ -693,12 +654,7 @@ describe("ChatComposer", () => {
   });
 
   it("粘贴剪贴板图片时保存为临时图片上下文", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
     const input = await setComposerText(view, "看图 ");
     const event = createFilePasteEvent([createPasteFile({
       name: "screenshot.png",
@@ -740,22 +696,17 @@ describe("ChatComposer", () => {
   });
 
   it("下方图片预览只显示缩略图", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [
-          {
-            id: "image-1",
-            name: "图片 1.png",
-            path: "D:\\PROJECT\\workspace\\Lilia\\shot.png",
-            kind: "file",
-            size: 42,
-            exists: true,
-            mime: "image/png",
-            directory: null,
-          },
-        ],
-      },
+    const view = renderComposer({
+      attachments: [{
+        id: "image-1",
+        name: "图片 1.png",
+        path: "D:\\PROJECT\\workspace\\Lilia\\shot.png",
+        kind: "file",
+        size: 42,
+        exists: true,
+        mime: "image/png",
+        directory: null,
+      }],
     });
 
     await flushToolbarLoad();
@@ -778,12 +729,7 @@ describe("ChatComposer", () => {
 
   it("重复粘贴同一路径不会重复插入", async () => {
     setMockClipboardFilePaths(["D:\\PROJECT\\workspace\\Lilia\\README.md"]);
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
     const input = view.getByRole("textbox") as HTMLElement;
 
     input.dispatchEvent(createFilePasteEvent([createPasteFile({ name: "README.md" })]));
@@ -800,12 +746,7 @@ describe("ChatComposer", () => {
 
 
   it("加号菜单收纳输入框辅助动作", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await requestComposerChrome(view);
     expect(await view.findByRole("button", { name: "更多输入操作" })).toHaveAttribute(
@@ -830,12 +771,8 @@ describe("ChatComposer", () => {
   });
 
   it("显示并可清除分支锚点 chip", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        pendingBranchAnchor: { sourceTurnId: "turn-1", mode: "fork" },
-      },
+    const view = renderComposer({
+      pendingBranchAnchor: { sourceTurnId: "turn-1", mode: "fork" },
     });
 
     await requestComposerChrome(view);
@@ -848,12 +785,7 @@ describe("ChatComposer", () => {
   });
 
   it("加号菜单会 Teleport 到 body，并在外部点击或 Escape 后关闭", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await openComposerActionMenu(view);
 
@@ -878,74 +810,10 @@ describe("ChatComposer", () => {
   });
 
   it("加号菜单会按触发位置设置展开 origin", async () => {
-    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value: function mockRect(this: HTMLElement) {
-        if (this.classList.contains("chat-composer__action-menu")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 128,
-            bottom: 228,
-            width: 28,
-            height: 28,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-composer__action-trigger")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 128,
-            bottom: 228,
-            width: 28,
-            height: 28,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-composer__action-menu-popover")) {
-          return {
-            x: 100,
-            y: 70,
-            left: 100,
-            top: 70,
-            right: 290,
-            bottom: 194,
-            width: 190,
-            height: 124,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      get() {
-        return this.classList.contains("chat-composer__action-menu-popover") ? 190 : 0;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get() {
-        return this.classList.contains("chat-composer__action-menu-popover") ? 124 : 0;
-      },
-    });
+    const restoreGeometry = installComposerMenuGeometryMock({ triggerY: 200, popoverY: 70 });
 
     try {
-      const view = render(ChatComposer, {
-        props: {
-          state: baseState,
-          attachments: [],
-        },
-      });
+      const view = renderComposer();
 
       await requestComposerChrome(view);
       await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }), {
@@ -961,93 +829,19 @@ describe("ChatComposer", () => {
         });
       });
     } finally {
-      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-        configurable: true,
-        value: originalGetBoundingClientRect,
-      });
-      if (originalOffsetWidth) {
-        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
-      }
-      if (originalOffsetHeight) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
-      }
+      restoreGeometry();
     }
   });
 
   it("加号菜单上方空间不足时会翻转到底部语义", async () => {
-    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    const originalInnerHeight = window.innerHeight;
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 360,
-    });
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value: function mockRect(this: HTMLElement) {
-        if (this.classList.contains("chat-composer__action-menu")) {
-          return {
-            x: 100,
-            y: 24,
-            left: 100,
-            top: 24,
-            right: 128,
-            bottom: 52,
-            width: 28,
-            height: 28,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-composer__action-trigger")) {
-          return {
-            x: 100,
-            y: 24,
-            left: 100,
-            top: 24,
-            right: 128,
-            bottom: 52,
-            width: 28,
-            height: 28,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-composer__action-menu-popover")) {
-          return {
-            x: 100,
-            y: 58,
-            left: 100,
-            top: 58,
-            right: 290,
-            bottom: 182,
-            width: 190,
-            height: 124,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      get() {
-        return this.classList.contains("chat-composer__action-menu-popover") ? 190 : 0;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get() {
-        return this.classList.contains("chat-composer__action-menu-popover") ? 124 : 0;
-      },
+    const restoreGeometry = installComposerMenuGeometryMock({
+      triggerY: 24,
+      popoverY: 58,
+      innerHeight: 360,
     });
 
     try {
-      const view = render(ChatComposer, {
-        props: {
-          state: baseState,
-          attachments: [],
-        },
-      });
+      const view = renderComposer();
 
       await requestComposerChrome(view);
       await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }), {
@@ -1061,30 +855,12 @@ describe("ChatComposer", () => {
         expect(menu).toHaveStyle({ top: "58px" });
       });
     } finally {
-      Object.defineProperty(window, "innerHeight", {
-        configurable: true,
-        value: originalInnerHeight,
-      });
-      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-        configurable: true,
-        value: originalGetBoundingClientRect,
-      });
-      if (originalOffsetWidth) {
-        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
-      }
-      if (originalOffsetHeight) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
-      }
+      restoreGeometry();
     }
   });
 
   it("加号菜单可触发添加附件", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await openComposerActionMenu(view);
     await fireEvent.click(view.getByRole("menuitem", { name: "添加附件" }));
@@ -1094,12 +870,7 @@ describe("ChatComposer", () => {
   });
 
   it("加号菜单会在输入框插入对话引用前缀", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await openComposerActionMenu(view);
     await fireEvent.click(view.getByRole("menuitem", { name: "引用其他对话" }));
@@ -1109,12 +880,7 @@ describe("ChatComposer", () => {
   });
 
   it("输入 # 后可搜索并插入对话引用", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await setComposerText(view, "#Claude");
     await flushContextSearch();
@@ -1129,13 +895,7 @@ describe("ChatComposer", () => {
   });
 
   it("快速从上下文引用切到斜杠命令时只按最新输入加载控制器", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ state: codexState, projectCwd });
 
     await setComposerText(view, "@read");
     await setComposerText(view, "/re");
@@ -1146,12 +906,7 @@ describe("ChatComposer", () => {
   });
 
   it("计划模式独立于执行权限切换", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await openComposerActionMenu(view);
     const planButton = view.getByRole("menuitemcheckbox", { name: "计划模式" });
@@ -1167,12 +922,7 @@ describe("ChatComposer", () => {
   });
 
   it("目标模式独立于计划模式和执行权限切换", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await openComposerActionMenu(view);
     const goalButton = view.getByRole("menuitemcheckbox", { name: "目标模式" });
@@ -1188,13 +938,7 @@ describe("ChatComposer", () => {
   });
 
   it("输入 /re 后可通过斜杠命令选择未提交改动审查", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ state: codexState, projectCwd });
     const input = view.getByRole("textbox") as HTMLElement;
 
     await setComposerText(view, "/re");
@@ -1215,13 +959,7 @@ describe("ChatComposer", () => {
   });
 
   it("Codex review 斜杠命令会把输入框其他内容作为补充说明发出", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ state: codexState, projectCwd });
     await setComposerText(view, "重点看权限边界\n/re");
     await flushContextSearch();
 
@@ -1240,13 +978,7 @@ describe("ChatComposer", () => {
     const promptSpy = vi.spyOn(window, "prompt");
     promptSpy.mockReturnValueOnce("main");
     promptSpy.mockReturnValueOnce("abc123");
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ state: codexState, projectCwd });
 
     await setComposerText(view, "/re");
     await flushContextSearch();
@@ -1269,13 +1001,7 @@ describe("ChatComposer", () => {
   });
 
   it("输入 /fi 后可通过斜杠命令发起修复建议", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ projectCwd });
 
     await setComposerText(view, "/fi");
     await flushContextSearch();
@@ -1307,13 +1033,7 @@ describe("ChatComposer", () => {
   });
 
   it("Codex 修复建议会把输入框内容作为补充说明发出", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ state: codexState, projectCwd });
     await setComposerText(view, "优先给最小修复\n/fi");
     await flushContextSearch();
 
@@ -1332,13 +1052,7 @@ describe("ChatComposer", () => {
     const promptSpy = vi.spyOn(window, "prompt");
     promptSpy.mockReturnValueOnce("main");
     promptSpy.mockReturnValueOnce("abc123");
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        projectCwd,
-      },
-    });
+    const view = renderComposer({ state: codexState, projectCwd });
 
     await setComposerText(view, "/fi");
     await flushContextSearch();
@@ -1361,25 +1075,17 @@ describe("ChatComposer", () => {
   });
 
   it("工具栏不再显示代码审查和修复建议入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
     expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
   });
 
   it("阻塞 pending 交互时不显示斜杠 workflow 入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        pendingAsk: pendingAsk(singleAskWithOtherSpec),
-        projectCwd,
-      },
+    const view = renderComposer({
+      state: codexState,
+      pendingAsk: pendingAsk(singleAskWithOtherSpec),
+      projectCwd,
     });
 
     expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
@@ -1389,12 +1095,7 @@ describe("ChatComposer", () => {
   });
 
   it("Claude 和 Codex 后端可从工具栏发起上下文压缩", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     expect(view.queryByTitle("压缩上下文")).toBeNull();
     await requestComposerChrome(view);
@@ -1415,20 +1116,16 @@ describe("ChatComposer", () => {
   });
 
   it("上下文圆环展示已用比例和具体占用信息", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        contextUsage: {
-          taskId: "task-1",
-          backend: "claude",
-          usedTokens: 7168,
-          limitTokens: 8192,
-          usedPercent: 87.5,
-          source: "runtime",
-          updatedAt: Date.UTC(2026, 5, 16, 8, 30),
-          unavailableReason: null,
-        },
+    const view = renderComposer({
+      contextUsage: {
+        taskId: "task-1",
+        backend: "claude",
+        usedTokens: 7168,
+        limitTokens: 8192,
+        usedPercent: 87.5,
+        source: "runtime",
+        updatedAt: Date.UTC(2026, 5, 16, 8, 30),
+        unavailableReason: null,
       },
     });
 
@@ -1443,20 +1140,16 @@ describe("ChatComposer", () => {
   });
 
   it("上下文圆环无比例时显示空态但仍可触发压缩", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        contextUsage: {
-          taskId: "task-1",
-          backend: "claude",
-          usedTokens: 2048,
-          limitTokens: null,
-          usedPercent: null,
-          source: "runtime",
-          updatedAt: Date.UTC(2026, 5, 16, 8, 30),
-          unavailableReason: "provider 未返回上下文上限",
-        },
+    const view = renderComposer({
+      contextUsage: {
+        taskId: "task-1",
+        backend: "claude",
+        usedTokens: 2048,
+        limitTokens: null,
+        usedPercent: null,
+        source: "runtime",
+        updatedAt: Date.UTC(2026, 5, 16, 8, 30),
+        unavailableReason: "provider 未返回上下文上限",
       },
     });
 
@@ -1470,12 +1163,7 @@ describe("ChatComposer", () => {
   });
 
   it("Claude 和 Codex 后端不再从工具栏分叉当前会话", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
 
@@ -1489,24 +1177,14 @@ describe("ChatComposer", () => {
   });
 
   it("工具栏不再暴露 IAB 入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer({ state: codexState });
 
     expect(view.queryByRole("button", { name: "打开 Lilia IAB" })).toBeNull();
     expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
   });
 
   it("运行中也不在工具栏暴露 IAB 入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     expect(view.queryByRole("button", { name: "打开 Lilia IAB" })).toBeNull();
     expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
@@ -1522,13 +1200,7 @@ describe("ChatComposer", () => {
   });
 
   it("compact 入口在运行中或禁用状态时禁用", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        sending: true,
-      },
-    });
+    const view = renderComposer({ sending: true });
 
     await requestComposerChrome(view);
     expect(await view.findByRole("button", { name: /压缩上下文/ })).toBeDisabled();
@@ -1544,23 +1216,13 @@ describe("ChatComposer", () => {
   });
 
   it("Codex 后端不再从工具栏清理后台终端", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer({ state: codexState });
 
     expect(view.queryByRole("button", { name: "清理 Codex 后台终端" })).toBeNull();
   });
 
   it("Codex 后端不再显示原生接口、Memory、Goal、Fork 和配置诊断入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer({ state: codexState });
 
     expect(view.queryByRole("button", { name: "Codex 原生接口" })).toBeNull();
     expect(view.queryByRole("button", { name: "Codex 高级字段" })).toBeNull();
@@ -1573,12 +1235,7 @@ describe("ChatComposer", () => {
   });
 
   it("原生接口入口在非 Codex、运行中和阻塞 pending 时都不显示", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     expect(view.queryByRole("button", { name: "Codex 原生接口" })).toBeNull();
 
@@ -1599,12 +1256,7 @@ describe("ChatComposer", () => {
   });
 
   it("后台终端清理入口不再显示在 composer 工具栏", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     expect(view.queryByRole("button", { name: "清理 Codex 后台终端" })).toBeNull();
 
@@ -1625,12 +1277,8 @@ describe("ChatComposer", () => {
   });
 
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        pendingAsk: pendingAsk(singleAskWithOtherSpec),
-      },
+    const view = renderComposer({
+      pendingAsk: pendingAsk(singleAskWithOtherSpec),
     });
 
     expect(view.queryByRole("textbox")).toBeNull();
@@ -1655,12 +1303,8 @@ describe("ChatComposer", () => {
   });
 
   it("同一 AskUser requestId 重新 hydrate 时不重新屏蔽关键动作", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        pendingAsk: pendingAsk(singleAskWithOtherSpec, { id: 1, requestId: "ask-1" }),
-      },
+    const view = renderComposer({
+      pendingAsk: pendingAsk(singleAskWithOtherSpec, { id: 1, requestId: "ask-1" }),
     });
 
     await fireEvent.click(await view.findByRole("radio", { name: "A" }));
@@ -1677,12 +1321,7 @@ describe("ChatComposer", () => {
   });
 
   it("状态切到工具授权后短暂屏蔽关键动作", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-      },
-    });
+    const view = renderComposer();
 
     await view.rerender({
       state: baseState,
@@ -1702,13 +1341,7 @@ describe("ChatComposer", () => {
 
 
   it("pending 工具授权中输入文本后修改按钮会作为拒绝备注返回", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        toolConsent,
-      },
-    });
+    const view = renderComposer({ toolConsent });
 
     expect(await view.findByRole("button", { name: "忽略" })).toBeDisabled();
     await fireEvent.update(await view.findByRole("textbox"), "先不要写这个文件");
@@ -1722,13 +1355,7 @@ describe("ChatComposer", () => {
 
 
   it("pending Bash 授权同意时返回用户修改后的 updatedInput", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        toolConsent: bashToolConsent,
-      },
-    });
+    const view = renderComposer({ toolConsent: bashToolConsent });
 
     await fireEvent.click(await view.findByRole("button", { name: "编辑完整命令" }));
     await fireEvent.update(await view.findByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
@@ -1742,13 +1369,7 @@ describe("ChatComposer", () => {
   });
 
   it("pending Codex command approval 同意时返回用户修改后的 updatedInput", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        toolConsent: codexCommandToolConsent,
-      },
-    });
+    const view = renderComposer({ toolConsent: codexCommandToolConsent });
 
     await fireEvent.click(await view.findByRole("button", { name: "编辑完整命令" }));
     await fireEvent.update(await view.findByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");

@@ -20,6 +20,9 @@ export const AUTO_TURN_DECISION_PERMISSION_KEYS = Object.freeze(
   AUTO_TURN_DECISION_PERMISSION_OPTIONS.map((option) => option.key),
 );
 
+const MAIN_AGENT_PROMPT_MODES = Object.freeze(["conservative", "aggressive"]);
+const MAIN_AGENT_PROMPT_MODE_SET = new Set(MAIN_AGENT_PROMPT_MODES);
+
 const defaults = readAgentInteractionDefaultsManifest(agentInteractionDefaults);
 
 export const DEFAULT_AGENT_SUBAGENT_MODE_SETTINGS = freezeSubagentModeSettings(
@@ -29,6 +32,12 @@ export const DEFAULT_AUTO_TURN_DECISION_SETTINGS = Object.freeze({
   ...defaults.autoTurnDecision,
 });
 export const DEFAULT_AGENT_INTERACTION_SETTINGS = freezeAgentInteractionSettings(defaults);
+
+export function normalizeMainAgentPromptMode(value, fallback = "conservative") {
+  return typeof value === "string" && MAIN_AGENT_PROMPT_MODE_SET.has(value)
+    ? value
+    : fallback;
+}
 
 export function normalizeAgentSubagentModeSettings(
   input,
@@ -78,6 +87,10 @@ export function normalizeAgentInteractionSettings(
       : base.nonInterruptMode,
     debug: typeof input?.debug === "boolean" ? input.debug : base.debug,
     permissionMode: normalizeRuntimePermissionMode(input?.permissionMode, base.permissionMode),
+    mainAgentPromptMode: normalizeMainAgentPromptMode(
+      input?.mainAgentPromptMode,
+      base.mainAgentPromptMode,
+    ),
     codexProfile: normalizeCodexProfileSettings(input?.codexProfile, base.codexProfile),
     subagentMode: normalizeAgentSubagentModeSettings(input?.subagentMode, base.subagentMode),
     autoTurnDecision: normalizeAutoTurnDecisionSettings(
@@ -112,6 +125,7 @@ function readAgentInteractionDefaultsManifest(value) {
     ),
     debug: booleanManifestField(row, "debug", "agent-interaction-defaults.json"),
     permissionMode: row.permissionMode,
+    mainAgentPromptMode: normalizeMainAgentPromptMode(row.mainAgentPromptMode),
     codexProfile: normalizeCodexProfileSettings(
       codexProfile,
       DEFAULT_CODEX_PROFILE_SETTINGS,
@@ -199,6 +213,7 @@ function freezeAgentInteractionSettings(value) {
     nonInterruptMode: value.nonInterruptMode,
     debug: value.debug,
     permissionMode: value.permissionMode,
+    mainAgentPromptMode: value.mainAgentPromptMode,
     codexProfile: Object.freeze({ ...value.codexProfile }),
     subagentMode: freezeSubagentModeSettings(value.subagentMode),
     autoTurnDecision: Object.freeze({ ...value.autoTurnDecision }),

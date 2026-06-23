@@ -27,29 +27,40 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const sidebarSearchLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.search.load",
+    async () => (await import("../components/sidebar/SidebarSearch.vue")).default,
+  )
+);
+const sidebarUnifiedSectionLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.unified-section.load",
+    async () => (await import("../components/sidebar/SidebarUnifiedSection.vue")).default,
+  )
+);
+const secondaryPanelGroupedHostLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.grouped-host.load",
+    async () => (await import("./SecondaryPanelGroupedHost.vue")).default,
+  )
+);
 
 const SidebarSearch = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.search.load",
-    async () => (await import("../components/sidebar/SidebarSearch.vue")).default,
-  ),
+  loader: () => sidebarSearchLoad.load(),
 });
 
 const SidebarUnifiedSection = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.unified-section.load",
-    async () => (await import("../components/sidebar/SidebarUnifiedSection.vue")).default,
-  ),
+  loader: () => sidebarUnifiedSectionLoad.load(),
 });
 
 const SecondaryPanelGroupedHost = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.grouped-host.load",
-    async () => (await import("./SecondaryPanelGroupedHost.vue")).default,
-  ),
+  loader: () => secondaryPanelGroupedHostLoad.load(),
 });
 
 const router = useRouter();

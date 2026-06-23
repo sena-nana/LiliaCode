@@ -37,6 +37,7 @@ import {
   setMockTasks,
   setMockRuntimeSnapshot,
 } from "./tauriMock";
+import { domRect } from "./domTestHelpers";
 import {
   installConversationActivityBridge,
   resetConversationActivity,
@@ -107,17 +108,7 @@ async function findConversationRow(view: ReturnType<typeof render>, title: strin
 }
 
 function box(top: number, bottom: number): DOMRect {
-  return {
-    x: 0,
-    y: top,
-    left: 0,
-    top,
-    right: 220,
-    bottom,
-    width: 220,
-    height: bottom - top,
-    toJSON: () => ({}),
-  } as DOMRect;
+  return domRect(0, top, 220, bottom - top);
 }
 
 function projectConversation(id: string, title: string, index: number): Task {

@@ -47,48 +47,37 @@ import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useHookSourceEditor } from "./plugins/useHookSourceEditor";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
+import { createLazyLoadState } from "../utils/lazyLoadState";
 
-let skillCreateDialogLoad: Promise<Component> | null = null;
-let hookSourceEditorDialogLoad: Promise<Component> | null = null;
-let mcpServerEditorDialogLoad: Promise<Component> | null = null;
+const skillCreateDialogLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "plugins.skill-create-dialog.load",
+    async () => (await import("./plugins/SkillCreateDialog.vue")).default,
+  )
+);
+const hookSourceEditorDialogLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "plugins.hook-editor-dialog.load",
+    async () => (await import("./plugins/HookSourceEditorDialog.vue")).default,
+  )
+);
+const mcpServerEditorDialogLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "plugins.mcp-editor-dialog.load",
+    async () => (await import("./plugins/McpServerEditorDialog.vue")).default,
+  )
+);
 
 async function loadSkillCreateDialog(): Promise<Component> {
-  if (!skillCreateDialogLoad) {
-    skillCreateDialogLoad = measurePerfAsync(
-      "plugins.skill-create-dialog.load",
-      async () => (await import("./plugins/SkillCreateDialog.vue")).default,
-    ).catch((error) => {
-      skillCreateDialogLoad = null;
-      throw error;
-    });
-  }
-  return skillCreateDialogLoad;
+  return skillCreateDialogLoad.load();
 }
 
 async function loadHookSourceEditorDialog(): Promise<Component> {
-  if (!hookSourceEditorDialogLoad) {
-    hookSourceEditorDialogLoad = measurePerfAsync(
-      "plugins.hook-editor-dialog.load",
-      async () => (await import("./plugins/HookSourceEditorDialog.vue")).default,
-    ).catch((error) => {
-      hookSourceEditorDialogLoad = null;
-      throw error;
-    });
-  }
-  return hookSourceEditorDialogLoad;
+  return hookSourceEditorDialogLoad.load();
 }
 
 async function loadMcpServerEditorDialog(): Promise<Component> {
-  if (!mcpServerEditorDialogLoad) {
-    mcpServerEditorDialogLoad = measurePerfAsync(
-      "plugins.mcp-editor-dialog.load",
-      async () => (await import("./plugins/McpServerEditorDialog.vue")).default,
-    ).catch((error) => {
-      mcpServerEditorDialogLoad = null;
-      throw error;
-    });
-  }
-  return mcpServerEditorDialogLoad;
+  return mcpServerEditorDialogLoad.load();
 }
 
 const SkillCreateDialog = defineAsyncComponent({

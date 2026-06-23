@@ -29,29 +29,40 @@ import {
   type TimelineDisplayContext,
 } from "./timelineDisplay";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const timelineDeclaredEventLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.declared.load",
+    async () => (await import("./TimelineDeclaredEvent.vue")).default,
+  )
+);
+const timelineFinalReplyLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.final-reply.load",
+    async () => (await import("./TimelineFinalReply.vue")).default,
+  )
+);
+const timelinePlanCardLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.plan-card.load",
+    async () => (await import("./TimelinePlanCard.vue")).default,
+  )
+);
 
 const TimelineDeclaredEvent = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.declared.load",
-    async () => (await import("./TimelineDeclaredEvent.vue")).default,
-  ),
+  loader: () => timelineDeclaredEventLoad.load(),
 });
 
 const TimelineFinalReply = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.final-reply.load",
-    async () => (await import("./TimelineFinalReply.vue")).default,
-  ),
+  loader: () => timelineFinalReplyLoad.load(),
 });
 
 const TimelinePlanCard = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.plan-card.load",
-    async () => (await import("./TimelinePlanCard.vue")).default,
-  ),
+  loader: () => timelinePlanCardLoad.load(),
 });
 
 const props = defineProps<{

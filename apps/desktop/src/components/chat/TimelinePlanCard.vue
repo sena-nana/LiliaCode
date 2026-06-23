@@ -15,6 +15,7 @@ import type {
 } from "../../composables/pendingAgentActions";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,
@@ -22,20 +23,27 @@ import {
   truncateTimelineText,
 } from "./timelineDisplay";
 
-const MarkdownBlock = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+const markdownBlockLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "timeline.markdown.load",
     async () => (await import("./MarkdownBlock.vue")).default,
-  ),
+  )
+);
+const timelineCardDetailsLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.card-details.load",
+    async () => (await import("./TimelineCardDetails.vue")).default,
+  )
+);
+
+const MarkdownBlock = defineAsyncComponent({
+  suspensible: false,
+  loader: () => markdownBlockLoad.load(),
 });
 
 const TimelineCardDetails = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.card-details.load",
-    async () => (await import("./TimelineCardDetails.vue")).default,
-  ),
+  loader: () => timelineCardDetailsLoad.load(),
 });
 
 const props = defineProps<{

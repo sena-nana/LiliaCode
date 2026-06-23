@@ -16,6 +16,7 @@ use crate::chat::types::{
     RuntimeSettingsCodex,
 };
 use crate::chat::workflow::{runtime_command_kind, workflow_kind};
+use crate::prompt_contract;
 use crate::provider::{
     assistant_ai_secret, codex_account_spark_enabled, load_agent_interaction_settings,
     load_assistant_ai_config, request_codex_account_spark, AssistantAIConfig,
@@ -23,8 +24,6 @@ use crate::provider::{
 };
 use crate::store::LiliaStore;
 use crate::BACKEND_CODEX;
-
-const AUTO_DECISION_INSTRUCTION: &str = "只输出严格 JSON，不要输出 Markdown。";
 
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedTurn {
@@ -435,8 +434,12 @@ fn request_auto_turn_decision<R: Runtime>(
         context_usage.as_ref(),
     );
     let text = if codex_account_spark_enabled(app) {
-        request_codex_account_spark(app, &prompt, AUTO_DECISION_INSTRUCTION)
-            .map_err(|err| format!("辅助模型决策失败：{err}"))?
+        request_codex_account_spark(
+            app,
+            &prompt,
+            prompt_contract::auto_turn_decision_system_instruction(),
+        )
+        .map_err(|err| format!("辅助模型决策失败：{err}"))?
     } else {
         let model = assistant_ai_model_request(app)?;
         request_openai_compatible(&model, &prompt)?
@@ -480,7 +483,7 @@ fn request_openai_compatible(model: &AssistantAIConfig, prompt: &str) -> Result<
         .json(&json!({
             "model": model.model,
             "messages": [
-                { "role": "system", "content": AUTO_DECISION_INSTRUCTION },
+                { "role": "system", "content": prompt_contract::auto_turn_decision_system_instruction() },
                 { "role": "user", "content": prompt }
             ],
             "temperature": 0.1,
@@ -527,8 +530,9 @@ fn build_decision_prompt(
             })
         })
         .collect::<Vec<_>>();
+    let tier_policy = prompt_contract::auto_turn_decision_tier_policy();
     json!({
-        "instruction": "为 Lilia 本轮对话选择策略。只返回 JSON: {\"tier\":\"light|normal|deep\",\"reasoningEffort\":\"low|medium|high|xhigh|max\",\"planMode\":boolean,\"goalMode\":boolean,\"sessionFork\":boolean,\"summary\":string,\"signals\":string[]}",
+        "instruction": prompt_contract::auto_turn_decision_request_instruction(),
         "backend": composer.backend,
         "projectCwd": project_cwd,
         "promptLength": content.chars().count(),
@@ -546,9 +550,9 @@ fn build_decision_prompt(
             "permission": composer.permission,
         },
         "tierPolicy": {
-            "light": "短小、说明、轻量查询、整理。",
-            "normal": "中等上下文、普通实现或分析。",
-            "deep": "复杂重构、审查、长期任务、计划、风险高或上下文大。"
+            "light": &tier_policy.light,
+            "normal": &tier_policy.normal,
+            "deep": &tier_policy.deep
         }
     })
     .to_string()

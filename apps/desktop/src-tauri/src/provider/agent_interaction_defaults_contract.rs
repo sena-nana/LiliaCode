@@ -20,6 +20,7 @@ struct RawAgentInteractionSettings {
     non_interrupt_mode: bool,
     debug: bool,
     permission_mode: String,
+    main_agent_prompt_mode: String,
     codex_profile: CodexProfileSettings,
     subagent_mode: SubagentModeSettings,
     auto_turn_decision: AutoTurnDecisionSettings,
@@ -42,6 +43,7 @@ pub(super) fn agent_interaction_settings() -> AgentInteractionSettings {
                 non_interrupt_mode: raw.non_interrupt_mode,
                 debug: raw.debug,
                 permission_mode: raw.permission_mode.clone(),
+                main_agent_prompt_mode: raw.main_agent_prompt_mode.clone(),
                 codex_profile: raw.codex_profile.clone(),
                 subagent_mode: raw.subagent_mode.clone(),
                 auto_turn_decision: raw.auto_turn_decision.clone(),
@@ -131,6 +133,12 @@ pub(super) fn auto_turn_decision_allow_session_fork() -> bool {
 pub(super) fn permission_mode() -> String {
     DEFAULT_PERMISSION_MODE
         .get_or_init(|| raw_agent_interaction_defaults().permission_mode.clone())
+        .clone()
+}
+
+pub(super) fn main_agent_prompt_mode() -> String {
+    raw_agent_interaction_defaults()
+        .main_agent_prompt_mode
         .clone()
 }
 

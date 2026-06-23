@@ -29,25 +29,9 @@ import {
   mockInvoke,
   resetTauriMockData,
 } from "./tauriMock";
+import { toolConsentRequestFixture as toolConsentRequest } from "./interactionTestHelpers";
 
 const taskId = "task-1";
-
-function toolConsentRequest(): ToolConsentRequest {
-  return {
-    taskId,
-    turnId: "turn-1",
-    backend: "claude",
-    requestId: "tool-1",
-    toolName: "Bash",
-    input: { command: "pwd" },
-    title: null,
-    displayName: null,
-    description: null,
-    blockedPath: null,
-    decisionReason: null,
-    toolUseId: null,
-  };
-}
 
 function permissionApprovalInteraction(): PendingAgentInteraction {
   return {
@@ -101,6 +85,51 @@ function architectureChange(): PendingArchitectureChange {
     draft: "draft",
     response: { status: "pending" },
   };
+}
+
+function askUser(
+  requestId: string,
+  onResolve?: (result: AskUserResult) => void,
+  options: {
+    title?: string;
+    turnId?: string;
+    intent?: "plan_approval";
+    questionId?: string;
+    question?: string;
+  } = {},
+) {
+  const questionId = options.questionId ?? "q-1";
+  return hydrateAskUserForTask(
+    taskId,
+    {
+      title: options.title ?? "确认",
+      ...(options.intent ? { intent: options.intent } : {}),
+      questions: [{
+        id: questionId,
+        question: options.question ?? "继续？",
+        mode: "confirm",
+      }],
+    },
+    options.turnId ?? "turn-1",
+    requestId,
+    onResolve,
+  );
+}
+
+function askUserConfirmResult(questionId = "q-1", value = "yes"): AskUserResult {
+  return {
+    cancelled: false,
+    answers: { [questionId]: { questionId, value } },
+  };
+}
+
+function expectAgentInteractionResponse(requestId: string, kind: string, result: unknown) {
+  expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
+    taskId,
+    requestId,
+    kind,
+    result,
+  }, undefined);
 }
 
 function setupResolvers(input: {
@@ -160,79 +189,77 @@ describe("pending interaction resolvers", () => {
       pendingToolConsents: [tool],
     };
 
-    expect(pendingResolutionPlan(context, {
-      kind: "title_update",
-      requestId: "title-1",
-      decision: "accept",
-    })).toMatchObject({
-      label: "title-update",
-      target: "title_update",
-      requestId: "title-1",
-      decision: "accept",
-    });
-    expect(pendingResolutionPlan(context, {
-      kind: "title_update",
-      requestId: "missing-title",
-      decision: "accept",
-    })).toBeNull();
-    expect(pendingResolutionPlan(context, {
-      kind: TOOL_CONSENT_INTERACTION_KIND,
-      requestId: "tool-1",
-      decision: "allow",
-      updatedInput: { command: "pwd" },
-    })).toMatchObject({
-      label: "tool-consent",
-      target: "tool_consent",
-      request: tool,
-      decision: "allow",
-      updatedInput: { command: "pwd" },
-    });
-    expect(pendingResolutionPlan(context, {
-      kind: TOOL_CONSENT_INTERACTION_KIND,
-      requestId: "missing-tool",
-      decision: "allow",
-    })).toBeNull();
-    expect(pendingResolutionPlan(context, {
-      kind: MCP_ELICITATION_INTERACTION_KIND,
-      requestId: "mcp-1",
-      action: "accept",
-      content: { project: "lilia" },
-    })).toMatchObject({
-      label: "mcp-elicitation",
-      target: "mcp_elicitation",
-      result: {
+    for (const [resolution, expected] of [
+      [{
+        kind: "title_update",
+        requestId: "title-1",
+        decision: "accept",
+      }, {
+        label: "title-update",
+        target: "title_update",
+        requestId: "title-1",
+        decision: "accept",
+      }],
+      [{
+        kind: TOOL_CONSENT_INTERACTION_KIND,
+        requestId: "tool-1",
+        decision: "allow",
+        updatedInput: { command: "pwd" },
+      }, {
+        label: "tool-consent",
+        target: "tool_consent",
+        request: tool,
+        decision: "allow",
+        updatedInput: { command: "pwd" },
+      }],
+      [{
+        kind: MCP_ELICITATION_INTERACTION_KIND,
+        requestId: "mcp-1",
+        action: "accept",
+        content: { project: "lilia" },
+      }, {
+        label: "mcp-elicitation",
+        target: "mcp_elicitation",
+        result: { action: "accept", content: { project: "lilia" } },
+      }],
+      [{
+        kind: PERMISSION_APPROVAL_INTERACTION_KIND,
+        requestId: "permission-1",
+        decision: "allow",
+      }, {
+        label: "permission-approval",
+        target: "permission_approval",
+        result: {
+          action: "approve",
+          grantedAccess: { network: { domains: [{ domain: "example.com" }] } },
+        },
+      }],
+      [{
+        kind: ARCHITECTURE_INTERACTION_KIND,
+        requestId: "architecture-1",
+        decision: "deny",
+      }, {
+        label: "project-architecture",
+        target: "architecture_change",
+        request: architecture,
+        decision: "deny",
+      }],
+    ] as const) {
+      expect(pendingResolutionPlan(context, resolution)).toMatchObject(expected);
+    }
+
+    for (const resolution of [
+      { kind: "title_update", requestId: "missing-title", decision: "accept" },
+      { kind: TOOL_CONSENT_INTERACTION_KIND, requestId: "missing-tool", decision: "allow" },
+      {
+        kind: MCP_ELICITATION_INTERACTION_KIND,
+        requestId: "missing-mcp",
         action: "accept",
         content: { project: "lilia" },
       },
-    });
-    expect(pendingResolutionPlan(context, {
-      kind: MCP_ELICITATION_INTERACTION_KIND,
-      requestId: "missing-mcp",
-      action: "accept",
-      content: { project: "lilia" },
-    })).toBeNull();
-    expect(pendingResolutionPlan(context, {
-      kind: PERMISSION_APPROVAL_INTERACTION_KIND,
-      requestId: "permission-1",
-      decision: "allow",
-    })).toMatchObject({
-      label: "permission-approval",
-      target: "permission_approval",
-      result: {
-        action: "approve",
-        grantedAccess: { network: { domains: [{ domain: "example.com" }] } },
-      },
-    });
-    expect(pendingResolutionPlan(context, {
-      kind: ARCHITECTURE_INTERACTION_KIND,
-      requestId: "architecture-1",
-      decision: "deny",
-    })).toMatchObject({
-      label: "project-architecture",
-      target: "architecture_change",
-      request: architecture,
-      decision: "deny",
-    });
+    ] as const) {
+      expect(pendingResolutionPlan(context, resolution)).toBeNull();
+    }
   });
 
   it("writes tool consent resolutions back through the agent interaction command", async () => {
@@ -247,18 +274,13 @@ describe("pending interaction resolvers", () => {
       updatedInput: { command: "echo skipped" },
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
+    expectAgentInteractionResponse("tool-1", TOOL_CONSENT_INTERACTION_KIND, {
       taskId,
       requestId: "tool-1",
-      kind: TOOL_CONSENT_INTERACTION_KIND,
-      result: {
-        taskId,
-        requestId: "tool-1",
-        decision: "deny",
-        message: "先不执行",
-        updatedInput: { command: "echo skipped" },
-      },
-    }, undefined);
+      decision: "deny",
+      message: "先不执行",
+      updatedInput: { command: "echo skipped" },
+    });
   });
 
   it("resolves the active composer tool consent through the same pending action path", async () => {
@@ -267,18 +289,13 @@ describe("pending interaction resolvers", () => {
 
     await resolvers.onResolveToolConsent("allow", undefined, { command: "pwd" });
 
-    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
+    expectAgentInteractionResponse("tool-1", TOOL_CONSENT_INTERACTION_KIND, {
       taskId,
       requestId: "tool-1",
-      kind: TOOL_CONSENT_INTERACTION_KIND,
-      result: {
-        taskId,
-        requestId: "tool-1",
-        decision: "allow",
-        message: null,
-        updatedInput: { command: "pwd" },
-      },
-    }, undefined);
+      decision: "allow",
+      message: null,
+      updatedInput: { command: "pwd" },
+    });
   });
 
   it("uses the pending permission payload when approving permission requests", async () => {
@@ -292,16 +309,11 @@ describe("pending interaction resolvers", () => {
       decision: "allow",
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-      taskId,
-      requestId: "permission-1",
-      kind: PERMISSION_APPROVAL_INTERACTION_KIND,
-      result: expect.objectContaining({
-        action: "approve",
-        grantedAccess: { network: { domains: [{ domain: "example.com" }] } },
-        scope: "turn",
-      }),
-    }, undefined);
+    expectAgentInteractionResponse("permission-1", PERMISSION_APPROVAL_INTERACTION_KIND, expect.objectContaining({
+      action: "approve",
+      grantedAccess: { network: { domains: [{ domain: "example.com" }] } },
+      scope: "turn",
+    }));
   });
 
   it("responds to current MCP elicitation resolutions", async () => {
@@ -316,15 +328,10 @@ describe("pending interaction resolvers", () => {
       content: { project: "lilia" },
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-      taskId,
-      requestId: "mcp-1",
-      kind: MCP_ELICITATION_INTERACTION_KIND,
-      result: {
-        action: "accept",
-        content: { project: "lilia" },
-      },
-    }, undefined);
+    expectAgentInteractionResponse("mcp-1", MCP_ELICITATION_INTERACTION_KIND, {
+      action: "accept",
+      content: { project: "lilia" },
+    });
   });
 
   it("does not respond to stale MCP elicitation resolutions", async () => {
@@ -346,23 +353,11 @@ describe("pending interaction resolvers", () => {
 
   it("resolves ask-user actions by ask id", async () => {
     let resolved: AskUserResult | null = null;
-    const ask = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-      },
-      "turn-1",
-      "ask-1",
-      (result) => {
-        resolved = result;
-      },
-    );
+    const ask = askUser("ask-1", (result) => {
+      resolved = result;
+    });
     const resolvers = setupResolvers({ pendingAskUser: ask });
-    const result: AskUserResult = {
-      cancelled: false,
-      answers: { "q-1": { questionId: "q-1", value: "yes" } },
-    };
+    const result = askUserConfirmResult();
 
     await resolvers.onResolvePendingAgentAction({
       kind: ASK_USER_INTERACTION_KIND,
@@ -376,35 +371,15 @@ describe("pending interaction resolvers", () => {
 
   it("resolves ask-user actions by request id when local hydration ids change", async () => {
     let resolved: AskUserResult | null = null;
-    const staleAsk = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-      },
-      "turn-1",
-      "ask-1",
-    );
-    const rehydratedAsk = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-      },
-      "turn-1",
-      "ask-1",
-      (result) => {
-        resolved = result;
-      },
-    );
+    const staleAsk = askUser("ask-1");
+    const rehydratedAsk = askUser("ask-1", (result) => {
+      resolved = result;
+    });
     const resolvers = setupResolvers({
       pendingAskUser: rehydratedAsk,
       pendingAskUsers: [rehydratedAsk],
     });
-    const result: AskUserResult = {
-      cancelled: false,
-      answers: { "q-1": { questionId: "q-1", value: "yes" } },
-    };
+    const result = askUserConfirmResult();
 
     await resolvers.onResolvePendingAgentAction({
       kind: ASK_USER_INTERACTION_KIND,
@@ -418,23 +393,11 @@ describe("pending interaction resolvers", () => {
 
   it("does not resolve stale ask-user actions with mismatched request ids", async () => {
     let resolved: AskUserResult | null = null;
-    const ask = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-      },
-      "turn-1",
-      "ask-current",
-      (result) => {
-        resolved = result;
-      },
-    );
+    const ask = askUser("ask-current", (result) => {
+      resolved = result;
+    });
     const resolvers = setupResolvers({ pendingAskUser: ask });
-    const result: AskUserResult = {
-      cancelled: false,
-      answers: { "q-1": { questionId: "q-1", value: "yes" } },
-    };
+    const result = askUserConfirmResult();
 
     await resolvers.onResolvePendingAgentAction({
       kind: ASK_USER_INTERACTION_KIND,
@@ -448,36 +411,21 @@ describe("pending interaction resolvers", () => {
 
   it("resolves non-active pending ask actions from the full pending ask list", async () => {
     let resolved: AskUserResult | null = null;
-    const activeAsk = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "当前确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-      },
-      "turn-1",
-      "ask-active",
-    );
-    const queuedAsk = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "计划确认",
-        intent: "plan_approval",
-        questions: [{ id: "approve-plan", question: "", mode: "confirm" }],
-      },
-      "turn-2",
-      "plan-queued",
-      (result) => {
-        resolved = result;
-      },
-    );
+    const activeAsk = askUser("ask-active", undefined, { title: "当前确认" });
+    const queuedAsk = askUser("plan-queued", (result) => {
+      resolved = result;
+    }, {
+      title: "计划确认",
+      intent: "plan_approval",
+      turnId: "turn-2",
+      questionId: "approve-plan",
+      question: "",
+    });
     const resolvers = setupResolvers({
       pendingAskUser: activeAsk,
       pendingAskUsers: [activeAsk, queuedAsk],
     });
-    const result: AskUserResult = {
-      cancelled: false,
-      answers: { "approve-plan": { questionId: "approve-plan", value: "confirm" } },
-    };
+    const result = askUserConfirmResult("approve-plan", "confirm");
 
     await resolvers.onResolvePendingAgentAction({
       kind: "plan_approval",
@@ -491,23 +439,11 @@ describe("pending interaction resolvers", () => {
 
   it("resolves the active composer ask-user through the same pending action path", async () => {
     let resolved: AskUserResult | null = null;
-    const ask = hydrateAskUserForTask(
-      taskId,
-      {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-      },
-      "turn-1",
-      "ask-1",
-      (result) => {
-        resolved = result;
-      },
-    );
+    const ask = askUser("ask-1", (result) => {
+      resolved = result;
+    });
     const resolvers = setupResolvers({ pendingAskUser: ask });
-    const result: AskUserResult = {
-      cancelled: false,
-      answers: { "q-1": { questionId: "q-1", value: "yes" } },
-    };
+    const result = askUserConfirmResult();
 
     await resolvers.onResolveAskUser(result);
 

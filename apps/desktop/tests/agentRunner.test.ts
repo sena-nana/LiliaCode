@@ -147,6 +147,33 @@ function runnerTurn(prompt = "", extra: Record<string, unknown> = {}) {
   return { prompt, ...extra };
 }
 
+function approvePlanAnswers(value = "yes", notes?: string) {
+  return {
+    "approve-plan": {
+      questionId: "approve-plan",
+      value,
+      ...(notes ? { notes } : {}),
+    },
+  };
+}
+
+function approvedPlanResponse(value = "yes", notes?: string) {
+  return {
+    cancelled: false,
+    answers: approvePlanAnswers(value, notes),
+  };
+}
+
+function approvedPlanInteractions(value = "yes", notes?: string) {
+  return {
+    requestAskUser: async () => approvedPlanResponse(value, notes),
+  };
+}
+
+async function cancelledAskUser() {
+  return { cancelled: true, answers: {} };
+}
+
 function createTestInteractionBroker(protocol: any) {
   return createInteractionBroker({
     protocol,
@@ -155,36 +182,63 @@ function createTestInteractionBroker(protocol: any) {
   });
 }
 
+function codexAppServerStub(
+  request: (method: string, params: any) => Promise<unknown>,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    request,
+    notify: () => {},
+    respond: () => {},
+    drainNotifications: () => [],
+    close: () => {},
+    ...overrides,
+  };
+}
+
 function createCodexTurnTestServer(
   calls: any[],
   turn: Record<string, unknown> = { status: "completed" },
 ) {
-  return {
-    request: async (method: string, params: any) => {
+  return codexAppServerStub(
+    async (method: string, params: any) => {
       calls.push({ method, params });
       if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
       if (method === "turn/start") return { turn: { id: "fix-turn-1" } };
       return {};
     },
-    notify: () => {},
-    respond: () => {},
-    drainNotifications: () => [{
-      method: "turn/completed",
-      params: { threadId: "thread-1", turn },
-    }],
-    close: () => {},
-  };
+    {
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn },
+      }],
+    },
+  );
 }
 
-async function runCodexAppServerTestTurn({ protocol, server, ...cmd }: any) {
-  await runCodexAppServer(cmd, { mcpServers: [], warnings: [] }, {
+function codexAppServerTestContext(
+  protocol: any,
+  server: any,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
     protocol,
-    interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+    interactions: { requestAskUser: cancelledAskUser },
     emitToolConsentTimeline: () => {},
     createCodexAppServer: () => server,
     env: {},
     cwd: () => "C:/repo",
-  });
+    ...overrides,
+  };
+}
+
+async function runCodexAppServerTestTurn(
+  protocol: any,
+  server: any,
+  cmd: Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+) {
+  await runCodexAppServer(cmd, { mcpServers: [], warnings: [] }, codexAppServerTestContext(protocol, server, overrides));
 }
 
 describe("agent runner entry", () => {
@@ -685,12 +739,7 @@ describe("interaction broker", () => {
       type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "ask-1",
       kind: "plan_approval",
-      result: {
-        cancelled: false,
-        answers: {
-          "approve-plan": { questionId: "approve-plan", value: "yes" },
-        },
-      },
+      result: approvedPlanResponse(),
     }));
 
     await expect(ask).resolves.toMatchObject({ cancelled: false });
@@ -803,12 +852,19 @@ describe("Claude helpers", () => {
     return (async function* () {})();
   }
 
+  function emptyClaudeQueryProbe(onQuery: () => void) {
+    return () => {
+      onQuery();
+      return emptyClaudeQuery();
+    };
+  }
+
   function claudeRunnerContext(protocol: any, overrides: Record<string, unknown> = {}) {
     return {
       protocol,
       platform: "win32",
       interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        requestAskUser: cancelledAskUser,
         handleSettingsUpdate: () => {},
       },
       emitToolConsentTimeline: () => {},
@@ -816,11 +872,17 @@ describe("Claude helpers", () => {
     } as any;
   }
 
-  function claudeMcpElicitationContext(protocol: any, broker: any, createClaudeQuery: any) {
+  function claudeRunnerContextWithTools(protocol: any, overrides: Record<string, unknown> = {}) {
     return claudeRunnerContext(protocol, {
-      interactions: broker,
       createSdkMcpServer: (config: any) => config,
       createClaudeTool: (name: string) => ({ name }),
+      ...overrides,
+    });
+  }
+
+  function claudeMcpElicitationContext(protocol: any, broker: any, createClaudeQuery: any) {
+    return claudeRunnerContextWithTools(protocol, {
+      interactions: broker,
       createClaudeQuery,
     });
   }
@@ -836,7 +898,7 @@ describe("Claude helpers", () => {
     const normal = createLiliaAskUserServer({
       createServer,
       createTool,
-      requestAskUser: async () => ({ cancelled: true, answers: {} }),
+      requestAskUser: cancelledAskUser,
     });
     expect(normal.tools.map((tool: any) => tool.name)).toEqual([
       "ask_user_question",
@@ -846,7 +908,7 @@ describe("Claude helpers", () => {
     const child = createLiliaAskUserServer({
       createServer,
       createTool,
-      requestAskUser: async () => ({ cancelled: true, answers: {} }),
+      requestAskUser: cancelledAskUser,
       conversationContext: {
         currentTaskId: "child-1",
         parentTaskId: "parent-1",
@@ -905,16 +967,7 @@ describe("Claude helpers", () => {
       prompt: "继续实现",
       model: "claude-sonnet-4-6",
       permission: "ask",
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
-      createSdkMcpServer: (config: any) => config,
-      createClaudeTool: (name: string) => ({ name }),
+    }, claudeRunnerContextWithTools(protocol, {
       createClaudeQuery: ({ options }: any) => {
         seenOptions = options;
         return (async function* () {
@@ -939,7 +992,7 @@ describe("Claude helpers", () => {
           };
         })();
       },
-    } as any);
+    }));
 
     expect(seenOptions).toMatchObject({ promptSuggestions: true });
     expect(seenOptions.toolAliases.QueryQuotaUsage).toBe("mcp__lilia__query_quota_usage");
@@ -971,16 +1024,7 @@ describe("Claude helpers", () => {
           },
         },
       },
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
-      createSdkMcpServer: (config: any) => config,
-      createClaudeTool: (name: string) => ({ name }),
+    }, claudeRunnerContextWithTools(protocol, {
       createClaudeQuery: ({ options }: any) => {
         seenOptions = options;
         return (async function* () {
@@ -992,7 +1036,7 @@ describe("Claude helpers", () => {
           };
         })();
       },
-    } as any);
+    }));
 
     expect(seenOptions.systemPrompt).toMatchObject({
       type: "preset",
@@ -1154,23 +1198,15 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-source",
       runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
+    }, claudeRunnerContext(protocol, {
       forkClaudeSession: async (sessionId: string, options: any) => {
         forkInput = { sessionId, options };
         return { sessionId: "claude-forked" };
       },
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return (async function* () {})();
-      },
-    } as any);
+      }),
+    }));
 
     expect(forkInput).toEqual({
       sessionId: "claude-source",
@@ -1194,14 +1230,7 @@ describe("Claude helpers", () => {
       prompt: "继续实现",
       resumeSessionId: "claude-source",
       autoSessionFork: true,
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
+    }, claudeRunnerContext(protocol, {
       forkClaudeSession: async (sessionId: string, options: any) => {
         forkInput = { sessionId, options };
         return { sessionId: "claude-forked" };
@@ -1222,7 +1251,7 @@ describe("Claude helpers", () => {
           };
         })();
       },
-    } as any);
+    }));
 
     expect(forkInput).toEqual({
       sessionId: "claude-source",
@@ -1266,14 +1295,7 @@ describe("Claude helpers", () => {
         sourceTurnId: "message-uuid",
         mode: "continue",
       },
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
+    }, claudeRunnerContext(protocol, {
       forkClaudeSession: async () => {
         forkCalled = true;
         return { sessionId: "claude-forked" };
@@ -1291,7 +1313,7 @@ describe("Claude helpers", () => {
           };
         })();
       },
-    } as any);
+    }));
 
     expect(forkCalled).toBe(false);
     expect(seenOptions).toMatchObject({
@@ -1314,14 +1336,7 @@ describe("Claude helpers", () => {
         sourceTurnId: "message-uuid",
         mode: "fork",
       },
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
+    }, claudeRunnerContext(protocol, {
       forkClaudeSession: async (sessionId: string, options: any) => {
         forkInput = { sessionId, options };
         return { sessionId: "claude-forked" };
@@ -1339,7 +1354,7 @@ describe("Claude helpers", () => {
           };
         })();
       },
-    } as any);
+    }));
 
     expect(forkInput).toEqual({
       sessionId: "claude-source",
@@ -1360,23 +1375,15 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
-    }, {
-      protocol,
-      platform: "win32",
-      interactions: {
-        requestAskUser: async () => ({ cancelled: true, answers: {} }),
-        handleSettingsUpdate: () => {},
-      },
-      emitToolConsentTimeline: () => {},
+    }, claudeRunnerContext(protocol, {
       forkClaudeSession: async () => {
         forkCalled = true;
         return { sessionId: "claude-forked" };
       },
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return (async function* () {})();
-      },
-    } as any)).rejects.toThrow("当前 Claude task 没有可 fork 的 session");
+      }),
+    }))).rejects.toThrow("当前 Claude task 没有可 fork 的 session");
 
     expect(forkCalled).toBe(false);
     expect(queryCalled).toBe(false);
@@ -1546,9 +1553,7 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-source",
       workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
-    }, claudeRunnerContext(protocol, {
-      createSdkMcpServer: (config: any) => config,
-      createClaudeTool: (name: string) => ({ name }),
+    }, claudeRunnerContextWithTools(protocol, {
       createClaudeQuery: ({ prompt, options }: any) => {
         seenOptions = options;
         return (async function* () {
@@ -1624,10 +1629,9 @@ describe("Claude helpers", () => {
       prompt: "",
       workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }))).rejects.toThrow("当前 Claude task 没有可 compact 的 session");
 
     expect(queryCalled).toBe(false);
@@ -1649,9 +1653,7 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-source",
       workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
-    }, claudeRunnerContext(protocol, {
-      createSdkMcpServer: (config: any) => config,
-      createClaudeTool: (name: string) => ({ name }),
+    }, claudeRunnerContextWithTools(protocol, {
       createClaudeQuery: () => (async function* () {
         yield {
           type: "system",
@@ -1714,10 +1716,9 @@ describe("Claude helpers", () => {
       resumeSessionId: "claude-source",
       workflow,
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }));
 
     expect(queryCalled).toBe(false);
@@ -1750,10 +1751,9 @@ describe("Claude helpers", () => {
       prompt: "",
       workflow: { type: "lilia_memory_mode", mode: "maybe" },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }))).rejects.toThrow("Lilia memory mode workflow missing a valid mode");
 
     expect(queryCalled).toBe(false);
@@ -1809,9 +1809,7 @@ describe("Claude helpers", () => {
           },
         },
       },
-    }, claudeRunnerContext(protocol, {
-      createSdkMcpServer: (config: any) => config,
-      createClaudeTool: (name: string) => ({ name }),
+    }, claudeRunnerContextWithTools(protocol, {
       createClaudeQuery: ({ prompt, options }: any) => {
         seenOptions = options;
         return (async function* () {
@@ -1962,10 +1960,9 @@ describe("Claude helpers", () => {
         },
       },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }));
 
     expect(queryCalled).toBe(false);
@@ -2005,10 +2002,9 @@ describe("Claude helpers", () => {
         includeDetails: true,
       },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }));
 
     expect(queryCalled).toBe(false);
@@ -2048,10 +2044,9 @@ describe("Claude helpers", () => {
         environmentId: "env-1",
       },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }));
 
     expect(queryCalled).toBe(false);
@@ -2092,10 +2087,9 @@ describe("Claude helpers", () => {
         command: "npm test",
       },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }));
 
     expect(queryCalled).toBe(false);
@@ -2136,9 +2130,7 @@ describe("Claude helpers", () => {
           fallback: "diagnostic",
         }],
       },
-    }, claudeRunnerContext(diagnostic.protocol, {
-      createSdkMcpServer: (config: any) => config,
-      createClaudeTool: (name: string) => ({ name }),
+    }, claudeRunnerContextWithTools(diagnostic.protocol, {
       createClaudeQuery: () => {
         queryCalled = true;
         return (async function* () {
@@ -2235,10 +2227,9 @@ describe("Claude helpers", () => {
         },
       },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
+      createClaudeQuery: emptyClaudeQueryProbe(() => {
         queryCalled = true;
-        return emptyClaudeQuery();
-      },
+      }),
     }));
 
     expect(queryCalled).toBe(false);
@@ -2500,26 +2491,28 @@ describe("Codex app-server mapping", () => {
   it("collects Codex Spark assistant delta text from app-server notifications", async () => {
     const calls: any[] = [];
     let drained = false;
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/start") return { thread: { id: "thread-spark" } };
         if (method === "turn/start") return { turn: { id: "turn-spark" } };
         return {};
       },
-      notify: () => {},
-      drainNotifications: () => {
-        if (drained) return [];
-        drained = true;
-        return [
-          { method: "item/agentMessage/delta", params: { itemId: "msg-1", delta: "{\"items\"" } },
-          { method: "item/agentMessage/delta", params: { itemId: "msg-1", delta: ":[]}" } },
-          { method: "turn/completed", params: { threadId: "thread-spark", turn: { status: "completed" } } },
-        ];
+      {
+        notify: () => {},
+        drainNotifications: () => {
+          if (drained) return [];
+          drained = true;
+          return [
+            { method: "item/agentMessage/delta", params: { itemId: "msg-1", delta: "{\"items\"" } },
+            { method: "item/agentMessage/delta", params: { itemId: "msg-1", delta: ":[]}" } },
+            { method: "turn/completed", params: { threadId: "thread-spark", turn: { status: "completed" } } },
+          ];
+        },
+        close: () => calls.push({ method: "close" }),
       },
-      close: () => calls.push({ method: "close" }),
-    };
+    );
 
     const result = await runCodexSparkPromptCommand({
       kind: "codex_spark_prompt",
@@ -4109,36 +4102,28 @@ describe("Codex app-server mapping", () => {
   it("continues Codex run when history sync fails", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/resume") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
         if (method === "thread/turns/list") throw new Error("history unavailable");
         if (method === "turn/start") return { turn: { id: "turn-new" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-1", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "hi",
       resumeSessionId: "thread-1",
       permission: "ask",
       planMode: false,
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     const historyIndex = calls.findIndex((call) => call.method === "thread/turns/list");
@@ -4157,23 +4142,22 @@ describe("Codex app-server mapping", () => {
   it("applies Codex sticky settings before the first turn", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "turn/start") return { turn: { id: "turn-1" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-1", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "hi",
       permission: "ask",
@@ -4192,13 +4176,6 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     const updateIndex = calls.findIndex((call) => call.method === "thread/settings/update");
@@ -4229,24 +4206,23 @@ describe("Codex app-server mapping", () => {
   it("passes Codex resume-only advanced fields to thread/resume", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/resume") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/turns/list") return { data: [] };
         if (method === "turn/start") return { turn: { id: "turn-1" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-1", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "resume",
       permission: "ask",
@@ -4261,13 +4237,6 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.find((call) => call.method === "thread/resume").params).toMatchObject({
@@ -4281,23 +4250,22 @@ describe("Codex app-server mapping", () => {
   it("starts Codex review workflow through review/start", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "review/start") return { turn: { id: "review-turn-1" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-1", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "重点看权限边界",
       permission: "ask",
@@ -4307,13 +4275,6 @@ describe("Codex app-server mapping", () => {
         target: { type: "baseBranch", branch: "main" },
         instructions: "重点看权限边界",
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -4339,7 +4300,7 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     const server = createCodexTurnTestServer(calls);
 
-    await runCodexAppServerTestTurn({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "重点看权限边界",
       permission: "ask",
@@ -4349,8 +4310,6 @@ describe("Codex app-server mapping", () => {
         target: { type: "baseBranch", branch: "main" },
         instructions: "重点看权限边界",
       },
-      protocol,
-      server,
     });
 
     const startupEvent = json().find((line) =>
@@ -4410,7 +4369,7 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     const server = createCodexTurnTestServer(calls);
 
-    await runCodexAppServerTestTurn({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "full",
@@ -4419,8 +4378,6 @@ describe("Codex app-server mapping", () => {
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
-      protocol,
-      server,
     });
 
     const turnStart = calls.find((call) => call.method === "turn/start");
@@ -4434,7 +4391,7 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     const server = createCodexTurnTestServer(calls);
 
-    await runCodexAppServerTestTurn({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -4450,8 +4407,6 @@ describe("Codex app-server mapping", () => {
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
-      protocol,
-      server,
     });
 
     const turnStart = calls.find((call) => call.method === "turn/start");
@@ -4501,8 +4456,8 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     let turnStarts = 0;
     const completedTurns = new Set<number>();
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "collaborationMode/list") {
@@ -4519,34 +4474,33 @@ describe("Codex app-server mapping", () => {
         }
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => {
-        if (turnStarts > 0 && !completedTurns.has(turnStarts)) {
-          completedTurns.add(turnStarts);
-          if (turnStarts === 1) {
+      {
+        drainNotifications: () => {
+          if (turnStarts > 0 && !completedTurns.has(turnStarts)) {
+            completedTurns.add(turnStarts);
+            if (turnStarts === 1) {
+              return [{
+                method: "item/agentMessage/delta",
+                params: { delta: "计划：先改代码，再补测试。" },
+              }, {
+                method: "turn/completed",
+                params: { threadId: "thread-1", turn: { status: "completed" } },
+              }];
+            }
             return [{
               method: "item/agentMessage/delta",
-              params: { delta: "计划：先改代码，再补测试。" },
+              params: { delta: "已应用建议。" },
             }, {
               method: "turn/completed",
               params: { threadId: "thread-1", turn: { status: "completed" } },
             }];
           }
-          return [{
-            method: "item/agentMessage/delta",
-            params: { delta: "已应用建议。" },
-          }, {
-            method: "turn/completed",
-            params: { threadId: "thread-1", turn: { status: "completed" } },
-          }];
-        }
-        return [];
+          return [];
+        },
       },
-      close: () => {},
-    };
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -4557,23 +4511,8 @@ describe("Codex app-server mapping", () => {
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: {
-        requestAskUser: async () => ({
-          cancelled: false,
-          answers: {
-            "approve-plan": {
-              questionId: "approve-plan",
-              value: "yes",
-            },
-          },
-        }),
-      },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
+    }, {
+      interactions: approvedPlanInteractions(),
     });
 
     const startCalls = calls.filter((call) => call.method === "turn/start");
@@ -4619,7 +4558,7 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     const server = createCodexTurnTestServer(calls);
 
-    await runCodexAppServerTestTurn({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "可以直接修",
       permission: "full",
@@ -4629,8 +4568,6 @@ describe("Codex app-server mapping", () => {
         instructions: "可以直接修",
         mode: "apply",
       },
-      protocol,
-      server,
     });
 
     expect(calls.some((call) => call.method === "review/start")).toBe(false);
@@ -4648,7 +4585,7 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     const server = createCodexTurnTestServer(calls);
 
-    await runCodexAppServerTestTurn({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -4656,8 +4593,6 @@ describe("Codex app-server mapping", () => {
         type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
       },
-      protocol,
-      server,
     });
 
     const prompt = calls.find((call) => call.method === "turn/start").params.input[0].text;
@@ -4672,7 +4607,7 @@ describe("Codex app-server mapping", () => {
       error: { message: "fix failed" },
     });
 
-    await expect(runCodexAppServerTestTurn({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -4680,8 +4615,6 @@ describe("Codex app-server mapping", () => {
         type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "baseBranch", branch: "main" },
       },
-      protocol,
-      server,
     })).rejects.toThrow("Codex fix suggestion turn failed");
 
     expect(json().some((line) =>
@@ -4699,36 +4632,28 @@ describe("Codex app-server mapping", () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
     let drainCount = 0;
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => {
-        drainCount += 1;
-        calls.push({ method: "drain", count: drainCount });
-        if (drainCount < 2) return [];
-        return [{ method: "thread/compacted", params: { threadId: "thread-1", turnId: "compact-turn-1" } }];
+      {
+        drainNotifications: () => {
+          drainCount += 1;
+          calls.push({ method: "drain", count: drainCount });
+          if (drainCount < 2) return [];
+          return [{ method: "thread/compacted", params: { threadId: "thread-1", turnId: "compact-turn-1" } }];
+        },
       },
-      close: () => {},
-    };
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       planMode: false,
       workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -4750,30 +4675,17 @@ describe("Codex app-server mapping", () => {
 
   it("emits an error timeline when Codex compact fails", async () => {
     const { protocol, json } = captureProtocol();
-    const server = {
-      request: async (method: string) => {
+    const server = codexAppServerStub(async (method: string) => {
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/compact/start") throw new Error("compact unavailable");
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServer({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     })).rejects.toThrow("compact unavailable");
 
     expect(json().some((line) =>
@@ -4787,31 +4699,18 @@ describe("Codex app-server mapping", () => {
   it("starts Codex background terminals clean workflow through thread/backgroundTerminals/clean", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       planMode: false,
       workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -4839,30 +4738,17 @@ describe("Codex app-server mapping", () => {
 
   it("emits an error timeline when Codex background terminals clean fails", async () => {
     const { protocol, json } = captureProtocol();
-    const server = {
-      request: async (method: string) => {
+    const server = codexAppServerStub(async (method: string) => {
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/backgroundTerminals/clean") throw new Error("clean unavailable");
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServer({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     })).rejects.toThrow("clean unavailable");
 
     expect(json().some((line) =>
@@ -4876,30 +4762,17 @@ describe("Codex app-server mapping", () => {
   it("updates Codex memory mode through thread/memoryMode/set", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       workflow: { type: "lilia_memory_mode", mode: "enabled" },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -4917,59 +4790,33 @@ describe("Codex app-server mapping", () => {
 
   it("rejects invalid Codex memory mode workflow", async () => {
     const { protocol } = captureProtocol();
-    const server = {
-      request: async (method: string) => {
+    const server = codexAppServerStub(async (method: string) => {
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServer({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       workflow: { type: "lilia_memory_mode", mode: "maybe" },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     })).rejects.toThrow("Lilia memory mode workflow missing a valid mode");
   });
 
   it("resets Codex memory through memory/reset", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       workflow: { type: "lilia_memory_reset" },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -4988,20 +4835,14 @@ describe("Codex app-server mapping", () => {
   it("forks Codex thread and returns the forked session id", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/fork") return { thread: { id: "thread-fork" } };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5014,13 +4855,6 @@ describe("Codex app-server mapping", () => {
         },
       },
       runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5047,8 +4881,8 @@ describe("Codex app-server mapping", () => {
   it("auto forks Codex thread before continuing the current prompt", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/resume") return { thread: { id: "thread-source" }, model: "gpt-5.5" };
         if (method === "thread/turns/list") {
@@ -5058,28 +4892,20 @@ describe("Codex app-server mapping", () => {
         if (method === "turn/start") return { turn: { id: "turn-1" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-fork", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-fork", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "继续实现",
       permission: "ask",
       resumeSessionId: "thread-source",
       autoSessionFork: true,
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.find((call) => call.method === "thread/fork")).toMatchObject({
@@ -5113,8 +4939,8 @@ describe("Codex app-server mapping", () => {
   it("forks Codex thread from a selected turn before continuing the prompt", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/resume") return { thread: { id: "thread-source" }, model: "gpt-5.5" };
         if (method === "thread/turns/list") return { data: [], nextCursor: null, backwardsCursor: null };
@@ -5122,16 +4948,15 @@ describe("Codex app-server mapping", () => {
         if (method === "turn/start") return { turn: { id: "turn-anchored" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-fork", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-fork", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "从这里继续修复",
       permission: "ask",
@@ -5142,13 +4967,6 @@ describe("Codex app-server mapping", () => {
         mode: "fork",
         excludeTurns: true,
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.find((call) => call.method === "thread/fork")).toMatchObject({
@@ -5168,8 +4986,7 @@ describe("Codex app-server mapping", () => {
   it("reads Codex config diagnostics through config/read and configRequirements/read", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "config/read") {
@@ -5195,25 +5012,13 @@ describe("Codex app-server mapping", () => {
           };
         }
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       workflow: { type: LILIA_CONFIG_DIAGNOSTICS_WORKFLOW_TYPE },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5285,18 +5090,11 @@ describe("Codex app-server mapping", () => {
         close: () => {},
       };
 
-      await runCodexAppServer({
+      await runCodexAppServerTestTurn(protocol, server, {
         backend: "codex",
         prompt: "",
         permission: "ask",
         runtimeCommand,
-      }, { mcpServers: [], warnings: [] }, {
-        protocol,
-        interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-        emitToolConsentTimeline: () => {},
-        createCodexAppServer: () => server,
-        env: {},
-        cwd: () => "C:/repo",
       });
 
       expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5327,29 +5125,16 @@ describe("Codex app-server mapping", () => {
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
-      const server = {
-        request: async (method: string, params: any) => {
+      const server = codexAppServerStub(async (method: string, params: any) => {
           calls.push({ method, params });
           return {};
-        },
-        notify: () => {},
-        respond: () => {},
-        drainNotifications: () => [],
-        close: () => {},
-      };
+      });
 
-      await runCodexAppServer({
+      await runCodexAppServerTestTurn(protocol, server, {
         backend: "codex",
         prompt: "",
         permission: "ask",
         runtimeCommand,
-      }, { mcpServers: [], warnings: [] }, {
-        protocol,
-        interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-        emitToolConsentTimeline: () => {},
-        createCodexAppServer: () => server,
-        env: {},
-        cwd: () => "C:/repo",
       });
 
       expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5373,20 +5158,14 @@ describe("Codex app-server mapping", () => {
   it("updates Codex provider settings through thread settings", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/settings/update") return {};
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5411,13 +5190,6 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5459,20 +5231,14 @@ describe("Codex app-server mapping", () => {
   it("emits Codex provider settings update errors with runtime command context", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/settings/update") throw new Error("settings update failed");
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServer({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5483,13 +5249,6 @@ describe("Codex app-server mapping", () => {
       runtimeOptions: {
         common: { model: "gpt-5.6" },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     })).rejects.toThrow("settings update failed");
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5513,22 +5272,14 @@ describe("Codex app-server mapping", () => {
   it("handles Codex remote environment diagnostics without starting a turn", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/settings/update") return {};
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServerTestTurn({
-      protocol,
-      server,
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5568,23 +5319,15 @@ describe("Codex app-server mapping", () => {
   it("adds Codex remote environment through app-server", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/settings/update") return {};
         if (method === "environment/add") return { environment: { id: "env-1", name: "Windows VM" } };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServerTestTurn({
-      protocol,
-      server,
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5623,22 +5366,14 @@ describe("Codex app-server mapping", () => {
   it("selects Codex remote environment through thread settings", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/settings/update") return {};
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServerTestTurn({
-      protocol,
-      server,
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5680,8 +5415,7 @@ describe("Codex app-server mapping", () => {
   it("handles Codex sandbox diagnostics without starting a turn", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "windowsSandbox/readiness") {
@@ -5691,16 +5425,9 @@ describe("Codex app-server mapping", () => {
           };
         }
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServerTestTurn({
-      protocol,
-      server,
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5805,7 +5532,7 @@ describe("Codex app-server mapping", () => {
       close: () => {},
     };
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5820,13 +5547,8 @@ describe("Codex app-server mapping", () => {
         cols: 100,
         permissionProfile: ":workspace",
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
+    }, {
       interactions,
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -5898,22 +5620,14 @@ describe("Codex app-server mapping", () => {
   it("emits Codex sandbox diagnostics errors explicitly", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "windowsSandbox/readiness") throw new Error("sandbox not available");
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServerTestTurn({
-      protocol,
-      server,
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -5943,23 +5657,22 @@ describe("Codex app-server mapping", () => {
   it("falls back Codex provider settings advanced fields to turn start", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/settings/update") throw new Error("settings update failed");
         if (method === "turn/start") return { turnId: "turn-1" };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [
-        { method: "turn/completed", params: { threadId: "thread-1", turn: { status: "completed" } } },
-      ],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [
+          { method: "turn/completed", params: { threadId: "thread-1", turn: { status: "completed" } } },
+        ],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "hello",
       permission: "ask",
@@ -5972,13 +5685,6 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.find((call) => call.method === "turn/start")).toMatchObject({
@@ -5993,30 +5699,17 @@ describe("Codex app-server mapping", () => {
   it("rejects empty Codex provider settings update before turn start", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServer({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
       runtimeCommand: { type: RUNTIME_SETTINGS_COMMAND_TYPE, action: "update" },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     })).rejects.toThrow("Lilia provider settings update requires at least one supported setting");
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -6040,7 +5733,7 @@ describe("Codex app-server mapping", () => {
       },
     }, {
       protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      interactions: { requestAskUser: cancelledAskUser },
       emitToolConsentTimeline: () => {},
       createCodexAppServer: () => {
         serverCreated = true;
@@ -6073,23 +5766,22 @@ describe("Codex app-server mapping", () => {
   it("normalizes Codex review commit target for app-server schema", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "review/start") return { turn: { id: "review-turn-1" } };
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [{
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }],
-      close: () => {},
-    };
+      {
+        drainNotifications: () => [{
+          method: "turn/completed",
+          params: { threadId: "thread-1", turn: { status: "completed" } },
+        }],
+      },
+    );
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -6097,13 +5789,6 @@ describe("Codex app-server mapping", () => {
         type: LILIA_REVIEW_WORKFLOW_TYPE,
         target: { type: "commit", sha: "abc123" },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.find((call) => call.method === "review/start")).toMatchObject({
@@ -6127,20 +5812,14 @@ describe("Codex app-server mapping", () => {
       createdAt: 1,
       updatedAt: 2,
     };
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
         if (method === "thread/goal/set") return { goal };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "",
       permission: "ask",
@@ -6149,13 +5828,6 @@ describe("Codex app-server mapping", () => {
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -6178,8 +5850,7 @@ describe("Codex app-server mapping", () => {
     for (const action of ["refresh", "clear"] as const) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
-      const server = {
-        request: async (method: string, params: any) => {
+      const server = codexAppServerStub(async (method: string, params: any) => {
           calls.push({ method, params });
           if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
           if (method === "thread/goal/get") {
@@ -6197,14 +5868,9 @@ describe("Codex app-server mapping", () => {
             };
           }
           return {};
-        },
-        notify: () => {},
-        respond: () => {},
-        drainNotifications: () => [],
-        close: () => {},
-      };
+      });
 
-      await runCodexAppServer({
+      await runCodexAppServerTestTurn(protocol, server, {
         backend: "codex",
         prompt: "",
         permission: "ask",
@@ -6212,13 +5878,6 @@ describe("Codex app-server mapping", () => {
           type: LILIA_GOAL_WORKFLOW_TYPE,
           action,
         },
-      }, { mcpServers: [], warnings: [] }, {
-        protocol,
-        interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-        emitToolConsentTimeline: () => {},
-        createCodexAppServer: () => server,
-        env: {},
-        cwd: () => "C:/repo",
       });
 
       expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -6518,18 +6177,13 @@ describe("Codex app-server mapping", () => {
       close: () => {},
     };
 
-    const run = runCodexAppServer({
+    const run = runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "请制定计划",
       permission: "ask",
       planMode: true,
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
+    }, {
       interactions: broker,
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     await waitUntil(() =>
@@ -6554,15 +6208,7 @@ describe("Codex app-server mapping", () => {
       type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "ask-1",
       kind: "plan_approval",
-      result: {
-        cancelled: false,
-        answers: {
-          "approve-plan": {
-            questionId: "approve-plan",
-            value: "yes",
-          },
-        },
-      },
+      result: approvedPlanResponse(),
     }));
 
     await run;
@@ -6580,8 +6226,8 @@ describe("Codex app-server mapping", () => {
     const calls: any[] = [];
     let turnStarted = false;
     let interrupted = false;
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
@@ -6596,32 +6242,26 @@ describe("Codex app-server mapping", () => {
         }
         return {};
       },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => {
-        if (!turnStarted || !interrupted) return [];
-        return [{
-          method: "turn/completed",
-          params: {
-            threadId: "thread-1",
-            turn: { id: "turn-1", status: "interrupted" },
-          },
-        }];
+      {
+        drainNotifications: () => {
+          if (!turnStarted || !interrupted) return [];
+          return [{
+            method: "turn/completed",
+            params: {
+              threadId: "thread-1",
+              turn: { id: "turn-1", status: "interrupted" },
+            },
+          }];
+        },
       },
-      close: () => {},
-    };
+    );
 
-    const run = runCodexAppServer({
+    const run = runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "long turn",
       permission: "ask",
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
+    }, {
       interactions: broker,
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     await waitUntil(() => turnStarted);
@@ -6705,19 +6345,11 @@ describe("Codex app-server mapping", () => {
         calls.push({ type: "ask", spec, options });
         seenSpec = spec;
         seenOptions = options;
-        return {
-          cancelled: false,
-          answers: {
-            "approve-plan": {
-              questionId: "approve-plan",
-              value: "yes",
-            },
-          },
-        };
+        return approvedPlanResponse();
       },
     };
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "请制定计划",
       permission: "ask",
@@ -6729,13 +6361,8 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
+    }, {
       interactions,
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     const startCalls = calls.filter((call) => call.type === "server" && call.method === "turn/start");
@@ -6859,33 +6486,19 @@ describe("Codex app-server mapping", () => {
       requestAskUser: async () => {
         askCount += 1;
         if (askCount === 1) {
-          return {
-            cancelled: false,
-            answers: {
-              "approve-plan": {
-                questionId: "approve-plan",
-                value: "revision_request",
-                notes: "先补充回滚方案",
-              },
-            },
-          };
+          return approvedPlanResponse("revision_request", "先补充回滚方案");
         }
         return { cancelled: true, answers: {} };
       },
     };
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "请制定计划",
       permission: "ask",
       planMode: true,
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
+    }, {
       interactions,
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     });
 
     const startCalls = calls.filter((call) => call.type === "server" && call.method === "turn/start");
@@ -6963,7 +6576,7 @@ describe("Codex app-server mapping", () => {
       close: () => {},
     };
 
-    await runCodexAppServer({
+    await runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "请制定计划",
       permission: "ask",
@@ -6975,23 +6588,8 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: {
-        requestAskUser: async () => ({
-          cancelled: false,
-          answers: {
-            "approve-plan": {
-              questionId: "approve-plan",
-              value: "yes",
-            },
-          },
-        }),
-      },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
+    }, {
+      interactions: approvedPlanInteractions(),
     });
 
     const startCalls = calls.filter((call) => call.type === "server" && call.method === "turn/start");
@@ -7013,31 +6611,18 @@ describe("Codex app-server mapping", () => {
   it("Codex plan mode fails before turn/start when plan preset is missing", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
         if (method === "collaborationMode/list") return { data: [] };
         return {};
-      },
-      notify: () => {},
-      respond: () => {},
-      drainNotifications: () => [],
-      close: () => {},
-    };
+    });
 
-    await expect(runCodexAppServer({
+    await expect(runCodexAppServerTestTurn(protocol, server, {
       backend: "codex",
       prompt: "请制定计划",
       permission: "ask",
       planMode: true,
-    }, { mcpServers: [], warnings: [] }, {
-      protocol,
-      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
-      emitToolConsentTimeline: () => {},
-      createCodexAppServer: () => server,
-      env: {},
-      cwd: () => "C:/repo",
     })).rejects.toThrow("plan collaboration preset is missing");
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
@@ -7047,8 +6632,7 @@ describe("Codex app-server mapping", () => {
 describe("Codex history utility", () => {
   it("searches Codex threads with cursor and archive params", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/search") {
@@ -7064,10 +6648,7 @@ describe("Codex history utility", () => {
           };
         }
         return {};
-      },
-      notify: () => {},
-      close: () => {},
-    };
+    });
 
     await expect(searchCodexThreads({
       searchTerm: "build",
@@ -7099,8 +6680,7 @@ describe("Codex history utility", () => {
 
   it("lists recent Codex threads when search term is empty", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/list") {
@@ -7118,10 +6698,7 @@ describe("Codex history utility", () => {
           throw new Error("thread/search should not be called without a searchTerm");
         }
         return {};
-      },
-      notify: () => {},
-      close: () => {},
-    };
+    });
 
     await expect(searchCodexThreads({
       searchTerm: null,
@@ -7152,14 +6729,13 @@ describe("Codex history utility", () => {
 
   it("cleans Codex thread background terminals through history utility", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         return {};
       },
-      notify: () => {},
-      close: () => calls.push({ method: "close", params: null }),
-    };
+      { close: () => calls.push({ method: "close", params: null }) },
+    );
 
     await expect(cleanCodexThreadBackgroundTerminals(" thread-1 ", {
       createServer: () => server as any,
@@ -7190,14 +6766,13 @@ describe("Codex history utility", () => {
 
   it("archives Codex threads through history utility", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (requestMethod: string, params: any) => {
+    const server = codexAppServerStub(
+      async (requestMethod: string, params: any) => {
         calls.push({ method: requestMethod, params });
         return {};
       },
-      notify: () => {},
-      close: () => calls.push({ method: "close", params: null }),
-    };
+      { close: () => calls.push({ method: "close", params: null }) },
+    );
 
     await expect(archiveCodexThread(" thread-1 ", {
       createServer: () => server as any,
@@ -7234,14 +6809,13 @@ describe("Codex history utility", () => {
 
   it("renames Codex thread through history utility", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(
+      async (method: string, params: any) => {
         calls.push({ method, params });
         return {};
       },
-      notify: () => {},
-      close: () => calls.push({ method: "close", params: null }),
-    };
+      { close: () => calls.push({ method: "close", params: null }) },
+    );
 
     await expect(renameCodexThread(" thread-1 ", " 新标题 ", {
       createServer: () => server as any,
@@ -7392,8 +6966,7 @@ describe("Codex history utility", () => {
 
   it("previews Codex threads in lite mode without timeline event conversion", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/turns/list") {
@@ -7411,10 +6984,7 @@ describe("Codex history utility", () => {
           };
         }
         return {};
-      },
-      notify: () => {},
-      close: () => {},
-    };
+    });
 
     const result = await previewCodexThreadLite("thread-1", { createServer: () => server as any });
 
@@ -7437,8 +7007,7 @@ describe("Codex history utility", () => {
 
   it("previews Codex threads in full mode with all paginated timeline events", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/turns/list") {
@@ -7470,10 +7039,7 @@ describe("Codex history utility", () => {
           };
         }
         return {};
-      },
-      notify: () => {},
-      close: () => {},
-    };
+    });
 
     const result = await previewCodexThread("thread-1", { createServer: () => server as any });
 
@@ -7507,8 +7073,7 @@ describe("Codex history utility", () => {
 
   it("syncs history into Lilia timeline inputs", async () => {
     const calls: any[] = [];
-    const server = {
-      request: async (method: string, params: any) => {
+    const server = codexAppServerStub(async (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/turns/list") {
@@ -7527,10 +7092,7 @@ describe("Codex history utility", () => {
           };
         }
         return {};
-      },
-      notify: () => {},
-      close: () => {},
-    };
+    });
 
     const result = await syncCodexThreadHistoryForTask({
       taskId: "task-1",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Archive,
@@ -41,13 +41,19 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { useInlineRename } from "../../composables/useInlineRename";
+
+const projectTreeConversationListLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "sidebar.project-conversation-list.load",
+    async () => (await import("./ProjectTreeConversationList.vue")).default as Component,
+  )
+);
 
 const ProjectTreeConversationList = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.project-conversation-list.load",
-    async () => (await import("./ProjectTreeConversationList.vue")).default as Component,
-  ),
+  loader: () => projectTreeConversationListLoad.load(),
 });
 
 const props = defineProps<{
@@ -69,58 +75,24 @@ const emit = defineEmits<{
 const route = useRoute();
 const router = useRouter();
 
-const editingId = ref<string | null>(null);
-const editingValue = ref("");
-const editingInput = ref<HTMLInputElement | null>(null);
 const conversationListReady = ref(false);
 let conversationListRevealHandle: number | null = null;
 let cancelConversationListRevealPaint: (() => void) | null = null;
 let conversationListRevealSeq = 0;
-let renameSeq = 0;
 let disposed = false;
 
-async function startRename() {
-  if (disposed) return;
-  const seq = ++renameSeq;
-  editingId.value = props.project.id;
-  editingValue.value = props.project.name;
-  await nextTick();
-  if (disposed || seq !== renameSeq || editingId.value !== props.project.id) return;
-  const input = editingInput.value;
-  input?.focus();
-  input?.select();
-}
-
-function commitRename() {
-  const id = editingId.value;
-  if (!id) return;
-  const next = editingValue.value.trim();
-  if (next) renameProject(id, next);
-  editingId.value = null;
-  editingValue.value = "";
-  renameSeq += 1;
-}
-
-function cancelRename() {
-  editingId.value = null;
-  editingValue.value = "";
-  renameSeq += 1;
-}
-
-function onEditingKeydown(e: KeyboardEvent) {
-  e.stopPropagation();
-  if (e.key === "Enter") {
-    e.preventDefault();
-    commitRename();
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    cancelRename();
-  }
-}
-
-function bindEditingInput(el: unknown) {
-  editingInput.value = (el as HTMLInputElement | null) ?? null;
-}
+const {
+  editingId,
+  editingValue,
+  startRename,
+  commitRename,
+  onEditingKeydown,
+  bindEditingInput,
+} = useInlineRename({
+  currentId: () => props.project.id,
+  currentValue: () => props.project.name,
+  commit: renameProject,
+});
 
 async function openInExplorer() {
   if (disposed || !props.project.cwd) return;
@@ -369,7 +341,6 @@ if (props.isExpanded) {
 
 onBeforeUnmount(() => {
   disposed = true;
-  renameSeq += 1;
   cancelConversationListRevealPaint?.();
   cancelConversationListRevealPaint = null;
   if (conversationListRevealHandle !== null) {

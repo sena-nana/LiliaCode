@@ -4,6 +4,7 @@ import type {
   ContextMenuProvider,
 } from "../composables/useContextMenu";
 import { measurePerfAsync } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
 
 /**
  * v-context-menu 用法：
@@ -17,7 +18,13 @@ type Value = ContextMenuItem[] | ContextMenuProvider | null | undefined;
 
 const cleanups = new WeakMap<Element, () => void>();
 const bindSeq = new WeakMap<Element, number>();
-let registerContextMenuPromise: Promise<typeof import("../composables/useContextMenu")["registerContextMenu"]> | null = null;
+const registerContextMenuLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "context-menu.directive.load",
+    async () => (await import("../composables/useContextMenu")).registerContextMenu,
+    { detail: "registerContextMenu" },
+  )
+);
 
 function nextBindSeq(el: Element): number {
   const seq = (bindSeq.get(el) ?? 0) + 1;
@@ -36,15 +43,7 @@ function clearBinding(el: Element) {
 }
 
 function loadRegisterContextMenu() {
-  if (registerContextMenuPromise) return registerContextMenuPromise;
-  registerContextMenuPromise = measurePerfAsync(
-    "context-menu.directive.load",
-    async () => (await import("../composables/useContextMenu")).registerContextMenu,
-    { detail: "registerContextMenu" },
-  ).finally(() => {
-    registerContextMenuPromise = null;
-  });
-  return registerContextMenuPromise;
+  return registerContextMenuLoad.load();
 }
 
 function rebind(el: Element, value: Value) {

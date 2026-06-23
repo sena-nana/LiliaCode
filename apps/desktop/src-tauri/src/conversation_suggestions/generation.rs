@@ -3,25 +3,19 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::prompt_contract;
+
 use super::types::{
     now_millis, SuggestionGitHubActivityRef, SuggestionItem, SuggestionItemSource, SuggestionScope,
     MAX_SUGGESTIONS, PROMPT_LIMIT, REASON_LIMIT, SAMPLE_TEXT_LIMIT, SUMMARY_LIMIT,
 };
 
 pub(super) fn build_generation_prompt(scope: &SuggestionScope) -> String {
-    let mut lines = vec![
-        "你是 LiliaCode 的新对话建议助手。只能基于下方任务未完成信号、GitHub 近期活动或本地 Git 上下文提出继续处理建议。".to_string(),
-        "只返回 JSON 数组，可返回 []，最多 3 项。每项字段必须是 taskIds、githubActivityIds、localGitContextIds、summary、reason、prompt。不要 markdown。".to_string(),
-        "taskIds 必须引用下方任务 id；githubActivityIds 必须引用下方 GitHub 活动 id；localGitContextIds 必须引用下方本地 Git 上下文 id。每项至少引用一个有效 taskId、githubActivityId 或 localGitContextId。".to_string(),
-        "summary 控制在 20 个中文字左右；reason 控制在 80 个中文字左右；prompt 是可直接填入对话框的中文提示词，控制在 300 个中文字左右。".to_string(),
-        "不要提出泛化建议、体验优化、新方向、代码审查或测试补齐，除非它们被未完成信号、具体 GitHub 活动或本地 Git 状态明确指向。没有明确可继续处理的信号时返回 []。".to_string(),
-        "基于 GitHub 活动的建议必须引用具体 PR、Issue 或 Push，并让 prompt 包含仓库、编号/分支或 commit 摘要等具体上下文。".to_string(),
-        "基于本地 Git 的建议必须引用当前 branch，并让 prompt 包含最近提交、变更文件或未提交状态等具体上下文。".to_string(),
-        format!(
-            "scopeProjectId: {}",
-            scope.project_id.as_deref().unwrap_or("recent-projects")
-        ),
-    ];
+    let mut lines = prompt_contract::suggestion_generation_rules().to_vec();
+    lines.push(format!(
+        "scopeProjectId: {}",
+        scope.project_id.as_deref().unwrap_or("recent-projects")
+    ));
     if let Some(name) = &scope.project_name {
         lines.push(format!(
             "projectName: {}",

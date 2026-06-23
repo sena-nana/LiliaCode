@@ -1,4 +1,4 @@
-import { buildPromptWithAttachments } from "./prompt.mjs";
+import { buildPromptWithAttachments } from "./promptManager.mjs";
 import { createProtocolEmitter } from "./protocol.mjs";
 import { createInteractionBroker, emitAskUserTimeline } from "./interactions.mjs";
 import { emitToolConsentTimeline } from "./toolConsentTimeline.mjs";

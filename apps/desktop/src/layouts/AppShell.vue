@@ -10,21 +10,29 @@ import {
   measurePerfAsync,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const secondaryPanelLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "app-shell.secondary-panel.load",
+    async () => (await import("./SecondaryPanel.vue")).default,
+  )
+);
+const settingsSidebarLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "app-shell.settings-sidebar.load",
+    async () => (await import("./SettingsSidebar.vue")).default,
+  )
+);
 
 const SecondaryPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "app-shell.secondary-panel.load",
-    async () => (await import("./SecondaryPanel.vue")).default,
-  ),
+  loader: () => secondaryPanelLoad.load(),
 });
 
 const SettingsSidebar = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "app-shell.settings-sidebar.load",
-    async () => (await import("./SettingsSidebar.vue")).default,
-  ),
+  loader: () => settingsSidebarLoad.load(),
 });
 
 /** 侧栏宽度的硬约束：太窄项目名糊成一团，太宽主区被挤掉。 */
@@ -94,7 +102,12 @@ const sidebarReturnTo = computed(() =>
     ? previousSidebarReplacementRoute.value
     : "/",
 );
-let cancelRoutePaintMeasure: (() => void) | null = null;
+type PendingRoutePaintMeasure = {
+  cancelPaint: () => void;
+  stage: ReturnType<typeof beginPerfStage>;
+};
+let pendingRoutePaintMeasure: PendingRoutePaintMeasure | null = null;
+let routePaintSeq = 0;
 
 const removeBeforeEach = router.beforeEach((to, from) => {
   if (
@@ -111,25 +124,37 @@ function goBackFromAutomation() {
 
 installPerfObservers();
 
+function cancelPendingRoutePaintMeasure(stage: "cancelled" | "replaced") {
+  pendingRoutePaintMeasure?.cancelPaint();
+  pendingRoutePaintMeasure?.stage.end(stage);
+  pendingRoutePaintMeasure = null;
+}
+
 watch(
   () => route.fullPath,
   (path) => {
-    cancelRoutePaintMeasure?.();
-    const stage = beginPerfStage("route.paint", { detail: path });
+    cancelPendingRoutePaintMeasure("replaced");
+    const seq = ++routePaintSeq;
+    const stage = beginPerfStage("route.paint", {
+      detail: path,
+      feature: "route.paint",
+      id: path,
+      route: path,
+      seq,
+    });
     const cancelPaint = scheduleAfterPaint(() => {
-      if (cancelRoutePaintMeasure === cancelPaint) {
-        cancelRoutePaintMeasure = null;
+      if (pendingRoutePaintMeasure?.cancelPaint === cancelPaint) {
+        pendingRoutePaintMeasure = null;
       }
       stage.end("paint");
     });
-    cancelRoutePaintMeasure = cancelPaint;
+    pendingRoutePaintMeasure = { cancelPaint, stage };
   },
   { immediate: true },
 );
 
 onBeforeUnmount(() => {
-  cancelRoutePaintMeasure?.();
-  cancelRoutePaintMeasure = null;
+  cancelPendingRoutePaintMeasure("cancelled");
   removeBeforeEach();
 });
 </script>

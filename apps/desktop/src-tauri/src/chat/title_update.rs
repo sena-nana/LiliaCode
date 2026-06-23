@@ -14,6 +14,7 @@ use crate::chat::state::default_model_for_backend;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::codex_history;
 use crate::projects_tasks::events::emit_tasks_changed;
+use crate::prompt_contract;
 use crate::provider::{
     assistant_ai_secret, backend_api_key_env, backend_direct_url, codex_account_spark_enabled,
     is_codex_account_spark_request, load_active_backend, load_assistant_ai_config,
@@ -27,7 +28,6 @@ const TITLE_LABEL: &str = "标题已更新";
 const TITLE_MAX_CHARS: usize = 18;
 const TITLE_MIN_CHARS: usize = 2;
 const SAMPLE_TEXT_LIMIT: usize = 260;
-const TITLE_SPARK_INSTRUCTION: &str = "只输出一个中文短标题。";
 
 #[derive(Debug, Clone)]
 struct TaskTitleState {
@@ -385,8 +385,12 @@ fn request_title<R: Runtime>(
     prompt: &str,
 ) -> Result<String, String> {
     if is_codex_spark_request(model) {
-        return request_codex_account_spark(app, prompt, TITLE_SPARK_INSTRUCTION)
-            .map_err(|err| format!("title Codex Spark request failed: {err}"));
+        return request_codex_account_spark(
+            app,
+            prompt,
+            prompt_contract::title_system_instruction(),
+        )
+        .map_err(|err| format!("title Codex Spark request failed: {err}"));
     }
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
@@ -411,7 +415,7 @@ fn request_openai_compatible(
         .json(&json!({
             "model": model.model,
             "messages": [
-                { "role": "system", "content": "只输出一个中文短标题。" },
+                { "role": "system", "content": prompt_contract::title_system_instruction() },
                 { "role": "user", "content": prompt }
             ],
             "temperature": 0.2,
@@ -455,7 +459,7 @@ fn request_anthropic(
             "model": model.model,
             "max_tokens": 80,
             "temperature": 0.2,
-            "system": "只输出一个中文短标题。",
+            "system": prompt_contract::title_system_instruction(),
             "messages": [{ "role": "user", "content": prompt }]
         }))
         .send()

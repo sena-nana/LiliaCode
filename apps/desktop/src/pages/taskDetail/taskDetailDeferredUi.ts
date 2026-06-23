@@ -9,55 +9,46 @@ import {
 } from "@lilia/contracts";
 import type { Router } from "vue-router";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 
-let suggestionDepsLoad: Promise<{
+const suggestionDepsLoad = createLazyLoadState<{
   getConversationSuggestions: typeof import("../../services/chat").getConversationSuggestions;
   getConversationSuggestionSources: typeof import("../../services/chat").getConversationSuggestionSources;
-}> | null = null;
+}>(() =>
+  measurePerfAsync(
+    "task-detail.suggestion-deps.load",
+    async () => {
+      const {
+        getConversationSuggestions,
+        getConversationSuggestionSources,
+      } = await import("../../services/chat");
+      return { getConversationSuggestions, getConversationSuggestionSources };
+    },
+  )
+);
 
-let draftProjectPickerDepsLoad: Promise<{
+const draftProjectPickerDepsLoad = createLazyLoadState<{
   createDraftTask: typeof import("../../services/tasksStore").createDraftTask;
   listProjects: typeof import("../../services/projectsStore").listProjects;
-}> | null = null;
+}>(() =>
+  measurePerfAsync(
+    "task-detail.project-picker-deps.load",
+    async () => {
+      const [{ createDraftTask }, { listProjects }] = await Promise.all([
+        import("../../services/tasksStore"),
+        import("../../services/projectsStore"),
+      ]);
+      return { createDraftTask, listProjects };
+    },
+  )
+);
 
-async function loadSuggestionDeps(detail: string) {
-  if (!suggestionDepsLoad) {
-    suggestionDepsLoad = measurePerfAsync(
-      "task-detail.suggestion-deps.load",
-      async () => {
-        const {
-          getConversationSuggestions,
-          getConversationSuggestionSources,
-        } = await import("../../services/chat");
-        return { getConversationSuggestions, getConversationSuggestionSources };
-      },
-      { detail },
-    ).catch((err) => {
-      suggestionDepsLoad = null;
-      throw err;
-    });
-  }
-  return suggestionDepsLoad;
+async function loadSuggestionDeps(_detail: string) {
+  return suggestionDepsLoad.load();
 }
 
-async function loadDraftProjectPickerDeps(detail: string) {
-  if (!draftProjectPickerDepsLoad) {
-    draftProjectPickerDepsLoad = measurePerfAsync(
-      "task-detail.project-picker-deps.load",
-      async () => {
-        const [{ createDraftTask }, { listProjects }] = await Promise.all([
-          import("../../services/tasksStore"),
-          import("../../services/projectsStore"),
-        ]);
-        return { createDraftTask, listProjects };
-      },
-      { detail },
-    ).catch((err) => {
-      draftProjectPickerDepsLoad = null;
-      throw err;
-    });
-  }
-  return draftProjectPickerDepsLoad;
+async function loadDraftProjectPickerDeps(_detail: string) {
+  return draftProjectPickerDepsLoad.load();
 }
 
 export async function loadTaskDetailSuggestions(options: {

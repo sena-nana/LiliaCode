@@ -1,6 +1,7 @@
 import type { ChatAttachment } from "@lilia/contracts";
 import { onScopeDispose } from "vue";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import { textPart } from "./composerParts";
 import { pasteHasFileItems, pastedImageFiles, pastedPlainText } from "./composerPasteEvent";
 import type { useComposerRichInput } from "./useComposerRichInput";
@@ -15,29 +16,28 @@ type ComposerPasteDeps = {
   saveClipboardText: typeof import("../../services/chat").saveClipboardText;
 };
 
-let composerPasteDepsLoad: Promise<ComposerPasteDeps> | null = null;
+const composerPasteDepsLoad = createLazyLoadState<ComposerPasteDeps>(() =>
+  measurePerfAsync(
+    "chat-composer.paste.load",
+    async () => {
+      const {
+        describeAttachments,
+        readClipboardFilePaths,
+        saveClipboardImage,
+        saveClipboardText,
+      } = await import("../../services/chat");
+      return {
+        describeAttachments,
+        readClipboardFilePaths,
+        saveClipboardImage,
+        saveClipboardText,
+      };
+    },
+  )
+);
 
 async function loadComposerPasteDeps(): Promise<ComposerPasteDeps> {
-  if (!composerPasteDepsLoad) {
-    composerPasteDepsLoad = measurePerfAsync(
-      "chat-composer.paste.load",
-      async () => {
-        const {
-          describeAttachments,
-          readClipboardFilePaths,
-          saveClipboardImage,
-          saveClipboardText,
-        } = await import("../../services/chat");
-        return {
-          describeAttachments,
-          readClipboardFilePaths,
-          saveClipboardImage,
-          saveClipboardText,
-        };
-      },
-    );
-  }
-  return composerPasteDepsLoad;
+  return composerPasteDepsLoad.load();
 }
 
 async function fileToBase64(file: File): Promise<string> {

@@ -88,6 +88,10 @@ async function refreshRemoteControl(options: { silent?: boolean } = {}) {
   }
 }
 
+function handleRefreshClick() {
+  void refreshRemoteControl();
+}
+
 function startRemoteControlPolling() {
   if (pollTimer !== null) return;
   pollTimer = window.setInterval(() => {
@@ -208,7 +212,7 @@ onBeforeUnmount(stopRemoteControlPolling);
           {{ hostEnabled ? "关闭远控" : "启用远控" }}
         </button>
         <span class="settings-row__status-text muted">{{ connectionLabel }}</span>
-        <button type="button" class="ui-button ui-button--ghost" :disabled="loading" @click="refreshRemoteControl">
+        <button type="button" class="ui-button ui-button--ghost" :disabled="loading" @click="handleRefreshClick">
           <RotateCw :size="11" aria-hidden="true" />
           刷新
         </button>

@@ -218,8 +218,6 @@ const defaultWorktreeSettings = {
   cleanupOnArchive: true,
 };
 
-const statusKeys = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
-
 function projectDashboardRows() {
   return projects.map((project) => {
     const projectTasks = tasks.filter((task) => task.projectId === project.id);

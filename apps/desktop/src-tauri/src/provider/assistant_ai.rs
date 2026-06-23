@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use reqwest::blocking::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime};
@@ -10,10 +10,12 @@ use super::codex_spark::{codex_account_spark_enabled, request_codex_account_spar
 use super::config::{assistant_ai_secret, load_assistant_ai_config};
 use super::credentials::normalize_secret;
 use super::types::{AssistantAIConfig, AssistantAITestResult};
-use crate::chat::types::{ChatAttachment, ChatConversationReference};
+use crate::chat::types::{ChatAttachment, ChatConversationReference, ChatWorkflow};
+use crate::prompt_contract;
 
-const PROMPT_OPTIMIZE_INSTRUCTION: &str = "你是 Lilia 的提示词优化助手。只输出优化后的提示词正文，不要解释，不要 Markdown 包装。目标：简单定位问题或入口，明确任务范围、边界、预期输出，保留用户原意、语言和关键约束。";
 const PROMPT_OPTIMIZE_TIMEOUT: Duration = Duration::from_secs(12);
+const PROMPT_ROUTE_CONFIDENCE_THRESHOLD: f64 = 0.6;
+const GENERAL_TASK_SCENARIO: &str = "general_task_optimize";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,37 @@ pub(crate) struct PromptOptimizeInput {
     pub(crate) attachments: Vec<ChatAttachment>,
     #[serde(default)]
     pub(crate) conversation_references: Vec<ChatConversationReference>,
+    #[serde(default)]
+    pub(crate) project_cwd: Option<String>,
+    #[serde(default)]
+    pub(crate) task_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PromptOptimizeResult {
+    pub(crate) optimized_prompt: String,
+    pub(crate) route: PromptRoute,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PromptRoute {
+    pub(crate) scenario: String,
+    pub(crate) workflow: Option<ChatWorkflow>,
+    pub(crate) confidence: f64,
+    pub(crate) reason: String,
+    pub(crate) signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPromptRoute {
+    scenario: Option<String>,
+    workflow: Option<JsonValue>,
+    confidence: Option<f64>,
+    reason: Option<String>,
+    signals: Option<Vec<String>>,
 }
 
 pub(crate) fn test_connection(mut config: AssistantAIConfig) -> AssistantAITestResult {
@@ -103,20 +136,33 @@ pub(crate) fn test_connection(mut config: AssistantAIConfig) -> AssistantAITestR
 pub(crate) fn optimize_prompt<R: Runtime>(
     app: AppHandle<R>,
     input: PromptOptimizeInput,
-) -> Result<String, String> {
+) -> Result<PromptOptimizeResult, String> {
     let prompt = input.prompt.trim();
     if prompt.is_empty() {
         return Err("提示词为空".to_string());
     }
-    let request_prompt = build_prompt_optimize_request(prompt, &input);
-    let text = if codex_account_spark_enabled(&app) {
-        request_codex_account_spark(&app, &request_prompt, PROMPT_OPTIMIZE_INSTRUCTION)
-            .map_err(|err| format!("提示词优化失败：{err}"))?
-    } else {
-        let model = assistant_ai_model_request(&app)?;
-        request_openai_compatible(&model, &request_prompt)?
-    };
-    normalize_optimized_prompt(&text)
+    let route_request = build_prompt_route_request(prompt, &input);
+    let route_text = request_assistant_text(
+        &app,
+        &route_request,
+        prompt_contract::prompt_router_system_instruction(),
+        700,
+        "Prompt Router",
+    )?;
+    let route = normalize_prompt_route(&route_text)?;
+
+    let optimize_request = build_prompt_optimize_request(prompt, &input, &route);
+    let optimized_text = request_assistant_text(
+        &app,
+        &optimize_request,
+        prompt_contract::prompt_optimize_system_instruction(),
+        900,
+        "提示词优化",
+    )?;
+    Ok(PromptOptimizeResult {
+        optimized_prompt: normalize_optimized_prompt(&optimized_text)?,
+        route,
+    })
 }
 
 fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Result<AssistantAIConfig, String> {
@@ -136,7 +182,27 @@ fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Result<Assistan
     Ok(cfg)
 }
 
-fn request_openai_compatible(model: &AssistantAIConfig, prompt: &str) -> Result<String, String> {
+fn request_assistant_text<R: Runtime>(
+    app: &AppHandle<R>,
+    prompt: &str,
+    system_instruction: &str,
+    max_tokens: u32,
+    label: &str,
+) -> Result<String, String> {
+    if codex_account_spark_enabled(app) {
+        return request_codex_account_spark(app, prompt, system_instruction)
+            .map_err(|err| format!("{label}失败：{err}"));
+    }
+    let model = assistant_ai_model_request(app)?;
+    request_openai_compatible(&model, prompt, system_instruction, max_tokens)
+}
+
+fn request_openai_compatible(
+    model: &AssistantAIConfig,
+    prompt: &str,
+    system_instruction: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
     let base_url = model
         .base_url
         .as_deref()
@@ -153,11 +219,11 @@ fn request_openai_compatible(model: &AssistantAIConfig, prompt: &str) -> Result<
         .json(&json!({
             "model": model.model,
             "messages": [
-                { "role": "system", "content": PROMPT_OPTIMIZE_INSTRUCTION },
+                { "role": "system", "content": system_instruction },
                 { "role": "user", "content": prompt }
             ],
             "temperature": 0.2,
-            "max_tokens": 900
+            "max_tokens": max_tokens
         }))
         .send()
         .map_err(|err| format!("辅助模型请求失败：{err}"))?;
@@ -178,7 +244,7 @@ fn request_openai_compatible(model: &AssistantAIConfig, prompt: &str) -> Result<
         .ok_or_else(|| "辅助模型响应缺少 message.content".to_string())
 }
 
-fn build_prompt_optimize_request(prompt: &str, input: &PromptOptimizeInput) -> String {
+fn prompt_context_json(input: &PromptOptimizeInput) -> (Vec<JsonValue>, Vec<JsonValue>) {
     let attachments = input
         .attachments
         .iter()
@@ -204,19 +270,105 @@ fn build_prompt_optimize_request(prompt: &str, input: &PromptOptimizeInput) -> S
             })
         })
         .collect::<Vec<_>>();
+    (attachments, conversation_references)
+}
+
+fn build_prompt_route_request(prompt: &str, input: &PromptOptimizeInput) -> String {
+    let (attachments, conversation_references) = prompt_context_json(input);
     json!({
-        "instruction": "优化用户准备发送给编程 Agent 的提示词。只返回优化后的提示词正文。",
+        "instruction": prompt_contract::prompt_router_request_instruction(),
         "originalPrompt": prompt,
         "attachments": attachments,
         "conversationReferences": conversation_references,
-        "requirements": [
-            "简单定位：指出应从哪些模块、文件、功能入口或现象开始查。",
-            "明确范围：写清本次要做什么、不做什么、需要保持哪些契约。",
-            "保留原意：不要扩大任务，不要替用户新增未表达的目标。",
-            "输出应可直接替换输入框内容。"
-        ]
+        "projectCwd": input.project_cwd,
+        "taskId": input.task_id,
+        "scenarios": prompt_contract::prompt_router_scenarios(),
+        "requirements": prompt_contract::prompt_router_requirements()
     })
     .to_string()
+}
+
+fn build_prompt_optimize_request(
+    prompt: &str,
+    input: &PromptOptimizeInput,
+    route: &PromptRoute,
+) -> String {
+    let (attachments, conversation_references) = prompt_context_json(input);
+    json!({
+        "instruction": prompt_contract::prompt_optimize_request_instruction(),
+        "originalPrompt": prompt,
+        "route": route,
+        "attachments": attachments,
+        "conversationReferences": conversation_references,
+        "requirements": prompt_contract::prompt_optimize_requirements()
+    })
+    .to_string()
+}
+
+fn extract_json_object(text: &str) -> Result<String, String> {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Ok(trimmed.to_string());
+    }
+    let Some(start) = trimmed.find('{') else {
+        return Err("Prompt Router 未返回 JSON 对象".to_string());
+    };
+    let Some(end) = trimmed.rfind('}') else {
+        return Err("Prompt Router 未返回完整 JSON 对象".to_string());
+    };
+    Ok(trimmed[start..=end].to_string())
+}
+
+fn normalize_prompt_route(text: &str) -> Result<PromptRoute, String> {
+    Ok(normalize_raw_prompt_route(
+        serde_json::from_str::<RawPromptRoute>(&extract_json_object(text)?)
+            .map_err(|err| format!("Prompt Router JSON 解析失败：{err}"))?,
+    ))
+}
+
+fn normalize_raw_prompt_route(raw: RawPromptRoute) -> PromptRoute {
+    let mut scenario = raw
+        .scenario
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| {
+            prompt_contract::prompt_router_scenarios()
+                .iter()
+                .any(|item| item == value)
+        })
+        .unwrap_or(GENERAL_TASK_SCENARIO)
+        .to_string();
+    let mut confidence = raw.confidence.unwrap_or(0.0).clamp(0.0, 1.0);
+    if confidence < PROMPT_ROUTE_CONFIDENCE_THRESHOLD {
+        scenario = GENERAL_TASK_SCENARIO.to_string();
+        confidence = confidence.min(0.5);
+    }
+    let workflow = raw
+        .workflow
+        .and_then(|value| serde_json::from_value::<ChatWorkflow>(value).ok())
+        .filter(|workflow| prompt_route_workflow_matches(&scenario, workflow));
+    PromptRoute {
+        scenario,
+        workflow,
+        confidence,
+        reason: raw.reason.unwrap_or_default().trim().to_string(),
+        signals: raw.signals.unwrap_or_default(),
+    }
+}
+
+fn prompt_route_workflow_matches(scenario: &str, workflow: &ChatWorkflow) -> bool {
+    matches!(
+        (scenario, workflow),
+        ("review", ChatWorkflow::LiliaReview { .. })
+            | ("fix_suggestion", ChatWorkflow::LiliaFixSuggestion { .. })
+            | ("batch_apply", ChatWorkflow::LiliaBatchApply { .. })
+            | ("context_compact", ChatWorkflow::LiliaCompact)
+            | (
+                "config_diagnostics",
+                ChatWorkflow::LiliaConfigDiagnostics { .. }
+            )
+            | ("goal_update", ChatWorkflow::LiliaGoal { .. })
+    )
 }
 
 fn normalize_optimized_prompt(text: &str) -> Result<String, String> {
@@ -284,12 +436,62 @@ mod tests {
                 project_id: Some("lilia".to_string()),
                 project_name: Some("Lilia".to_string()),
             }],
+            project_cwd: Some("C:\\Files\\workspace\\Lilia".to_string()),
+            task_id: Some("task-current".to_string()),
         };
-        let prompt = build_prompt_optimize_request(&input.prompt, &input);
+        let route = PromptRoute {
+            scenario: GENERAL_TASK_SCENARIO.to_string(),
+            workflow: None,
+            confidence: 0.4,
+            reason: "fallback".to_string(),
+            signals: vec!["unclear".to_string()],
+        };
+        let route_prompt = build_prompt_route_request(&input.prompt, &input);
+        let prompt = build_prompt_optimize_request(&input.prompt, &input, &route);
 
-        assert!(prompt.contains("简单定位"));
-        assert!(prompt.contains("明确范围"));
+        assert!(route_prompt.contains("task-current"));
+        assert!(route_prompt.contains("C:\\\\Files\\\\workspace\\\\Lilia"));
         assert!(prompt.contains("ChatComposer.vue"));
         assert!(prompt.contains("旧对话"));
+        assert!(prompt.contains(GENERAL_TASK_SCENARIO));
+    }
+
+    #[test]
+    fn prompt_router_low_confidence_falls_back_without_workflow() {
+        let route = normalize_raw_prompt_route(RawPromptRoute {
+            scenario: Some("review".to_string()),
+            workflow: Some(json!({
+                "type": "lilia_review",
+                "target": { "type": "uncommittedChanges" },
+            })),
+            confidence: Some(0.3),
+            reason: Some("unclear".to_string()),
+            signals: Some(vec!["weak".to_string()]),
+        });
+
+        assert_eq!(route.scenario, GENERAL_TASK_SCENARIO);
+        assert!(route.workflow.is_none());
+        assert!(route.confidence <= 0.5);
+    }
+
+    #[test]
+    fn prompt_router_keeps_matching_workflow() {
+        let route = normalize_raw_prompt_route(RawPromptRoute {
+            scenario: Some("review".to_string()),
+            workflow: Some(json!({
+                "type": "lilia_review",
+                "target": { "type": "uncommittedChanges" },
+                "delivery": "inline",
+            })),
+            confidence: Some(0.9),
+            reason: Some("review requested".to_string()),
+            signals: Some(vec!["review".to_string()]),
+        });
+
+        assert_eq!(route.scenario, "review");
+        assert!(matches!(
+            route.workflow,
+            Some(ChatWorkflow::LiliaReview { .. })
+        ));
     }
 }

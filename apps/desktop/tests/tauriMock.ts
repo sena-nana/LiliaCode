@@ -75,6 +75,7 @@ import {
   PROJECT_GET_SETTINGS_COMMAND,
   PROJECT_LIST_COMMAND,
   PROJECT_REMOVE_COMMAND,
+  PROJECT_RENAME_COMMAND,
   PROJECT_REORDER_COMMAND,
   PROJECT_SET_SETTINGS_COMMAND,
   PROJECT_TOGGLE_PIN_COMMAND,
@@ -2299,21 +2300,11 @@ export function emitMockTimelineEvent(
   taskId: string,
   patch: Partial<AgentTimelineEvent> = {},
 ) {
-  const event: AgentTimelineEvent = {
-    id: patch.id ?? `tl-${Date.now()}`,
-    taskId,
-    turnId: patch.turnId ?? "turn-live",
-    backend: patch.backend ?? "claude",
-    kind: patch.kind ?? "command",
-    status: patch.status ?? "running",
-    title: patch.title ?? "实时命令",
-    summary: patch.summary ?? "正在运行命令",
-    payload: patch.payload ?? { command: "yarn test" },
-    createdAt: patch.createdAt ?? Date.now(),
-    updatedAt: patch.updatedAt ?? Date.now(),
-    turnSeq: patch.turnSeq ?? 0,
-    intraTurnOrder: patch.intraTurnOrder ?? (timelineEvents[taskId]?.length ?? 0),
-  };
+  const event = createMockTimelineEvent(taskId, patch, {
+    id: `tl-${Date.now()}`,
+    updatedAt: Date.now(),
+    intraTurnOrder: timelineEvents[taskId]?.length ?? 0,
+  });
   timelineEvents[taskId] = [
     ...(timelineEvents[taskId] ?? []).filter((item) => item.id !== event.id),
     event,
@@ -2322,25 +2313,40 @@ export function emitMockTimelineEvent(
   return event;
 }
 
+function createMockTimelineEvent(
+  taskId: string,
+  patch: Partial<AgentTimelineEvent>,
+  fallback: Partial<AgentTimelineEvent> = {},
+): AgentTimelineEvent {
+  const createdAt = patch.createdAt ?? fallback.createdAt ?? Date.now();
+  return {
+    id: patch.id ?? fallback.id ?? `tl-${Date.now()}`,
+    taskId,
+    turnId: patch.turnId ?? "turn-live",
+    backend: patch.backend ?? "claude",
+    kind: patch.kind ?? "command",
+    status: patch.status ?? fallback.status ?? "running",
+    title: patch.title ?? fallback.title ?? "实时命令",
+    summary: patch.summary ?? fallback.summary ?? "正在运行命令",
+    payload: patch.payload ?? fallback.payload ?? { command: "yarn test" },
+    createdAt,
+    updatedAt: patch.updatedAt ?? fallback.updatedAt ?? createdAt,
+    turnSeq: patch.turnSeq ?? fallback.turnSeq ?? 0,
+    intraTurnOrder: patch.intraTurnOrder ?? fallback.intraTurnOrder ?? 0,
+  };
+}
+
 export function emitMockTimelineBatchEvent(
   taskId: string,
   patches: Partial<AgentTimelineEvent>[],
 ) {
-  const events = patches.map((patch, index): AgentTimelineEvent => ({
-    id: patch.id ?? `tl-batch-${Date.now()}-${index}`,
-    taskId: patch.taskId ?? taskId,
-    turnId: patch.turnId ?? "turn-live",
-    backend: patch.backend ?? "claude",
-    kind: patch.kind ?? "command",
-    status: patch.status ?? "running",
-    title: patch.title ?? "实时命令",
-    summary: patch.summary ?? "正在运行命令",
-    payload: patch.payload ?? { command: "yarn test" },
-    createdAt: patch.createdAt ?? Date.now(),
-    updatedAt: patch.updatedAt ?? Date.now(),
-    turnSeq: patch.turnSeq ?? 0,
-    intraTurnOrder: patch.intraTurnOrder ?? (timelineEvents[taskId]?.length ?? 0) + index,
-  }));
+  const events = patches.map((patch, index) =>
+    createMockTimelineEvent(patch.taskId ?? taskId, patch, {
+      id: `tl-batch-${Date.now()}-${index}`,
+      updatedAt: Date.now(),
+      intraTurnOrder: (timelineEvents[taskId]?.length ?? 0) + index,
+    })
+  );
   timelineEvents[taskId] = [
     ...(timelineEvents[taskId] ?? []).filter((item) =>
       !events.some((event) => event.id === item.id)
@@ -2355,21 +2361,17 @@ export function replaceMockTimelineEvents(
   taskId: string,
   events: Partial<AgentTimelineEvent>[],
 ) {
-  timelineEvents[taskId] = events.map((patch, index) => ({
-    id: patch.id ?? `tl-${taskId}-${index}`,
-    taskId,
-    turnId: patch.turnId ?? "turn-live",
-    backend: patch.backend ?? "claude",
-    kind: patch.kind ?? "command",
-    status: patch.status ?? "success",
-    title: patch.title ?? "历史事件",
-    summary: patch.summary ?? "",
-    payload: patch.payload ?? {},
-    createdAt: patch.createdAt ?? 10_000 + index,
-    updatedAt: patch.updatedAt ?? patch.createdAt ?? 10_000 + index,
-    turnSeq: patch.turnSeq ?? index,
-    intraTurnOrder: patch.intraTurnOrder ?? 0,
-  }));
+  timelineEvents[taskId] = events.map((patch, index) =>
+    createMockTimelineEvent(taskId, patch, {
+      id: `tl-${taskId}-${index}`,
+      status: "success",
+      title: "历史事件",
+      summary: "",
+      payload: {},
+      createdAt: 10_000 + index,
+      turnSeq: index,
+    })
+  );
 }
 
 /**
@@ -2572,6 +2574,16 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const id = String(args.id);
       refreshSessionCounts();
       return projects.find((project) => project.id === id) ?? null;
+    }
+
+    case PROJECT_RENAME_COMMAND: {
+      const id = String(args.id ?? "");
+      const nextName = String(args.nextName ?? "").trim();
+      if (!id || !nextName) return false;
+      const index = projects.findIndex((project) => project.id === id);
+      if (index < 0) return false;
+      projects[index] = { ...projects[index], name: nextName };
+      return true;
     }
 
     case CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND: {
@@ -3513,7 +3525,24 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
-      return `优化后：${typeof input.prompt === "string" ? input.prompt : ""}`;
+      const prompt = typeof input.prompt === "string" ? input.prompt : "";
+      const wantsReview = /\breview\b|审查|评审/.test(prompt);
+      return {
+        optimizedPrompt: `优化后：${prompt}`,
+        route: {
+          scenario: wantsReview ? "review" : "general_task_optimize",
+          workflow: wantsReview
+            ? {
+              type: "lilia_review",
+              target: { type: "uncommittedChanges" },
+              delivery: "inline",
+            }
+            : null,
+          confidence: wantsReview ? 0.86 : 0.5,
+          reason: wantsReview ? "用户明确请求 review" : "普通提示词优化",
+          signals: wantsReview ? ["review"] : [],
+        },
+      };
     }
 
     case CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND:

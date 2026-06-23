@@ -6,7 +6,7 @@ import {
   ChevronRight,
   Sparkles,
 } from "lucide-vue-next";
-import type { AgentInteractionSettings, PermissionMode } from "@lilia/contracts";
+import type { AgentInteractionSettings, MainAgentPromptMode, PermissionMode } from "@lilia/contracts";
 import {
   AUTO_TURN_DECISION_PERMISSION_OPTIONS,
   PERMISSION_MODE_DISPLAY,
@@ -22,13 +22,18 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const subagentCatalogSectionLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "settings.agent.subagents.load",
+    async () => (await import("./SubagentCatalogSection.vue")).default as Component,
+  )
+);
 
 const SubagentCatalogSection = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "settings.agent.subagents.load",
-    async () => (await import("./SubagentCatalogSection.vue")).default as Component,
-  ),
+  loader: () => subagentCatalogSectionLoad.load(),
 });
 
 const agentInteractionStore = useAgentInteractionSettings();
@@ -56,6 +61,22 @@ type SubagentModePatch = Partial<Omit<AgentInteractionSettings["subagentMode"], 
 };
 
 const autoTurnDecisionPermissionOptions = AUTO_TURN_DECISION_PERMISSION_OPTIONS;
+const mainAgentPromptModeOptions: Array<{
+  value: MainAgentPromptMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "conservative",
+    label: "保守",
+    description: "小步低风险，优先沿用现有结构。",
+  },
+  {
+    value: "aggressive",
+    label: "激进",
+    description: "允许根因级检查和必要功能重构。",
+  },
+];
 
 function activePermissionDescription(): string {
   return permissionModeOptions.find((option) => option.value === agentInteraction.value.permissionMode)
@@ -81,6 +102,10 @@ async function setDebugMode(debug: boolean) {
 
 async function setPermissionMode(permissionMode: PermissionMode) {
   await setAgentInteraction({ permissionMode });
+}
+
+async function setMainAgentPromptMode(mainAgentPromptMode: MainAgentPromptMode) {
+  await setAgentInteraction({ mainAgentPromptMode });
 }
 
 function nextSubagentMode(
@@ -251,6 +276,32 @@ onBeforeUnmount(() => {
         </span>
       </div>
     </section>
+
+    <div class="settings-row">
+      <div class="settings-row__label">主 Agent 策略</div>
+      <div class="settings-row__control settings-row__control--loose">
+        <div class="ui-segmented" role="radiogroup" aria-label="主 Agent 策略">
+          <button
+            v-for="option in mainAgentPromptModeOptions"
+            :key="option.value"
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.mainAgentPromptMode === option.value"
+            :class="{ 'is-active': agentInteraction.mainAgentPromptMode === option.value }"
+            :disabled="savingAgentInteraction"
+            @click="setMainAgentPromptMode(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <span class="settings-row__status muted">
+          {{
+            mainAgentPromptModeOptions.find((option) => option.value === agentInteraction.mainAgentPromptMode)
+              ?.description ?? mainAgentPromptModeOptions[0].description
+          }}
+        </span>
+      </div>
+    </div>
 
     <div class="settings-row">
       <div class="settings-row__label">非打断模式</div>

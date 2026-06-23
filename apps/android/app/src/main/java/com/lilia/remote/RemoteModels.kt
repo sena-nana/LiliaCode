@@ -1,5 +1,6 @@
 package com.lilia.remote
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class RemotePairingTicket(
@@ -36,7 +37,16 @@ data class RemoteTimelineItem(
     val title: String,
     val summary: String,
     val status: String,
+    val kind: String = "event",
+    val role: String? = null,
+    val details: List<RemoteTimelineDetail> = emptyList(),
     val branchSourceTurnId: String? = null,
+    val retryable: Boolean = false,
+)
+
+data class RemoteTimelineDetail(
+    val label: String,
+    val value: String,
 )
 
 enum class RemoteSessionForkMode(val wireValue: String, val label: String) {
@@ -47,6 +57,17 @@ enum class RemoteSessionForkMode(val wireValue: String, val label: String) {
 data class RemoteBranchAnchor(
     val sourceTurnId: String,
     val mode: RemoteSessionForkMode,
+)
+
+data class RemoteSendMessageInput(
+    val taskId: String,
+    val content: String,
+    val composer: JSONObject? = null,
+    val attachments: JSONArray? = null,
+    val conversationReferences: JSONArray? = null,
+    val workflow: JSONObject? = null,
+    val runtimeCommand: JSONObject? = null,
+    val runtimeOptions: JSONObject? = null,
 )
 
 data class PendingInteraction(
@@ -70,6 +91,12 @@ data class RemoteTaskDetail(
     val pendingInteraction: PendingInteraction?,
 )
 
+data class RemoteTaskState(
+    val task: RemoteTaskSummary,
+    val runtimePhase: String,
+    val pendingInteraction: PendingInteraction?,
+)
+
 data class RemoteBridgeStatus(
     val hostEnabled: Boolean,
     val state: String,
@@ -79,6 +106,7 @@ data class RemoteBridgeStatus(
 
 data class RemoteCapabilities(
     val supportsTaskInbox: Boolean = true,
+    val supportsTimelineSubscription: Boolean = true,
     val supportsChatSend: Boolean = true,
     val supportsInteractionResponse: Boolean = true,
     val supportsInterrupt: Boolean = true,

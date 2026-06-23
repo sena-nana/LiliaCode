@@ -1,6 +1,7 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatAttachment, ChatContextSearchResult } from "@lilia/contracts";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import { attachmentPart, textPart, type MentionRange } from "./composerParts";
 import {
   compactPathLabel,
@@ -19,19 +20,18 @@ type ContextSearchDeps = {
   searchContextAttachments: typeof import("../../services/chat").searchContextAttachments;
 };
 
-let contextSearchDepsLoad: Promise<ContextSearchDeps> | null = null;
+const contextSearchDepsLoad = createLazyLoadState<ContextSearchDeps>(() =>
+  measurePerfAsync(
+    "chat-composer.context-search.load",
+    async () => {
+      const { describeAttachments, searchContextAttachments } = await import("../../services/chat");
+      return { describeAttachments, searchContextAttachments };
+    },
+  )
+);
 
 async function loadContextSearchDeps(): Promise<ContextSearchDeps> {
-  if (!contextSearchDepsLoad) {
-    contextSearchDepsLoad = measurePerfAsync(
-      "chat-composer.context-search.load",
-      async () => {
-        const { describeAttachments, searchContextAttachments } = await import("../../services/chat");
-        return { describeAttachments, searchContextAttachments };
-      },
-    );
-  }
-  return contextSearchDepsLoad;
+  return contextSearchDepsLoad.load();
 }
 
 export {

@@ -6,21 +6,18 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../../utils/perf";
+import { createLazyLoadState } from "../../../utils/lazyLoadState";
 import { useDeferredVisibility } from "./useDeferredVisibility";
 
-let mathRenderModuleLoad: Promise<typeof import("./mathRender")> | null = null;
+const mathRenderModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "markdown.math.module.load",
+    async () => await import("./mathRender"),
+  )
+);
 
 async function loadMathRenderModule() {
-  if (!mathRenderModuleLoad) {
-    mathRenderModuleLoad = measurePerfAsync(
-      "markdown.math.module.load",
-      async () => await import("./mathRender"),
-    ).catch((err) => {
-      mathRenderModuleLoad = null;
-      throw err;
-    });
-  }
-  return mathRenderModuleLoad;
+  return mathRenderModuleLoad.load();
 }
 
 export function useDeferredMathRender(options: {

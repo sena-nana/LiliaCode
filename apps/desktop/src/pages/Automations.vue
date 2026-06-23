@@ -6,13 +6,18 @@ import {
   measurePerfAsync,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const automationWorkspacePageLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "automations.workspace.load",
+    async () => (await import("./automations/AutomationWorkspacePage.vue")).default,
+  )
+);
 
 const AutomationWorkspacePage = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "automations.workspace.load",
-    async () => (await import("./automations/AutomationWorkspacePage.vue")).default,
-  ),
+  loader: () => automationWorkspacePageLoad.load(),
 });
 
 const workspaceReady = ref(false);
