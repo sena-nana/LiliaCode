@@ -36,10 +36,13 @@ export interface AutoTurnDecisionPermissionOption {
   ariaLabel: string;
 }
 
+export type MainAgentPromptMode = "conservative" | "aggressive";
+
 export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
   permissionMode: RuntimePermissionMode;
+  mainAgentPromptMode: MainAgentPromptMode;
   codexProfile: CodexProfileSettings;
   subagentMode: AgentSubagentModeSettings;
   autoTurnDecision: AutoTurnDecisionSettings;
@@ -50,6 +53,11 @@ export const AUTO_TURN_DECISION_PERMISSION_KEYS: readonly AutoTurnDecisionPermis
 export const DEFAULT_AGENT_SUBAGENT_MODE_SETTINGS: Readonly<AgentSubagentModeSettings>;
 export const DEFAULT_AUTO_TURN_DECISION_SETTINGS: Readonly<AutoTurnDecisionSettings>;
 export const DEFAULT_AGENT_INTERACTION_SETTINGS: Readonly<AgentInteractionSettings>;
+
+export function normalizeMainAgentPromptMode(
+  value: unknown,
+  fallback?: MainAgentPromptMode,
+): MainAgentPromptMode;
 
 export function normalizeAgentSubagentModeSettings(
   input: Partial<AgentSubagentModeSettings> | null | undefined,

@@ -321,7 +321,7 @@ describe("ChatComposer", () => {
     await setComposerText(view, "补充上下文");
     await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
 
-    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", [], []]);
+    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", [], [], null]);
     expect(view.emitted("interrupt")).toBeUndefined();
   });
 
@@ -348,7 +348,7 @@ describe("ChatComposer", () => {
   });
 
   it("提示词优化按钮在发送按钮左侧且成功后替换草稿", async () => {
-    const view = renderComposer();
+    const view = renderComposer({ projectCwd });
     const input = await setComposerText(view, "修一下输入框按钮");
     await requestComposerChrome(view);
 
@@ -366,9 +366,39 @@ describe("ChatComposer", () => {
         prompt: "修一下输入框按钮",
         attachments: [],
         conversationReferences: [],
+        projectCwd,
+        taskId: "task-1",
       },
     }, undefined);
     expect(view.emitted("send")).toBeUndefined();
+  });
+
+  it("提示词优化只展示 workflow 建议，应用后随发送透传", async () => {
+    const view = renderComposer({ projectCwd });
+    const input = await setComposerText(view, "请 review 当前改动");
+    await requestComposerChrome(view);
+
+    await fireEvent.click(view.getByRole("button", { name: "优化提示词" }));
+
+    await waitFor(() => {
+      expect(composerText(input)).toBe("优化后：请 review 当前改动");
+    });
+    expect(view.emitted("send")).toBeUndefined();
+
+    expect(await view.findByText("建议作为 代码审查 发送")).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "应用" }));
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    expect(view.emitted("send")?.[0]).toEqual([
+      "优化后：请 review 当前改动",
+      [],
+      [],
+      {
+        type: "lilia_review",
+        target: { type: "uncommittedChanges" },
+        delivery: "inline",
+      },
+    ]);
   });
 
 

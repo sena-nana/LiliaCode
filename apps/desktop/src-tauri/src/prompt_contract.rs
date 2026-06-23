@@ -2,14 +2,15 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-const PROMPT_CONTRACT_JSON: &str =
-    include_str!("../../../../packages/contracts/src/prompt-contract.json");
+const PROMPT_TEXT_JSON: &str = include_str!("../../../../packages/contracts/src/prompt-text.json");
 
 static PROMPT_CONTRACT: OnceLock<PromptContract> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PromptContract {
+    main_agent: MainAgentPrompts,
+    codex: CodexPrompts,
     assistant: AssistantPrompts,
     suggestion: SuggestionPrompts,
     title: TitlePrompts,
@@ -18,9 +19,63 @@ struct PromptContract {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct MainAgentPrompts {
+    pub(crate) base_prompt: String,
+    pub(crate) tools_prompt: String,
+    pub(crate) skills: std::collections::BTreeMap<String, MainAgentSkillPrompt>,
+    pub(crate) modes: MainAgentModePrompts,
+    pub(crate) skill_order: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MainAgentSkillPrompt {
+    pub(crate) title: String,
+    pub(crate) prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MainAgentModePrompts {
+    pub(crate) conservative: String,
+    pub(crate) aggressive: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexPrompts {
+    subagents: CodexSubagentPrompts,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexSubagentPrompts {
+    pub(crate) delegation_header: String,
+    pub(crate) baseline_intro: String,
+    pub(crate) baseline_prompt: String,
+    pub(crate) baseline_label: String,
+    pub(crate) available_label: String,
+    pub(crate) agent_specific_instruction_label: String,
+    pub(crate) agent_role_label: String,
+    pub(crate) delegation_rules_label: String,
+    pub(crate) delegation_rules: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AssistantPrompts {
+    prompt_router: PromptRouterPrompts,
     prompt_optimize: PromptOptimizePrompts,
     auto_turn_decision: AutoTurnDecisionPrompts,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptRouterPrompts {
+    system_instruction: String,
+    request_instruction: String,
+    requirements: Vec<String>,
+    scenarios: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,7 +124,7 @@ struct AutomationPrompts {
 
 fn prompt_contract() -> &'static PromptContract {
     PROMPT_CONTRACT.get_or_init(|| {
-        crate::contract_manifest::parse_contract_json(PROMPT_CONTRACT_JSON, "prompt-contract.json")
+        crate::contract_manifest::parse_contract_json(PROMPT_TEXT_JSON, "prompt-text.json")
     })
 }
 
@@ -78,6 +133,41 @@ pub(crate) fn prompt_optimize_system_instruction() -> &'static str {
         .assistant
         .prompt_optimize
         .system_instruction
+}
+
+pub(crate) fn main_agent_prompts() -> &'static MainAgentPrompts {
+    &prompt_contract().main_agent
+}
+
+pub(crate) fn main_agent_prompt_mode(mode: &str) -> &'static str {
+    match mode {
+        "aggressive" => &prompt_contract().main_agent.modes.aggressive,
+        _ => &prompt_contract().main_agent.modes.conservative,
+    }
+}
+
+pub(crate) fn build_main_agent_prompt(mode: &str) -> String {
+    let prompts = main_agent_prompts();
+    let mut parts = vec![
+        prompts.base_prompt.trim().to_string(),
+        main_agent_prompt_mode(mode).trim().to_string(),
+        prompts.tools_prompt.trim().to_string(),
+    ];
+    let skills = prompts
+        .skill_order
+        .iter()
+        .filter_map(|key| prompts.skills.get(key))
+        .map(|skill| format!("## {}\n{}", skill.title.trim(), skill.prompt.trim()))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !skills.trim().is_empty() {
+        parts.push(skills);
+    }
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 pub(crate) fn prompt_optimize_request_instruction() -> &'static str {
@@ -89,6 +179,25 @@ pub(crate) fn prompt_optimize_request_instruction() -> &'static str {
 
 pub(crate) fn prompt_optimize_requirements() -> &'static [String] {
     &prompt_contract().assistant.prompt_optimize.requirements
+}
+
+pub(crate) fn prompt_router_system_instruction() -> &'static str {
+    &prompt_contract().assistant.prompt_router.system_instruction
+}
+
+pub(crate) fn prompt_router_request_instruction() -> &'static str {
+    &prompt_contract()
+        .assistant
+        .prompt_router
+        .request_instruction
+}
+
+pub(crate) fn prompt_router_requirements() -> &'static [String] {
+    &prompt_contract().assistant.prompt_router.requirements
+}
+
+pub(crate) fn prompt_router_scenarios() -> &'static [String] {
+    &prompt_contract().assistant.prompt_router.scenarios
 }
 
 pub(crate) fn auto_turn_decision_system_instruction() -> &'static str {
@@ -107,6 +216,10 @@ pub(crate) fn auto_turn_decision_request_instruction() -> &'static str {
 
 pub(crate) fn auto_turn_decision_tier_policy() -> &'static AutoTurnDecisionTierPolicy {
     &prompt_contract().assistant.auto_turn_decision.tier_policy
+}
+
+pub(crate) fn codex_subagent_prompts() -> &'static CodexSubagentPrompts {
+    &prompt_contract().codex.subagents
 }
 
 pub(crate) fn suggestion_system_instruction() -> &'static str {
@@ -135,13 +248,35 @@ mod tests {
 
     #[test]
     fn prompt_contract_loads_shared_defaults() {
-        assert_eq!(
-            default_automation_agent_prompt(),
-            "请根据当前上下文继续推进。"
-        );
-        assert_eq!(title_system_instruction(), "只输出一个中文短标题。");
-        assert!(prompt_optimize_requirements()
-            .iter()
-            .any(|item| item.contains("明确范围")));
+        assert!(!default_automation_agent_prompt().trim().is_empty());
+        assert!(!default_automation_human_prompt().trim().is_empty());
+        let main_agent = main_agent_prompts();
+        assert!(!main_agent.base_prompt.trim().is_empty());
+        assert!(!main_agent.tools_prompt.trim().is_empty());
+        assert!(!main_agent.skills.is_empty());
+        assert!(!main_agent.skill_order.is_empty());
+        assert!(!main_agent_prompt_mode("conservative").trim().is_empty());
+        assert!(!main_agent_prompt_mode("aggressive").trim().is_empty());
+        assert!(build_main_agent_prompt("aggressive").len() > main_agent.base_prompt.len());
+        assert!(!title_system_instruction().trim().is_empty());
+        assert!(!prompt_router_system_instruction().trim().is_empty());
+        assert!(!prompt_router_request_instruction().trim().is_empty());
+        assert!(!prompt_router_requirements().is_empty());
+        assert!(!prompt_router_scenarios().is_empty());
+        assert!(!prompt_optimize_system_instruction().trim().is_empty());
+        assert!(!prompt_optimize_request_instruction().trim().is_empty());
+        assert!(!prompt_optimize_requirements().is_empty());
+        assert!(!auto_turn_decision_system_instruction().trim().is_empty());
+        assert!(!auto_turn_decision_request_instruction().trim().is_empty());
+        assert!(!suggestion_system_instruction().trim().is_empty());
+        assert!(!suggestion_generation_rules().is_empty());
+
+        let subagent_prompts = codex_subagent_prompts();
+        assert!(!subagent_prompts.baseline_prompt.trim().is_empty());
+        assert!(!subagent_prompts
+            .agent_specific_instruction_label
+            .trim()
+            .is_empty());
+        assert!(!subagent_prompts.delegation_rules.is_empty());
     }
 }

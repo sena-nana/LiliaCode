@@ -1,9 +1,15 @@
-import promptContract from "./prompt-contract.json" with { type: "json" };
+import promptContractManifest from "./prompt-contract.json" with { type: "json" };
+import promptText from "./prompt-text.json" with { type: "json" };
 
-const manifest = Object.freeze(promptContract);
+if (promptContractManifest.textBundle !== "prompt-text.json") {
+  throw new Error("Unsupported prompt contract text bundle.");
+}
+
+const manifest = Object.freeze(promptText);
 
 export const PROMPT_CONTRACT = manifest;
 export const PROMPT_RUNNER = manifest.runner;
+export const PROMPT_MAIN_AGENT = manifest.mainAgent;
 export const PROMPT_CLAUDE = manifest.claude;
 export const PROMPT_CODEX = manifest.codex;
 export const PROMPT_ASSISTANT = manifest.assistant;

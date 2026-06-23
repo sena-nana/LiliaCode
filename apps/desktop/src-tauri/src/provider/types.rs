@@ -14,6 +14,8 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) debug: bool,
     #[serde(default = "default_permission_mode")]
     pub(crate) permission_mode: String,
+    #[serde(default = "default_main_agent_prompt_mode")]
+    pub(crate) main_agent_prompt_mode: String,
     #[serde(default)]
     pub(crate) codex_profile: CodexProfileSettings,
     #[serde(default)]
@@ -152,6 +154,10 @@ fn default_auto_turn_decision_allow_session_fork() -> bool {
 
 fn default_permission_mode() -> String {
     agent_interaction_defaults_contract::permission_mode()
+}
+
+fn default_main_agent_prompt_mode() -> String {
+    agent_interaction_defaults_contract::main_agent_prompt_mode()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -305,6 +311,7 @@ mod tests {
         assert!(!settings.non_interrupt_mode);
         assert!(!settings.debug);
         assert_eq!(settings.permission_mode, "ask");
+        assert_eq!(settings.main_agent_prompt_mode, "conservative");
         assert_eq!(settings.codex_profile.profile, "default");
         assert!(settings.codex_profile.model.is_none());
         assert!(settings.codex_profile.runtime_workspace_roots.is_empty());
@@ -326,6 +333,10 @@ mod tests {
         let settings: AgentInteractionSettings = serde_json::from_value(json!({})).unwrap();
 
         assert_eq!(settings.permission_mode, default_permission_mode());
+        assert_eq!(
+            settings.main_agent_prompt_mode,
+            default_main_agent_prompt_mode()
+        );
         assert_eq!(settings.codex_profile, CodexProfileSettings::default());
         assert_eq!(
             settings.subagent_mode.enabled,

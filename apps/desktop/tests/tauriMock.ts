@@ -3525,7 +3525,24 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
-      return `优化后：${typeof input.prompt === "string" ? input.prompt : ""}`;
+      const prompt = typeof input.prompt === "string" ? input.prompt : "";
+      const wantsReview = /\breview\b|审查|评审/.test(prompt);
+      return {
+        optimizedPrompt: `优化后：${prompt}`,
+        route: {
+          scenario: wantsReview ? "review" : "general_task_optimize",
+          workflow: wantsReview
+            ? {
+              type: "lilia_review",
+              target: { type: "uncommittedChanges" },
+              delivery: "inline",
+            }
+            : null,
+          confidence: wantsReview ? 0.86 : 0.5,
+          reason: wantsReview ? "用户明确请求 review" : "普通提示词优化",
+          signals: wantsReview ? ["review"] : [],
+        },
+      };
     }
 
     case CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND:

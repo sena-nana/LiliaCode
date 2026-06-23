@@ -11,6 +11,7 @@ import type {
   ChatContextUsage,
   ChatModelOption,
   ChatSlashCommandWorkflow,
+  ChatWorkflow,
   LiliaThreadGoal,
   LiliaReviewTarget,
   Project,
@@ -188,7 +189,12 @@ const emit = defineEmits<{
   "start-process-session": [command: string];
   "send-process-session-stdin": [stdin: string];
   "stop-process-session": [];
-  send: [content: string, attachments: ChatAttachment[], conversationReferences: ChatConversationReference[]];
+  send: [
+    content: string,
+    attachments: ChatAttachment[],
+    conversationReferences: ChatConversationReference[],
+    workflow?: ChatWorkflow | null,
+  ];
   "start-lilia-review": [
     content: string,
     attachments: ChatAttachment[],
@@ -425,8 +431,9 @@ function emitSend(
   content: string,
   outgoingAttachments: ChatAttachment[],
   conversationReferences: ChatConversationReference[],
+  workflow?: ChatWorkflow | null,
 ) {
-  emit("send", content, outgoingAttachments, conversationReferences);
+  emit("send", content, outgoingAttachments, conversationReferences, workflow);
 }
 
 function selectSuggestion(suggestion: SuggestionItem) {

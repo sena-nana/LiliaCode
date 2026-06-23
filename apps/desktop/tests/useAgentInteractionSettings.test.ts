@@ -26,6 +26,7 @@ describe("useAgentInteractionSettings", () => {
       },
     });
     expect(store.settings.value.permissionMode).toBe("ask");
+    expect(store.settings.value.mainAgentPromptMode).toBe("conservative");
     expect(store.settings.value.autoTurnDecision).toEqual({
       enabled: true,
       allowModelTier: true,
@@ -49,6 +50,18 @@ describe("useAgentInteractionSettings", () => {
 
     await store.update({ permissionMode: "free" });
     expect(store.settings.value.permissionMode).toBe("free");
+  });
+
+  it("saves supported main agent prompt modes", async () => {
+    const { useAgentInteractionSettings } = await loadStoreModule();
+    const store = useAgentInteractionSettings();
+    await store.load();
+
+    await store.update({ mainAgentPromptMode: "aggressive" });
+    expect(store.settings.value.mainAgentPromptMode).toBe("aggressive");
+
+    await store.update({ mainAgentPromptMode: "conservative" });
+    expect(store.settings.value.mainAgentPromptMode).toBe("conservative");
   });
 
   it("rolls back subagent settings when saving fails", async () => {
