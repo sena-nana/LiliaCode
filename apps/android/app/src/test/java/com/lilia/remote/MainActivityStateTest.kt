@@ -37,6 +37,25 @@ class MainActivityStateTest {
     }
 
     @Test
+    fun activePcSwitcherItemsKeepActivePcAndSameEndpointAlternates() {
+        val active = savedPc(
+            endpointId = "pc-shared",
+            displayName = "Desk",
+            bridgeUrl = "http://192.168.1.12:41478",
+        )
+        val studio = savedPc(
+            endpointId = "pc-shared",
+            displayName = "Studio",
+            bridgeUrl = "http://192.168.1.44:41478",
+        )
+
+        val items = activePcSwitcherItems(active, listOf(studio, active))
+
+        assertEquals(listOf("Desk", "Studio"), items.map { it.pc.displayName })
+        assertEquals(listOf(true, false), items.map { it.active })
+    }
+
+    @Test
     fun unauthorizedRemoteFailureRequiresPairAgain() {
         val revoked = RemoteBridgeException(
             code = "unauthorized",
@@ -157,10 +176,14 @@ class MainActivityStateTest {
         assertEquals(null, updated[0].pendingAction)
     }
 
-    private fun savedPc(endpointId: String, bridgeUrl: String): SavedPc =
+    private fun savedPc(
+        endpointId: String,
+        bridgeUrl: String,
+        displayName: String = "Desk",
+    ): SavedPc =
         SavedPc(
             endpointId = endpointId,
-            displayName = "Desk",
+            displayName = displayName,
             protocolVersion = 1,
             pairingUri = "lilia-remote://pair?v=1",
             bridgeUrl = bridgeUrl,

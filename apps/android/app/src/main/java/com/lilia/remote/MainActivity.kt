@@ -97,6 +97,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     var providerStatus by remember { mutableStateOf<RemoteProviderStatus?>(null) }
     var pairingBusy by remember { mutableStateOf(false) }
     var pairingError by remember { mutableStateOf("") }
+    var pendingPcSwitchTaskId by remember { mutableStateOf<String?>(null) }
     var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
 
     fun resetActivePcDerivedState() {
@@ -118,10 +119,12 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     }
 
     fun selectActivePc(pc: SavedPc) {
-        val selected = fallbackRepository?.switchActivePc(pc.endpointId) ?: pc
+        val taskIdToRefresh = selectedTask?.task?.taskId
+        val selected = fallbackRepository?.switchActivePc(pc) ?: pc
         savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
         activePc = selected
         resetActivePcDerivedState()
+        pendingPcSwitchTaskId = taskIdToRefresh
         bridgeTone = "Listening"
         remoteError = ""
         pairingError = ""
@@ -435,6 +438,10 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         if (!shouldIgnorePcResult(activePc, pc)) {
             inboxLoading = false
         }
+        val taskIdToRefresh = pendingPcSwitchTaskId ?: return@LaunchedEffect
+        pendingPcSwitchTaskId = null
+        if (shouldIgnorePcResult(activePc, pc)) return@LaunchedEffect
+        openTask(pc, taskIdToRefresh)
     }
 
     LaunchedEffect(
@@ -618,6 +625,31 @@ internal fun shouldIgnorePcResult(current: SavedPc?, candidate: SavedPc): Boolea
 
 internal fun shouldClearActivePcForFailure(err: Throwable): Boolean =
     err is RemoteBridgeException && err.code == "unauthorized"
+
+internal data class ActivePcSwitcherItem(
+    val pc: SavedPc,
+    val active: Boolean,
+)
+
+internal fun activePcSwitcherItems(
+    activePc: SavedPc?,
+    savedPcs: List<SavedPc>,
+): List<ActivePcSwitcherItem> {
+    val pcs = buildList {
+        activePc?.let { add(it) }
+        savedPcs.forEach { pc ->
+            if (none { activePcConnectionMatches(it, pc) }) {
+                add(pc)
+            }
+        }
+    }
+    return pcs.map { pc ->
+        ActivePcSwitcherItem(
+            pc = pc,
+            active = activePc != null && activePcConnectionMatches(activePc, pc),
+        )
+    }
+}
 
 private fun RemoteTaskDetail.withRelatedTasks(tasks: List<RemoteTaskSummary>): RemoteTaskDetail {
     val byId = LinkedHashMap<String, RemoteTaskSummary>()
@@ -1226,9 +1258,7 @@ private fun RemoteHeader(
     onSelectPc: (SavedPc) -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val switchablePcs = savedPcs.filter { pc ->
-        activePc == null || !activePcConnectionMatches(activePc, pc)
-    }
+    val pcItems = activePcSwitcherItems(activePc, savedPcs)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1246,25 +1276,34 @@ private fun RemoteHeader(
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (switchablePcs.isNotEmpty()) {
+            if (pcItems.size > 1) {
                 Box {
                     OutlinedButton(
                         onClick = { menuExpanded = true },
+                        modifier = Modifier.width(112.dp),
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        Text("Switch")
+                        Text(
+                            activePc?.displayName ?: "PC",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     DropdownMenu(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false },
                     ) {
-                        switchablePcs.forEach { pc ->
+                        pcItems.forEach { item ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(pc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(
-                                            pc.bridgeUrl,
+                                            if (item.active) "${item.pc.displayName} (Active)" else item.pc.displayName,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            item.pc.bridgeUrl,
                                             color = Muted,
                                             style = MaterialTheme.typography.bodySmall,
                                             maxLines = 1,
@@ -1274,7 +1313,9 @@ private fun RemoteHeader(
                                 },
                                 onClick = {
                                     menuExpanded = false
-                                    onSelectPc(pc)
+                                    if (!item.active) {
+                                        onSelectPc(item.pc)
+                                    }
                                 },
                             )
                         }
