@@ -197,6 +197,11 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         remoteError = DETAIL_LIVE_UPDATE_ERROR_MESSAGE
     }
 
+    fun applyTaskDetail(detail: RemoteTaskDetail) {
+        selectedTask = detail
+        inboxTasks = syncInboxTaskStatus(inboxTasks, detail)
+    }
+
     suspend fun refreshTaskSnapshot(
         pc: SavedPc,
         remoteClient: RemoteHttpClient,
@@ -210,7 +215,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
             return false
         }
-        selectedTask = detail
+        applyTaskDetail(detail)
         clearLiveUpdateError()
         return true
     }
@@ -263,12 +268,13 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             return false
         }
         val latest = selectedTask ?: return false
-        selectedTask = latest.copy(
+        val detail = latest.copy(
             task = state.task,
             runtimePhase = state.runtimePhase,
             timeline = RemotePayloadParser.mergeTimeline(latest.timeline, timeline),
             pendingInteraction = state.pendingInteraction,
         )
+        applyTaskDetail(detail)
         clearLiveUpdateError()
         return true
     }
@@ -320,7 +326,8 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         remoteClient.listTasks(pc)
             .onSuccess {
                 if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                inboxTasks = it
+                val detail = selectedTask
+                inboxTasks = if (detail == null) it else syncInboxTaskStatus(it, detail)
             }
             .onFailure { handleRemoteFailure(it, "Failed to load tasks", pc) }
     }
@@ -334,7 +341,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             remoteClient.taskDetail(pc, taskId)
                 .onSuccess {
                     if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                    selectedTask = it
+                    applyTaskDetail(it)
                 }
                 .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
             if (!shouldIgnorePcResult(activePc, pc)) {
@@ -364,7 +371,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 remoteClient.taskDetail(pc, taskId)
                     .onSuccess {
                         if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                        selectedTask = it
+                        applyTaskDetail(it)
                     }
                     .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
             }
@@ -562,6 +569,21 @@ internal fun shouldIgnorePcResult(current: SavedPc?, candidate: SavedPc): Boolea
 
 internal fun shouldClearActivePcForFailure(err: Throwable): Boolean =
     err is RemoteBridgeException && err.code == "unauthorized"
+
+internal fun syncInboxTaskStatus(
+    tasks: List<RemoteTaskSummary>,
+    detail: RemoteTaskDetail,
+): List<RemoteTaskSummary> =
+    tasks.map { task ->
+        if (task.taskId == detail.task.taskId) {
+            task.copy(
+                status = detail.task.status,
+                pendingAction = detail.pendingInteraction?.title,
+            )
+        } else {
+            task
+        }
+    }
 
 private fun nextLiveUpdateDelay(currentDelayMs: Long?): Long =
     minOf(
