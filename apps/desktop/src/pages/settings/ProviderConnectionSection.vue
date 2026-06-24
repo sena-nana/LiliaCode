@@ -129,11 +129,6 @@ const codexVersionText = computed(() => {
   const latest = codexAppServerStatus.value?.latestVersion;
   return latest ? `${current} / latest ${latest}` : current;
 });
-const codexInstallPathText = computed(() =>
-  codexAppServerStatus.value?.installPath
-    ? `路径：${codexAppServerStatus.value.installPath}`
-    : "将安装到 Lilia 管理目录",
-);
 const codexAccountStatus = ref<CodexAccountQuotaStatus | null>(null);
 const codexAccountLoading = ref(false);
 const codexLoginStarting = ref(false);
@@ -428,13 +423,12 @@ watch(showCodexRuntimeStatus, (enabled) => {
     </div>
 
     <template v-if="showCodexRuntimeStatus">
-      <div class="settings-row settings-row--stacked">
-        <div class="settings-row__label">运行时状态</div>
+      <div class="settings-row">
+        <span class="settings-row__status muted">
+          <UserRound :size="12" aria-hidden="true" />
+          {{ codexRuntimeStatusText }}
+        </span>
         <div class="settings-row__control settings-row__control--loose">
-          <span class="muted" style="display: inline-flex; gap: 4px; align-items: center;">
-            <UserRound :size="12" aria-hidden="true" />
-            {{ codexRuntimeStatusText }}
-          </span>
           <span class="settings-row__status-text muted">当前版本：{{ codexVersionText }}</span>
           <span class="settings-row__status-text muted">{{ codexLoginStatusText }}</span>
           <button
@@ -471,15 +465,15 @@ watch(showCodexRuntimeStatus, (enabled) => {
             <Download v-else :size="12" aria-hidden="true" />
             {{ codexAppServerUpdating ? "更新中..." : codexUpdateLabel }}
           </button>
-        <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.provider.probe" :disabled="probing" @click="probe">
-            <RotateCw :size="11" aria-hidden="true" />
-            重新检测
-          </button>
         </div>
+      </div>
+      <div
+        v-if="codexLoginStatusDetail || codexAppServerUpdateError"
+        class="settings-row settings-row--stacked"
+      >
         <div class="settings-row__status muted">
-          {{ codexInstallPathText }}
-          <span v-if="codexLoginStatusDetail">；{{ codexLoginStatusDetail }}</span>
-          <span v-if="codexAppServerUpdateError">；{{ codexAppServerUpdateError }}</span>
+          <span v-if="codexLoginStatusDetail">{{ codexLoginStatusDetail }}</span>
+          <span v-if="codexAppServerUpdateError">{{ codexAppServerUpdateError }}</span>
         </div>
       </div>
     </template>
