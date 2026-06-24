@@ -264,6 +264,10 @@ mod tests {
         );
         let built_main_agent_prompt = build_main_agent_prompt("aggressive");
         assert!(built_main_agent_prompt.len() > main_agent.base_prompt.len());
+        assert!(
+            built_main_agent_prompt.contains("不替代当前 provider 的原生系统提示"),
+            "mainAgent prompt must preserve provider-native prompt precedence"
+        );
         for key in main_agent.skills.keys() {
             assert!(main_agent.skill_order.contains(key));
         }
