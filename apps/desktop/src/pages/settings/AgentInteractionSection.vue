@@ -63,10 +63,10 @@ type SubagentModePatch = Partial<Omit<AgentInteractionSettings["subagentMode"], 
 };
 
 const autoTurnDecisionPermissionOptions = AUTO_TURN_DECISION_PERMISSION_OPTIONS;
-const mainAgentSkillsPrompt = PROMPT_MAIN_AGENT.skillOrder
-  .map((key) => PROMPT_MAIN_AGENT.skills[key])
-  .filter((skill): skill is NonNullable<typeof skill> => Boolean(skill))
-  .map((skill) => `## ${skill.title.trim()}\n${skill.prompt.trim()}`)
+const mainAgentWorkflowsPrompt = PROMPT_MAIN_AGENT.workflowOrder
+  .map((key) => PROMPT_MAIN_AGENT.workflowTypes[key])
+  .filter((workflow): workflow is NonNullable<typeof workflow> => Boolean(workflow))
+  .map((workflow) => `## ${workflow.title.trim()}\n${workflow.summary.trim()}\n\n${workflow.prompt.trim()}`)
   .filter((part) => part.trim())
   .join("\n\n");
 const mainAgentPromptModeOptions: Array<{
@@ -87,7 +87,7 @@ const mainAgentPromptModeOptions: Array<{
   {
     value: "custom",
     label: "自定义",
-    description: "使用自己填写的策略片段，保留内置工具与技能提示。",
+    description: "使用自己填写的策略片段，保留内置工具与工作流提示。",
   },
 ];
 
@@ -105,7 +105,7 @@ function buildMainAgentPromptPreview(mode: MainAgentPromptMode, customPrompt: st
     PROMPT_MAIN_AGENT.basePrompt.trim(),
     mainAgentStrategyPrompt(mode, customPrompt),
     PROMPT_MAIN_AGENT.toolsPrompt.trim(),
-    mainAgentSkillsPrompt,
+    mainAgentWorkflowsPrompt,
   ]
     .filter((part) => part.trim())
     .join("\n\n");
@@ -376,9 +376,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <section class="main-agent-prompt-panel" aria-label="主 Agent 提示词">
+    <section class="main-agent-prompt-panel" aria-label="主 Agent 工作流提示">
       <div class="main-agent-prompt-panel__head">
-        <div class="settings-row__label">主 Agent 提示词预览</div>
+        <div class="settings-row__label">主 Agent 工作流提示预览</div>
         <span class="main-agent-prompt-panel__meta">
           {{ agentInteraction.mainAgentPromptMode === "custom" ? "自定义策略" : "内置策略" }}
         </span>

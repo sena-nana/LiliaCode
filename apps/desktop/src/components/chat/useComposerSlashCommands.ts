@@ -2,9 +2,11 @@ import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import {
   CHAT_WORKFLOW_SLASH_COMMANDS,
   createChatSlashCommandWorkflow,
+  isLiliaTaskWorkflowKind,
   type ChatWorkflowSlashKind,
   type ChatSlashCommandSearchResult,
   type ChatSlashCommandWorkflow,
+  type LiliaTaskWorkflowKind,
   type LiliaReviewTarget,
 } from "@lilia/contracts";
 import { measurePerfAsync } from "../../utils/perf";
@@ -67,6 +69,7 @@ export function useComposerSlashCommands(options: {
   hasPending: ComputedRef<boolean>;
   executeCommand: (workflow: ChatSlashCommandWorkflow) => void;
   startWorkflow: (kind: ComposerWorkflowSlashKind, target: LiliaReviewTarget) => void;
+  startTaskWorkflow: (kind: LiliaTaskWorkflowKind) => void;
 }) {
   const results = ref<ComposerSlashCommandItem[]>([]);
   const activeWorkflowKind = ref<ComposerWorkflowSlashKind | null>(null);
@@ -181,6 +184,14 @@ export function useComposerSlashCommands(options: {
     const range = slashRange.value;
     if (!range) return;
     if (result.kind === "workflow" && result.workflowKind) {
+      const taskKind = taskWorkflowKindFromSlashKind(result.workflowKind);
+      if (taskKind) {
+        options.richInput.replaceRange(range.start, range.end, [textPart("")]);
+        suppressedKey.value = null;
+        clear();
+        options.startTaskWorkflow(taskKind);
+        return;
+      }
       activeWorkflowKind.value = result.workflowKind;
       results.value = [];
       activeIndex.value = 0;
@@ -196,6 +207,12 @@ export function useComposerSlashCommands(options: {
       source: result.command.source,
       arguments: {},
     }));
+  }
+
+  function taskWorkflowKindFromSlashKind(kind: ComposerWorkflowSlashKind): LiliaTaskWorkflowKind | null {
+    if (!kind.startsWith("task:")) return null;
+    const taskKind = kind.slice("task:".length);
+    return isLiliaTaskWorkflowKind(taskKind) ? taskKind : null;
   }
 
   function targetFromItem(item: ComposerSlashTargetItem): LiliaReviewTarget | null {

@@ -674,7 +674,7 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("Agent 交互")).toBeInTheDocument();
     expect(view.queryByText("权限行为")).toBeInTheDocument();
     expect(view.queryByText("主 Agent 策略")).toBeInTheDocument();
-    expect(view.queryByText("主 Agent 提示词预览")).toBeInTheDocument();
+    expect(view.queryByText("主 Agent 工作流提示预览")).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();

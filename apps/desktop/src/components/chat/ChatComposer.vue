@@ -29,6 +29,7 @@ import {
   ASK_USER_MULTI_SELECT_MODE,
   ASK_USER_SINGLE_SELECT_MODE,
   chatAttachmentMetaLabel,
+  createLiliaTaskWorkflow,
   DEFAULT_ASK_USER_MODE,
   isLargeChatAttachmentDirectory,
   type AskUserResult,
@@ -42,6 +43,7 @@ import {
   type ChatSlashCommandWorkflow,
   type ChatWorkflow,
   type LiliaReviewTarget,
+  type LiliaTaskWorkflowKind,
   type PermissionMode,
 } from "@lilia/contracts";
 import {
@@ -578,6 +580,7 @@ async function ensureSlashCommandsLoaded() {
             kind === "review"
               ? startLiliaReview(target)
               : startLiliaFixSuggestion(target),
+          startTaskWorkflow: startLiliaTaskWorkflow,
         }));
         if (!controller) {
           scope.stop();
@@ -821,6 +824,7 @@ const hasPendingComposerUi = computed(() => hasPending.value && pendingInteracti
 const toolIconForPanel = computed<Component>(() => toolIcon.value ?? FileText);
 
 function workflowSuggestionLabel(workflow: ChatWorkflow): string {
+  if (workflow.type === "lilia_task_workflow") return "任务工作流";
   if (workflow.type === "lilia_review") return "代码审查";
   if (workflow.type === "lilia_fix_suggestion") return "修复建议";
   if (workflow.type === "lilia_batch_apply") return "批量应用";
@@ -1164,6 +1168,20 @@ function startLiliaFixSuggestion(target: LiliaReviewTarget) {
     attachmentsForView.value,
     richInput.conversationReferences.value,
     target,
+  );
+  richInput.resetInput();
+  clearComposerContextState();
+}
+
+function startLiliaTaskWorkflow(kind: LiliaTaskWorkflowKind) {
+  if (hasPending.value) return;
+  const value = richInput.serializedText.value.trim();
+  emit(
+    "send",
+    value,
+    attachmentsForView.value,
+    richInput.conversationReferences.value,
+    createLiliaTaskWorkflow(kind),
   );
   richInput.resetInput();
   clearComposerContextState();

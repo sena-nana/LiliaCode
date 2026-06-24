@@ -398,6 +398,10 @@ mod agent_event_sink_tests {
                 source_summary: "建议修复权限边界".to_string(),
                 instructions: None,
             },
+            ChatWorkflow::LiliaTaskWorkflow {
+                kind: "frontend".to_string(),
+                instructions: None,
+            },
             ChatWorkflow::LiliaGoal {
                 action: "set".to_string(),
                 objective: Some("完成 Thread Goal 接入".to_string()),
@@ -488,6 +492,22 @@ mod agent_event_sink_tests {
         assert_eq!(batch_apply_json["sourceKind"], json!("fix_suggestion"));
         assert_eq!(batch_apply_json["sourceSummary"], json!("建议修复权限边界"));
         assert!(batch_apply_json.get("source_turn_id").is_none());
+
+        let task_workflow = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_task_workflow",
+            "kind": "frontend",
+            "instructions": "保持现有交互",
+        }))
+        .unwrap();
+        let ChatWorkflow::LiliaTaskWorkflow { kind, instructions } = &task_workflow else {
+            panic!("unexpected workflow: {task_workflow:?}");
+        };
+        assert_eq!(kind, "frontend");
+        assert_eq!(instructions.as_deref(), Some("保持现有交互"));
+        let task_workflow_json = serde_json::to_value(&task_workflow).unwrap();
+        assert_eq!(task_workflow_json["type"], json!("lilia_task_workflow"));
+        assert_eq!(task_workflow_json["kind"], json!("frontend"));
+        assert_eq!(task_workflow_json["instructions"], json!("保持现有交互"));
 
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
             "type": "session_fork",
@@ -897,6 +917,45 @@ mod agent_event_sink_tests {
             payload["workflow"]["sourceSummary"],
             json!("建议修复权限边界")
         );
+    }
+
+    #[test]
+    fn runner_stdin_payload_keeps_lilia_task_workflow() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
+            plan_mode: false,
+            goal_mode: false,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let workflow = ChatWorkflow::LiliaTaskWorkflow {
+            kind: "frontend".to_string(),
+            instructions: Some("调整按钮布局".to_string()),
+        };
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\\\Files\\\\workspace\\\\Lilia",
+            "调整按钮布局",
+            &[],
+            &[],
+            Some(&workflow),
+            None,
+            None,
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["turn"]["prompt"], json!("调整按钮布局"));
+        assert_eq!(payload["workflow"]["type"], json!("lilia_task_workflow"));
+        assert_eq!(payload["workflow"]["kind"], json!("frontend"));
+        assert_eq!(payload["workflow"]["instructions"], json!("调整按钮布局"));
     }
 
     #[test]

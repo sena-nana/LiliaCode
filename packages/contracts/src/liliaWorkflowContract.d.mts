@@ -11,10 +11,21 @@ export type LiliaReviewTargetType = "uncommittedChanges" | "baseBranch" | "commi
 export type LiliaReviewDelivery = "inline" | "detached";
 export type LiliaFixSuggestionMode = "suggest" | "apply";
 export type LiliaBatchApplySourceKind = "review" | "fix_suggestion";
+export type LiliaTaskWorkflowKind =
+  | "generalTask"
+  | "review"
+  | "bugLocalization"
+  | "frontend"
+  | "refactor"
+  | "testAndVerification"
+  | "docsAndPrompt"
+  | "gitAndRelease"
+  | "architectureAndMemory";
 export type LiliaQueryWorkflowType =
   | "lilia_review"
   | "lilia_fix_suggestion"
   | "lilia_batch_apply"
+  | "lilia_task_workflow"
   | "lilia_compact";
 
 export type LiliaReviewTarget =
@@ -43,6 +54,11 @@ export interface NormalizedLiliaReviewWorkflow {
   delivery: LiliaReviewDelivery;
 }
 
+export interface NormalizedLiliaTaskWorkflow {
+  kind: LiliaTaskWorkflowKind;
+  instructions: string;
+}
+
 export interface NormalizedLiliaFixSuggestionWorkflow {
   target: LiliaReviewTarget;
   instructions: string;
@@ -59,6 +75,10 @@ export interface NormalizedLiliaBatchApplyWorkflow {
 export interface CreateLiliaReviewWorkflowOptions {
   instructions?: string;
   delivery?: LiliaReviewDelivery;
+}
+
+export interface CreateLiliaTaskWorkflowOptions {
+  instructions?: string;
 }
 
 export interface CreateLiliaFixSuggestionWorkflowOptions {
@@ -78,6 +98,10 @@ export interface CreateLiliaGoalWorkflowOptions {
 
 export const LILIA_WORKFLOW_CONTRACT: {
   queryWorkflowTypes: readonly LiliaQueryWorkflowType[];
+  taskWorkflow: {
+    type: "lilia_task_workflow";
+    kinds: readonly LiliaTaskWorkflowKind[];
+  };
   review: {
     type: "lilia_review";
     targetTypes: readonly LiliaReviewTargetType[];
@@ -126,6 +150,8 @@ export const LILIA_WORKFLOW_CONTRACT: {
 };
 
 export const LILIA_QUERY_WORKFLOW_TYPES: readonly LiliaQueryWorkflowType[];
+export const LILIA_TASK_WORKFLOW_TYPE: "lilia_task_workflow";
+export const LILIA_TASK_WORKFLOW_KINDS: readonly LiliaTaskWorkflowKind[];
 export const LILIA_REVIEW_WORKFLOW_TYPE: "lilia_review";
 export const LILIA_REVIEW_TARGET_TYPES: readonly LiliaReviewTargetType[];
 export const LILIA_REVIEW_DELIVERIES: readonly LiliaReviewDelivery[];
@@ -153,6 +179,8 @@ export function isLiliaReviewTargetType(value: unknown): value is LiliaReviewTar
 
 export function isLiliaQueryWorkflowType(value: unknown): value is LiliaQueryWorkflowType;
 
+export function isLiliaTaskWorkflowKind(value: unknown): value is LiliaTaskWorkflowKind;
+
 export function isLiliaReviewDelivery(value: unknown): value is LiliaReviewDelivery;
 
 export function isLiliaFixSuggestionMode(value: unknown): value is LiliaFixSuggestionMode;
@@ -177,6 +205,10 @@ export function normalizeLiliaReviewWorkflow(
   value: unknown,
 ): NormalizedLiliaReviewWorkflow | null;
 
+export function normalizeLiliaTaskWorkflow(
+  value: unknown,
+): NormalizedLiliaTaskWorkflow | null;
+
 export function normalizeLiliaFixSuggestionWorkflow(
   value: unknown,
 ): NormalizedLiliaFixSuggestionWorkflow | null;
@@ -193,6 +225,15 @@ export function createLiliaReviewWorkflow(
   target: LiliaReviewTarget;
   instructions?: string;
   delivery?: LiliaReviewDelivery;
+};
+
+export function createLiliaTaskWorkflow(
+  kind: LiliaTaskWorkflowKind,
+  options?: CreateLiliaTaskWorkflowOptions,
+): {
+  type: "lilia_task_workflow";
+  kind: LiliaTaskWorkflowKind;
+  instructions?: string;
 };
 
 export function createLiliaFixSuggestionWorkflow(

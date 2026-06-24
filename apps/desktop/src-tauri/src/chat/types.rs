@@ -201,6 +201,12 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         instructions: Option<String>,
     },
+    #[serde(rename = "lilia_task_workflow")]
+    LiliaTaskWorkflow {
+        kind: String,
+        #[serde(default)]
+        instructions: Option<String>,
+    },
     #[serde(rename = "lilia_goal")]
     LiliaGoal {
         action: String,

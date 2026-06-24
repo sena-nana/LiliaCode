@@ -357,6 +357,20 @@ fn normalize_raw_prompt_route(raw: RawPromptRoute) -> PromptRoute {
 }
 
 fn prompt_route_workflow_matches(scenario: &str, workflow: &ChatWorkflow) -> bool {
+    fn task_workflow_matches(scenario: &str, kind: &str) -> bool {
+        matches!(
+            (scenario, kind),
+            ("bug_localization", "bugLocalization")
+                | ("frontend", "frontend")
+                | ("refactor", "refactor")
+                | ("test_verification", "testAndVerification")
+                | ("docs_prompt", "docsAndPrompt")
+                | ("git_release", "gitAndRelease")
+                | ("architecture_memory", "architectureAndMemory")
+                | ("general_task_optimize", "generalTask")
+        )
+    }
+
     matches!(
         (scenario, workflow),
         ("review", ChatWorkflow::LiliaReview { .. })
@@ -368,6 +382,9 @@ fn prompt_route_workflow_matches(scenario: &str, workflow: &ChatWorkflow) -> boo
                 ChatWorkflow::LiliaConfigDiagnostics { .. }
             )
             | ("goal_update", ChatWorkflow::LiliaGoal { .. })
+    ) || matches!(
+        workflow,
+        ChatWorkflow::LiliaTaskWorkflow { kind, .. } if task_workflow_matches(scenario, kind)
     )
 }
 
@@ -492,6 +509,23 @@ mod tests {
         assert!(matches!(
             route.workflow,
             Some(ChatWorkflow::LiliaReview { .. })
+        ));
+
+        let route = normalize_raw_prompt_route(RawPromptRoute {
+            scenario: Some("frontend".to_string()),
+            workflow: Some(json!({
+                "type": "lilia_task_workflow",
+                "kind": "frontend",
+            })),
+            confidence: Some(0.9),
+            reason: Some("frontend requested".to_string()),
+            signals: Some(vec!["ui".to_string()]),
+        });
+
+        assert_eq!(route.scenario, "frontend");
+        assert!(matches!(
+            route.workflow,
+            Some(ChatWorkflow::LiliaTaskWorkflow { .. })
         ));
     }
 }
