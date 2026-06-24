@@ -164,6 +164,25 @@ jobs:
             - [ ] 已确认 Windows 安装包文件名符合 `LiliaCode_<version>_x64-setup.*`。
             - [ ] 已在干净 Windows 环境下载并运行安装包。
             - [ ] 已确认安装后可以启动 LiliaCode，并能打开主窗口。
-            - [ ] 已确认卸载流程可完成。
+            - [ ] 已在新的 PowerShell 或 cmd 中运行 `liliacode <测试项目路径>`，确认 LiliaCode 会打开并进入该项目。
+            - [ ] 已确认卸载流程可完成，卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
             - [ ] 已在 Release 说明中保留未签名提示：当前安装包没有代码签名，Windows SmartScreen 警告属于预期风险。
             - [ ] 已在 Release 说明中保留升级提示：当前没有应用内自动更新，升级需要手动下载并安装新版安装包。
+
+            ## Windows 安装验证记录
+
+            - 验证人：
+            - 验证日期：
+            - Windows 环境：
+            - 安装包文件名：
+            - 安装：
+            - 启动：
+            - CLI 入口：
+            - 卸载：
+
+            ## 已知限制
+
+            - 当前只发布 Windows 安装包。
+            - 当前安装包没有代码签名，Windows SmartScreen 或安全软件提示属于预期风险。
+            - 当前不包含 Tauri updater 自动更新能力。
+            - 当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包。

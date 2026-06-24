@@ -39,6 +39,11 @@ labels: release,area: docs
 
 - [ ] 发布说明可直接用于 draft Release。
 - [ ] 关键发布风险都有明确处理结论。
+
+#### 当前准入落点
+
+- `yarn release:check --tag <tag>` 自动核对版本号、Tauri Windows 打包配置、NSIS CLI 安装 hook、release notes 已知限制、安装包命名预期和 Windows 安装验证记录入口。
+- 安装、启动、`liliacode <测试项目路径>` 和卸载验证仍必须在 Windows draft Release 安装包上人工执行，并写回 Release 正文的 Windows 安装验证记录。
 <!-- /issue -->
 
 <!-- issue

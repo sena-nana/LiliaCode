@@ -25,6 +25,17 @@
 - [ ] 确认卸载流程可完成，卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
 - [ ] 完成验证后再将 draft Release 正式发布。
 
+## Windows 安装验证记录
+
+- 验证人：
+- 验证日期：
+- Windows 环境：
+- 安装包文件名：LiliaCode_1.0.0-beta_x64-setup.exe
+- 安装：
+- 启动：
+- CLI 入口：
+- 卸载：
+
 ## 已知限制
 
 - 当前只发布 Windows 安装包。

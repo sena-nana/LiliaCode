@@ -87,7 +87,15 @@ git tag v1.0.0-beta && git push origin v1.0.0-beta
 
 Release workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri NSIS 安装包，并上传到 draft GitHub Release。安装包命名按 `LiliaCode_<version>_x64-setup.*` 检查；release draft 会附带首发检查清单和自动生成的变更记录。
 
-正式发布前必须在 Windows 环境下载 draft Release 里的安装包，确认安装、启动主窗口、在新的 PowerShell 或 cmd 里通过 `liliacode <测试项目路径>` 打开项目，以及卸载后新的终端里 `liliacode` 不再可用。当前发布包没有代码签名，Windows SmartScreen 或安全软件警告属于预期风险；当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
+`release:check` 会自动核对版本号、Tauri Windows 打包配置、NSIS CLI 安装 hook、release notes 已知限制、安装包命名预期和 Windows 安装验证记录入口。检查通过只代表发布元数据和记录入口已准备好，仍必须人工执行以下步骤后才能正式发布：
+
+- 在 Windows 环境下载 draft Release 里的安装包。
+- 运行安装包，确认安装后可以启动 LiliaCode 并打开主窗口。
+- 在新的 PowerShell 或 cmd 里通过 `liliacode <测试项目路径>` 打开项目。
+- 完成卸载，并确认卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
+- 在 Release 正文的 Windows 安装验证记录中写入验证人、验证日期、Windows 环境、安装包文件名和安装 / 启动 / CLI / 卸载结果。
+
+当前发布包没有代码签名，Windows SmartScreen 或安全软件警告属于预期风险；当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
 
 GitHub Release 正文可从 `docs/github/release-template.md` 复制后补全。
 
