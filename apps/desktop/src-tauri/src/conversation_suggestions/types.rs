@@ -18,6 +18,8 @@ pub(super) const GITHUB_EVENT_FETCH_LIMIT: usize = 30;
 pub(super) const GITHUB_ACTIVITY_LIMIT: usize = 6;
 pub(super) const LOCAL_GIT_COMMIT_LIMIT: usize = 3;
 pub(super) const LOCAL_GIT_FILE_LIMIT: usize = 12;
+pub(super) const CODEX_THREAD_FETCH_LIMIT: i64 = 12;
+pub(super) const CODEX_THREAD_LIMIT: usize = 5;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -61,6 +63,8 @@ pub(crate) struct SuggestionItem {
     pub(crate) github_activities: Vec<SuggestionGitHubActivityRef>,
     #[serde(default)]
     pub(crate) local_git_contexts: Vec<SuggestionLocalGitContextRef>,
+    #[serde(default)]
+    pub(crate) codex_threads: Vec<SuggestionCodexThreadRef>,
     pub(crate) summary: String,
     pub(crate) reason: String,
     pub(crate) prompt: String,
@@ -73,6 +77,7 @@ pub(crate) enum SuggestionItemSource {
     Task,
     Github,
     LocalGit,
+    CodexThread,
     Claude,
 }
 
@@ -94,6 +99,15 @@ pub(crate) struct SuggestionLocalGitContextRef {
     pub(crate) status: String,
     pub(crate) changed_files: Vec<String>,
     pub(crate) recent_commits: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestionCodexThreadRef {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) updated_at: Option<i64>,
+    pub(crate) preview: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,6 +168,12 @@ pub(super) struct LocalGitContextSample {
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct CodexThreadSample {
+    pub(super) thread: SuggestionCodexThreadRef,
+    pub(super) fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct SuggestionScope {
     pub(super) project_id: Option<String>,
     pub(super) project_name: Option<String>,
@@ -161,6 +181,7 @@ pub(super) struct SuggestionScope {
     pub(super) github_repo: Option<GitHubRepoRef>,
     pub(super) github_activities: Vec<GitHubActivitySample>,
     pub(super) local_git_contexts: Vec<LocalGitContextSample>,
+    pub(super) codex_threads: Vec<CodexThreadSample>,
     pub(super) latest_updated_at: i64,
 }
 

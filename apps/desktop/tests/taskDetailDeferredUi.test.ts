@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
       taskIds: [],
       source: "task",
       githubActivities: [],
+      localGitContexts: [],
+      codexThreads: [],
       summary: "过期建议",
       reason: "旧请求晚返回。",
       prompt: "不应写回。",

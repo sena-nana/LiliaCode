@@ -1,5 +1,5 @@
 type SuggestionSource = "provider" | "assistant-ai";
-type SuggestionItemSource = "task" | "github" | "local-git" | "claude";
+type SuggestionItemSource = "task" | "github" | "local-git" | "codex-thread" | "claude";
 type SuggestionStatus = "idle" | "loading" | "empty" | "error";
 
 export const SUGGESTIONS_CONTRACT: Record<string, unknown>;
@@ -13,7 +13,7 @@ export const SUGGESTION_SOURCE_LABELS: Readonly<Record<SuggestionSource, string>
 export const SUGGESTION_SOURCE_SETTING_ORDER: readonly SuggestionSource[];
 export const SUGGESTION_ITEM_SOURCES: readonly SuggestionItemSource[];
 export const SUGGESTION_LOADING_SOURCE_LABELS: Readonly<
-  Record<"task" | "github" | "claude", string>
+  Record<"task" | "github" | "codex-thread" | "claude", string>
 >;
 export const SUGGESTION_LOCAL_GIT_LOADING_LABELS: Readonly<{
   recentCommitsAndChangedFiles: string;

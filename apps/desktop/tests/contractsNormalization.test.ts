@@ -2251,10 +2251,11 @@ describe("contracts normalization helpers", () => {
       "conversation_suggestions_set_settings",
     );
     expect(suggestionSourceSettingLabel("assistant-ai")).toBe("辅助模型");
-    expect(SUGGESTION_ITEM_SOURCES).toEqual(["task", "github", "local-git", "claude"]);
+    expect(SUGGESTION_ITEM_SOURCES).toEqual(["task", "github", "local-git", "codex-thread", "claude"]);
     expect(SUGGESTION_LOADING_SOURCE_LABELS).toMatchObject({
       task: "历史任务",
       github: "GitHub 活动",
+      "codex-thread": "Codex thread",
       claude: "Claude 建议",
     });
     expect(SUGGESTION_LOCAL_GIT_LOADING_LABELS.default).toBe("本地 Git 上下文");
@@ -2281,6 +2282,7 @@ describe("contracts normalization helpers", () => {
         { ...githubActivity, id: "gh-2", title: "Bug #7" },
       ],
       localGitContexts: [],
+      codexThreads: [],
     })).toBe("openai/lilia · PR #42 +1");
     expect(suggestionSourceLabel({
       githubActivities: [],
@@ -2291,13 +2293,19 @@ describe("contracts normalization helpers", () => {
         changedFiles: [],
         recentCommits: [],
       }],
+      codexThreads: [],
     })).toBe("本地 Git · feature/contracts");
-    expect(suggestionSourceLabel({ githubActivities: [], localGitContexts: [] })).toBe("");
+    expect(suggestionSourceLabel({
+      githubActivities: [],
+      localGitContexts: [],
+      codexThreads: [{ id: "thread-1", title: " 补齐建议 ", updatedAt: 1, preview: "预览" }],
+    })).toBe("Codex thread · 补齐建议");
+    expect(suggestionSourceLabel({ githubActivities: [], localGitContexts: [], codexThreads: [] })).toBe("");
     expect(conversationSuggestionLoadingText({ sources: ["claude"] })).toBe("正在读取 Claude 建议");
     expect(conversationSuggestionLoadingText({
-      sources: ["task", "github", "local-git"],
+      sources: ["task", "github", "local-git", "codex-thread"],
       localGit: { hasRecentCommits: true, hasChangedFiles: true },
-    })).toBe("正在检查历史任务、GitHub 活动和本地提交和未提交变更");
+    })).toBe("正在检查历史任务、GitHub 活动、本地提交和未提交变更和 Codex thread");
     expect(conversationSuggestionLoadingText({ sources: [] })).toBe("正在寻找灵感");
     expect(suggestionStatusDisplayText({
       hasSuggestions: false,
