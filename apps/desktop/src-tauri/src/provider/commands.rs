@@ -68,11 +68,9 @@ fn start_codex_login_process(program: &str) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-pub fn chat_check_env(app: AppHandle, force_refresh: Option<bool>) -> EnvStatusReport {
+fn chat_check_env_sync(app: AppHandle, force_refresh: bool) -> EnvStatusReport {
     let node_available = cli_available("node");
-    let codex_app_server =
-        build_codex_app_server_probe_status_cached(force_refresh.unwrap_or(false));
+    let codex_app_server = build_codex_app_server_probe_status_cached(force_refresh);
     let codex_cli_available = codex_app_server.path.is_some();
 
     let mut backends = HashMap::new();
@@ -95,8 +93,18 @@ pub fn chat_check_env(app: AppHandle, force_refresh: Option<bool>) -> EnvStatusR
 }
 
 #[tauri::command]
-pub fn provider_codex_app_server_check_update() -> CodexAppServerStatus {
-    check_codex_app_server_update_status()
+pub async fn chat_check_env(app: AppHandle, force_refresh: Option<bool>) -> EnvStatusReport {
+    let force_refresh = force_refresh.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || chat_check_env_sync(app, force_refresh))
+        .await
+        .expect("chat_check_env blocking task panicked")
+}
+
+#[tauri::command]
+pub async fn provider_codex_app_server_check_update() -> CodexAppServerStatus {
+    tauri::async_runtime::spawn_blocking(check_codex_app_server_update_status)
+        .await
+        .expect("provider_codex_app_server_check_update blocking task panicked")
 }
 
 #[tauri::command]
