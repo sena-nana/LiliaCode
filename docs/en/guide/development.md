@@ -74,18 +74,18 @@ GitHub Actions runs CI for pull requests to `main`, pushes to `main`, and manual
 After pushing to `main`, the Pages workflow continues to publish the documentation site automatically. Before publishing a Windows desktop installer, sync and check the four version sources: root `package.json`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json`. They must match the release tag without the leading `v`.
 
 ```bash
-yarn release:check --tag v0.1.0-alpha.1
+yarn release:check --tag v1.0.0-beta
 ```
 
 After the check passes, push a `v*` tag:
 
 ```bash
-git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
+git tag v1.0.0-beta && git push origin v1.0.0-beta
 ```
 
 The release workflow runs `yarn verify` and `yarn release:check --tag <tag>` first, then builds the Windows Tauri NSIS bundle and uploads it to a draft GitHub Release. Installer asset names are checked against `LiliaCode_<version>_x64-setup.*`; the draft release includes a first-release checklist and generated release notes.
 
-Before publishing the release, download the installer from the draft Release on Windows and verify install, main-window launch, and uninstall. Current release artifacts are not code signed, so Windows SmartScreen or security software warnings are expected. They also do not include macOS notarization, Linux/macOS installers, or Tauri updater auto-update support. During the first-release phase, users upgrade manually by downloading and installing the newer Windows installer.
+Before publishing the release, download the installer from the draft Release on Windows and verify install, main-window launch, opening a project from a new PowerShell or cmd with `liliacode <test-project-path>`, and removal of `liliacode` from a new terminal after uninstall. Current release artifacts are not code signed, so Windows SmartScreen or security software warnings are expected. They also do not include macOS notarization, Linux/macOS installers, or Tauri updater auto-update support. During the first-release phase, users upgrade manually by downloading and installing the newer Windows installer.
 
 Use `docs/github/release-template.md` as the source template when preparing the GitHub Release body.
 

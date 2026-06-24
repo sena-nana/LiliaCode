@@ -61,6 +61,32 @@ function hasBundleTarget(targets, target) {
   return targets === target;
 }
 
+function verifyWindowsCliInstallerHook(tauriConfig) {
+  const hookPath = tauriConfig.bundle?.windows?.nsis?.installerHooks;
+  if (!hookPath) {
+    reportError("Tauri NSIS installerHooks must be configured so Windows installs the liliacode CLI entry.");
+    return;
+  }
+
+  const normalizedHookPath = hookPath.replaceAll("\\", "/").replace(/^\.\//, "");
+  const hookRelativePath = path.posix.join("apps/desktop/src-tauri", normalizedHookPath);
+  const hookSource = readText(hookRelativePath);
+  const requiredSnippets = [
+    ['FileOpen $0 "$INSTDIR\\liliacode.cmd" w', "create liliacode.cmd during install"],
+    ['FileWrite $0 "start """" ""$INSTDIR\\LiliaCode.exe"" %*$\\r$\\n"', "forward liliacode arguments to LiliaCode.exe"],
+    ["[Environment]::SetEnvironmentVariable('Path', ($$parts -join ';'), 'User')", "write the user PATH for liliacode"],
+    ['!insertmacro LILIA_RUN_PATH_SCRIPT "install"', "add the install directory to PATH after install"],
+    ['!insertmacro LILIA_RUN_PATH_SCRIPT "uninstall"', "remove the install directory from PATH before uninstall"],
+    ['Delete "$INSTDIR\\liliacode.cmd"', "delete liliacode.cmd during uninstall"],
+  ];
+
+  for (const [snippet, requirement] of requiredSnippets) {
+    if (!hookSource.includes(snippet)) {
+      reportError(`${hookRelativePath} must ${requirement}.`);
+    }
+  }
+}
+
 const tag = getArgValue("--tag") ?? process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME;
 const tagMatch = tag?.match(versionTagPattern);
 
@@ -100,6 +126,10 @@ if (!tagMatch) {
         tauriConfig.bundle?.targets,
       )}".`,
     );
+  }
+
+  if (hasBundleTarget(tauriConfig.bundle?.targets, "nsis")) {
+    verifyWindowsCliInstallerHook(tauriConfig);
   }
 
   if (errors.length === 0) {

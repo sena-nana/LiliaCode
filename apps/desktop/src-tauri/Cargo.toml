@@ -1,6 +1,6 @@
 [package]
 name = "lilia"
-version = "0.1.0-alpha.1"
+version = "1.0.0-beta"
 description = "Lilia · 一个把 Claude Code 会话当作任务管理的桌面客户端"
 authors = ["Sena"]
 edition = "2021"

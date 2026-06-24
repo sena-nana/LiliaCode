@@ -1,4 +1,4 @@
-# LiliaCode v0.1.0-alpha.1
+# LiliaCode v1.0.0-beta
 
 ## 发布摘要
 
@@ -20,8 +20,9 @@
 - [ ] 从 draft Release 下载 Windows 安装包。
 - [ ] 在干净 Windows 环境运行安装包。
 - [ ] 确认安装后可以启动 LiliaCode，并能打开主窗口。
+- [ ] 打开新的 PowerShell 或 cmd，运行 `liliacode <测试项目路径>`，确认 LiliaCode 会打开并进入该项目。
 - [ ] 确认基础窗口操作正常。
-- [ ] 确认卸载流程可完成。
+- [ ] 确认卸载流程可完成，卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
 - [ ] 完成验证后再将 draft Release 正式发布。
 
 ## 已知限制
