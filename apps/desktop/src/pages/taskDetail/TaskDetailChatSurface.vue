@@ -479,80 +479,80 @@ function selectSuggestion(suggestion: SuggestionItem) {
                 @refresh-suggestions="emit('refresh-suggestions')"
               />
             </template>
-            <template #controls>
-              <div class="chat-controls">
-                <TodoFloat
-                  v-if="taskId && shouldRenderTodoFloat"
-                  :task-id="taskId"
-                  :show-goal="true"
-                  :goal="currentLiliaGoal"
-                  :goal-disabled="isTurnRunning || pendingAgentActions.some((action) => action.kind !== TITLE_UPDATE_ACTION_KIND)"
-                  @insert-guide="emit('insert-guide', $event)"
-                  @set-lilia-goal="emit('set-lilia-goal', $event)"
-                  @refresh-lilia-goal="emit('refresh-lilia-goal')"
-                  @clear-lilia-goal="emit('clear-lilia-goal')"
-                />
-                <ChatComposer
-                  v-if="composerActivated"
-                  ref="composerRef"
-                  :state="composerState"
-                  :worktree-value="worktreeValue"
-                  :worktree-options="worktreeOptions"
-                  :worktree-busy="worktreeBusy"
-                  :worktree-error="worktreeError"
-                  :model-options="modelOptions"
-                  :attachments="attachments"
-                  :append-attachments-to-end-key="appendAttachmentsToEndKey"
-                  :project-cwd="contextSearchCwd"
-                  :sending="isTurnRunning"
-                  :compact-disabled="hasBlockingPendingAction || !!taskRunBlockingReason"
-                  :context-usage="contextUsage"
-                  :pending-ask="pendingAsk"
-                  :tool-consent="toolConsent"
-                  :restore-draft-key="restoreDraftKey"
-                  :restore-draft-content="restoreDraftContent"
-                  :restore-draft-conversation-references="restoreDraftConversationReferences"
-                  :insert-draft-text-key="insertDraftTextKey"
-                  :insert-draft-text-content="insertDraftTextContent"
-                  :pending-branch-anchor="pendingBranchAnchor"
-                  @send="emitSend"
-                  @start-lilia-review="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-review', content, outgoingAttachments, conversationReferences, target)"
-                  @start-lilia-fix-suggestion="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, conversationReferences, target)"
-                  @start-lilia-compact="emit('start-lilia-compact')"
-                  @execute-slash-command="emit('execute-slash-command', $event)"
-                  @interrupt="emit('interrupt')"
-                  @update:state="emit('update-composer', $event)"
-                  @select-worktree="emit('select-worktree', $event)"
-                  @remove-attachment="emit('remove-attachment', $event)"
-                  @pick-attachments="emit('pick-attachments')"
-                  @add-context-attachment="emit('add-context-attachment', $event)"
-                  @resolve-ask-user="emit('resolve-ask-user', $event)"
-                  @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
-                  @open-image="emit('open-image', $event)"
-                  @draft-empty-change="composerDraftEmpty = $event"
-                  @clear-branch-anchor="emit('clear-branch-anchor')"
-                />
-                <div
-                  v-else
-                  class="chat-composer chat-composer--loading"
-                  aria-hidden="true"
-                >
-                  <div class="chat-composer__placeholder">
-                    <div class="chat-composer__placeholder-line chat-composer__placeholder-line--primary" />
-                    <div class="chat-composer__placeholder-line" />
-                    <div class="chat-composer__placeholder-line chat-composer__placeholder-line--short" />
-                  </div>
-                </div>
-                <ComposerProjectPicker
-                  v-if="showDraftProjectPicker"
-                  :projects="draftProjectPickerProjects ?? []"
-                  @select-project="emit('select-draft-project', $event)"
-                  @created-project="emit('created-draft-project', $event)"
-                  @error="emit('draft-project-picker-error', $event)"
-                />
-              </div>
-            </template>
           </ChatTranscript>
+          <div class="chat-controls-wrap">
+            <div class="chat-controls">
+              <TodoFloat
+                v-if="taskId && shouldRenderTodoFloat"
+                :task-id="taskId"
+                :show-goal="true"
+                :goal="currentLiliaGoal"
+                :goal-disabled="isTurnRunning || pendingAgentActions.some((action) => action.kind !== TITLE_UPDATE_ACTION_KIND)"
+                @insert-guide="emit('insert-guide', $event)"
+                @set-lilia-goal="emit('set-lilia-goal', $event)"
+                @refresh-lilia-goal="emit('refresh-lilia-goal')"
+                @clear-lilia-goal="emit('clear-lilia-goal')"
+              />
+              <ChatComposer
+                v-if="composerActivated"
+                ref="composerRef"
+                :state="composerState"
+                :worktree-value="worktreeValue"
+                :worktree-options="worktreeOptions"
+                :worktree-busy="worktreeBusy"
+                :worktree-error="worktreeError"
+                :model-options="modelOptions"
+                :attachments="attachments"
+                :append-attachments-to-end-key="appendAttachmentsToEndKey"
+                :project-cwd="contextSearchCwd"
+                :sending="isTurnRunning"
+                :compact-disabled="hasBlockingPendingAction || !!taskRunBlockingReason"
+                :context-usage="contextUsage"
+                :pending-ask="pendingAsk"
+                :tool-consent="toolConsent"
+                :restore-draft-key="restoreDraftKey"
+                :restore-draft-content="restoreDraftContent"
+                :restore-draft-conversation-references="restoreDraftConversationReferences"
+                :insert-draft-text-key="insertDraftTextKey"
+                :insert-draft-text-content="insertDraftTextContent"
+                :pending-branch-anchor="pendingBranchAnchor"
+                @send="emitSend"
+                @start-lilia-review="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-review', content, outgoingAttachments, conversationReferences, target)"
+                @start-lilia-fix-suggestion="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, conversationReferences, target)"
+                @start-lilia-compact="emit('start-lilia-compact')"
+                @execute-slash-command="emit('execute-slash-command', $event)"
+                @interrupt="emit('interrupt')"
+                @update:state="emit('update-composer', $event)"
+                @select-worktree="emit('select-worktree', $event)"
+                @remove-attachment="emit('remove-attachment', $event)"
+                @pick-attachments="emit('pick-attachments')"
+                @add-context-attachment="emit('add-context-attachment', $event)"
+                @resolve-ask-user="emit('resolve-ask-user', $event)"
+                @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
+                @open-image="emit('open-image', $event)"
+                @draft-empty-change="composerDraftEmpty = $event"
+                @clear-branch-anchor="emit('clear-branch-anchor')"
+              />
+              <div
+                v-else
+                class="chat-composer chat-composer--loading"
+                aria-hidden="true"
+              >
+                <div class="chat-composer__placeholder">
+                  <div class="chat-composer__placeholder-line chat-composer__placeholder-line--primary" />
+                  <div class="chat-composer__placeholder-line" />
+                  <div class="chat-composer__placeholder-line chat-composer__placeholder-line--short" />
+                </div>
+              </div>
+              <ComposerProjectPicker
+                v-if="showDraftProjectPicker"
+                :projects="draftProjectPickerProjects ?? []"
+                @select-project="emit('select-draft-project', $event)"
+                @created-project="emit('created-draft-project', $event)"
+                @error="emit('draft-project-picker-error', $event)"
+              />
+            </div>
+          </div>
         </div>
         <ChatSidebarHost
           v-if="!isPopup && sidebarHostActivated"
