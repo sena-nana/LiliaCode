@@ -3,6 +3,7 @@ use std::process::Command;
 use serde_json::Value as JsonValue;
 use tauri::AppHandle;
 
+use crate::process_command::hide_console_window;
 use crate::{github, project_shell::GitHubBindingMetadata};
 
 use super::generation::{compact_line, truncate_chars};
@@ -44,7 +45,9 @@ fn resolve_github_repo_from_cwd(cwd: &str) -> Result<Option<GitHubRepoRef>, Stri
 }
 
 fn git_config_value(cwd: &str, key: &str) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    hide_console_window(&mut command);
+    let output = command
         .arg("-C")
         .arg(cwd)
         .arg("config")

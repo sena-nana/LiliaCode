@@ -45,6 +45,7 @@ use crate::chat::types::{
     TurnStartedEvent,
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
+use crate::process_command::hide_console_window;
 use crate::provider::{
     build_effective_claude_settings, build_effective_codex_subagent_settings,
     load_agent_interaction_settings, normalize_codex_settings_profile, normalize_json_object,
@@ -547,6 +548,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
     );
 
     let mut cmd = Command::new("node");
+    hide_console_window(&mut cmd);
     cmd.arg(&script_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

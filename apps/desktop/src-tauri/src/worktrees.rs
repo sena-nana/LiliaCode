@@ -8,6 +8,7 @@ use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::codex_history::spawn_codex_thread_archive_sync;
+use crate::process_command::hide_console_window;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
@@ -80,7 +81,9 @@ struct GitWorktree {
 }
 
 fn run_git(args: &[&str], cwd: &Path) -> Result<String, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    hide_console_window(&mut command);
+    let output = command
         .args(args)
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -322,7 +325,9 @@ fn unique_branch_name(base_repo_path: &Path, slug: &str) -> Result<String, Strin
     let short = Uuid::new_v4().to_string();
     let short = &short[..8];
     let candidate = format!("lilia/{slug}-{short}");
-    let exists = Command::new("git")
+    let mut command = Command::new("git");
+    hide_console_window(&mut command);
+    let exists = command
         .args([
             "show-ref",
             "--verify",

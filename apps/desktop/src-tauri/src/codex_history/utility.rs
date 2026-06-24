@@ -5,6 +5,7 @@ use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime};
 
 use crate::chat::runner::locate_agent_runner;
+use crate::process_command::hide_console_window;
 use crate::provider::{resolve_connection_for, validate_backend_ready_for_send, ConnectionMode};
 use crate::BACKEND_CODEX;
 
@@ -27,6 +28,7 @@ pub(super) fn run_codex_history_utility(
     let connection = resolve_connection_for(app, BACKEND_CODEX);
 
     let mut cmd = Command::new("node");
+    hide_console_window(&mut cmd);
     cmd.arg(script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

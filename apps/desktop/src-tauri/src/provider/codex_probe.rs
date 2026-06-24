@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
+use crate::process_command::hide_console_window;
 use crate::store::resolve_lilia_home;
 use crate::{BACKEND_CODEX, MIN_CODEX_APP_SERVER_VERSION};
 
@@ -23,7 +24,9 @@ pub(crate) fn cli_available(name: &str) -> bool {
     };
     for ext in candidates {
         let candidate = format!("{name}{ext}");
-        let ok = Command::new(&candidate)
+        let mut command = Command::new(&candidate);
+        hide_console_window(&mut command);
+        let ok = command
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -92,7 +95,9 @@ fn public_status(
 }
 
 pub(crate) fn command_output_result(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
+    let mut command = Command::new(program);
+    hide_console_window(&mut command);
+    let output = command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
