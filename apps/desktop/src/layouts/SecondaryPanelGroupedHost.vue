@@ -15,6 +15,8 @@ import {
   conversationActivityForTask,
   hydrateConversationActivities,
 } from "../composables/useConversationActivity";
+import { useSidebarRunningProcesses } from "../composables/useSidebarRunningProcesses";
+import type { SidebarRunningProcessItem } from "../components/sidebar/sidebarTypes";
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
 import { useSidebarAddMenu } from "../composables/useSidebarAddMenu";
 import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
@@ -45,6 +47,12 @@ const sidebarProjectAddMenuLoad = createLazyLoadState(() =>
     async () => (await import("../components/sidebar/SidebarProjectAddMenu.vue")).default,
   )
 );
+const sidebarRunningProcessesSectionLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.running-processes-section.load",
+    async () => (await import("../components/sidebar/SidebarRunningProcessesSection.vue")).default,
+  )
+);
 
 const SidebarProjectsSection = defineAsyncComponent({
   suspensible: false,
@@ -61,12 +69,22 @@ const SidebarProjectAddMenu = defineAsyncComponent({
   loader: () => sidebarProjectAddMenuLoad.load(),
 });
 
+const SidebarRunningProcessesSection = defineAsyncComponent({
+  suspensible: false,
+  loader: () => sidebarRunningProcessesSectionLoad.load(),
+});
+
 const router = useRouter();
 const route = useRoute();
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
 const orphansLoaded = computed(() => areOrphansLoaded());
 const projectError = ref<string | null>(null);
+const {
+  openRunningProcess,
+  stoppingTaskIds,
+  stopRunningProcess,
+} = useSidebarRunningProcesses({ router, reportError: reportProjectError });
 let activityHydrationTimer: number | null = null;
 let mountIdleMeasureHandle: number | null = null;
 let activityHydrationSeq = 0;
@@ -142,6 +160,31 @@ const sidebarTaskIds = computed(() => [
   ...projects.value.flatMap((project) => listProjectConversations(project.id).map((task) => task.id)),
   ...orphans.value.map((task) => task.id),
 ]);
+
+const runningProcesses = computed<SidebarRunningProcessItem[]>(() => {
+  const items: SidebarRunningProcessItem[] = [];
+  for (const project of projects.value) {
+    for (const task of listProjectConversations(project.id)) {
+      if (conversationActivityForTask(task.id) !== "running") continue;
+      items.push({
+        taskId: task.id,
+        title: task.title,
+        projectName: project.name,
+        route: `/projects/${project.id}/tasks/${task.id}`,
+      });
+    }
+  }
+  for (const task of orphans.value) {
+    if (conversationActivityForTask(task.id) !== "running") continue;
+    items.push({
+      taskId: task.id,
+      title: task.title,
+      projectName: "收集箱",
+      route: `/chats/${task.id}`,
+    });
+  }
+  return items;
+});
 
 const activityPriorityTaskIds = computed(() => {
   const taskIds = sidebarTaskIds.value;
@@ -232,6 +275,14 @@ function onProjectCreated(project: Project) {
     @pointerdown="onTreePointerDown($event)"
     @click.capture="onTreeClickCapture($event)"
   >
+    <SidebarRunningProcessesSection
+      v-if="runningProcesses.length > 0"
+      :items="runningProcesses"
+      :stopping-task-ids="stoppingTaskIds"
+      @open="openRunningProcess"
+      @stop="stopRunningProcess"
+    />
+
     <SidebarProjectsSection
       :add-menu-open="addMenuOpen"
       :all-expanded="allExpanded"

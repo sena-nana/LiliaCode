@@ -125,11 +125,14 @@ function surfaceProps(overrides: Record<string, unknown> = {}) {
     hasBlockingPendingAction: false,
     taskRunBlockingReason: null,
     currentLiliaGoal: null,
-    processSessionBusy: false,
-    processSessionError: null,
     showExpiredPendingActions: false,
     canRetryEvent: () => false,
     composerState: codexComposerState,
+    worktreeValue: "__current__",
+    worktreeOptions: [{ value: "__current__", label: "当前环境" }],
+    worktreeBusy: false,
+    worktreeError: null,
+    modelOptions: [],
     contextUsage: null,
     attachments: [],
     appendAttachmentsToEndKey: 0,
@@ -170,26 +173,6 @@ function renderSurfaceHost() {
   return render(Host);
 }
 
-function renderProcessSurface(overrides: Record<string, unknown> = {}) {
-  const startProcessSession = vi.fn();
-  const sendProcessSessionStdin = vi.fn();
-  const stopProcessSession = vi.fn();
-  const view = render(TaskDetailChatSurface, {
-    props: {
-      ...surfaceProps(overrides),
-      onStartProcessSession: startProcessSession,
-      onSendProcessSessionStdin: sendProcessSessionStdin,
-      onStopProcessSession: stopProcessSession,
-    },
-  });
-  return {
-    ...view,
-    startProcessSession,
-    sendProcessSessionStdin,
-    stopProcessSession,
-  };
-}
-
 describe("TaskDetailChatSurface", () => {
   it("forwards Lilia Goal setting events from TodoFloat", async () => {
     const view = renderSurface();
@@ -223,33 +206,16 @@ describe("TaskDetailChatSurface", () => {
     expect(triggerConversationReference).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards process session start commands", async () => {
-    const view = renderProcessSurface();
+  it("does not render manual process controls", async () => {
+    const view = renderSurface({ isTurnRunning: true });
 
-    const input = await waitFor(() => view.getByLabelText("进程命令"));
-    await fireEvent.update(input, "npm test -- --watch=false");
-    await fireEvent.click(view.getByRole("button", { name: "启动进程会话" }));
+    await waitFor(() => view.getByRole("button", { name: "stub fix suggestion" }));
 
-    expect(view.startProcessSession).toHaveBeenCalledWith("npm test -- --watch=false");
-  });
-
-  it("forwards process session stdin while running", async () => {
-    const view = renderProcessSurface({ isTurnRunning: true });
-
-    const input = await waitFor(() => view.getByLabelText("stdin"));
-    await fireEvent.update(input, "q");
-    await fireEvent.click(view.getByRole("button", { name: "发送 stdin" }));
-
-    expect(view.sendProcessSessionStdin).toHaveBeenCalledWith("q");
-  });
-
-  it("forwards process session stop while running", async () => {
-    const view = renderProcessSurface({ isTurnRunning: true });
-
-    await waitFor(() => view.getByRole("button", { name: "停止进程" }));
-    await fireEvent.click(view.getByRole("button", { name: "停止进程" }));
-
-    expect(view.stopProcessSession).toHaveBeenCalledTimes(1);
+    expect(view.queryByLabelText("进程命令")).not.toBeInTheDocument();
+    expect(view.queryByLabelText("stdin")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "启动进程会话" })).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "发送 stdin" })).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "停止进程" })).not.toBeInTheDocument();
   });
 
   it("cancels deferred TodoFloat render after unmount", async () => {

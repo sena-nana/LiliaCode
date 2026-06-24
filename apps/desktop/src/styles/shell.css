@@ -150,6 +150,10 @@
   position: relative;
 }
 
+.sb-section--running-processes {
+  padding: 0 0 4px;
+}
+
 .sb-primary-btn {
   flex: 1;
   min-width: 0;
@@ -479,6 +483,15 @@
   filter: none;
 }
 
+.sb-icon-btn--danger {
+  color: var(--err);
+}
+
+.sb-icon-btn--danger:hover {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
 .sb-icon-btn.is-pinned,
 .sb-icon-btn.is-pinned:hover {
   color: var(--accent);
@@ -733,6 +746,20 @@
   color: var(--text-muted);
 }
 
+.sb-tree__row--running-process {
+  padding-left: 8px;
+  color: var(--text);
+}
+
+.sb-tree__running-process-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
 .sb-tree__meta {
   flex: 0 0 auto;
   overflow: hidden;
@@ -826,6 +853,11 @@
 
 .sb-tree__activity-icon--spin {
   animation: lilia-spin 0.9s linear infinite;
+}
+
+.sb-tree__running-process-stop {
+  flex: 0 0 24px;
+  margin-left: 2px;
 }
 
 .sb-tree__pin-icon {
