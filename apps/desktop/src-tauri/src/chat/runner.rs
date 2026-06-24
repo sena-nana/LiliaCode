@@ -1646,6 +1646,7 @@ fn apply_main_agent_prompt_to_runtime_options<R: Runtime>(
         backend,
         runtime_options,
         &settings.main_agent_prompt_mode,
+        &settings.main_agent_custom_prompt,
     )
 }
 
@@ -1653,11 +1654,12 @@ fn append_main_agent_prompt_to_runtime_options(
     backend: &str,
     runtime_options: Option<JsonValue>,
     mode: &str,
+    custom_prompt: &str,
 ) -> Option<JsonValue> {
     crate::memory::append_context_to_runtime_options(
         backend,
         runtime_options,
-        &crate::prompt_contract::build_main_agent_prompt(mode),
+        &crate::prompt_contract::build_main_agent_prompt(mode, Some(custom_prompt)),
     )
 }
 
@@ -1724,6 +1726,7 @@ mod main_agent_prompt_tests {
                 }
             })),
             "aggressive",
+            "",
         )
         .unwrap();
         let context = value["provider"]["codex"]["additionalContext"]
@@ -1745,7 +1748,8 @@ mod main_agent_prompt_tests {
     #[test]
     fn main_agent_prompt_unknown_mode_uses_conservative_context() {
         let value =
-            append_main_agent_prompt_to_runtime_options(BACKEND_CLAUDE, None, "unknown").unwrap();
+            append_main_agent_prompt_to_runtime_options(BACKEND_CLAUDE, None, "unknown", "")
+                .unwrap();
         let context = value["provider"]["claude"]["additionalContext"]
             .as_str()
             .unwrap();
@@ -1754,6 +1758,34 @@ mod main_agent_prompt_tests {
 
         assert!(context.contains(conservative));
         assert!(!context.contains(aggressive));
+    }
+
+    #[test]
+    fn main_agent_prompt_custom_mode_uses_custom_strategy_context() {
+        let value = append_main_agent_prompt_to_runtime_options(
+            BACKEND_CODEX,
+            None,
+            "custom",
+            "Custom strategy for this workspace.",
+        )
+        .unwrap();
+        let context = value["provider"]["codex"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let first_skill_title = crate::prompt_contract::main_agent_prompts()
+            .skill_order
+            .first()
+            .and_then(|key| crate::prompt_contract::main_agent_prompts().skills.get(key))
+            .map(|skill| skill.title.as_str())
+            .unwrap();
+
+        assert!(context.contains("Custom strategy for this workspace."));
+        assert!(
+            !context.contains(crate::prompt_contract::main_agent_prompt_mode(
+                "conservative"
+            ))
+        );
+        assert!(context.contains(first_skill_title));
     }
 }
 

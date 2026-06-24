@@ -267,6 +267,10 @@ pub(crate) fn normalize_agent_interaction_settings(
         debug: settings.debug,
         permission_mode: normalize_permission_mode(&settings.permission_mode),
         main_agent_prompt_mode: normalize_main_agent_prompt_mode(&settings.main_agent_prompt_mode),
+        main_agent_custom_prompt: normalize_optional_string(Some(
+            settings.main_agent_custom_prompt,
+        ))
+        .unwrap_or_default(),
         codex_profile: normalize_codex_profile_settings(settings.codex_profile),
         subagent_mode: normalize_subagent_mode_settings(settings.subagent_mode),
         auto_turn_decision: settings.auto_turn_decision,
@@ -276,6 +280,7 @@ pub(crate) fn normalize_agent_interaction_settings(
 pub(crate) fn normalize_main_agent_prompt_mode(value: &str) -> String {
     match value {
         "aggressive" => "aggressive".to_string(),
+        "custom" => "custom".to_string(),
         _ => "conservative".to_string(),
     }
 }
@@ -579,7 +584,23 @@ mod tests {
     #[test]
     fn main_agent_prompt_mode_normalizes_to_known_modes() {
         assert_eq!(normalize_main_agent_prompt_mode("aggressive"), "aggressive");
+        assert_eq!(normalize_main_agent_prompt_mode("custom"), "custom");
         assert_eq!(normalize_main_agent_prompt_mode("unknown"), "conservative");
+    }
+
+    #[test]
+    fn agent_interaction_custom_prompt_trims_outer_whitespace() {
+        let normalized = normalize_agent_interaction_settings(Some(AgentInteractionSettings {
+            main_agent_prompt_mode: "custom".to_string(),
+            main_agent_custom_prompt: "  custom strategy\nwith details  ".to_string(),
+            ..AgentInteractionSettings::default()
+        }));
+
+        assert_eq!(normalized.main_agent_prompt_mode, "custom");
+        assert_eq!(
+            normalized.main_agent_custom_prompt,
+            "custom strategy\nwith details"
+        );
     }
 
     #[test]

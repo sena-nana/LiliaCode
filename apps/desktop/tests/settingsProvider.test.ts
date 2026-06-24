@@ -674,8 +674,11 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("Agent 交互")).toBeInTheDocument();
     expect(view.queryByText("权限行为")).toBeInTheDocument();
     expect(view.queryByText("主 Agent 策略")).toBeInTheDocument();
+    expect(view.queryByText("主 Agent 提示词预览")).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
+    expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();
+    expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "询问" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "只读" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "完全访问" })).toBeInTheDocument();
@@ -721,6 +724,43 @@ describe("Settings provider switch", () => {
         }),
       });
     });
+  });
+
+  it("Agent 设置页可以编辑并保存自定义主 Agent 提示词", async () => {
+    const view = await renderSettings("/settings?tab=agent");
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
+      ).toBe(true);
+    });
+
+    await fireEvent.click(view.getByRole("radio", { name: "自定义" }));
+
+    const textarea = await view.findByLabelText("自定义主 Agent 提示词");
+    expect((textarea as HTMLTextAreaElement).value).toContain("主 Agent 策略：保守");
+    expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          mainAgentPromptMode: "custom",
+          mainAgentCustomPrompt: expect.stringContaining("主 Agent 策略：保守"),
+        }),
+      });
+    });
+
+    await fireEvent.update(textarea, "按用户的项目约束优先实现。\n必要时重构。");
+    await fireEvent.click(view.getByRole("button", { name: "应用自定义提示词" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          mainAgentPromptMode: "custom",
+          mainAgentCustomPrompt: "按用户的项目约束优先实现。\n必要时重构。",
+        }),
+      });
+    });
+    expect(view.getByText(/按用户的项目约束优先实现/)).toBeInTheDocument();
   });
 
   it("Agent 设置页会在首屏后再加载自定义 Agent 目录", async () => {
