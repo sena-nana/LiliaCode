@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "lilia"
-version = "0.1.0-alpha.1"
+version = "1.0.0-beta"
 dependencies = [
  "base64 0.22.1",
  "clipboard-win",
