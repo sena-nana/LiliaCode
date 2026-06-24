@@ -287,6 +287,7 @@ import {
   POPUP_NAVIGATE_EVENT_NAME,
   PLUGIN_MCP_TRANSPORTS,
   PLUGIN_SCOPES,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
@@ -1279,6 +1280,9 @@ describe("contracts normalization helpers", () => {
     );
     expect(PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND).toBe(
       "provider_codex_app_server_install_update",
+    );
+    expect(PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND).toBe(
+      "provider_codex_account_start_login",
     );
     expect(ROUTER_GET_MODE_COMMAND).toBe("router_get_mode");
     expect(ROUTER_SET_MODE_COMMAND).toBe("router_set_mode");

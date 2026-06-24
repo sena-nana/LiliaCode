@@ -51,6 +51,7 @@ import {
   HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
   HISTORY_IMPORT_SEARCH_COMMAND,
   LILIA_IAB_SUBMIT_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
@@ -428,6 +429,10 @@ export function checkCodexAppServerUpdate(): Promise<CodexAppServerStatus> {
 
 export function installCodexAppServerUpdate(): Promise<CodexAppServerStatus> {
   return invoke<CodexAppServerStatus>(PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND);
+}
+
+export function startCodexAccountLogin(): Promise<void> {
+  return invoke<void>(PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND);
 }
 
 export function getRouterMode(backend: ChatBackendKind): Promise<RouterMode> {

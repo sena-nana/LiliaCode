@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   GITHUB_POLL_DEVICE_FLOW_COMMAND,
   GITHUB_START_DEVICE_FLOW_COMMAND,
   POPUP_SET_WINDOW_SETTINGS_COMMAND,
@@ -559,7 +560,7 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("codex-cli 0.136.0 / latest 0.141.0")).toBeInTheDocument();
+      expect(view.getByText("当前版本：codex-cli 0.136.0 / latest 0.141.0")).toBeInTheDocument();
       expect(view.getByRole("button", { name: /更新到 0.141.0/ })).toBeEnabled();
     });
 
@@ -568,6 +569,48 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(lastInvokeInput("provider_codex_app_server_install_update")).toEqual({});
       expect(view.queryByRole("button", { name: /更新到 0.141.0/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAccountQuotaStatus({
+      available: false,
+      connectionMode: "codex-account",
+      limitId: null,
+      limitName: null,
+      planType: null,
+      rateLimitReachedType: null,
+      fiveHour: null,
+      weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
+      rateLimitResetCredits: null,
+      accountUsage: null,
+      usageError: null,
+      fetchedAt: Date.now(),
+      error: "Codex 未登录",
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByText("运行时状态")).toBeInTheDocument();
+      expect(view.getByText("登录状态：未登录")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "登录" })).toBeEnabled();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "登录" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
+        {},
+        undefined,
+      );
     });
   });
 

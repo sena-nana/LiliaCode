@@ -95,6 +95,7 @@ import {
   PLUGINS_UPDATE_MCP_SERVER_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
   PROVIDER_GET_CONFIG_COMMAND,
   PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
@@ -3465,6 +3466,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         issues: [...codexAppServerStatus.issues],
         releaseNotes: [...codexAppServerStatus.releaseNotes],
       };
+
+    case PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND:
+      return undefined;
 
     case PROVIDER_GET_ACTIVE_BACKEND_COMMAND:
       return activeBackend;

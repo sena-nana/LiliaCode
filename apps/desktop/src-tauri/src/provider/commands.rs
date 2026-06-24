@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::process::Command;
 
 use tauri::AppHandle;
 
@@ -27,6 +28,40 @@ use super::types::{
     AgentInteractionSettings, AssistantAIConfig, AssistantAITestResult, CodexAppServerStatus,
     CustomSubagentDefinition, EnvStatusReport, ProviderConfig,
 };
+
+fn powershell_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn start_codex_login_process(program: &str) -> Result<(), String> {
+    if cfg!(windows) {
+        let script = format!(
+            "Start-Process -FilePath {} -ArgumentList 'login'",
+            powershell_single_quoted(program)
+        );
+        let status = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &script,
+            ])
+            .status()
+            .map_err(|err| format!("启动 Codex 登录窗口失败：{err}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("启动 Codex 登录窗口失败：{status}"))
+        }
+    } else {
+        Command::new(program)
+            .arg("login")
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("启动 Codex 登录流程失败：{err}"))
+    }
+}
 
 #[tauri::command]
 pub fn chat_check_env(app: AppHandle, force_refresh: Option<bool>) -> EnvStatusReport {
@@ -62,6 +97,20 @@ pub fn provider_codex_app_server_check_update() -> CodexAppServerStatus {
 #[tauri::command]
 pub fn provider_codex_app_server_install_update() -> Result<CodexAppServerStatus, String> {
     install_or_update_codex_app_server()
+}
+
+#[tauri::command]
+pub fn provider_codex_account_start_login() -> Result<(), String> {
+    let probe = build_codex_app_server_probe_status_cached(true);
+    if !probe.public.supports_required_protocol {
+        return Err(
+            "Lilia 内置 Codex app-server 不可用，请先安装或更新 Codex app-server。".to_string(),
+        );
+    }
+    let program = probe
+        .path
+        .ok_or_else(|| "未找到 Lilia 内置 Codex app-server。".to_string())?;
+    start_codex_login_process(&program)
 }
 
 #[tauri::command]

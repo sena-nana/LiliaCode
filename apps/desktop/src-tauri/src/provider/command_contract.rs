@@ -17,6 +17,7 @@ struct ProviderCommandsContract {
     provider_set_active_backend_command: String,
     provider_codex_app_server_check_update_command: String,
     provider_codex_app_server_install_update_command: String,
+    provider_codex_account_start_login_command: String,
     router_get_mode_command: String,
     router_set_mode_command: String,
     assistant_ai_get_config_command: String,
@@ -39,9 +40,10 @@ mod tests {
     use super::*;
     use crate::provider::commands::{
         assistant_ai_get_config, assistant_ai_optimize_prompt, assistant_ai_set_config,
-        assistant_ai_test_connection, chat_check_env, provider_codex_app_server_check_update,
-        provider_codex_app_server_install_update, provider_get_active_backend, provider_get_config,
-        provider_set_active_backend, provider_set_config, router_get_mode, router_set_mode,
+        assistant_ai_test_connection, chat_check_env, provider_codex_account_start_login,
+        provider_codex_app_server_check_update, provider_codex_app_server_install_update,
+        provider_get_active_backend, provider_get_config, provider_set_active_backend,
+        provider_set_config, router_get_mode, router_set_mode,
     };
 
     #[test]
@@ -54,6 +56,7 @@ mod tests {
         let _ = provider_set_active_backend;
         let _ = provider_codex_app_server_check_update;
         let _ = provider_codex_app_server_install_update;
+        let _ = provider_codex_account_start_login;
         let _ = router_get_mode;
         let _ = router_set_mode;
         let _ = assistant_ai_get_config;
@@ -85,6 +88,10 @@ mod tests {
         assert_eq!(
             contract.provider_codex_app_server_install_update_command,
             stringify!(provider_codex_app_server_install_update)
+        );
+        assert_eq!(
+            contract.provider_codex_account_start_login_command,
+            stringify!(provider_codex_account_start_login)
         );
         assert_eq!(
             contract.router_get_mode_command,
