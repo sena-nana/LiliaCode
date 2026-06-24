@@ -11,6 +11,7 @@ use crate::agent_timeline::AgentTimelineEvent;
 use crate::agent_timeline_contract;
 use crate::chat::runner::locate_agent_runner;
 use crate::chat::state::try_normalize_backend;
+use crate::process_command::hide_console_window;
 use crate::provider::{resolve_connection_for, validate_backend_ready_for_send, ConnectionMode};
 use crate::quota_usage_contract::{
     default_usage_stats_days, is_rate_limit_reset_credit_consume_outcome,
@@ -332,7 +333,9 @@ fn run_codex_account_quota_utility_output<R: Runtime>(
     args: &[String],
 ) -> Result<String, String> {
     let script = locate_codex_account_quota_utility(app);
-    let output = Command::new("node")
+    let mut command = Command::new("node");
+    hide_console_window(&mut command);
+    let output = command
         .arg(script)
         .args(args)
         .env_remove("OPENAI_BASE_URL")

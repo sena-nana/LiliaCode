@@ -31,6 +31,7 @@ mod plugins;
 #[cfg(test)]
 mod plugins_command_contract;
 mod popup_windows;
+mod process_command;
 mod project_architecture_contract;
 #[cfg(test)]
 mod project_contract;

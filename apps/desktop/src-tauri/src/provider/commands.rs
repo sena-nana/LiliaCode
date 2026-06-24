@@ -4,6 +4,7 @@ use std::process::Command;
 use tauri::AppHandle;
 
 use crate::chat::state::{chat_backend_supported, chat_backends};
+use crate::process_command::hide_console_window;
 use crate::settings_store::save_store_value;
 
 use super::assistant_ai;
@@ -39,7 +40,9 @@ fn start_codex_login_process(program: &str) -> Result<(), String> {
             "Start-Process -FilePath {} -ArgumentList 'login'",
             powershell_single_quoted(program)
         );
-        let status = Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        hide_console_window(&mut command);
+        let status = command
             .args([
                 "-NoProfile",
                 "-ExecutionPolicy",
@@ -55,7 +58,9 @@ fn start_codex_login_process(program: &str) -> Result<(), String> {
             Err(format!("启动 Codex 登录窗口失败：{status}"))
         }
     } else {
-        Command::new(program)
+        let mut command = Command::new(program);
+        hide_console_window(&mut command);
+        command
             .arg("login")
             .spawn()
             .map(|_| ())
