@@ -1199,6 +1199,13 @@ pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRun
 
     let backend = running_turn.as_ref().map(|turn| turn.backend.clone());
     let turn_id = running_turn.map(|turn| turn.turn_id);
+    let process_session_id = store
+        .running_process_sessions
+        .lock()
+        .unwrap()
+        .get(task_id)
+        .cloned()
+        .filter(|process_session_id| super::runner::process_session_is_active(process_session_id));
     let context_usage = latest_context_usage(store, task_id, backend.as_deref());
 
     ChatRuntimeSnapshot {
@@ -1206,6 +1213,7 @@ pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRun
         phase: phase.to_string(),
         backend,
         turn_id,
+        process_session_id,
         queued_count,
         pending_rollback,
         pending_reset_cleanup,
@@ -1250,8 +1258,13 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
                 } else {
                     abandoned.phase.clone()
                 };
+                snapshot.process_session_id =
+                    abandoned.process_session_id.filter(|process_session_id| {
+                        super::runner::process_session_is_active(process_session_id)
+                    });
             } else {
                 snapshot.phase = "abandoned".to_string();
+                snapshot.process_session_id = None;
             }
             snapshot.backend = Some(abandoned.turn.backend);
             snapshot.turn_id = Some(abandoned.turn.turn_id);
@@ -1268,6 +1281,9 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
     };
     snapshot.backend = Some(persisted.turn.backend);
     snapshot.turn_id = Some(persisted.turn.turn_id);
+    snapshot.process_session_id = persisted
+        .process_session_id
+        .filter(|process_session_id| super::runner::process_session_is_active(process_session_id));
     snapshot.context_usage = latest_context_usage(store, task_id, snapshot.backend.as_deref());
     snapshot
 }

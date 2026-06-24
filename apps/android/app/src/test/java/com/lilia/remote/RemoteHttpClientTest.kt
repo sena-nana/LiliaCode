@@ -318,6 +318,7 @@ class RemoteHttpClientTest {
                         "taskId": "task-1",
                         "title": "Remote task",
                         "status": "running",
+                        "dependsOn": ["dep-1"],
                         "createdAt": 1710000000000
                       },
                       "runtime": { "phase": "running" }
@@ -353,6 +354,7 @@ class RemoteHttpClientTest {
             .getOrThrow()
 
         assertEquals("task-1", detail.task.taskId)
+        assertEquals(listOf("dep-1"), detail.task.dependsOn)
         assertEquals("running", detail.runtimePhase)
         assertEquals(3, requests.size)
         assertEquals("tasks.get", requests[0].getString("type"))
@@ -555,6 +557,47 @@ class RemoteHttpClientTest {
     }
 
     @Test
+    fun sendMessageDispatchesProcessSessionRuntimeCommand() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "chat.send",
+                    "result": { "accepted": true }
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+
+        RemoteHttpClient(FakeDeviceStore())
+            .sendMessage(
+                savedPc(server),
+                RemoteSendMessageInput(
+                    taskId = "task-1",
+                    content = "",
+                    runtimeCommand = RemoteRuntimeCommandAdapter.processWriteStdin("q"),
+                ),
+            )
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("chat.send", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+        assertEquals("", request.getString("content"))
+        val command = request.getJSONObject("runtimeCommand")
+        assertEquals("process_session", command.getString("type"))
+        assertEquals("write_stdin", command.getString("action"))
+        assertEquals("q", command.getString("stdin"))
+    }
+
+    @Test
     fun interruptDispatchesChatInterruptRequest() = runBlocking {
         val requestBody = AtomicReference<JSONObject>()
         val server = startBridge { exchange ->
@@ -610,6 +653,37 @@ class RemoteHttpClientTest {
         val request = requestBody.get().getJSONObject("request")
         assertEquals("chat.retry", request.getString("type"))
         assertEquals("task-1", request.getString("taskId"))
+        assertFalse(request.has("eventId"))
+    }
+
+    @Test
+    fun retryDispatchesSelectedTimelineEventId() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "chat.retry",
+                    "result": { "dispatch": "started" }
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+
+        RemoteHttpClient(FakeDeviceStore())
+            .retry(savedPc(server), "task-1", "error-1")
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("chat.retry", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+        assertEquals("error-1", request.getString("eventId"))
     }
 
     @Test

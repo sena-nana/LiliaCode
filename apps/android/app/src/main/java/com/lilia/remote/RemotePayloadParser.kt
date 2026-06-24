@@ -41,17 +41,7 @@ object RemotePayloadParser {
         return buildList {
             for (index in 0 until tasks.length()) {
                 val task = tasks.getJSONObject(index)
-                val taskId = task.optString("taskId").takeIf { it.isNotBlank() } ?: continue
-                add(
-                    RemoteTaskSummary(
-                        taskId = taskId,
-                        title = task.nonBlankString("title", "Untitled task"),
-                        projectName = task.optNullableString("projectName"),
-                        status = task.nonBlankString("status", "waiting"),
-                        lastActivity = formatRemoteTime(task.optLong("createdAt", 0L)),
-                        pendingAction = null,
-                    ),
-                )
+                add(parseTaskSummary(task) ?: continue)
             }
         }
     }
@@ -78,9 +68,12 @@ object RemotePayloadParser {
         pendingPayload: JSONObject,
     ): RemoteTaskDetail {
         val state = parseTaskState(taskId, taskPayload, pendingPayload)
+        val runtime = taskPayload.optJSONObject("runtime")
         return RemoteTaskDetail(
             task = state.task,
+            relatedTasks = listOf(state.task),
             runtimePhase = state.runtimePhase,
+            processSessionId = runtime?.optNullableString("processSessionId"),
             timeline = parseTimelinePayload(timelinePayload),
             pendingInteraction = state.pendingInteraction,
         )
@@ -101,15 +94,31 @@ object RemotePayloadParser {
         return merged.values.toList()
     }
 
+    private fun parseTaskSummary(task: JSONObject, fallbackTaskId: String? = null): RemoteTaskSummary? {
+        val taskId = task.firstNonBlankString("taskId", "id") ?: fallbackTaskId ?: return null
+        return parseTaskSummary(taskId, task)
+    }
+
     private fun parseTaskSummary(taskId: String, task: JSONObject?): RemoteTaskSummary =
         RemoteTaskSummary(
             taskId = task?.firstNonBlankString("taskId", "id") ?: taskId,
             title = task?.nonBlankString("title", "Untitled task") ?: "Untitled task",
             projectName = task?.firstNonBlankString("projectName", "projectId"),
             status = task?.nonBlankString("status", "waiting") ?: "waiting",
+            dependsOn = parseStringArray(task?.optJSONArray("dependsOn")),
             lastActivity = formatRemoteTime(task?.optLong("createdAt", 0L) ?: 0L),
             pendingAction = null,
         )
+
+    private fun parseStringArray(array: JSONArray?): List<String> {
+        if (array == null) return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val value = array.optString(index).takeIf { it.isNotBlank() } ?: continue
+                add(value)
+            }
+        }
+    }
 
     private fun parseTimeline(events: JSONArray): List<RemoteTimelineItem> {
         val rows = buildList {

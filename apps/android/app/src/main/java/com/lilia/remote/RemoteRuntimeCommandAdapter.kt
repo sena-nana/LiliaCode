@@ -9,4 +9,18 @@ object RemoteRuntimeCommandAdapter {
             .put("excludeTurns", true)
             .put("sourceTurnId", anchor.sourceTurnId)
             .put("mode", anchor.mode.wireValue)
+
+    fun processSpawn(command: String): JSONObject =
+        processSession("spawn").put("command", command)
+
+    fun processWriteStdin(stdin: String): JSONObject =
+        processSession("write_stdin").put("stdin", stdin)
+
+    fun processKill(): JSONObject =
+        processSession("kill")
+
+    private fun processSession(action: String): JSONObject =
+        JSONObject()
+            .put("type", "process_session")
+            .put("action", action)
 }

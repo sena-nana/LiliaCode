@@ -660,6 +660,16 @@ fn dispatch_request(
                 .and_then(JsonValue::as_str)
                 .map(ToString::to_string);
             let chat_store = app.state::<chat::state::ChatStore>();
+            if let Some(command) = runtime_command.clone() {
+                if is_process_session_control_command(&command) {
+                    chat::commands::chat_send_process_session_command(task_id, command, chat_store)
+                        .map_err(RemoteDispatchError::unavailable)?;
+                    return Ok(json!({
+                        "type": "chat.send",
+                        "result": { "accepted": true },
+                    }));
+                }
+            }
             let result = chat::commands::chat_send_message(
                 app.clone(),
                 task_id,
@@ -688,7 +698,16 @@ fn dispatch_request(
             let task_id = string_field(&envelope.request, "taskId")?;
             let events =
                 agent_timeline::list(&conn, &task_id).map_err(RemoteDispatchError::internal)?;
-            let retry_context = latest_retry_context(&events)
+            let event_id = envelope
+                .request
+                .get("eventId")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let retry_context = match event_id {
+                Some(event_id) => retry_context_for_timeline_event_id(&events, event_id),
+                None => latest_retry_context(&events),
+            }
                 .ok_or_else(|| RemoteDispatchError::conflict("没有可重试的远控消息"))?;
             let project_cwd = load_task_project_cwd(&conn, &task_id).unwrap_or_default();
             let chat_store = app.state::<chat::state::ChatStore>();
@@ -760,6 +779,13 @@ fn dispatch_request(
             "不支持的远控请求：{request_type}"
         ))),
     }
+}
+
+fn is_process_session_control_command(command: &chat::types::ChatRuntimeCommand) -> bool {
+    matches!(
+        command,
+        chat::types::ChatRuntimeCommand::ProcessSession { action, .. } if action != "spawn"
+    )
 }
 
 pub(crate) fn record_pending_interaction(
@@ -912,6 +938,7 @@ fn list_sidebar_conversations(
     conn: &Connection,
     limit: i64,
 ) -> Result<Vec<SidebarConversationSummaryRow>, RemoteDispatchError> {
+    let deps = load_task_deps(conn, None)?;
     let mut stmt = conn
         .prepare(
             r#"SELECT
@@ -943,6 +970,7 @@ fn list_sidebar_conversations(
             let project_id = row.get::<_, Option<String>>(1)?;
             let project_name = row.get::<_, Option<String>>(2)?;
             let status = row.get::<_, String>(4)?;
+            let depends_on = deps.get(&task_id).cloned().unwrap_or_default();
             let route = match project_id.as_deref() {
                 Some(project_id) => format!("/projects/{project_id}/tasks/{task_id}"),
                 None => format!("/chats/{task_id}"),
@@ -953,6 +981,7 @@ fn list_sidebar_conversations(
                 project_name,
                 title: row.get(3)?,
                 status,
+                depends_on,
                 created_at: row.get(5)?,
                 pinned: row.get::<_, i64>(6)? != 0,
                 route,
@@ -967,6 +996,7 @@ fn list_sidebar_conversations(
 }
 
 fn load_task(conn: &Connection, id: &str) -> Result<Option<TaskRow>, RemoteDispatchError> {
+    let deps = load_task_deps(conn, Some(id))?;
     conn.query_row(
         r#"SELECT id, project_id, session_id, title, title_source, status, created_at,
                   parent_id, sort_order, pinned
@@ -982,7 +1012,7 @@ fn load_task(conn: &Connection, id: &str) -> Result<Option<TaskRow>, RemoteDispa
                 status: row.get(5)?,
                 created_at: row.get(6)?,
                 parent_id: row.get(7)?,
-                depends_on: Vec::new(),
+                depends_on: deps.get(id).cloned().unwrap_or_default(),
                 sort_order: row.get(8)?,
                 pinned: row.get::<_, i64>(9)? != 0,
             })
@@ -990,6 +1020,40 @@ fn load_task(conn: &Connection, id: &str) -> Result<Option<TaskRow>, RemoteDispa
     )
     .optional()
     .map_err(|e| RemoteDispatchError::internal(format!("读取任务失败：{e}")))
+}
+
+fn load_task_deps(
+    conn: &Connection,
+    task_id: Option<&str>,
+) -> Result<HashMap<String, Vec<String>>, RemoteDispatchError> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT d.task_id, d.depends_on_id
+               FROM task_dependencies d
+               INNER JOIN tasks t ON t.id = d.task_id
+               WHERE t.archived = 0
+                 AND (?1 IS NULL OR d.task_id = ?1)"#,
+        )
+        .map_err(|e| RemoteDispatchError::internal(format!("读取任务依赖失败：{e}")))?;
+    let rows = stmt
+        .query_map(params![task_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| RemoteDispatchError::internal(format!("读取任务依赖失败：{e}")))?;
+    collect_task_deps(rows)
+}
+
+fn collect_task_deps<I>(rows: I) -> Result<HashMap<String, Vec<String>>, RemoteDispatchError>
+where
+    I: IntoIterator<Item = rusqlite::Result<(String, String)>>,
+{
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (task_id, depends_on_id) =
+            row.map_err(|e| RemoteDispatchError::internal(format!("读取任务依赖失败：{e}")))?;
+        out.entry(task_id).or_default().push(depends_on_id);
+    }
+    Ok(out)
 }
 
 fn load_task_project_cwd(conn: &Connection, task_id: &str) -> Result<String, RemoteDispatchError> {
@@ -1050,6 +1114,14 @@ fn latest_retry_context(
         .iter()
         .rev()
         .find_map(|event| retry_context_for_timeline_event(event, events))
+}
+
+fn retry_context_for_timeline_event_id(
+    events: &[agent_timeline::AgentTimelineEvent],
+    event_id: &str,
+) -> Option<RemoteTimelineRetryContext> {
+    let event = events.iter().find(|event| event.id == event_id)?;
+    retry_context_for_timeline_event(event, events)
 }
 
 fn retry_context_for_timeline_event(
@@ -1855,6 +1927,31 @@ mod tests {
     }
 
     #[test]
+    fn remote_process_session_controls_reuse_chat_send_runtime_command() {
+        let write_stdin: chat::types::ChatRuntimeCommand = serde_json::from_value(json!({
+            "type": "process_session",
+            "action": "write_stdin",
+            "stdin": "q"
+        }))
+        .unwrap();
+        let kill: chat::types::ChatRuntimeCommand = serde_json::from_value(json!({
+            "type": "process_session",
+            "action": "kill"
+        }))
+        .unwrap();
+        let spawn: chat::types::ChatRuntimeCommand = serde_json::from_value(json!({
+            "type": "process_session",
+            "action": "spawn",
+            "command": "npm test"
+        }))
+        .unwrap();
+
+        assert!(is_process_session_control_command(&write_stdin));
+        assert!(is_process_session_control_command(&kill));
+        assert!(!is_process_session_control_command(&spawn));
+    }
+
+    #[test]
     fn remote_status_serializes_android_bridge_contract_as_camel_case() {
         let conn = conn();
         enable_host(&conn);
@@ -1961,6 +2058,40 @@ mod tests {
     }
 
     #[test]
+    fn retry_context_for_timeline_event_id_selects_requested_error_without_fallback() {
+        let events = vec![
+            timeline_event(
+                "message-1",
+                "message",
+                Some("turn-1"),
+                Some("Original prompt"),
+                json!({ "role": "user", "content": "Original prompt" }),
+            ),
+            timeline_event(
+                "error-1",
+                "error",
+                Some("turn-1"),
+                Some("Old failure"),
+                json!({ "message": "Old failure" }),
+            ),
+            timeline_event(
+                "error-2",
+                "error",
+                None,
+                Some("New failure"),
+                json!({ "retryContext": { "content": "Retry new" } }),
+            ),
+        ];
+
+        let selected = retry_context_for_timeline_event_id(&events, "error-1").unwrap();
+
+        assert_eq!(selected.content, "Original prompt");
+        assert_eq!(latest_retry_context(&events).unwrap().content, "Retry new");
+        assert!(retry_context_for_timeline_event_id(&events, "missing").is_none());
+        assert!(retry_context_for_timeline_event_id(&events, "message-1").is_none());
+    }
+
+    #[test]
     fn active_ticket_restores_bridge_url_from_pairing_uri() {
         let conn = conn();
         insert_ticket(&conn);
@@ -2034,9 +2165,15 @@ mod tests {
               pinned     INTEGER NOT NULL,
               archived   INTEGER NOT NULL
             );
+            CREATE TABLE task_dependencies (
+              task_id       TEXT NOT NULL,
+              depends_on_id TEXT NOT NULL
+            );
             INSERT INTO projects (id, name) VALUES ('project-1', 'Lilia');
             INSERT INTO tasks (id, project_id, title, status, created_at, pinned, archived)
             VALUES ('task-1', 'project-1', 'Android remote', 'running', 1710000000000, 0, 0);
+            INSERT INTO task_dependencies (task_id, depends_on_id)
+            VALUES ('task-1', 'task-0');
             "#,
         )
         .unwrap();
@@ -2047,13 +2184,16 @@ mod tests {
         assert_eq!(rows[0].task_id, "task-1");
         assert_eq!(rows[0].project_name.as_deref(), Some("Lilia"));
         assert_eq!(rows[0].status, "running");
+        assert_eq!(rows[0].depends_on, vec!["task-0".to_string()]);
 
         let wire = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(wire["taskId"], "task-1");
         assert_eq!(wire["projectName"], "Lilia");
+        assert_eq!(wire["dependsOn"][0], "task-0");
         assert_eq!(wire["createdAt"], 1710000000000i64);
         assert!(wire.get("task_id").is_none());
         assert!(wire.get("project_name").is_none());
+        assert!(wire.get("depends_on").is_none());
     }
 
     #[test]
@@ -2083,6 +2223,47 @@ mod tests {
         assert!(wire.get("project_id").is_none());
         assert!(wire.get("created_at").is_none());
         assert!(wire.get("depends_on").is_none());
+    }
+
+    #[test]
+    fn load_task_includes_dependency_ids() {
+        let conn = conn();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id           TEXT PRIMARY KEY,
+              project_id   TEXT,
+              session_id   TEXT NOT NULL,
+              title        TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'manual',
+              status       TEXT NOT NULL,
+              created_at   INTEGER NOT NULL,
+              parent_id    TEXT,
+              sort_order   INTEGER NOT NULL,
+              pinned       INTEGER NOT NULL,
+              archived     INTEGER NOT NULL
+            );
+            CREATE TABLE task_dependencies (
+              task_id       TEXT NOT NULL,
+              depends_on_id TEXT NOT NULL
+            );
+            INSERT INTO tasks (
+              id, project_id, session_id, title, title_source, status,
+              created_at, parent_id, sort_order, pinned, archived
+            )
+            VALUES (
+              'task-1', 'project-1', 'session-1', 'Android remote', 'manual', 'blocked',
+              1710000000000, NULL, 7, 1, 0
+            );
+            INSERT INTO task_dependencies (task_id, depends_on_id)
+            VALUES ('task-1', 'dep-1');
+            "#,
+        )
+        .unwrap();
+
+        let task = load_task(&conn, "task-1").unwrap().unwrap();
+
+        assert_eq!(task.depends_on, vec!["dep-1".to_string()]);
     }
 
     #[test]
