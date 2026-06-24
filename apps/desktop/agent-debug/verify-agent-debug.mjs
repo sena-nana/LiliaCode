@@ -18,6 +18,36 @@ const appBinary = process.env.LILIA_AGENT_DEBUG_APP ??
 const toolDir = process.env.LILIA_AGENT_DEBUG_TOOL_DIR ??
   path.join(os.homedir(), ".lilia", "agent-debug", "bin");
 const replay = [];
+const scenarioResults = [];
+
+const CHAT_SEND_MESSAGE_COMMAND = "chat_send_message";
+const SCENARIOS = {
+  ordinarySend: {
+    id: "ordinary-send",
+    label: "普通发送",
+    artifact: "scenario-ordinary-send.png",
+  },
+  continueHistory: {
+    id: "continue-history-session",
+    label: "继续历史会话",
+    artifact: "scenario-continue-history-session.png",
+  },
+  taskRecovery: {
+    id: "task-route-recovery",
+    label: "任务恢复",
+    artifact: "scenario-task-route-recovery.png",
+  },
+  planPendingAction: {
+    id: "plan-pending-action",
+    label: "plan pending action",
+    artifact: "scenario-plan-pending-action.png",
+  },
+  permissionPendingAction: {
+    id: "permission-pending-action",
+    label: "permission pending action",
+    artifact: "scenario-permission-pending-action.png",
+  },
+};
 
 function commandExists(command, args = ["--version"]) {
   const result = spawnSync(command, args, { stdio: "ignore" });
@@ -304,6 +334,260 @@ async function screenshot(sessionId, name) {
   return target;
 }
 
+function elementById(snapshot, id) {
+  return snapshot?.elements?.find((element) => element.id === id) ?? null;
+}
+
+function visibleEnabledElement(snapshot, id) {
+  const element = elementById(snapshot, id);
+  return element?.visible && element?.enabled ? element : null;
+}
+
+async function observe(sessionId) {
+  return await execute(sessionId, "return window.__liliaAgentDebug?.observe?.() ?? null;");
+}
+
+async function waitForCondition(sessionId, label, predicate, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await observe(sessionId).catch((error) => ({ error: String(error?.message ?? error) }));
+    if (predicate(last)) return last;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(`${label} did not become ready within ${timeoutMs}ms`);
+}
+
+async function waitForAgentElement(sessionId, id, timeoutMs = 15_000) {
+  return await waitForCondition(
+    sessionId,
+    `agent debug element ${id}`,
+    (snapshot) => !!visibleEnabledElement(snapshot, id),
+    timeoutMs,
+  );
+}
+
+async function waitForAnyAgentElement(sessionId, ids, timeoutMs = 15_000) {
+  return await waitForCondition(
+    sessionId,
+    `one of agent debug elements ${ids.join(", ")}`,
+    (snapshot) => ids.some((id) => !!visibleEnabledElement(snapshot, id)),
+    timeoutMs,
+  );
+}
+
+async function waitForVisibleText(sessionId, text, timeoutMs = 15_000) {
+  return await waitForCondition(
+    sessionId,
+    `visible text ${text}`,
+    (snapshot) => String(snapshot?.visibleText ?? "").includes(text),
+    timeoutMs,
+  );
+}
+
+async function waitForRouteChange(sessionId, previousRoute, timeoutMs = 15_000) {
+  return await waitForCondition(
+    sessionId,
+    `route change from ${previousRoute}`,
+    (snapshot) => !!snapshot?.route && snapshot.route !== previousRoute,
+    timeoutMs,
+  );
+}
+
+async function waitForInvokeCount(sessionId, command, minimumCount, timeoutMs = 20_000) {
+  return await waitForCondition(
+    sessionId,
+    `${command} invoke count >= ${minimumCount}`,
+    (snapshot) => (snapshot?.invokes ?? []).filter((entry) => entry.command === command).length >= minimumCount,
+    timeoutMs,
+  );
+}
+
+async function invokeCount(sessionId, command) {
+  const snapshot = await observe(sessionId);
+  return (snapshot?.invokes ?? []).filter((entry) => entry.command === command).length;
+}
+
+async function act(sessionId, action, scenarioId) {
+  const result = await execute(
+    sessionId,
+    "return window.__liliaAgentDebug.act(arguments[0]);",
+    [action],
+  );
+  replay.push({
+    scenario: scenarioId,
+    ...action,
+    route: result?.route ?? null,
+    capturedAt: result?.capturedAt ?? null,
+  });
+  return result;
+}
+
+async function clickAgent(sessionId, target, scenarioId) {
+  await waitForAgentElement(sessionId, target);
+  return await act(sessionId, { type: "click", target }, scenarioId);
+}
+
+async function typeAgent(sessionId, target, text, scenarioId, clear = true) {
+  await waitForAgentElement(sessionId, target);
+  return await act(sessionId, { type: "type", target, text, clear }, scenarioId);
+}
+
+async function markScenario(sessionId, scenario) {
+  await act(
+    sessionId,
+    { type: "mark", label: `scenario:${scenario.id}:start`, data: { label: scenario.label } },
+    scenario.id,
+  );
+}
+
+async function finishScenario(sessionId, scenario, details = {}) {
+  const screenshotPath = await screenshot(sessionId, scenario.artifact);
+  const snapshot = await observe(sessionId);
+  const result = {
+    id: scenario.id,
+    label: scenario.label,
+    status: "passed",
+    route: snapshot?.route ?? null,
+    screenshotPath,
+    ...details,
+  };
+  scenarioResults.push(result);
+  replay.push({ scenario: scenario.id, type: "assert", status: "passed", details });
+  await act(
+    sessionId,
+    { type: "mark", label: `scenario:${scenario.id}:passed`, data: result },
+    scenario.id,
+  );
+  return result;
+}
+
+async function ensureFreshConversation(sessionId, scenarioId) {
+  const before = await observe(sessionId);
+  await clickAgent(sessionId, "sidebar.new-chat", scenarioId);
+  const after = await waitForRouteChange(sessionId, before?.route ?? "", 15_000);
+  await waitForAgentElement(sessionId, "chat.composer.input", 20_000);
+  return after.route;
+}
+
+async function ensureDebugPanel(sessionId, scenarioId) {
+  const snapshot = await observe(sessionId);
+  if (visibleEnabledElement(snapshot, "debug.timeline.plan")) return;
+
+  if (!visibleEnabledElement(snapshot, "chat.sidebar.tab.debug")) {
+    await clickAgent(sessionId, "titlebar.chat-sidebar.toggle", scenarioId);
+  }
+  const ready = await waitForAnyAgentElement(
+    sessionId,
+    ["chat.sidebar.tab.debug", "debug.timeline.plan"],
+    20_000,
+  );
+  if (visibleEnabledElement(ready, "chat.sidebar.tab.debug")) {
+    await clickAgent(sessionId, "chat.sidebar.tab.debug", scenarioId);
+  }
+  await waitForAgentElement(sessionId, "debug.timeline.plan", 20_000);
+}
+
+async function clickFirstAvailable(sessionId, targets, scenarioId) {
+  const snapshot = await waitForAnyAgentElement(sessionId, targets, 15_000);
+  const target = targets.find((id) => visibleEnabledElement(snapshot, id));
+  if (!target) throw new Error(`No enabled target among ${targets.join(", ")}`);
+  await clickAgent(sessionId, target, scenarioId);
+  return target;
+}
+
+async function settleRunningTurnForFollowup(sessionId, scenarioId) {
+  const snapshot = await observe(sessionId);
+  const sendButton = elementById(snapshot, "chat.composer.send");
+  if (!String(sendButton?.text ?? "").includes("打断 Agent")) return;
+  await clickAgent(sessionId, "chat.composer.send", scenarioId);
+  await waitForCondition(
+    sessionId,
+    "running turn interruption",
+    (next) => !String(elementById(next, "chat.composer.send")?.text ?? "").includes("打断 Agent"),
+    15_000,
+  ).catch(() => undefined);
+}
+
+async function runSendScenario(sessionId, scenario, input) {
+  await markScenario(sessionId, scenario);
+  const beforeCount = await invokeCount(sessionId, CHAT_SEND_MESSAGE_COMMAND);
+  await typeAgent(sessionId, "chat.composer.input", input, scenario.id);
+  await clickAgent(sessionId, "chat.composer.send", scenario.id);
+  await waitForInvokeCount(sessionId, CHAT_SEND_MESSAGE_COMMAND, beforeCount + 1);
+  return await finishScenario(sessionId, scenario, {
+    expectedCommand: CHAT_SEND_MESSAGE_COMMAND,
+    expectedCommandCount: beforeCount + 1,
+  });
+}
+
+async function runOrdinarySendScenario(sessionId) {
+  const scenario = SCENARIOS.ordinarySend;
+  await ensureFreshConversation(sessionId, scenario.id);
+  return await runSendScenario(
+    sessionId,
+    scenario,
+    "Agent Debug v1.0 ordinary send regression",
+  );
+}
+
+async function runContinueHistoryScenario(sessionId) {
+  const scenario = SCENARIOS.continueHistory;
+  await settleRunningTurnForFollowup(sessionId, scenario.id);
+  await waitForAgentElement(sessionId, "chat.composer.input", 20_000);
+  return await runSendScenario(
+    sessionId,
+    scenario,
+    "Agent Debug v1.0 continue history regression",
+  );
+}
+
+async function runTaskRecoveryScenario(sessionId, previousRoute) {
+  const scenario = SCENARIOS.taskRecovery;
+  await markScenario(sessionId, scenario);
+  if (!previousRoute) throw new Error("Task recovery scenario requires an existing task route");
+  await ensureFreshConversation(sessionId, scenario.id);
+  await execute(sessionId, "window.history.back(); return true;");
+  await waitForCondition(
+    sessionId,
+    `route recovery to ${previousRoute}`,
+    (snapshot) => snapshot?.route === previousRoute,
+    20_000,
+  );
+  await waitForAgentElement(sessionId, "chat.composer.input", 20_000);
+  return await finishScenario(sessionId, scenario, { recoveredRoute: previousRoute });
+}
+
+async function runPendingActionScenario(sessionId, input) {
+  const { scenario, triggerTarget, resolutionTargets, expectedText, details } = input;
+  await markScenario(sessionId, scenario);
+  await ensureDebugPanel(sessionId, scenario.id);
+  await clickAgent(sessionId, triggerTarget, scenario.id);
+  await clickFirstAvailable(sessionId, resolutionTargets, scenario.id);
+  await waitForVisibleText(sessionId, expectedText, 20_000);
+  return await finishScenario(sessionId, scenario, details);
+}
+
+async function runCoreConversationScenarios(sessionId) {
+  const ordinary = await runOrdinarySendScenario(sessionId);
+  await runContinueHistoryScenario(sessionId);
+  await runTaskRecoveryScenario(sessionId, ordinary.route);
+  await runPendingActionScenario(sessionId, {
+    scenario: SCENARIOS.planPendingAction,
+    triggerTarget: "debug.timeline.plan",
+    resolutionTargets: ["chat.pending.plan.accept", "chat.composer.plan.accept"],
+    expectedText: "Debug 计划已同意",
+    details: { resolved: "accepted" },
+  });
+  await runPendingActionScenario(sessionId, {
+    scenario: SCENARIOS.permissionPendingAction,
+    triggerTarget: "debug.timeline.permission",
+    resolutionTargets: ["chat.pending.tool.allow", "chat.composer.tool.allow"],
+    expectedText: "Debug 权限已同意",
+    details: { resolved: "allowed" },
+  });
+}
+
 async function main() {
   await mkdir(runDir, { recursive: true });
   let setupInfo = null;
@@ -419,19 +703,23 @@ async function main() {
       throw new Error("Missing target scenario did not return a useful diagnostic");
     }
     replay.push({ type: "click", target: "missing.debug.target", expectedError: true });
+    await runCoreConversationScenarios(sessionId);
     const logs = await execute(sessionId, "return window.__liliaAgentDebug?.observe?.().invokes ?? [];");
     const afterScreenshotPath = await screenshot(sessionId, "after.png");
     await writeJson("logs.json", logs);
     await writeJson("replay.json", replay);
+    const scenarioResultsPath = await writeJson("scenario-results.json", scenarioResults);
     await writeJson("summary.json", {
       status: "passed",
       runId,
       preflight,
+      scenarios: scenarioResults,
       beforeScreenshotPath,
       afterScreenshotPath,
       observePath: path.join(runDir, "observe.json"),
       logsPath: path.join(runDir, "logs.json"),
       replayPath: path.join(runDir, "replay.json"),
+      scenarioResultsPath,
     });
   } catch (error) {
     let failureDiagnosticsPath = null;
@@ -460,6 +748,7 @@ async function main() {
       failureScreenshotPath,
       failureDiagnosticsPath,
       replay,
+      scenarios: scenarioResults,
     });
     process.exitCode = 1;
   } finally {

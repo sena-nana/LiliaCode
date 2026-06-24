@@ -62,6 +62,10 @@ labels: enhancement,area: desktop,area: tauri,area: contracts
 
 - [ ] 首发核心对话路径有最小必要回归验证。
 - [ ] 已知失败模式有用户可理解的错误或诊断落点。
+
+#### 当前回归落点
+
+- Agent Debug v1.0 核心对话回归覆盖普通发送、继续历史会话、任务恢复、plan pending action 和 permission pending action；运行 `yarn verify:agent-debug` 后查看 `agent-debug-runs/<timestamp>/scenario-results.json` 与对应截图。
 <!-- /issue -->
 
 <!-- issue
