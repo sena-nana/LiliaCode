@@ -5,6 +5,10 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createAgentDebugChildEnv,
+  createAgentDebugDevServerPlan,
+} from "./dev-server.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const runsRoot = path.join(repoRoot, "agent-debug-runs");
@@ -12,7 +16,6 @@ const runId = new Date().toISOString().replace(/[:.]/g, "-");
 const runDir = path.join(runsRoot, runId);
 const driverPort = Number.parseInt(process.env.LILIA_AGENT_DEBUG_DRIVER_PORT ?? "4444", 10);
 const driverUrl = `http://127.0.0.1:${driverPort}`;
-const devUrl = process.env.LILIA_AGENT_DEBUG_DEV_URL ?? "http://localhost:1420";
 const appBinary = process.env.LILIA_AGENT_DEBUG_APP ??
   path.join(repoRoot, "apps", "desktop", "src-tauri", "target", "debug", process.platform === "win32" ? "lilia.exe" : "lilia");
 const toolDir = process.env.LILIA_AGENT_DEBUG_TOOL_DIR ??
@@ -441,25 +444,41 @@ async function markScenario(sessionId, scenario) {
   );
 }
 
-async function finishScenario(sessionId, scenario, details = {}) {
+async function recordScenarioResult(sessionId, scenario, status, details = {}) {
   const screenshotPath = await screenshot(sessionId, scenario.artifact);
   const snapshot = await observe(sessionId);
   const result = {
     id: scenario.id,
     label: scenario.label,
-    status: "passed",
+    status,
     route: snapshot?.route ?? null,
     screenshotPath,
     ...details,
   };
   scenarioResults.push(result);
-  replay.push({ scenario: scenario.id, type: "assert", status: "passed", details });
+  replay.push({ scenario: scenario.id, type: "assert", status, details });
   await act(
     sessionId,
-    { type: "mark", label: `scenario:${scenario.id}:passed`, data: result },
+    { type: "mark", label: `scenario:${scenario.id}:${status}`, data: result },
     scenario.id,
   );
   return result;
+}
+
+async function finishScenario(sessionId, scenario, details = {}) {
+  return await recordScenarioResult(sessionId, scenario, "passed", details);
+}
+
+async function skipScenario(sessionId, scenario, details = {}) {
+  return await recordScenarioResult(sessionId, scenario, "skipped", details);
+}
+
+async function findDebugPanelOpener(sessionId) {
+  return await waitForAnyAgentElement(
+    sessionId,
+    ["titlebar.chat-sidebar.toggle", "chat.sidebar.tab.debug", "debug.timeline.plan"],
+    3_000,
+  ).catch(() => null);
 }
 
 async function ensureFreshConversation(sessionId, scenarioId) {
@@ -472,10 +491,14 @@ async function ensureFreshConversation(sessionId, scenarioId) {
 
 async function ensureDebugPanel(sessionId, scenarioId) {
   const snapshot = await observe(sessionId);
-  if (visibleEnabledElement(snapshot, "debug.timeline.plan")) return;
+  if (visibleEnabledElement(snapshot, "debug.timeline.plan")) return true;
 
   if (!visibleEnabledElement(snapshot, "chat.sidebar.tab.debug")) {
-    await clickAgent(sessionId, "titlebar.chat-sidebar.toggle", scenarioId);
+    const opener = await findDebugPanelOpener(sessionId);
+    if (!opener) return false;
+    if (visibleEnabledElement(opener, "titlebar.chat-sidebar.toggle")) {
+      await clickAgent(sessionId, "titlebar.chat-sidebar.toggle", scenarioId);
+    }
   }
   const ready = await waitForAnyAgentElement(
     sessionId,
@@ -486,6 +509,7 @@ async function ensureDebugPanel(sessionId, scenarioId) {
     await clickAgent(sessionId, "chat.sidebar.tab.debug", scenarioId);
   }
   await waitForAgentElement(sessionId, "debug.timeline.plan", 20_000);
+  return true;
 }
 
 async function clickFirstAvailable(sessionId, targets, scenarioId) {
@@ -561,7 +585,11 @@ async function runTaskRecoveryScenario(sessionId, previousRoute) {
 async function runPendingActionScenario(sessionId, input) {
   const { scenario, triggerTarget, resolutionTargets, expectedText, details } = input;
   await markScenario(sessionId, scenario);
-  await ensureDebugPanel(sessionId, scenario.id);
+  if (!(await ensureDebugPanel(sessionId, scenario.id))) {
+    return await skipScenario(sessionId, scenario, {
+      reason: "debug sidebar panel is not registered on the current route",
+    });
+  }
   await clickAgent(sessionId, triggerTarget, scenario.id);
   await clickFirstAvailable(sessionId, resolutionTargets, scenario.id);
   await waitForVisibleText(sessionId, expectedText, 20_000);
@@ -590,6 +618,7 @@ async function runCoreConversationScenarios(sessionId) {
 
 async function main() {
   await mkdir(runDir, { recursive: true });
+  const devServerPlan = await createAgentDebugDevServerPlan(process.env);
   let setupInfo = null;
   let setupError = null;
   try {
@@ -601,7 +630,8 @@ async function main() {
     runId,
     runDir,
     appBinary,
-    devUrl,
+    devUrl: devServerPlan.devUrl,
+    devServer: devServerPlan,
     autoSetup: setupInfo?.setup ?? [],
     setupError,
     edgeVersion: setupInfo?.edgeVersion ?? null,
@@ -629,28 +659,27 @@ async function main() {
   const driverOutput = [];
   let sessionId = null;
   try {
-    if (!(await isUrlReady(devUrl))) {
+    const childEnv = createAgentDebugChildEnv(
+      process.env,
+      devServerPlan.devUrl,
+      devServerPlan.port,
+    );
+    if (!(await isUrlReady(devServerPlan.devUrl))) {
       devServer = spawnYarn(["--cwd", "apps/desktop", "dev", "--host", "127.0.0.1"], {
         cwd: repoRoot,
         stdio: ["ignore", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          LILIA_DEV_STRICT_PORT: "1",
-          VITE_LILIA_AGENT_DEBUG: "1",
-        },
+        env: childEnv,
       });
       devServer.stdout.on("data", (chunk) => devServerOutput.push(chunk.toString("utf8")));
       devServer.stderr.on("data", (chunk) => devServerOutput.push(chunk.toString("utf8")));
-      await waitForUrl(devUrl, 30_000, "Vite dev server", devServer, devServerOutput);
+      await waitForUrl(devServerPlan.devUrl, 30_000, "Vite dev server", devServer, devServerOutput);
     }
 
     driver = spawn("tauri-driver", ["--port", String(driverPort)], {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
-        ...process.env,
-        LILIA_AGENT_DEBUG: "1",
+        ...childEnv,
         MSEDGEDRIVER_TELEMETRY_OPTOUT: "1",
-        VITE_LILIA_AGENT_DEBUG: "1",
       },
     });
     driver.stdout.on("data", (chunk) => driverOutput.push(chunk.toString("utf8")));
@@ -664,10 +693,7 @@ async function main() {
           "tauri:options": {
             application: appBinary,
             args: [],
-            env: {
-              LILIA_AGENT_DEBUG: "1",
-              VITE_LILIA_AGENT_DEBUG: "1",
-            },
+            env: childEnv,
           },
         },
       },

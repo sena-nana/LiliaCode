@@ -139,8 +139,36 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+#[cfg(debug_assertions)]
+fn apply_agent_debug_dev_url_override<R: Runtime>(context: &mut tauri::Context<R>) {
+    if !agent_debug::agent_debug_enabled() {
+        return;
+    }
+    let Ok(dev_url) = std::env::var("LILIA_AGENT_DEBUG_DEV_URL") else {
+        return;
+    };
+    let dev_url = dev_url.trim();
+    if dev_url.is_empty() {
+        return;
+    }
+    match tauri::Url::parse(dev_url) {
+        Ok(url) => {
+            context.config_mut().build.dev_url = Some(url);
+        }
+        Err(err) => {
+            eprintln!("[agent-debug] ignored invalid LILIA_AGENT_DEBUG_DEV_URL={dev_url:?}: {err}");
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn apply_agent_debug_dev_url_override<R: Runtime>(_context: &mut tauri::Context<R>) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    apply_agent_debug_dev_url_override(&mut context);
+
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
@@ -373,6 +401,6 @@ pub fn run() {
             agent_debug::agent_debug_record_action,
             agent_debug::agent_debug_reset_state,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
