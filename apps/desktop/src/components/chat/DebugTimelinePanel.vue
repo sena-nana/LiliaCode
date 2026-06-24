@@ -54,6 +54,7 @@ const groups = [
         :key="action.id"
         type="button"
         class="debug-panel__button"
+        :data-agent-id="`debug.timeline.${action.id}`"
         @click="action.run"
       >
         <component :is="action.icon" :size="14" aria-hidden="true" />

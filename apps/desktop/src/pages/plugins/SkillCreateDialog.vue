@@ -38,6 +38,7 @@ const emit = defineEmits<{
               <input
                 :value="name" type="text"
                 class="ui-input"
+                data-agent-id="plugins.skill-create.name"
                 placeholder="kebab-case，仅 a-z 0-9 - _"
                 @input="emit('update:name', ($event.target as HTMLInputElement).value)"
               />
@@ -47,6 +48,7 @@ const emit = defineEmits<{
               <textarea
                 :value="description"
                 class="ui-input"
+                data-agent-id="plugins.skill-create.description"
                 rows="3"
                 placeholder="一行描述，告诉 Claude 什么时候应该用这个 skill"
                 @input="emit('update:description', ($event.target as HTMLTextAreaElement).value)"
@@ -58,10 +60,10 @@ const emit = defineEmits<{
             </p>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ui-button ui-button--ghost" :disabled="creating" @click="emit('update:open', false)">
+            <button type="button" class="ui-button ui-button--ghost" data-agent-id="plugins.skill-create.cancel" :disabled="creating" @click="emit('update:open', false)">
               取消
             </button>
-            <button type="button" class="ui-button ui-button--primary" :disabled="creating" @click="emit('confirm')">
+            <button type="button" class="ui-button ui-button--primary" data-agent-id="plugins.skill-create.confirm" :disabled="creating" @click="emit('confirm')">
               {{ creating ? "创建中…" : "创建" }}
             </button>
           </div>

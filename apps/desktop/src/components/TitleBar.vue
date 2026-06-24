@@ -125,11 +125,12 @@ function onToggleChatSidebar() {
 </script>
 
 <template>
-  <header class="titlebar" data-tauri-drag-region>
-    <div class="titlebar__left-controls">
+  <header class="titlebar" data-agent-id="titlebar" data-tauri-drag-region>
+    <div class="titlebar__left-controls" data-agent-id="titlebar.left-controls">
       <button
         type="button"
         class="titlebar__btn titlebar__left-sidebar-btn"
+        data-agent-id="titlebar.left-sidebar.toggle"
         :aria-label="leftSidebarCollapsed ? '展开左侧栏' : '折叠左侧栏'"
         :title="leftSidebarCollapsed ? '展开左侧栏' : '折叠左侧栏'"
         :aria-pressed="leftSidebarCollapsed"
@@ -149,7 +150,7 @@ function onToggleChatSidebar() {
       </button>
     </div>
 
-    <div class="titlebar__crumbs" data-tauri-drag-region>
+    <div class="titlebar__crumbs" data-agent-id="titlebar.crumbs" data-tauri-drag-region>
       <!-- 非叶子段（项目名等）：同项目内 prefixKey 不变 → 不动；跨项目变 → 走过渡。 -->
       <!-- 每个子节点都标 data-tauri-drag-region：Tauri v2 只看 event.target 自身，
            不上溯祖先，否则 span/SVG 会拦截 mousedown 让面包屑拖不动。 -->
@@ -193,11 +194,12 @@ function onToggleChatSidebar() {
       </Transition>
     </div>
 
-    <div class="titlebar__controls">
+    <div class="titlebar__controls" data-agent-id="titlebar.window-controls">
       <button
         v-if="canToggleChatSidebar"
         type="button"
         class="titlebar__btn titlebar__chat-sidebar-btn"
+        data-agent-id="titlebar.chat-sidebar.toggle"
         :aria-label="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
         :title="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
         :aria-pressed="chatSidebar.state.open"
@@ -218,6 +220,7 @@ function onToggleChatSidebar() {
       <button
         type="button"
         class="titlebar__btn"
+        data-agent-id="titlebar.window.minimize"
         aria-label="最小化"
         @click="onMinimize"
       >
@@ -226,6 +229,7 @@ function onToggleChatSidebar() {
       <button
         type="button"
         class="titlebar__btn"
+        data-agent-id="titlebar.window.maximize"
         :aria-label="isMaximized ? '还原' : '最大化'"
         @click="onToggleMaximize"
       >
@@ -235,6 +239,7 @@ function onToggleChatSidebar() {
       <button
         type="button"
         class="titlebar__btn titlebar__btn--danger"
+        data-agent-id="titlebar.window.close"
         aria-label="关闭"
         @click="onClose"
       >

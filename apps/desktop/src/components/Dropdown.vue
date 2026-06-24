@@ -32,6 +32,7 @@ const open = ref(false);
 let listenerSeq = 0;
 let documentUnlisteners: Array<() => void> = [];
 const placement = computed(() => props.placement === "bottom" ? "bottom" : "top");
+const agentIdBase = computed(() => props.title ?? props.placeholder ?? "dropdown");
 const {
   triggerEl,
   menuEl,
@@ -124,6 +125,7 @@ onBeforeUnmount(() => {
       type="button"
       class="chat-chip"
       :class="{ 'is-open': open, 'is-disabled': disabled }"
+      :data-agent-id="`dropdown.${agentIdBase}.trigger`"
       :disabled="disabled"
       :title="title"
       :aria-haspopup="true"
@@ -153,6 +155,7 @@ onBeforeUnmount(() => {
             type="button"
             class="dd__item"
             :class="{ 'is-active': opt.value === modelValue }"
+            :data-agent-id="`dropdown.${agentIdBase}.option.${String(opt.value)}`"
             role="option"
             :aria-selected="opt.value === modelValue"
             @click="pick(opt)"

@@ -33,6 +33,7 @@ function listStart(list: MarkdownListNode): number | undefined {
           v-if="item.taskChecked !== null"
           class="markdown-block__task-checkbox"
           type="checkbox"
+          :data-agent-id="`markdown.task.${itemIndex}`"
           :checked="item.taskChecked"
           disabled
           :aria-label="item.taskChecked ? '已完成' : '未完成'"

@@ -48,6 +48,7 @@ const emit = defineEmits<{
       v-if="mode === 'ask-input' && askQuestionSkippable && askTotal > 1"
       type="button"
       class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
+      data-agent-id="chat.pending.skip"
       :disabled="actionsBlocked"
       @click="emit('skipAsk')"
     >
@@ -59,6 +60,7 @@ const emit = defineEmits<{
         v-if="canGoPrev"
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="chat.pending.back"
         :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
@@ -68,6 +70,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--primary composer-inline__btn"
+        data-agent-id="chat.pending.continue"
         :disabled="actionsBlocked || !canAskSubmit"
         @click="emit('submitAsk')"
       >
@@ -80,6 +83,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="chat.pending.plan.modify"
         :disabled="actionsBlocked || !hasPendingInputText"
         @click="emit('modifyPlanApproval')"
       >
@@ -88,6 +92,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--primary composer-inline__btn"
+        data-agent-id="chat.pending.plan.accept"
         :disabled="actionsBlocked"
         @click="emit('submitAsk')"
       >
@@ -99,6 +104,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="chat.pending.tool.secondary"
         :disabled="actionsBlocked || toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
         @click="isEditingToolCommand ? emit('cancelToolCommandEdit') : emit('decideToolConsent', 'deny')"
       >
@@ -107,6 +113,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="composer-inline__btn"
+        data-agent-id="chat.pending.tool.allow"
         :class="toolDanger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked || toolSubmitting !== null || toolCommandIsEmpty"
         @click="emit('decideToolConsent', 'allow')"
@@ -119,6 +126,7 @@ const emit = defineEmits<{
       v-if="mode === 'ask-confirm' || mode === 'none'"
       type="button"
       class="chat-composer__send"
+      data-agent-id="chat.composer.send"
       :class="{ 'chat-composer__send--interrupt': canInterrupt }"
       :disabled="actionsBlocked || !canSubmitEntry"
       :title="sendTitle"

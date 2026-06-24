@@ -3,7 +3,7 @@
  * Rust 侧字段命名走 camelCase（serde rename_all），前端不需 key 映射。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import type {
   HookDocumentUpdateInput,
   HookDocumentView,

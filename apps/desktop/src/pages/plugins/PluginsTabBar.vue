@@ -24,6 +24,7 @@ const emit = defineEmits<{
       class="ui-tabs__tab"
       :aria-selected="modelValue === 'claude-skills'"
       :class="{ 'is-active': modelValue === 'claude-skills' }"
+      data-agent-id="plugins.tab.claude-skills"
       @click="emit('update:modelValue', 'claude-skills')"
     >
       <Sparkles :size="14" aria-hidden="true" /> 技能
@@ -34,6 +35,7 @@ const emit = defineEmits<{
       class="ui-tabs__tab"
       :aria-selected="modelValue === 'claude-plugins'"
       :class="{ 'is-active': modelValue === 'claude-plugins' }"
+      data-agent-id="plugins.tab.claude-plugins"
       @click="emit('update:modelValue', 'claude-plugins')"
     >
       <Puzzle :size="14" aria-hidden="true" /> 插件
@@ -44,6 +46,7 @@ const emit = defineEmits<{
       class="ui-tabs__tab"
       :aria-selected="modelValue === 'claude-hooks'"
       :class="{ 'is-active': modelValue === 'claude-hooks' }"
+      data-agent-id="plugins.tab.claude-hooks"
       @click="emit('update:modelValue', 'claude-hooks')"
     >
       <Workflow :size="14" aria-hidden="true" /> Claude Hooks
@@ -54,6 +57,7 @@ const emit = defineEmits<{
       class="ui-tabs__tab"
       :aria-selected="modelValue === 'claude-mcp'"
       :class="{ 'is-active': modelValue === 'claude-mcp' }"
+      data-agent-id="plugins.tab.claude-mcp"
       @click="emit('update:modelValue', 'claude-mcp')"
     >
       <Server :size="14" aria-hidden="true" /> Claude MCP
@@ -64,6 +68,7 @@ const emit = defineEmits<{
       class="ui-tabs__tab"
       :aria-selected="modelValue === 'codex-hooks'"
       :class="{ 'is-active': modelValue === 'codex-hooks' }"
+      data-agent-id="plugins.tab.codex-hooks"
       @click="emit('update:modelValue', 'codex-hooks')"
     >
       <Workflow :size="14" aria-hidden="true" /> Codex Hooks
@@ -74,6 +79,7 @@ const emit = defineEmits<{
       class="ui-tabs__tab"
       :aria-selected="modelValue === 'codex-mcp'"
       :class="{ 'is-active': modelValue === 'codex-mcp' }"
+      data-agent-id="plugins.tab.codex-mcp"
       @click="emit('update:modelValue', 'codex-mcp')"
     >
       <Server :size="14" aria-hidden="true" /> Codex MCP

@@ -216,9 +216,10 @@ onBeforeUnmount(() => {
     <figcaption v-if="state === 'idle'" class="markdown-block__render-note">
       <button
         v-if="needsExplicitActivation(source) && !activatedByUser"
-        type="button"
-        class="markdown-block__render-activate"
-        @click="requestDiagramActivation"
+    type="button"
+    class="markdown-block__render-activate"
+    :data-agent-id="`markdown.mermaid.activate.${blockKey}`"
+    @click="requestDiagramActivation"
       >
         图表较大，点击渲染。
       </button>

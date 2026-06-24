@@ -32,6 +32,7 @@ const tabs: Array<{ key: ViewKey; label: string; icon: any; path: (pid: string) 
       :to="t.path(props.projectId)"
       class="view-tabs__tab ui-tabs__tab"
       :class="{ 'is-active': active === t.key }"
+      :data-agent-id="`view-tabs.${t.key}`"
       :aria-selected="active === t.key"
       role="tab"
     >

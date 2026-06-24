@@ -50,7 +50,8 @@
     "preverify:tauri": "node scripts/check-package-manager.mjs",
     "verify:tauri": "yarn check:package-manager && cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "preverify:contracts": "node scripts/check-package-manager.mjs",
-    "verify:contracts": "yarn check:package-manager && node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json"
+    "verify:contracts": "yarn check:package-manager && node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json",
+    "verify:agent-debug": "yarn check:package-manager && node apps/desktop/agent-debug/verify-agent-debug.mjs"
   },
   "devDependencies": {
     "vitepress": "^1.6.4"

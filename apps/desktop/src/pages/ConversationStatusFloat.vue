@@ -362,6 +362,7 @@ onUnmounted(() => {
 <template>
   <section
     class="conversation-status-float"
+    data-agent-id="conversation-status.float"
     :class="{ 'conversation-status-float--has-banner': error }"
     :style="{ '--conversation-status-opacity': opacityCssValue }"
   >
@@ -373,6 +374,7 @@ onUnmounted(() => {
           :class="{ 'is-active': alwaysOnTop }"
           :aria-pressed="alwaysOnTop"
           :aria-label="alwaysOnTop ? '取消置顶' : '置顶'"
+          data-agent-id="conversation-status.pin"
           :title="alwaysOnTop ? '取消置顶' : '置顶'"
           @click="toggleAlwaysOnTop"
         >
@@ -397,6 +399,7 @@ onUnmounted(() => {
             :aria-expanded="opacityPanelOpen"
             aria-controls="conversation-status-opacity-panel"
             :aria-label="`窗口透明度 ${opacityPercentLabel}`"
+            data-agent-id="conversation-status.opacity.toggle"
             :title="`窗口透明度 ${opacityPercentLabel}`"
             @click="toggleOpacityPanel"
           >
@@ -415,6 +418,7 @@ onUnmounted(() => {
               step="0.01"
               :value="opacity"
               aria-label="窗口透明度"
+              data-agent-id="conversation-status.opacity.range"
               @input="setOpacity(($event.target as HTMLInputElement).value)"
             />
             <span class="conversation-status-float__opacity-value">{{ opacityPercentLabel }}</span>
@@ -426,6 +430,7 @@ onUnmounted(() => {
           class="titlebar__btn"
           aria-label="新对话"
           title="新对话"
+          data-agent-id="conversation-status.new-chat"
           @click="newChat"
         >
           <MessageSquarePlus :size="15" aria-hidden="true" />
@@ -435,6 +440,7 @@ onUnmounted(() => {
           class="titlebar__btn titlebar__btn--danger"
           aria-label="关闭对话悬浮窗"
           title="关闭"
+          data-agent-id="conversation-status.close"
           @click="closeWindow"
         >
           <X :size="15" aria-hidden="true" />
@@ -445,7 +451,7 @@ onUnmounted(() => {
     <div v-if="error" class="conversation-status-float__banner">
       <AlertTriangle :size="13" aria-hidden="true" />
       <span>{{ error }}</span>
-      <button type="button" class="sb-icon-btn" aria-label="忽略错误" @click="dismissError">
+      <button type="button" class="sb-icon-btn" data-agent-id="conversation-status.error.dismiss" aria-label="忽略错误" @click="dismissError">
         <X :size="12" aria-hidden="true" />
       </button>
     </div>

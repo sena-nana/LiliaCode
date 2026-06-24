@@ -524,6 +524,7 @@ watch(
         :style="selectionToolbarStyle"
         role="toolbar"
         aria-label="Agent 选中文本操作"
+        data-agent-id="chat.selection-toolbar"
         @mousedown.prevent
       >
         <button
@@ -531,6 +532,7 @@ watch(
           class="agent-selection-toolbar__button"
           title="复制"
           aria-label="复制"
+          data-agent-id="chat.selection.copy"
           @click="copySelection"
         >
           <Copy :size="15" aria-hidden="true" />
@@ -540,6 +542,7 @@ watch(
           class="agent-selection-toolbar__button"
           title="引用"
           aria-label="引用"
+          data-agent-id="chat.selection.quote"
           @click="insertSelectionQuote"
         >
           <Quote :size="15" aria-hidden="true" />
@@ -549,6 +552,7 @@ watch(
           class="agent-selection-toolbar__button"
           title="在弹出窗口提问"
           aria-label="在弹出窗口提问"
+          data-agent-id="chat.selection.ask-popup"
           @click="askSelectionInPopup"
         >
           <MessageSquarePlus :size="15" aria-hidden="true" />

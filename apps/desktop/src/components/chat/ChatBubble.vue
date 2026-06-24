@@ -93,6 +93,7 @@ function conversationReferenceScope(reference: ChatConversationReference) {
         :key="attachment.id"
         type="button"
         class="chat-attachment-chip chat-attachment-chip--bubble chat-attachment-chip--image-preview"
+        :data-agent-id="`chat.bubble.attachment.${attachment.id}`"
         :title="attachment.path"
         :aria-label="`查看图片 ${attachment.name}`"
         @click="openAttachmentImage(attachment)"

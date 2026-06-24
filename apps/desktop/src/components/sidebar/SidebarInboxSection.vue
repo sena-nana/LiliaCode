@@ -42,13 +42,21 @@ function isActiveOrphan(taskId: string) {
       <span class="sb-section__title">收集箱</span>
       <div class="sb-section__tools">
         <button type="button" class="sb-icon-btn"
+          data-agent-id="sidebar.inbox.toggle"
           :title="orphansExpanded ? '折叠收集箱' : '展开收集箱'"
           :aria-label="orphansExpanded ? '折叠收集箱' : '展开收集箱'"
           @click="emit('toggleOrphans')">
           <ChevronsDownUp v-if="orphansExpanded" :size="14" aria-hidden="true" />
           <ChevronsUpDown v-else :size="14" aria-hidden="true" />
         </button>
-        <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="emit('newChat')">
+        <button
+          type="button"
+          class="sb-icon-btn"
+          data-agent-id="sidebar.inbox.new-chat"
+          title="新对话"
+          aria-label="新对话"
+          @click="emit('newChat')"
+        >
           <Plus :size="14" aria-hidden="true" />
         </button>
       </div>

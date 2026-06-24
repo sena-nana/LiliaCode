@@ -57,6 +57,7 @@ function openMarkdownImage(token: InlineToken) {
       v-else-if="token.type === 'image' && token.href && renderImages"
       type="button"
       class="markdown-block__image-button"
+      :data-agent-id="`markdown.image.${index}`"
       :aria-label="token.text ? `查看图片 ${token.text}` : '查看图片'"
       @click="openMarkdownImage(token)"
     >
@@ -71,6 +72,7 @@ function openMarkdownImage(token: InlineToken) {
       v-else-if="token.type === 'link' && token.href"
       :href="token.href"
       :target="linkTarget(token.href)"
+      :data-agent-id="`markdown.link.${index}`"
       rel="noreferrer"
     >{{ token.text }}</a>
     <template v-else>{{ token.text }}</template>

@@ -71,6 +71,7 @@ packages/*/src/**/*.d.ts.map
 coverage/
 *.lcov
 .vitest-cache/
+agent-debug-runs/
 
 # ---------- Rust / Cargo / Tauri ----------
 target/

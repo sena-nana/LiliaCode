@@ -59,8 +59,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AutomationWorkspacePage v-if="workspaceReady" />
-  <section v-else class="automations-shell" aria-busy="true" aria-label="自动化工作区加载中">
+  <AutomationWorkspacePage v-if="workspaceReady" data-agent-id="automations.workspace" />
+  <section v-else class="automations-shell" aria-busy="true" aria-label="自动化工作区加载中" data-agent-id="automations.loading">
     <div class="automations-shell__pulse" />
     <div class="automations-shell__body">
       <p class="automations-shell__eyebrow">Automations</p>

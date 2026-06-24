@@ -169,6 +169,7 @@ function taskRelationMeta(task: Task): string {
           <button
             type="button"
             class="ui-button ui-icon-button"
+            :data-agent-id="`roadmap.milestone.${view.milestone.id}.move-up`"
             :disabled="isSaving(view.milestone.id) || view.index === 0"
             :aria-label="`${view.milestone.title} 上移`"
             title="上移"
@@ -179,6 +180,7 @@ function taskRelationMeta(task: Task): string {
           <button
             type="button"
             class="ui-button ui-icon-button"
+            :data-agent-id="`roadmap.milestone.${view.milestone.id}.move-down`"
             :disabled="isSaving(view.milestone.id) || view.index === milestoneViews.length - 1"
             :aria-label="`${view.milestone.title} 下移`"
             title="下移"
@@ -188,6 +190,7 @@ function taskRelationMeta(task: Task): string {
           </button>
           <select
             class="roadmap-milestone__status-select"
+            :data-agent-id="`roadmap.milestone.${view.milestone.id}.status`"
             :value="view.milestone.status"
             :disabled="isSaving(view.milestone.id)"
             :aria-label="`${view.milestone.title} 状态`"
@@ -204,6 +207,7 @@ function taskRelationMeta(task: Task): string {
           <button
             type="button"
             class="ui-button ui-icon-button ui-button--danger"
+            :data-agent-id="`roadmap.milestone.${view.milestone.id}.remove`"
             :disabled="isSaving(view.milestone.id)"
             :aria-label="`删除 ${view.milestone.title}`"
             title="删除"
@@ -219,6 +223,7 @@ function taskRelationMeta(task: Task): string {
           <span>描述</span>
           <textarea
             class="ui-input roadmap-milestone__description"
+            :data-agent-id="`roadmap.milestone.${view.milestone.id}.description`"
             :value="view.milestone.description"
             :disabled="isSaving(view.milestone.id)"
             :aria-label="`${view.milestone.title} 描述`"
@@ -232,6 +237,7 @@ function taskRelationMeta(task: Task): string {
           <input
             class="ui-input roadmap-milestone__date"
             type="date"
+            :data-agent-id="`roadmap.milestone.${view.milestone.id}.due-date`"
             :value="formatDateInput(view.milestone.dueDate)"
             :disabled="isSaving(view.milestone.id)"
             :aria-label="`${view.milestone.title} 截止日期`"
@@ -253,7 +259,7 @@ function taskRelationMeta(task: Task): string {
             <h4>关联任务</h4>
             <ul v-if="view.tasks.length" class="roadmap-task-list">
               <li v-for="task in view.tasks" :key="task.id" class="roadmap-task">
-                <RouterLink :to="`/projects/${projectId}/tasks/${task.id}`" class="roadmap-task__link">
+                <RouterLink :to="`/projects/${projectId}/tasks/${task.id}`" class="roadmap-task__link" :data-agent-id="`roadmap.task.${task.id}.open`">
                   <span class="roadmap-task__title">{{ task.title }}</span>
                   <span class="roadmap-task__meta">
                     <span :class="`roadmap-task__status roadmap-task__status--${task.status}`">
@@ -278,6 +284,7 @@ function taskRelationMeta(task: Task): string {
                 <label class="roadmap-task-choice">
                   <input
                     type="checkbox"
+                    :data-agent-id="`roadmap.milestone.${view.milestone.id}.task.${task.id}.toggle`"
                     :checked="view.taskIds.has(task.id)"
                     :disabled="isSaving(view.milestone.id)"
                     @change="emit('toggleTask', view.milestone.id, view.taskIds, task.id, $event)"

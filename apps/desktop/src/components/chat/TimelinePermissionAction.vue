@@ -21,6 +21,7 @@ const emit = defineEmits<{
     class="timeline-pending-action timeline-pending-action--codex"
     role="region"
     aria-label="权限确认"
+    data-agent-id="timeline.permission"
   >
     <div class="timeline-pending-action__stack">
       <div class="timeline-pending-action__title-preview">
@@ -39,6 +40,7 @@ const emit = defineEmits<{
         <button
           type="button"
           class="ui-button ui-button--ghost composer-inline__btn"
+          data-agent-id="timeline.permission.deny"
           :disabled="disabled"
           @click="emit('deny')"
         >
@@ -47,6 +49,7 @@ const emit = defineEmits<{
         <button
           type="button"
           class="ui-button ui-button--primary composer-inline__btn"
+          data-agent-id="timeline.permission.allow"
           :disabled="disabled"
           @click="emit('allow')"
         >

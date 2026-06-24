@@ -134,13 +134,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="subagent-section">
+  <section class="subagent-section" data-agent-id="settings.subagents">
     <div class="subagent-section__header">
       <div class="subagent-section__title">
         <Bot :size="14" aria-hidden="true" />
         <span>自定义 Agent</span>
       </div>
-      <button type="button" class="ui-btn" :disabled="saving" @click="startCreate">
+      <button type="button" class="ui-btn" data-agent-id="settings.subagents.create" :disabled="saving" @click="startCreate">
         <Plus :size="14" aria-hidden="true" />
         新建 Agent
       </button>
@@ -149,25 +149,26 @@ onBeforeUnmount(() => {
     <div v-if="editing" class="subagent-editor">
       <label class="subagent-field">
         <span>名称</span>
-        <input v-model="draft.name" type="text" placeholder="例如：Reviewer" />
+        <input v-model="draft.name" type="text" data-agent-id="settings.subagents.form.name" placeholder="例如：Reviewer" />
       </label>
       <label class="subagent-field">
         <span>描述</span>
-        <input v-model="draft.description" type="text" placeholder="一句话说明这个 Agent 适合做什么" />
+        <input v-model="draft.description" type="text" data-agent-id="settings.subagents.form.description" placeholder="一句话说明这个 Agent 适合做什么" />
       </label>
       <label class="subagent-field">
         <span>职责说明</span>
         <textarea
           v-model="draft.instruction"
           rows="5"
+          data-agent-id="settings.subagents.form.instruction"
           placeholder="告诉 Agent 它的职责、边界和输出要求"
         />
       </label>
       <div class="subagent-editor__actions">
-        <button type="button" class="ui-btn ui-btn--primary" :disabled="saving" @click="saveDraft">
+        <button type="button" class="ui-btn ui-btn--primary" data-agent-id="settings.subagents.form.save" :disabled="saving" @click="saveDraft">
           保存
         </button>
-        <button type="button" class="ui-btn" :disabled="saving" @click="cancelEdit">
+        <button type="button" class="ui-btn" data-agent-id="settings.subagents.form.cancel" :disabled="saving" @click="cancelEdit">
           取消
         </button>
       </div>
@@ -185,14 +186,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="subagent-item__actions">
-          <button type="button" class="ui-btn" :disabled="saving" @click="startEdit(item)">
+          <button type="button" class="ui-btn" :data-agent-id="`settings.subagents.item.${item.id}.edit`" :disabled="saving" @click="startEdit(item)">
             <Pencil :size="14" aria-hidden="true" />
             编辑
           </button>
-          <button type="button" class="ui-btn" :disabled="saving" @click="toggleEnabled(item)">
+          <button type="button" class="ui-btn" :data-agent-id="`settings.subagents.item.${item.id}.toggle`" :disabled="saving" @click="toggleEnabled(item)">
             {{ item.enabled ? "停用" : "启用" }}
           </button>
-          <button type="button" class="ui-btn ui-btn--danger" :disabled="saving" @click="remove(item)">
+          <button type="button" class="ui-btn ui-btn--danger" :data-agent-id="`settings.subagents.item.${item.id}.remove`" :disabled="saving" @click="remove(item)">
             <Trash2 :size="14" aria-hidden="true" />
             删除
           </button>

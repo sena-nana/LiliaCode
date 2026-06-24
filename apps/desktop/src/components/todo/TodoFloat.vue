@@ -183,7 +183,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="hasVisibleTodos" class="todo-float" aria-label="Todo 与引导">
+  <div v-if="hasVisibleTodos" class="todo-float" aria-label="Todo 与引导" data-agent-id="todo.float">
     <section v-if="visibleGoal" class="todo-float__section todo-float__section--goal">
       <ul class="todo-float__list">
         <li class="todo-float__row todo-float__row--goal">
@@ -196,6 +196,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="todo-float__icon-btn"
+              data-agent-id="todo.goal.set"
               :disabled="goalDisabled"
               title="设置 Goal"
               aria-label="设置 Lilia Goal"
@@ -206,6 +207,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="todo-float__icon-btn"
+              data-agent-id="todo.goal.refresh"
               :disabled="goalDisabled"
               title="刷新 Goal"
               aria-label="刷新 Lilia Goal"
@@ -216,6 +218,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="todo-float__icon-btn todo-float__icon-btn--danger"
+              data-agent-id="todo.goal.clear"
               :disabled="goalDisabled || !goal"
               title="清除 Goal"
               aria-label="清除 Lilia Goal"
@@ -273,6 +276,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="todo-float__icon-btn"
+              :data-agent-id="`todo.guide.${todo.id}.insert`"
               :disabled="todo.guideStatus !== PENDING_TASK_TODO_GUIDE_STATUS"
               title="立即插入"
               :aria-label="`立即插入引导：${todo.text}`"
@@ -283,6 +287,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="todo-float__icon-btn todo-float__icon-btn--danger"
+              :data-agent-id="`todo.guide.${todo.id}.delete`"
               :disabled="todo.guideStatus === QUEUED_TASK_TODO_GUIDE_STATUS"
               title="删除引导"
               :aria-label="`删除引导：${todo.text}`"

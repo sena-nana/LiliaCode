@@ -30,11 +30,12 @@ function openTab(tab: SettingsTabKey) {
 </script>
 
 <template>
-  <aside class="secondary-panel settings-sidebar" aria-label="设置分类">
+  <aside class="secondary-panel settings-sidebar" aria-label="设置分类" data-agent-id="settings.sidebar">
     <div class="settings-sidebar__head">
       <button
         type="button"
         class="settings-sidebar__back"
+        data-agent-id="settings.back"
         aria-label="返回"
         title="返回"
         @click="goBack"
@@ -50,6 +51,7 @@ function openTab(tab: SettingsTabKey) {
         :key="tab.key"
         type="button"
         class="settings-sidebar__tab"
+        :data-agent-id="`settings.tab.${tab.key}`"
         :class="{ 'is-active': activeTab === tab.key }"
         :aria-current="activeTab === tab.key ? 'page' : undefined"
         @click="openTab(tab.key)"

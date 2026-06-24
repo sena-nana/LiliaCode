@@ -205,9 +205,10 @@ defineExpose({
       <input
         ref="inputRef"
         :value="modelValue"
-        type="text"
-        class="search-dropdown__input"
-        :placeholder="placeholder"
+      type="text"
+      class="search-dropdown__input"
+      data-agent-id="search-dropdown.input"
+      :placeholder="placeholder"
         :spellcheck="spellcheck"
         @pointerdown="requestOpen"
         @focus="requestOpen"

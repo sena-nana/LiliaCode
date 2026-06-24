@@ -352,7 +352,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="sb-tree__group">
+  <div class="sb-tree__group" :data-agent-id="`sidebar.project.${project.id}`">
     <div class="sb-tree__row sb-tree__row--project"
       :class="[
         {
@@ -362,6 +362,7 @@ onBeforeUnmount(() => {
         treeRowStateClass('project', project.id, null),
       ]"
       data-tree-kind="project"
+      :data-agent-id="`sidebar.project.${project.id}.row`"
       :data-project-id="project.id"
       :data-pinned="project.pinned ? 'true' : 'false'"
       :aria-expanded="isExpanded"
@@ -382,6 +383,7 @@ onBeforeUnmount(() => {
         v-model="editingValue"
         type="text"
         class="sb-tree__rename-input"
+        :data-agent-id="`sidebar.project.${project.id}.rename-input`"
         spellcheck="false"
         @click.stop
         @pointerdown.stop
@@ -396,10 +398,10 @@ onBeforeUnmount(() => {
         <Pin v-if="project.pinned" :size="12" class="sb-tree__pin-icon" aria-hidden="true" />
       </span>
       <div v-if="editingId !== project.id" class="sb-tree__hover-tools" @click.stop>
-        <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="onMoreClick">
+        <button type="button" class="sb-icon-btn" :data-agent-id="`sidebar.project.${project.id}.more`" title="更多" aria-label="更多" @click="onMoreClick">
           <MoreHorizontal :size="13" aria-hidden="true" />
         </button>
-        <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话"
+        <button type="button" class="sb-icon-btn" :data-agent-id="`sidebar.project.${project.id}.new-chat`" title="新对话" aria-label="新对话"
           @click="emit('newChat', project.id)">
           <Plus :size="13" aria-hidden="true" />
         </button>

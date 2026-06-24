@@ -260,12 +260,14 @@ onBeforeUnmount(() => {
       <input
         v-model="newMilestoneTitle"
         class="ui-input roadmap-create__input"
+        data-agent-id="roadmap.create.title"
         aria-label="新 Milestone 标题"
         placeholder="新建 Milestone"
       />
       <button
         type="submit"
         class="ui-button ui-button--primary"
+        data-agent-id="roadmap.create.submit"
         :disabled="creatingMilestone || !newMilestoneTitle.trim()"
       >
         新增

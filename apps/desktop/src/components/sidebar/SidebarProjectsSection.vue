@@ -40,13 +40,14 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="sb-section">
+  <div class="sb-section" data-agent-id="sidebar.projects">
     <div class="sb-section__header">
       <span class="sb-section__title">项目</span>
       <div class="sb-section__tools">
         <button
           type="button"
           class="sb-icon-btn"
+          data-agent-id="sidebar.projects.overview"
           title="项目总览"
           aria-label="项目总览"
           @click="emit('openOverview')"
@@ -54,13 +55,14 @@ const emit = defineEmits<{
           <LayoutGrid :size="14" aria-hidden="true" />
         </button>
         <button type="button" class="sb-icon-btn"
+          data-agent-id="sidebar.projects.toggle-all"
           :title="allExpanded ? '全部折叠' : '全部展开'"
           :aria-label="allExpanded ? '全部折叠' : '全部展开'"
           @click="emit('toggleAll')">
           <ChevronsDownUp v-if="allExpanded" :size="14" aria-hidden="true" />
           <ChevronsUpDown v-else :size="14" aria-hidden="true" />
         </button>
-        <button type="button" class="sb-icon-btn" title="添加项目" aria-label="添加项目"
+        <button type="button" class="sb-icon-btn" data-agent-id="sidebar.projects.add" title="添加项目" aria-label="添加项目"
           :aria-expanded="addMenuOpen" :aria-haspopup="true"
           @click="emit('openAddMenu', $event)">
           <Plus :size="14" aria-hidden="true" />
@@ -71,12 +73,12 @@ const emit = defineEmits<{
     <div v-if="projectError" class="sb-banner sb-banner--err">
       <AlertTriangle :size="12" aria-hidden="true" />
       <span class="sb-banner__msg">{{ projectError }}</span>
-      <button type="button" class="sb-icon-btn" @click="emit('dismissError')" aria-label="忽略错误">
+      <button type="button" class="sb-icon-btn" data-agent-id="sidebar.projects.error.dismiss" @click="emit('dismissError')" aria-label="忽略错误">
         <X :size="12" aria-hidden="true" />
       </button>
     </div>
 
-    <div class="sb-tree">
+    <div class="sb-tree" data-agent-id="sidebar.projects.tree">
       <ProjectTreeItem
         v-for="p in projects"
         :key="p.id"

@@ -428,12 +428,14 @@ watch(actionKey, () => {
         v-model="toolMessageModel"
         class="timeline-pending-action__input"
         rows="1"
+        data-agent-id="timeline.tool.message"
         placeholder="拒绝理由"
       />
       <div class="composer-inline__actions">
         <button
           type="button"
           class="ui-button ui-button--ghost composer-inline__btn"
+          data-agent-id="timeline.tool.secondary"
           :disabled="toolSubmitting !== null || (!isEditingToolCommand && !hasToolMessage)"
           @click="isEditingToolCommand ? cancelCommandEdit() : decideTool('deny')"
         >
@@ -442,6 +444,7 @@ watch(actionKey, () => {
         <button
           type="button"
           class="ui-button ui-button--primary composer-inline__btn"
+          data-agent-id="timeline.tool.allow"
           :disabled="toolSubmitting !== null || toolCommandIsEmpty"
           @click="decideTool('allow')"
         >
@@ -505,11 +508,13 @@ watch(actionKey, () => {
     class="timeline-pending-action timeline-pending-action--plan"
     role="region"
     :aria-label="askTitle"
+    data-agent-id="timeline.plan"
   >
     <textarea
       v-model="freeformTextModel"
       class="timeline-pending-action__input"
       rows="1"
+      data-agent-id="timeline.plan.freeform"
       placeholder="修改要求"
     />
     <div
@@ -523,12 +528,13 @@ watch(actionKey, () => {
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="timeline.plan.modify"
         :disabled="!hasFreeformText"
         @click="submitAskFreeform()"
       >
         {{ hasFreeformText ? "修改" : "忽略" }}
       </button>
-      <button type="button" class="ui-button ui-button--primary composer-inline__btn" @click="submitAsk">
+      <button type="button" class="ui-button ui-button--primary composer-inline__btn" data-agent-id="timeline.plan.accept" @click="submitAsk">
         同意
       </button>
     </div>

@@ -4,7 +4,7 @@
  * `pickFolder` 直接 invoke Tauri dialog 插件命令而非走 @tauri-apps/plugin-dialog wrapper，
  * 保持与 Tauri 端权限申明一致的最小依赖面。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import type {
   GitHubBindingStatus,
   GitHubDeviceFlowPollResult,

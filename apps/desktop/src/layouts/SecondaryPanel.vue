@@ -281,12 +281,14 @@ function prefetchTaskDetailIntent(detail: string) {
 <template>
   <aside
     class="secondary-panel"
+    data-agent-id="sidebar"
   >
     <div class="sb-section sb-section--actions">
       <button
         v-if="!searchActive"
         type="button"
         class="sb-primary-btn"
+        data-agent-id="sidebar.new-chat"
         title="新对话"
         aria-label="新对话"
         @mouseenter="prefetchTaskDetailIntent('sidebar:new-chat')"
@@ -296,7 +298,7 @@ function prefetchTaskDetailIntent(detail: string) {
         <MessageSquarePlus :size="15" aria-hidden="true" />
         <span class="sb-primary-btn__label">新对话</span>
       </button>
-      <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
+    <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
     </div>
 
     <SidebarRunningProcessesSection
@@ -310,7 +312,8 @@ function prefetchTaskDetailIntent(detail: string) {
     <div v-if="isUnifiedMode && projectError" class="sb-banner sb-banner--err">
       <AlertTriangle :size="12" aria-hidden="true" />
       <span class="sb-banner__msg">{{ projectError }}</span>
-      <button type="button" class="sb-icon-btn" @click="dismissError" aria-label="忽略错误">
+      <button type="button" class="sb-icon-btn" data-agent-id="sidebar.error.dismiss" @click="dismissError" aria-label="忽略错误">
+        <span class="sr-only">忽略错误</span>
         <X :size="12" aria-hidden="true" />
       </button>
     </div>

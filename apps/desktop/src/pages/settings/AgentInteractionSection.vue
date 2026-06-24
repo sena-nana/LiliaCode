@@ -313,7 +313,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card">
+  <div class="card" data-agent-id="settings.agent">
     <h2>
       <span class="card-h2__title">
         <Sparkles :size="14" aria-hidden="true" />
@@ -334,6 +334,7 @@ onBeforeUnmount(() => {
             type="button"
             role="radio"
             :aria-checked="agentInteraction.permissionMode === option.value"
+            :data-agent-id="`settings.agent.permission-mode.${option.value}`"
             :class="{ 'is-active': agentInteraction.permissionMode === option.value }"
             :disabled="savingAgentInteraction"
             @click="setPermissionMode(option.value)"
@@ -363,6 +364,7 @@ onBeforeUnmount(() => {
             type="button"
             role="radio"
             :aria-checked="agentInteraction.mainAgentPromptMode === option.value"
+            :data-agent-id="`settings.agent.main-prompt-mode.${option.value}`"
             :class="{ 'is-active': agentInteraction.mainAgentPromptMode === option.value }"
             :disabled="savingAgentInteraction"
             @click="setMainAgentPromptMode(option.value)"
@@ -395,12 +397,14 @@ onBeforeUnmount(() => {
           id="main-agent-custom-prompt"
           v-model="mainAgentCustomPromptDraft"
           class="ui-textarea main-agent-prompt-panel__textarea"
+          data-agent-id="settings.agent.main-prompt.custom"
           rows="8"
           :disabled="savingAgentInteraction"
         />
         <button
           type="button"
           class="ui-button ui-button--ghost main-agent-prompt-panel__save"
+          data-agent-id="settings.agent.main-prompt.save"
           :disabled="savingAgentInteraction"
           @click="saveMainAgentCustomPrompt"
         >
@@ -416,6 +420,7 @@ onBeforeUnmount(() => {
           type="button"
           role="radio"
           :aria-checked="!agentInteraction.nonInterruptMode"
+          data-agent-id="settings.agent.non-interrupt.off"
           :class="{ 'is-active': !agentInteraction.nonInterruptMode }"
           :disabled="savingAgentInteraction"
           @click="setNonInterruptMode(false)"
@@ -426,6 +431,7 @@ onBeforeUnmount(() => {
           type="button"
           role="radio"
           :aria-checked="agentInteraction.nonInterruptMode"
+          data-agent-id="settings.agent.non-interrupt.on"
           :class="{ 'is-active': agentInteraction.nonInterruptMode }"
           :disabled="savingAgentInteraction"
           @click="setNonInterruptMode(true)"
@@ -442,6 +448,7 @@ onBeforeUnmount(() => {
           type="button"
           role="radio"
           :aria-checked="!agentInteraction.debug"
+          data-agent-id="settings.agent.debug.off"
           :class="{ 'is-active': !agentInteraction.debug }"
           :disabled="savingAgentInteraction"
           @click="setDebugMode(false)"
@@ -452,6 +459,7 @@ onBeforeUnmount(() => {
           type="button"
           role="radio"
           :aria-checked="agentInteraction.debug"
+          data-agent-id="settings.agent.debug.on"
           :class="{ 'is-active': agentInteraction.debug }"
           :disabled="savingAgentInteraction"
           @click="setDebugMode(true)"
@@ -469,20 +477,22 @@ onBeforeUnmount(() => {
         </div>
         <div class="ui-segmented" role="radiogroup" aria-label="自动轮次策略">
           <button
-            type="button"
-            role="radio"
-            :aria-checked="!agentInteraction.autoTurnDecision.enabled"
-            :class="{ 'is-active': !agentInteraction.autoTurnDecision.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction.autoTurnDecision.enabled"
+          data-agent-id="settings.agent.auto-turn.off"
+          :class="{ 'is-active': !agentInteraction.autoTurnDecision.enabled }"
             :disabled="savingAgentInteraction"
             @click="setAutoTurnDecisionField('enabled', false)"
           >
             关闭
           </button>
           <button
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.autoTurnDecision.enabled"
-            :class="{ 'is-active': agentInteraction.autoTurnDecision.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.autoTurnDecision.enabled"
+          data-agent-id="settings.agent.auto-turn.on"
+          :class="{ 'is-active': agentInteraction.autoTurnDecision.enabled }"
             :disabled="savingAgentInteraction"
             @click="setAutoTurnDecisionField('enabled', true)"
           >
@@ -500,20 +510,22 @@ onBeforeUnmount(() => {
           <div class="settings-row__label">{{ option.label }}</div>
           <div class="ui-segmented" role="radiogroup" :aria-label="option.ariaLabel">
             <button
-              type="button"
-              role="radio"
-              :aria-checked="!agentInteraction.autoTurnDecision[option.key]"
-              :class="{ 'is-active': !agentInteraction.autoTurnDecision[option.key] }"
+            type="button"
+            role="radio"
+            :aria-checked="!agentInteraction.autoTurnDecision[option.key]"
+            :data-agent-id="`settings.agent.auto-turn.${option.key}.off`"
+            :class="{ 'is-active': !agentInteraction.autoTurnDecision[option.key] }"
               :disabled="savingAgentInteraction || !agentInteraction.autoTurnDecision.enabled"
               @click="setAutoTurnDecisionField(option.key, false)"
             >
               禁止
             </button>
             <button
-              type="button"
-              role="radio"
-              :aria-checked="agentInteraction.autoTurnDecision[option.key]"
-              :class="{ 'is-active': agentInteraction.autoTurnDecision[option.key] }"
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.autoTurnDecision[option.key]"
+            :data-agent-id="`settings.agent.auto-turn.${option.key}.on`"
+            :class="{ 'is-active': agentInteraction.autoTurnDecision[option.key] }"
               :disabled="savingAgentInteraction || !agentInteraction.autoTurnDecision.enabled"
               @click="setAutoTurnDecisionField(option.key, true)"
             >
@@ -529,6 +541,7 @@ onBeforeUnmount(() => {
     >
       <div
         class="subagent-mode-card__header"
+        data-agent-id="settings.agent-interaction.subagent-details.toggle"
         role="button"
         :tabindex="agentInteraction.subagentMode.enabled ? 0 : -1"
         :aria-controls="subagentDetailsId"
@@ -551,20 +564,22 @@ onBeforeUnmount(() => {
           @click.stop
         >
           <button
-            type="button"
-            role="radio"
-            :aria-checked="!agentInteraction.subagentMode.enabled"
-            :class="{ 'is-active': !agentInteraction.subagentMode.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction.subagentMode.enabled"
+          data-agent-id="settings.agent.subagent.off"
+          :class="{ 'is-active': !agentInteraction.subagentMode.enabled }"
             :disabled="savingAgentInteraction"
             @click="setSubagentModeEnabled(false)"
           >
             关闭
           </button>
           <button
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.subagentMode.enabled"
-            :class="{ 'is-active': agentInteraction.subagentMode.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.subagentMode.enabled"
+          data-agent-id="settings.agent.subagent.on"
+          :class="{ 'is-active': agentInteraction.subagentMode.enabled }"
             :disabled="savingAgentInteraction"
             @click="setSubagentModeEnabled(true)"
           >
@@ -585,20 +600,22 @@ onBeforeUnmount(() => {
           <div class="settings-row__label">Codex Subagent</div>
           <div class="ui-segmented" role="radiogroup" aria-label="Codex Subagent">
             <button
-              type="button"
-              role="radio"
-              :aria-checked="!agentInteraction.subagentMode.codex.enabled"
-              :class="{ 'is-active': !agentInteraction.subagentMode.codex.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction.subagentMode.codex.enabled"
+          data-agent-id="settings.agent.subagent.codex.off"
+          :class="{ 'is-active': !agentInteraction.subagentMode.codex.enabled }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled"
               @click="setCodexSubagentEnabled(false)"
             >
               关闭
             </button>
             <button
-              type="button"
-              role="radio"
-              :aria-checked="agentInteraction.subagentMode.codex.enabled"
-              :class="{ 'is-active': agentInteraction.subagentMode.codex.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.subagentMode.codex.enabled"
+          data-agent-id="settings.agent.subagent.codex.on"
+          :class="{ 'is-active': agentInteraction.subagentMode.codex.enabled }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled"
               @click="setCodexSubagentEnabled(true)"
             >
@@ -611,20 +628,22 @@ onBeforeUnmount(() => {
           <div class="settings-row__label">Claude Subagent</div>
           <div class="ui-segmented" role="radiogroup" aria-label="Claude Subagent">
             <button
-              type="button"
-              role="radio"
-              :aria-checked="!agentInteraction.subagentMode.claude.enabled"
-              :class="{ 'is-active': !agentInteraction.subagentMode.claude.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction.subagentMode.claude.enabled"
+          data-agent-id="settings.agent.subagent.claude.off"
+          :class="{ 'is-active': !agentInteraction.subagentMode.claude.enabled }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled"
               @click="setClaudeSubagentField('enabled', false)"
             >
               关闭
             </button>
             <button
-              type="button"
-              role="radio"
-              :aria-checked="agentInteraction.subagentMode.claude.enabled"
-              :class="{ 'is-active': agentInteraction.subagentMode.claude.enabled }"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.subagentMode.claude.enabled"
+          data-agent-id="settings.agent.subagent.claude.on"
+          :class="{ 'is-active': agentInteraction.subagentMode.claude.enabled }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled"
               @click="setClaudeSubagentField('enabled', true)"
             >
@@ -637,20 +656,22 @@ onBeforeUnmount(() => {
           <div class="settings-row__label">Claude 转发子代理文本</div>
           <div class="ui-segmented" role="radiogroup" aria-label="Claude 转发子代理文本">
             <button
-              type="button"
-              role="radio"
-              :aria-checked="!agentInteraction.subagentMode.claude.forwardSubagentText"
-              :class="{ 'is-active': !agentInteraction.subagentMode.claude.forwardSubagentText }"
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction.subagentMode.claude.forwardSubagentText"
+          data-agent-id="settings.agent.subagent.claude.forward-text.off"
+          :class="{ 'is-active': !agentInteraction.subagentMode.claude.forwardSubagentText }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled || !agentInteraction.subagentMode.claude.enabled"
               @click="setClaudeSubagentField('forwardSubagentText', false)"
             >
               关闭
             </button>
             <button
-              type="button"
-              role="radio"
-              :aria-checked="agentInteraction.subagentMode.claude.forwardSubagentText"
-              :class="{ 'is-active': agentInteraction.subagentMode.claude.forwardSubagentText }"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.subagentMode.claude.forwardSubagentText"
+          data-agent-id="settings.agent.subagent.claude.forward-text.on"
+          :class="{ 'is-active': agentInteraction.subagentMode.claude.forwardSubagentText }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled || !agentInteraction.subagentMode.claude.enabled"
               @click="setClaudeSubagentField('forwardSubagentText', true)"
             >
@@ -663,20 +684,22 @@ onBeforeUnmount(() => {
           <div class="settings-row__label">Claude 进度摘要</div>
           <div class="ui-segmented" role="radiogroup" aria-label="Claude 进度摘要">
             <button
-              type="button"
-              role="radio"
-              :aria-checked="!agentInteraction.subagentMode.claude.agentProgressSummaries"
-              :class="{ 'is-active': !agentInteraction.subagentMode.claude.agentProgressSummaries }"
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction.subagentMode.claude.agentProgressSummaries"
+          data-agent-id="settings.agent.subagent.claude.progress-summary.off"
+          :class="{ 'is-active': !agentInteraction.subagentMode.claude.agentProgressSummaries }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled || !agentInteraction.subagentMode.claude.enabled"
               @click="setClaudeSubagentField('agentProgressSummaries', false)"
             >
               关闭
             </button>
             <button
-              type="button"
-              role="radio"
-              :aria-checked="agentInteraction.subagentMode.claude.agentProgressSummaries"
-              :class="{ 'is-active': agentInteraction.subagentMode.claude.agentProgressSummaries }"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.subagentMode.claude.agentProgressSummaries"
+          data-agent-id="settings.agent.subagent.claude.progress-summary.on"
+          :class="{ 'is-active': agentInteraction.subagentMode.claude.agentProgressSummaries }"
               :disabled="savingAgentInteraction || !agentInteraction.subagentMode.enabled || !agentInteraction.subagentMode.claude.enabled"
               @click="setClaudeSubagentField('agentProgressSummaries', true)"
             >

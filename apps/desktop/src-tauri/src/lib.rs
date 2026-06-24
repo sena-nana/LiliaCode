@@ -1,6 +1,7 @@
 use tauri::{utils::config::Color, Manager, Runtime, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
+mod agent_debug;
 pub mod agent_events;
 mod agent_extensions;
 mod agent_interaction_contract;
@@ -366,6 +367,11 @@ pub fn run() {
             automation::commands::automation_resume_run,
             automation::commands::automation_list_runs,
             automation::commands::automation_get_run,
+            agent_debug::agent_debug_status,
+            agent_debug::agent_debug_logs,
+            agent_debug::agent_debug_runtime_snapshot,
+            agent_debug::agent_debug_record_action,
+            agent_debug::agent_debug_reset_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

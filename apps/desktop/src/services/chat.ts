@@ -4,7 +4,7 @@
  * 已对齐字段名，前端不需再做 key 映射。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { normalizeAgentInteractionRequest } from "@lilia/contracts";
 import {

@@ -2,7 +2,7 @@
  * 项目 store：所有数据经 Tauri IPC 走 SQLite 持久化。
  * 内部维护 `PROJECTS` reactive ref 作为 UI 缓存。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import { ref } from "vue";
 import {
   PROJECT_CREATE_COMMAND,

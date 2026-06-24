@@ -4,7 +4,7 @@
  * - OrphanConversation = `project_id IS NULL` 的 task，同一张表。
  * - 草稿（draft）留在前端内存，不落库；`promote` 后才 INSERT。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ref } from "vue";
 import type { Task, TasksChangedEvent } from "@lilia/contracts";

@@ -283,7 +283,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="chat-composer__toolbar">
+  <div class="chat-composer__toolbar" data-agent-id="chat.composer.toolbar">
     <div
       v-if="previewAttachments.length"
       class="chat-composer__attachments"
@@ -294,6 +294,7 @@ onBeforeUnmount(() => {
         :key="attachment.id"
         type="button"
         class="chat-attachment-chip chat-attachment-chip--image-preview"
+        :data-agent-id="`chat.composer.attachment.preview.${attachment.id}`"
         :title="attachment.path"
         :aria-label="`查看图片 ${attachment.name}`"
         @click="emit('openImage', attachment)"
@@ -313,6 +314,7 @@ onBeforeUnmount(() => {
             ref="actionTriggerEl"
             type="button"
             class="chat-composer__action-trigger"
+            data-agent-id="chat.composer.actions.open"
             :class="{ 'is-open': actionMenuOpen }"
             title="更多输入操作"
             aria-label="更多输入操作"
@@ -335,6 +337,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="dd__item chat-composer__action-menu-item"
+                  data-agent-id="chat.composer.actions.attachments"
                   role="menuitem"
                   @click="pickAction('attachments')"
                 >
@@ -346,6 +349,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="dd__item chat-composer__action-menu-item"
+                  data-agent-id="chat.composer.actions.reference-conversation"
                   role="menuitem"
                   @click="pickAction('reference')"
                 >
@@ -357,6 +361,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
+                  data-agent-id="chat.composer.actions.plan-mode"
                   :class="{ 'is-active': state.planMode }"
                   role="menuitemcheckbox"
                   :aria-checked="state.planMode"
@@ -373,6 +378,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
+                  data-agent-id="chat.composer.actions.goal-mode"
                   :class="{ 'is-active': state.goalMode }"
                   role="menuitemcheckbox"
                   :aria-checked="state.goalMode"
@@ -392,6 +398,7 @@ onBeforeUnmount(() => {
         </div>
         <Dropdown
           class="chat-composer__permission-dropdown"
+          data-agent-id="chat.composer.permission"
           :class="{ 'is-full-access': state.permission === 'full' }"
           :model-value="state.permission"
           :options="permissionOptions"
@@ -400,6 +407,7 @@ onBeforeUnmount(() => {
         />
         <Dropdown
           class="chat-composer__worktree-dropdown"
+          data-agent-id="chat.composer.worktree"
           :class="{ 'is-error': worktreeError }"
           :model-value="worktreeValue"
           :options="worktreeOptions"
@@ -410,6 +418,7 @@ onBeforeUnmount(() => {
           @update:model-value="emit('selectWorktree', $event)"
         />
         <ComposerModelPicker
+          data-agent-id="chat.composer.model"
           :state="state"
           :model-options="modelOptions"
           :auto-model-preview="autoModelPreview"
@@ -420,6 +429,7 @@ onBeforeUnmount(() => {
           :key="chip.key"
           type="button"
           class="chat-composer__mode-chip"
+          :data-agent-id="`chat.composer.mode.${chip.key}`"
           :title="chip.title"
           :aria-label="chip.title"
           @click="chip.toggle"
@@ -451,6 +461,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="chat-composer__context-action"
+            data-agent-id="chat.composer.context.compact"
             :class="[contextUsageTone(contextUsage), { 'is-disabled': compactDisabled }]"
             :style="contextUsageProgressStyle"
             :disabled="compactDisabled || actionsBlocked"
@@ -477,6 +488,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="chat-composer__optimize"
+          data-agent-id="chat.composer.prompt.optimize"
           :disabled="!canOptimizePrompt"
           :title="promptOptimizing ? '正在优化提示词' : '优化提示词'"
           :aria-label="promptOptimizing ? '正在优化提示词' : '优化提示词'"
@@ -487,6 +499,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="chat-composer__send"
+          data-agent-id="chat.composer.send"
           :class="{ 'chat-composer__send--interrupt': canInterrupt }"
           :disabled="actionsBlocked || !canSubmitEntry"
           :title="sendTitle"

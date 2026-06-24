@@ -30,6 +30,7 @@ function openFromKey(item: SidebarRunningProcessItem, event: KeyboardEvent) {
         v-for="item in items"
         :key="item.taskId"
         class="sb-tree__row sb-tree__row--running-process"
+        :data-agent-id="`sidebar.running-process.open.${item.taskId}`"
         role="button"
         tabindex="0"
         @click="emit('open', item)"
@@ -41,9 +42,10 @@ function openFromKey(item: SidebarRunningProcessItem, event: KeyboardEvent) {
         <span class="sb-tree__name">{{ item.title }}</span>
         <span v-if="item.projectName" class="sb-tree__project-label">{{ item.projectName }}</span>
         <button
-          type="button"
-          class="sb-icon-btn sb-icon-btn--danger sb-tree__running-process-stop"
-          :disabled="stoppingTaskIds.includes(item.taskId)"
+      type="button"
+      class="sb-icon-btn sb-icon-btn--danger sb-tree__running-process-stop"
+      :data-agent-id="`sidebar.running-process.stop.${item.taskId}`"
+      :disabled="stoppingTaskIds.includes(item.taskId)"
           :title="stoppingTaskIds.includes(item.taskId) ? '正在停止进程' : '强行停止进程'"
           :aria-label="stoppingTaskIds.includes(item.taskId) ? '正在停止进程' : '强行停止进程'"
           @click.stop="emit('stop', item.taskId)"

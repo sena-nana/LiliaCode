@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import {
   POPUP_FOCUS_MAIN_COMMAND,
   POPUP_GET_WINDOW_SETTINGS_COMMAND,
