@@ -561,6 +561,10 @@ describe("Settings provider switch", () => {
 
     await waitFor(() => {
       expect(view.getByText("当前版本：codex-cli 0.136.0 / latest 0.141.0")).toBeInTheDocument();
+      expect(view.queryByText("运行时状态")).not.toBeInTheDocument();
+      expect(view.queryByText(/路径：/)).not.toBeInTheDocument();
+      expect(view.queryByText("将安装到 Lilia 管理目录")).not.toBeInTheDocument();
+      expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
       expect(view.getByRole("button", { name: /更新到 0.141.0/ })).toBeEnabled();
     });
 
@@ -598,8 +602,11 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("运行时状态")).toBeInTheDocument();
+      expect(view.queryByText("运行时状态")).not.toBeInTheDocument();
       expect(view.getByText("登录状态：未登录")).toBeInTheDocument();
+      expect(view.queryByText(/路径：/)).not.toBeInTheDocument();
+      expect(view.queryByText("将安装到 Lilia 管理目录")).not.toBeInTheDocument();
+      expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
       expect(view.getByRole("button", { name: "登录" })).toBeEnabled();
     });
 
