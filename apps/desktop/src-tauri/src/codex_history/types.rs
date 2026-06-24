@@ -24,6 +24,8 @@ pub struct CodexThreadSummary {
     pub status: Option<String>,
     pub model: Option<String>,
     pub source_kind: Option<String>,
+    #[serde(default)]
+    pub project_cwd: Option<String>,
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
     pub archived: bool,

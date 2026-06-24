@@ -52,6 +52,7 @@ pub(crate) fn save_claude_prompt_suggestion<R: Runtime>(
         source: SuggestionItemSource::Claude,
         github_activities: Vec::new(),
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         summary: summarize_claude_prompt_suggestion(&prompt),
         reason: "Claude 根据上一轮对话预测的下一条提示。".to_string(),
         prompt,

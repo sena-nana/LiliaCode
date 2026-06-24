@@ -4,11 +4,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value as JsonValue;
 use tauri::AppHandle;
 
+use super::codex_thread::load_recent_codex_threads;
 use super::generation::{compact_line, truncate_chars};
 use super::github_context::load_github_activity_context;
 use super::local_git::load_local_git_context;
 use super::types::{
-    GitHubActivitySample, GitHubRepoRef, LocalGitContextSample, ProjectContext,
+    CodexThreadSample, GitHubActivitySample, GitHubRepoRef, LocalGitContextSample, ProjectContext,
     SuggestionItemSource, SuggestionLocalGitProbe, SuggestionScope, SuggestionSourceProbe,
     TaskSample, MAX_TASKS_PER_SCOPE, SAMPLE_TEXT_LIMIT, TASK_CANDIDATE_LIMIT,
     UNFINISHED_SIGNAL_LIMIT,
@@ -46,12 +47,20 @@ pub(super) fn build_scope(
     } else {
         Vec::new()
     };
+    let codex_threads = match load_recent_codex_threads(app, conn, &project, requested_project_id) {
+        Ok(threads) => threads,
+        Err(err) => {
+            eprintln!("[conversation-suggestions] Codex thread context skipped: {err}");
+            Vec::new()
+        }
+    };
     build_scope_from_parts(
         conn,
         requested_project_id,
         project,
         github_context,
         local_git_contexts,
+        codex_threads,
     )
 }
 
@@ -61,6 +70,7 @@ pub(super) fn build_scope_from_parts(
     project: ProjectContext,
     github_context: Option<(GitHubRepoRef, Vec<GitHubActivitySample>)>,
     local_git_contexts: Vec<LocalGitContextSample>,
+    codex_threads: Vec<CodexThreadSample>,
 ) -> Result<Option<SuggestionScope>, String> {
     let tasks = if let Some(project_id) = requested_project_id {
         load_task_samples(conn, Some(project_id), TASK_CANDIDATE_LIMIT)?
@@ -81,12 +91,21 @@ pub(super) fn build_scope_from_parts(
     } else {
         Vec::new()
     };
-    if tasks.is_empty() && github_activities.is_empty() && local_git_contexts.is_empty() {
+    if tasks.is_empty()
+        && github_activities.is_empty()
+        && local_git_contexts.is_empty()
+        && codex_threads.is_empty()
+    {
         return Ok(None);
     }
     let latest_updated_at = tasks
         .iter()
         .map(|task| task.latest_updated_at)
+        .chain(
+            codex_threads
+                .iter()
+                .filter_map(|thread| thread.thread.updated_at),
+        )
         .max()
         .unwrap_or(0);
     let project_id = requested_project_id
@@ -99,6 +118,7 @@ pub(super) fn build_scope_from_parts(
         github_repo,
         github_activities,
         local_git_contexts,
+        codex_threads,
         latest_updated_at,
     }))
 }
@@ -110,6 +130,9 @@ pub(super) fn summarize_scope_sources(scope: &SuggestionScope) -> SuggestionSour
     }
     if !scope.github_activities.is_empty() {
         sources.push(SuggestionItemSource::Github);
+    }
+    if !scope.codex_threads.is_empty() {
+        sources.push(SuggestionItemSource::CodexThread);
     }
     let local_git = if scope.local_git_contexts.is_empty() {
         None

@@ -736,6 +736,7 @@ export type SuggestionItemIncludesGitHubActivityTypeTest = Assert<
         url: "https://github.com/sena-nana/LiliaCode/pull/1";
       }];
       localGitContexts: [];
+      codexThreads: [];
       summary: "跟进 PR";
       reason: "近期 PR 有新活动。";
       prompt: "请继续跟进 PR #1。";
@@ -760,6 +761,7 @@ export type SuggestionItemIncludesLocalGitContextTypeTest = Assert<
         changedFiles: ["M apps/desktop/src-tauri/src/conversation_suggestions.rs"];
         recentCommits: ["abc1234 add suggestions"];
       }];
+      codexThreads: [];
       summary: "跟进本地变更";
       reason: "当前分支有未提交变更。";
       prompt: "请基于 feature/local-git 的未提交变更继续处理。";
@@ -778,9 +780,34 @@ export type SuggestionItemIncludesClaudeNativeSourceTypeTest = Assert<
       source: "claude";
       githubActivities: [];
       localGitContexts: [];
+      codexThreads: [];
       summary: "继续检查建议展示";
       reason: "Claude 根据上一轮对话预测的下一条提示。";
       prompt: "请继续检查 Claude 原生建议展示。";
+      generatedAt: 1;
+    },
+    SuggestionItem
+  >
+>;
+
+export type SuggestionItemIncludesCodexThreadSourceTypeTest = Assert<
+  Extends<
+    {
+      id: "sg-codex-thread-1";
+      projectId: "project-1";
+      taskIds: [];
+      source: "codex-thread";
+      githubActivities: [];
+      localGitContexts: [];
+      codexThreads: [{
+        id: "thread-1";
+        title: "补齐 Codex 建议";
+        updatedAt: 2000;
+        preview: "继续补齐 conversation suggestions";
+      }];
+      summary: "继续 Codex thread";
+      reason: "最近 Codex thread 显示建议来源还没补完。";
+      prompt: "请基于 thread-1 继续处理。";
       generatedAt: 1;
     },
     SuggestionItem

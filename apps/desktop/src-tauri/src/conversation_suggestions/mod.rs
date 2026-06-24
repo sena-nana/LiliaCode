@@ -1,5 +1,6 @@
 mod cache;
 mod claude_native;
+mod codex_thread;
 #[cfg(test)]
 mod command_contract;
 mod contract;

@@ -90,6 +90,18 @@ export function normalizeCodexThread(row, turns = []) {
     status: firstString(row.status, thread.status),
     model: firstString(row.model, row.modelProvider, thread.model, thread.modelProvider),
     sourceKind: firstString(row.sourceKind, row.source_kind, row.source?.kind),
+    projectCwd: firstString(
+      row.cwd,
+      row.projectCwd,
+      row.project_cwd,
+      row.workspaceRoot,
+      row.workspace_root,
+      thread.cwd,
+      thread.projectCwd,
+      thread.project_cwd,
+      thread.workspaceRoot,
+      thread.workspace_root,
+    ),
     createdAt: millisFromSeconds(row.createdAt ?? row.created_at ?? thread.createdAt),
     updatedAt: millisFromSeconds(
       row.updatedAt ??

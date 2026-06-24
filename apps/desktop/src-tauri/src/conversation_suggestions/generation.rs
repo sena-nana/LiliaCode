@@ -86,6 +86,20 @@ pub(super) fn build_generation_prompt(scope: &SuggestionScope) -> String {
             ));
         }
     }
+    for thread in &scope.codex_threads {
+        lines.push(format!(
+            "\nCodex thread {} | 标题: {} | updatedAt: {}",
+            thread.thread.id,
+            truncate_chars(&compact_line(&thread.thread.title), SAMPLE_TEXT_LIMIT),
+            thread.thread.updated_at.unwrap_or(0)
+        ));
+        if let Some(preview) = &thread.thread.preview {
+            lines.push(format!(
+                "thread 预览: {}",
+                truncate_chars(&compact_line(preview), SAMPLE_TEXT_LIMIT)
+            ));
+        }
+    }
     lines.join("\n")
 }
 
@@ -97,6 +111,8 @@ pub(super) struct RawSuggestion {
     pub(super) github_activity_ids: Vec<String>,
     #[serde(default, rename = "localGitContextIds")]
     pub(super) local_git_context_ids: Vec<String>,
+    #[serde(default, rename = "codexThreadIds")]
+    pub(super) codex_thread_ids: Vec<String>,
     pub(super) summary: Option<String>,
     pub(super) reason: Option<String>,
     pub(super) prompt: Option<String>,
@@ -133,6 +149,11 @@ pub(super) fn materialize_items(
         .iter()
         .map(|context| (context.context.id.clone(), context))
         .collect::<HashMap<_, _>>();
+    let codex_thread_by_id = scope
+        .codex_threads
+        .iter()
+        .map(|thread| (thread.thread.id.clone(), thread))
+        .collect::<HashMap<_, _>>();
     raw.into_iter()
         .filter_map(|item| {
             let task_ids = item
@@ -158,7 +179,16 @@ pub(super) fn materialize_items(
                 .filter_map(|context_id| local_git_context_by_id.get(&context_id).copied())
                 .map(|context| context.context.clone())
                 .collect::<Vec<_>>();
-            if task_ids.is_empty() && github_activities.is_empty() && local_git_contexts.is_empty()
+            let codex_threads = item
+                .codex_thread_ids
+                .into_iter()
+                .filter_map(|thread_id| codex_thread_by_id.get(&thread_id).copied())
+                .map(|thread| thread.thread.clone())
+                .collect::<Vec<_>>();
+            if task_ids.is_empty()
+                && github_activities.is_empty()
+                && local_git_contexts.is_empty()
+                && codex_threads.is_empty()
             {
                 return None;
             }
@@ -173,7 +203,11 @@ pub(super) fn materialize_items(
                 project_id: scope.project_id.clone(),
                 source: if task_ids.is_empty() {
                     if github_activities.is_empty() {
-                        SuggestionItemSource::LocalGit
+                        if local_git_contexts.is_empty() {
+                            SuggestionItemSource::CodexThread
+                        } else {
+                            SuggestionItemSource::LocalGit
+                        }
                     } else {
                         SuggestionItemSource::Github
                     }
@@ -183,6 +217,7 @@ pub(super) fn materialize_items(
                 task_ids,
                 github_activities,
                 local_git_contexts,
+                codex_threads,
                 summary,
                 reason,
                 prompt,
