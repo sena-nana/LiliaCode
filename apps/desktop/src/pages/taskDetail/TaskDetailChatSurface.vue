@@ -55,12 +55,6 @@ const chatComposerLoad = createLazyLoadState(() =>
     async () => (await import("../../components/chat/ChatComposer.vue")).default,
   )
 );
-const processSessionControlLoad = createLazyLoadState(() =>
-  measurePerfAsync(
-    "task-detail.process-session-control.load",
-    async () => (await import("../../components/chat/ProcessSessionControl.vue")).default,
-  )
-);
 const chatSuggestionsLoad = createLazyLoadState(() =>
   measurePerfAsync(
     "task-detail.chat-suggestions.load",
@@ -99,10 +93,6 @@ const ChatTranscript = defineAsyncComponent({
 const ChatComposer = defineAsyncComponent({
   suspensible: false,
   loader: () => chatComposerLoad.load(),
-});
-const ProcessSessionControl = defineAsyncComponent({
-  suspensible: false,
-  loader: () => processSessionControlLoad.load(),
 });
 const ChatSuggestions = defineAsyncComponent({
   suspensible: false,
@@ -151,8 +141,6 @@ const props = defineProps<{
   hasBlockingPendingAction: boolean;
   taskRunBlockingReason: string | null;
   currentLiliaGoal: LiliaThreadGoal | null;
-  processSessionBusy: boolean;
-  processSessionError: string | null;
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
@@ -186,9 +174,6 @@ const emit = defineEmits<{
   "clear-lilia-goal": [];
   "insert-draft-text": [text: string];
   "clear-branch-anchor": [];
-  "start-process-session": [command: string];
-  "send-process-session-stdin": [stdin: string];
-  "stop-process-session": [];
   send: [
     content: string,
     attachments: ChatAttachment[],
@@ -506,15 +491,6 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @set-lilia-goal="emit('set-lilia-goal', $event)"
                   @refresh-lilia-goal="emit('refresh-lilia-goal')"
                   @clear-lilia-goal="emit('clear-lilia-goal')"
-                />
-                <ProcessSessionControl
-                  :running="isTurnRunning"
-                  :busy="processSessionBusy"
-                  :disabled="hasBlockingPendingAction || !!taskRunBlockingReason"
-                  :error="processSessionError"
-                  @start="emit('start-process-session', $event)"
-                  @send-stdin="emit('send-process-session-stdin', $event)"
-                  @stop="emit('stop-process-session')"
                 />
                 <ChatComposer
                   v-if="composerActivated"

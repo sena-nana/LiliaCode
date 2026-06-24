@@ -101,6 +101,14 @@ export function markConversationCompleted(taskId: string) {
   state.completed = true;
 }
 
+export function clearConversationRunning(taskId: string) {
+  if (!taskId) return;
+  const state = states[taskId];
+  if (!state) return;
+  state.running = false;
+  compactState(taskId);
+}
+
 export function markConversationError(taskId: string) {
   if (!taskId) return;
   const state = ensureState(taskId);
