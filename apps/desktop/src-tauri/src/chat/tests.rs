@@ -2226,6 +2226,10 @@ mod agent_event_sink_tests {
 
         assert_eq!(snapshot.phase, "running");
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-live"));
+        assert_eq!(
+            snapshot.process_session_id.as_deref(),
+            Some(process_session_id.as_str())
+        );
         crate::chat::runner::remove_test_process_session(&process_session_id);
     }
 

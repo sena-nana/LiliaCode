@@ -61,14 +61,29 @@ private const val DETAIL_SNAPSHOT_FALLBACK_MAX_MS = 15_000L
 
 class MainActivity : ComponentActivity() {
     private var pairingIntentUri by mutableStateOf<String?>(null)
+    private var foregroundResumeToken by mutableStateOf(0L)
+    private var didLeaveForeground = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val repository = RemoteRepository(applicationContext)
         pairingIntentUri = intent?.dataString
         setContent {
-            LiliaRemoteApp(repository, pairingIntentUri)
+            LiliaRemoteApp(repository, pairingIntentUri, foregroundResumeToken)
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (didLeaveForeground) {
+            didLeaveForeground = false
+            foregroundResumeToken += 1
+        }
+    }
+
+    override fun onStop() {
+        didLeaveForeground = true
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -79,7 +94,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: String? = null) {
+fun LiliaRemoteApp(
+    repository: RemoteRepository? = null,
+    initialPairingUri: String? = null,
+    foregroundResumeToken: Long = 0L,
+) {
     val fallbackRepository = remember { repository }
     val client = remember(fallbackRepository) { fallbackRepository?.let { RemoteHttpClient(it) } }
     val scope = rememberCoroutineScope()
@@ -97,6 +116,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     var providerStatus by remember { mutableStateOf<RemoteProviderStatus?>(null) }
     var pairingBusy by remember { mutableStateOf(false) }
     var pairingError by remember { mutableStateOf("") }
+    var pendingPcSwitchTaskId by remember { mutableStateOf<String?>(null) }
     var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
 
     fun resetActivePcDerivedState() {
@@ -118,10 +138,12 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     }
 
     fun selectActivePc(pc: SavedPc) {
-        val selected = fallbackRepository?.switchActivePc(pc.endpointId) ?: pc
+        val taskIdToRefresh = selectedTask?.task?.taskId
+        val selected = fallbackRepository?.switchActivePc(pc) ?: pc
         savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
         activePc = selected
         resetActivePcDerivedState()
+        pendingPcSwitchTaskId = taskIdToRefresh
         bridgeTone = "Listening"
         remoteError = ""
         pairingError = ""
@@ -291,17 +313,17 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             }
     }
 
-    suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteHttpClient) {
+    suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteHttpClient): Boolean {
         val accepted = remoteClient.resume(pc).getOrElse {
-            if (shouldIgnorePcResult(activePc, pc)) return
+            if (shouldIgnorePcResult(activePc, pc)) return false
             bridgeTone = "Offline"
             handleRemoteFailure(it, "Failed to resume remote session", pc)
-            return
+            return false
         }
-        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldIgnorePcResult(activePc, pc)) return false
         if (!accepted) {
             clearUntrustedPc(pc, UNTRUSTED_PC_MESSAGE)
-            return
+            return false
         }
         val status = remoteClient.bridgeStatus(pc)
             .onSuccess {
@@ -315,13 +337,13 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 bridgeTone = "Offline"
             }
             .getOrNull()
-        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldIgnorePcResult(activePc, pc)) return false
         refreshProviderStatus(pc, remoteClient)
-        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldIgnorePcResult(activePc, pc)) return false
         if (status?.capabilities?.supportsTaskInbox == false) {
             inboxTasks = emptyList()
             remoteError = taskInboxUnsupportedMessage()
-            return
+            return true
         }
         remoteClient.listTasks(pc)
             .onSuccess {
@@ -330,6 +352,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 inboxTasks = if (detail == null) it else syncInboxTaskStatus(it, detail)
             }
             .onFailure { handleRemoteFailure(it, "Failed to load tasks", pc) }
+        return true
     }
 
     fun openTask(pc: SavedPc, taskId: String) {
@@ -341,7 +364,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             remoteClient.taskDetail(pc, taskId)
                 .onSuccess {
                     if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                    applyTaskDetail(it)
+                    applyTaskDetail(it.withRelatedTasks(inboxTasks))
                 }
                 .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
             if (!shouldIgnorePcResult(activePc, pc)) {
@@ -371,13 +394,35 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 remoteClient.taskDetail(pc, taskId)
                     .onSuccess {
                         if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                        applyTaskDetail(it)
+                        applyTaskDetail(it.withRelatedTasks(inboxTasks))
                     }
                     .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
             }
             if (!shouldIgnorePcResult(activePc, pc)) {
                 detailLoading = false
             }
+        }
+    }
+
+    fun sendProcessCommand(command: org.json.JSONObject, failureMessage: String, clearError: Boolean = true) {
+        val pc = activePc ?: return
+        val detail = selectedTask ?: return
+        val taskId = detail.task.taskId
+        if (command.optString("type") == "process_session" && command.optString("action") == "spawn") {
+            taskRunBlockInfo(detail.task, detail.relatedTasks)?.let {
+                remoteError = it.reason
+                return
+            }
+        }
+        runTaskAction(pc, taskId, failureMessage, clearError) { remoteClient ->
+            remoteClient.sendMessage(
+                pc,
+                RemoteSendMessageInput(
+                    taskId = taskId,
+                    content = "",
+                    runtimeCommand = command,
+                ),
+            )
         }
     }
 
@@ -389,6 +434,37 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             loadInbox(pc, remoteClient)
             if (!shouldIgnorePcResult(activePc, pc)) {
                 inboxLoading = false
+            }
+        }
+    }
+
+    fun resumeActivePcFromForeground(pc: SavedPc) {
+        val remoteClient = client ?: return
+        val taskId = selectedTask?.task?.taskId
+        inboxLoading = true
+        detailLoading = taskId != null
+        remoteError = ""
+        scope.launch {
+            val resumed = loadInbox(pc, remoteClient)
+            if (
+                resumed &&
+                taskId != null &&
+                !shouldIgnorePcResult(activePc, pc) &&
+                selectedTask?.task?.taskId == taskId
+            ) {
+                remoteClient.taskDetail(pc, taskId)
+                    .onSuccess {
+                        if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
+                        applyTaskDetail(it.withRelatedTasks(inboxTasks))
+                        clearLiveUpdateError()
+                    }
+                    .onFailure { handleRemoteFailure(it, "Failed to refresh task", pc) }
+            }
+            if (!shouldIgnorePcResult(activePc, pc)) {
+                inboxLoading = false
+                if (taskId != null) {
+                    detailLoading = false
+                }
             }
         }
     }
@@ -413,6 +489,16 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         if (!shouldIgnorePcResult(activePc, pc)) {
             inboxLoading = false
         }
+        val taskIdToRefresh = pendingPcSwitchTaskId ?: return@LaunchedEffect
+        pendingPcSwitchTaskId = null
+        if (shouldIgnorePcResult(activePc, pc)) return@LaunchedEffect
+        openTask(pc, taskIdToRefresh)
+    }
+
+    LaunchedEffect(foregroundResumeToken) {
+        if (foregroundResumeToken == 0L) return@LaunchedEffect
+        val pc = activePc ?: return@LaunchedEffect
+        resumeActivePcFromForeground(pc)
     }
 
     LaunchedEffect(
@@ -474,6 +560,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 selectedTask != null -> TaskDetailScreen(
                     pc = activePc!!,
                     detail = selectedTask!!,
+                    taskRunBlockInfo = taskRunBlockInfo(selectedTask!!.task, selectedTask!!.relatedTasks),
                     savedPcs = savedPcs,
                     capabilities = bridgeStatus?.capabilities ?: RemoteCapabilities(),
                     providerStatus = providerStatus,
@@ -490,11 +577,11 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                             remoteClient.interrupt(pc, taskId)
                         }
                     },
-                    onRetry = {
+                    onRetry = { eventId ->
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
                         runTaskAction(pc, taskId, "Retry failed") { remoteClient ->
-                            remoteClient.retry(pc, taskId)
+                            remoteClient.retry(pc, taskId, eventId)
                         }
                     },
                     onResolveInteraction = { interaction, approve, responseText, selectedOptions ->
@@ -514,26 +601,52 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                     onClearBranchAnchor = { pendingBranchAnchor = null },
                     onSend = { message, branchAnchor ->
                         val pc = activePc!!
-                        val taskId = selectedTask!!.task.taskId
-                        runTaskAction(
-                            pc,
-                            taskId,
-                            "Send failed",
-                            onSuccess = {
-                                if (pendingBranchAnchor == branchAnchor) {
-                                    pendingBranchAnchor = null
-                                }
-                            },
-                        ) { remoteClient ->
-                            remoteClient.sendMessage(
+                        val detail = selectedTask!!
+                        val taskId = detail.task.taskId
+                        val blockInfo = taskRunBlockInfo(detail.task, detail.relatedTasks)
+                        if (blockInfo != null) {
+                            remoteError = blockInfo.reason
+                        } else {
+                            runTaskAction(
                                 pc,
-                                RemoteSendMessageInput(
-                                    taskId = taskId,
-                                    content = message,
-                                    runtimeCommand = branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
-                                ),
-                            )
+                                taskId,
+                                "Send failed",
+                                onSuccess = {
+                                    if (pendingBranchAnchor == branchAnchor) {
+                                        pendingBranchAnchor = null
+                                    }
+                                },
+                            ) { remoteClient ->
+                                remoteClient.sendMessage(
+                                    pc,
+                                    RemoteSendMessageInput(
+                                        taskId = taskId,
+                                        content = message,
+                                        runtimeCommand = branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
+                                    ),
+                                )
+                            }
                         }
+                    },
+                    onStartProcess = { command ->
+                        sendProcessCommand(
+                            RemoteRuntimeCommandAdapter.processSpawn(command),
+                            "Start process failed",
+                        )
+                    },
+                    onSendProcessStdin = { stdin ->
+                        sendProcessCommand(
+                            RemoteRuntimeCommandAdapter.processWriteStdin(stdin),
+                            "Send stdin failed",
+                            clearError = false,
+                        )
+                    },
+                    onStopProcess = {
+                        sendProcessCommand(
+                            RemoteRuntimeCommandAdapter.processKill(),
+                            "Stop process failed",
+                            clearError = false,
+                        )
                     },
                 )
                 else -> InboxScreen(
@@ -569,6 +682,38 @@ internal fun shouldIgnorePcResult(current: SavedPc?, candidate: SavedPc): Boolea
 
 internal fun shouldClearActivePcForFailure(err: Throwable): Boolean =
     err is RemoteBridgeException && err.code == "unauthorized"
+
+internal data class ActivePcSwitcherItem(
+    val pc: SavedPc,
+    val active: Boolean,
+)
+
+internal fun activePcSwitcherItems(
+    activePc: SavedPc?,
+    savedPcs: List<SavedPc>,
+): List<ActivePcSwitcherItem> {
+    val pcs = buildList {
+        activePc?.let { add(it) }
+        savedPcs.forEach { pc ->
+            if (none { activePcConnectionMatches(it, pc) }) {
+                add(pc)
+            }
+        }
+    }
+    return pcs.map { pc ->
+        ActivePcSwitcherItem(
+            pc = pc,
+            active = activePc != null && activePcConnectionMatches(activePc, pc),
+        )
+    }
+}
+
+private fun RemoteTaskDetail.withRelatedTasks(tasks: List<RemoteTaskSummary>): RemoteTaskDetail {
+    val byId = LinkedHashMap<String, RemoteTaskSummary>()
+    tasks.forEach { byId[it.taskId] = it }
+    byId[task.taskId] = task
+    return copy(relatedTasks = byId.values.toList())
+}
 
 internal fun syncInboxTaskStatus(
     tasks: List<RemoteTaskSummary>,
@@ -773,7 +918,11 @@ private fun InboxScreen(
                 item { Text("No tasks from the active PC.", color = Muted, style = MaterialTheme.typography.bodyMedium) }
             }
             items(tasks, key = { it.taskId }) { task ->
-                TaskCard(task = task, onClick = { onOpenTask(task) })
+                TaskCard(
+                    task = task,
+                    blockInfo = taskRunBlockInfo(task, tasks),
+                    onClick = { onOpenTask(task) },
+                )
             }
         }
     }
@@ -783,6 +932,7 @@ private fun InboxScreen(
 private fun TaskDetailScreen(
     pc: SavedPc,
     detail: RemoteTaskDetail,
+    taskRunBlockInfo: TaskRunBlockInfo?,
     savedPcs: List<SavedPc>,
     capabilities: RemoteCapabilities,
     providerStatus: RemoteProviderStatus?,
@@ -793,16 +943,23 @@ private fun TaskDetailScreen(
     onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
     onInterrupt: () -> Unit,
-    onRetry: () -> Unit,
+    onRetry: (String?) -> Unit,
     onResolveInteraction: (PendingInteraction, Boolean, String, Map<String, List<String>>) -> Unit,
     onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
     onClearBranchAnchor: () -> Unit,
     onSend: (String, RemoteBranchAnchor?) -> Unit,
+    onStartProcess: (String) -> Unit,
+    onSendProcessStdin: (String) -> Unit,
+    onStopProcess: () -> Unit,
 ) {
     var draft by remember(detail.task.taskId) { mutableStateOf("") }
+    var processCommand by remember(detail.task.taskId) { mutableStateOf("") }
+    var processStdin by remember(detail.processSessionId) { mutableStateOf("") }
     val pendingInteraction = detail.pendingInteraction
     val providerReady = providerStatus?.ready != false
+    val processRunning = detail.processSessionId != null
     val hasRetryableError = detail.timeline.any { it.retryable }
+    val retryEnabled = !loading && providerReady && capabilities.supportsChatSend
     var interactionResponse by remember(pendingInteraction?.requestId) { mutableStateOf("") }
     var selectedInteractionOptions by remember(pendingInteraction?.requestId) { mutableStateOf<Set<String>>(emptySet()) }
     Column(
@@ -834,8 +991,8 @@ private fun TaskDetailScreen(
                 Text("Interrupt")
             }
             OutlinedButton(
-                onClick = onRetry,
-                enabled = !loading && providerReady && capabilities.supportsChatSend && hasRetryableError,
+                onClick = { onRetry(null) },
+                enabled = retryEnabled && hasRetryableError,
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text("Retry")
@@ -851,6 +1008,34 @@ private fun TaskDetailScreen(
         if (error.isNotBlank()) {
             Text(error, color = Danger, style = MaterialTheme.typography.bodySmall)
         }
+        if (taskRunBlockInfo != null) {
+            BlockedTaskPanel(taskRunBlockInfo)
+        }
+        ProcessSessionPanel(
+            running = processRunning,
+            processSessionId = detail.processSessionId,
+            command = processCommand,
+            stdin = processStdin,
+            loading = loading,
+            startBlockReason = taskRunBlockInfo?.reason,
+            onCommandChange = { processCommand = it },
+            onStdinChange = { processStdin = it },
+            onStart = {
+                val command = processCommand.trim()
+                if (command.isNotEmpty()) {
+                    processCommand = ""
+                    onStartProcess(command)
+                }
+            },
+            onSendStdin = {
+                if (processStdin.isNotEmpty()) {
+                    val value = processStdin
+                    processStdin = ""
+                    onSendProcessStdin(value)
+                }
+            },
+            onStop = onStopProcess,
+        )
         pendingInteraction?.let { interaction ->
             val optionQuestion = interactionOptionQuestion(interaction)
             val canResolveInteraction = interactionCanSubmit(
@@ -950,11 +1135,14 @@ private fun TaskDetailScreen(
                 TimelineRow(
                     item = item,
                     loading = loading,
+                    retryEnabled = retryEnabled,
+                    onRetry = { onRetry(item.id) },
                     onStartBranch = { mode ->
                         item.branchSourceTurnId?.let { turnId ->
                             onSelectBranchAnchor(RemoteBranchAnchor(turnId, mode))
                         }
                     },
+                    blockReason = taskRunBlockInfo?.reason,
                 )
             }
         }
@@ -987,20 +1175,22 @@ private fun TaskDetailScreen(
             value = draft,
             onValueChange = { draft = it },
             modifier = Modifier.fillMaxWidth(),
+            enabled = taskRunBlockInfo == null,
             label = { Text("Message") },
             placeholder = { Text("Send through the PC runner") },
         )
         Button(
             onClick = {
                 val message = draft.trim()
-                if (message.isNotEmpty()) {
+                if (message.isNotEmpty() && taskRunBlockInfo == null) {
                     val branchAnchor = pendingBranchAnchor
                     draft = ""
                     onSend(message, branchAnchor)
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !loading && providerReady && capabilities.supportsChatSend && draft.trim().isNotEmpty(),
+            enabled = !loading && providerReady && capabilities.supportsChatSend && taskRunBlockInfo == null &&
+                draft.trim().isNotEmpty(),
             shape = RoundedCornerShape(8.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -1012,9 +1202,105 @@ private fun TaskDetailScreen(
                     loading -> "Working..."
                     !providerReady -> "Provider not ready"
                     !capabilities.supportsChatSend -> "Send unsupported"
+                    taskRunBlockInfo != null -> "Blocked"
                     else -> "Send"
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun ProcessSessionPanel(
+    running: Boolean,
+    processSessionId: String?,
+    command: String,
+    stdin: String,
+    loading: Boolean,
+    startBlockReason: String?,
+    onCommandChange: (String) -> Unit,
+    onStdinChange: (String) -> Unit,
+    onStart: () -> Unit,
+    onSendStdin: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Panel {
+        Text("Process session", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = if (running) "Running ${processSessionId.orEmpty()}" else "Idle",
+            color = if (running) MaterialTheme.colorScheme.primary else Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (running) {
+            OutlinedTextField(
+                value = stdin,
+                onValueChange = onStdinChange,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                label = { Text("stdin") },
+                placeholder = { Text("q") },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSendStdin,
+                    enabled = !loading && stdin.isNotEmpty(),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Send stdin")
+                }
+                OutlinedButton(
+                    onClick = onStop,
+                    enabled = !loading,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Stop")
+                }
+            }
+        } else {
+            if (startBlockReason != null) {
+                Text(startBlockReason, color = Danger, style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedTextField(
+                value = command,
+                onValueChange = onCommandChange,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = startBlockReason == null,
+                minLines = 1,
+                label = { Text("Command") },
+                placeholder = { Text("npm test -- --watch") },
+            )
+            Button(
+                onClick = onStart,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading && startBlockReason == null && command.trim().isNotEmpty(),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text(
+                    when {
+                        loading -> "Working..."
+                        startBlockReason != null -> "Blocked"
+                        else -> "Start process"
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlockedTaskPanel(info: TaskRunBlockInfo) {
+    Panel {
+        Text("Blocked task", color = Danger, fontWeight = FontWeight.SemiBold)
+        Text(info.reason, color = Muted, style = MaterialTheme.typography.bodyMedium)
+        if (info.chain.isNotEmpty()) {
+            Text("Blocking chain", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            info.chain.forEachIndexed { index, task ->
+                Text(
+                    text = "${index + 1}. ${task.title} (${taskStatusLabel(task.status)})",
+                    color = if (task.status == "done") Muted else Danger,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }
@@ -1029,9 +1315,7 @@ private fun RemoteHeader(
     onSelectPc: (SavedPc) -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val switchablePcs = savedPcs.filter { pc ->
-        activePc == null || !activePcConnectionMatches(activePc, pc)
-    }
+    val pcItems = activePcSwitcherItems(activePc, savedPcs)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1049,25 +1333,34 @@ private fun RemoteHeader(
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (switchablePcs.isNotEmpty()) {
+            if (pcItems.size > 1) {
                 Box {
                     OutlinedButton(
                         onClick = { menuExpanded = true },
+                        modifier = Modifier.width(112.dp),
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        Text("Switch")
+                        Text(
+                            activePc?.displayName ?: "PC",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     DropdownMenu(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false },
                     ) {
-                        switchablePcs.forEach { pc ->
+                        pcItems.forEach { item ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(pc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(
-                                            pc.bridgeUrl,
+                                            if (item.active) "${item.pc.displayName} (Active)" else item.pc.displayName,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            item.pc.bridgeUrl,
                                             color = Muted,
                                             style = MaterialTheme.typography.bodySmall,
                                             maxLines = 1,
@@ -1077,7 +1370,9 @@ private fun RemoteHeader(
                                 },
                                 onClick = {
                                     menuExpanded = false
-                                    onSelectPc(pc)
+                                    if (!item.active) {
+                                        onSelectPc(item.pc)
+                                    }
                                 },
                             )
                         }
@@ -1135,7 +1430,7 @@ private fun StatusRow(label: String, value: String) {
 }
 
 @Composable
-private fun TaskCard(task: RemoteTaskSummary, onClick: () -> Unit) {
+private fun TaskCard(task: RemoteTaskSummary, blockInfo: TaskRunBlockInfo?, onClick: () -> Unit) {
     Panel {
         Column(
             modifier = Modifier.clickable(onClick = onClick),
@@ -1147,9 +1442,20 @@ private fun TaskCard(task: RemoteTaskSummary, onClick: () -> Unit) {
                 verticalAlignment = Alignment.Top,
             ) {
                 Text(task.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                Text(task.status, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium)
+                Text(
+                    taskStatusLabel(task.status),
+                    color = if (blockInfo != null) Danger else MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
             Text(task.projectName ?: "Standalone chat", color = Muted, style = MaterialTheme.typography.bodySmall)
+            if (blockInfo != null) {
+                Text(blockInfo.reason, color = Danger, style = MaterialTheme.typography.bodySmall)
+                val chainText = blockInfo.chain.joinToString(" -> ") { it.title }
+                if (chainText.isNotBlank()) {
+                    Text(chainText, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
             task.pendingAction?.let {
                 Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
             }
@@ -1162,7 +1468,10 @@ private fun TaskCard(task: RemoteTaskSummary, onClick: () -> Unit) {
 private fun TimelineRow(
     item: RemoteTimelineItem,
     loading: Boolean,
+    retryEnabled: Boolean,
+    onRetry: () -> Unit,
     onStartBranch: (RemoteSessionForkMode) -> Unit,
+    blockReason: String?,
 ) {
     val statusColor = timelineStatusColor(item.status)
     Panel {
@@ -1206,24 +1515,29 @@ private fun TimelineRow(
             TimelineDetailRow(detail)
         }
         if (item.retryable) {
-            Text(
-                "Retry available",
-                color = MaterialTheme.colorScheme.secondary,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            OutlinedButton(
+                onClick = onRetry,
+                enabled = retryEnabled,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Retry")
+            }
         }
         if (item.branchSourceTurnId != null) {
+            if (blockReason != null) {
+                Text(blockReason, color = Danger, style = MaterialTheme.typography.bodySmall)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = { onStartBranch(RemoteSessionForkMode.CONTINUE) },
-                    enabled = !loading,
+                    enabled = !loading && blockReason == null,
                     shape = RoundedCornerShape(8.dp),
                 ) {
                     Text("Continue")
                 }
                 OutlinedButton(
                     onClick = { onStartBranch(RemoteSessionForkMode.FORK) },
-                    enabled = !loading,
+                    enabled = !loading && blockReason == null,
                     shape = RoundedCornerShape(8.dp),
                 ) {
                     Text("Fork")
@@ -1232,6 +1546,74 @@ private fun TimelineRow(
         }
     }
 }
+
+internal data class TaskRunBlockInfo(
+    val reason: String,
+    val chain: List<RemoteTaskSummary>,
+)
+
+internal fun taskRunBlockInfo(
+    task: RemoteTaskSummary,
+    tasks: List<RemoteTaskSummary>,
+): TaskRunBlockInfo? {
+    val byId = LinkedHashMap<String, RemoteTaskSummary>()
+    tasks.forEach { byId[it.taskId] = it }
+    byId[task.taskId] = task
+    val dependencyBlock = dependencyRunBlockInfo(task, byId, listOf(task), LinkedHashSet())
+    if (task.status == "blocked") {
+        return TaskRunBlockInfo(
+            reason = "This task is marked blocked and cannot start a session.",
+            chain = dependencyBlock?.chain ?: listOf(task),
+        )
+    }
+    return dependencyBlock
+}
+
+private fun dependencyRunBlockInfo(
+    task: RemoteTaskSummary,
+    byId: Map<String, RemoteTaskSummary>,
+    chain: List<RemoteTaskSummary>,
+    visiting: MutableSet<String>,
+): TaskRunBlockInfo? {
+    if (!visiting.add(task.taskId)) {
+        return TaskRunBlockInfo(
+            reason = "Task dependency cycle detected; cannot start a session.",
+            chain = chain,
+        )
+    }
+    for (dependencyId in task.dependsOn) {
+        val dependency = byId[dependencyId] ?: continue
+        val nextChain = chain + dependency
+        if (visiting.contains(dependency.taskId)) {
+            return TaskRunBlockInfo(
+                reason = "Task dependency cycle detected; cannot start a session.",
+                chain = nextChain,
+            )
+        }
+        if (dependency.status != "done") {
+            return TaskRunBlockInfo(
+                reason = "Cannot send until dependency is done: ${dependency.title} (${taskStatusLabel(dependency.status)}).",
+                chain = nextChain,
+            )
+        }
+        dependencyRunBlockInfo(dependency, byId, nextChain, visiting)?.let {
+            return it
+        }
+    }
+    visiting.remove(task.taskId)
+    return null
+}
+
+internal fun taskStatusLabel(status: String): String =
+    when (status) {
+        "draft" -> "Draft"
+        "waiting" -> "Waiting"
+        "running" -> "Running"
+        "blocked" -> "Blocked"
+        "done" -> "Done"
+        "cancelled" -> "Cancelled"
+        else -> status.ifBlank { "Waiting" }.replaceFirstChar { it.uppercase() }
+    }
 
 @Composable
 private fun TimelineChip(text: String, color: Color) {

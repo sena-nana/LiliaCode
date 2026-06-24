@@ -115,9 +115,17 @@ class RemoteHttpClient(
         }
     }
 
-    suspend fun retry(pc: SavedPc, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun retry(
+        pc: SavedPc,
+        taskId: String,
+        eventId: String? = null,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            dispatch(pc, JSONObject().put("type", "chat.retry").put("taskId", taskId))
+            val request = JSONObject().put("type", "chat.retry").put("taskId", taskId)
+            if (!eventId.isNullOrBlank()) {
+                request.put("eventId", eventId)
+            }
+            dispatch(pc, request)
             Unit
         }
     }

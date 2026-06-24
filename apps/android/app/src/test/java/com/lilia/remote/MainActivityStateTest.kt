@@ -37,6 +37,25 @@ class MainActivityStateTest {
     }
 
     @Test
+    fun activePcSwitcherItemsKeepActivePcAndSameEndpointAlternates() {
+        val active = savedPc(
+            endpointId = "pc-shared",
+            displayName = "Desk",
+            bridgeUrl = "http://192.168.1.12:41478",
+        )
+        val studio = savedPc(
+            endpointId = "pc-shared",
+            displayName = "Studio",
+            bridgeUrl = "http://192.168.1.44:41478",
+        )
+
+        val items = activePcSwitcherItems(active, listOf(studio, active))
+
+        assertEquals(listOf("Desk", "Studio"), items.map { it.pc.displayName })
+        assertEquals(listOf(true, false), items.map { it.active })
+    }
+
+    @Test
     fun unauthorizedRemoteFailureRequiresPairAgain() {
         val revoked = RemoteBridgeException(
             code = "unauthorized",
@@ -60,6 +79,74 @@ class MainActivityStateTest {
         )
 
         assertSessionForkCommand(command, "turn-source", "continue")
+    }
+
+    @Test
+    fun processSessionRuntimeCommandsUseDesktopWireShape() {
+        val spawn = RemoteRuntimeCommandAdapter.processSpawn("npm test")
+        val stdin = RemoteRuntimeCommandAdapter.processWriteStdin("q")
+        val kill = RemoteRuntimeCommandAdapter.processKill()
+
+        assertEquals("process_session", spawn.getString("type"))
+        assertEquals("spawn", spawn.getString("action"))
+        assertEquals("npm test", spawn.getString("command"))
+        assertEquals("process_session", stdin.getString("type"))
+        assertEquals("write_stdin", stdin.getString("action"))
+        assertEquals("q", stdin.getString("stdin"))
+        assertEquals("process_session", kill.getString("type"))
+        assertEquals("kill", kill.getString("action"))
+    }
+
+    @Test
+    fun taskRunBlockInfoRejectsBlockedCurrentTask() {
+        val task = task("task-1", "Blocked task", "blocked")
+
+        val info = taskRunBlockInfo(task, listOf(task))
+
+        assertEquals("This task is marked blocked and cannot start a session.", info?.reason)
+        assertEquals(listOf("task-1"), info?.chain?.map { it.taskId })
+    }
+
+    @Test
+    fun taskRunBlockInfoReportsDirectUnfinishedDependency() {
+        val current = task("task-1", "Current", "waiting", dependsOn = listOf("dep-1"))
+        val dependency = task("dep-1", "Design pass", "running")
+
+        val info = taskRunBlockInfo(current, listOf(current, dependency))
+
+        assertEquals("Cannot send until dependency is done: Design pass (Running).", info?.reason)
+        assertEquals(listOf("task-1", "dep-1"), info?.chain?.map { it.taskId })
+    }
+
+    @Test
+    fun taskRunBlockInfoReportsTransitiveUnfinishedDependency() {
+        val current = task("task-1", "Current", "waiting", dependsOn = listOf("dep-1"))
+        val doneDependency = task("dep-1", "Implementation", "done", dependsOn = listOf("dep-2"))
+        val runningDependency = task("dep-2", "Design pass", "running")
+
+        val info = taskRunBlockInfo(current, listOf(current, doneDependency, runningDependency))
+
+        assertEquals("Cannot send until dependency is done: Design pass (Running).", info?.reason)
+        assertEquals(listOf("task-1", "dep-1", "dep-2"), info?.chain?.map { it.taskId })
+    }
+
+    @Test
+    fun taskRunBlockInfoAllowsCompletedDependencyChain() {
+        val current = task("task-1", "Current", "waiting", dependsOn = listOf("dep-1"))
+        val dependency = task("dep-1", "Design pass", "done")
+
+        assertEquals(null, taskRunBlockInfo(current, listOf(current, dependency)))
+    }
+
+    @Test
+    fun taskRunBlockInfoReportsDependencyCycle() {
+        val current = task("task-1", "Current", "waiting", dependsOn = listOf("dep-1"))
+        val dependency = task("dep-1", "Dependency", "done", dependsOn = listOf("task-1"))
+
+        val info = taskRunBlockInfo(current, listOf(current, dependency))
+
+        assertEquals("Task dependency cycle detected; cannot start a session.", info?.reason)
+        assertEquals(listOf("task-1", "dep-1", "task-1"), info?.chain?.map { it.taskId })
     }
 
     @Test
@@ -89,14 +176,34 @@ class MainActivityStateTest {
         assertEquals(null, updated[0].pendingAction)
     }
 
-    private fun savedPc(endpointId: String, bridgeUrl: String): SavedPc =
+    private fun savedPc(
+        endpointId: String,
+        bridgeUrl: String,
+        displayName: String = "Desk",
+    ): SavedPc =
         SavedPc(
             endpointId = endpointId,
-            displayName = "Desk",
+            displayName = displayName,
             protocolVersion = 1,
             pairingUri = "lilia-remote://pair?v=1",
             bridgeUrl = bridgeUrl,
             lastActiveAt = 1710000000000,
+        )
+
+    private fun task(
+        taskId: String,
+        title: String,
+        status: String,
+        dependsOn: List<String> = emptyList(),
+    ): RemoteTaskSummary =
+        RemoteTaskSummary(
+            taskId = taskId,
+            title = title,
+            projectName = "Lilia",
+            status = status,
+            dependsOn = dependsOn,
+            lastActivity = "now",
+            pendingAction = null,
         )
 
     private fun taskSummary(
@@ -120,7 +227,9 @@ class MainActivityStateTest {
     ): RemoteTaskDetail =
         RemoteTaskDetail(
             task = taskSummary(taskId = taskId, status = status),
+            relatedTasks = listOf(taskSummary(taskId = taskId, status = status)),
             runtimePhase = status,
+            processSessionId = null,
             timeline = emptyList(),
             pendingInteraction = pendingActionTitle?.let(::pendingInteraction),
         )

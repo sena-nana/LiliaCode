@@ -34,6 +34,8 @@ import type {
   AutomationRunSummary,
   HookDocumentUpdateInput,
   HooksOverview,
+  SidebarConversationSummary,
+  RemoteRetryChatRequest,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -230,6 +232,31 @@ export type SessionManagementRuntimeCommandTypeTest = Assert<
       includeSystemMessages: true;
     },
     ChatRuntimeCommand
+  >
+>;
+
+export type RemoteRetryChatRequestWithoutEventTypeTest = Assert<
+  Extends<
+    {
+      type: "chat.retry";
+      taskId: "task-1";
+    },
+    RemoteRetryChatRequest
+  >
+>;
+
+export type RemoteRetryChatRequestWithEventTypeTest = Assert<
+  Extends<
+    {
+      type: "chat.retry";
+      taskId: "task-1";
+      eventId: "error-1";
+    } | {
+      type: "chat.retry";
+      taskId: "task-1";
+      eventId: null;
+    },
+    RemoteRetryChatRequest
   >
 >;
 
@@ -467,6 +494,7 @@ export type ChatRuntimeSnapshotContextUsageTypeTest = Assert<
       phase: "running";
       backend: "codex";
       turnId: "turn-1";
+      processSessionId: "jsonl-process-1";
       queuedCount: 0;
       pendingRollback: false;
       pendingResetCleanup: false;
@@ -483,6 +511,23 @@ export type ChatRuntimeSnapshotContextUsageTypeTest = Assert<
       rollback: null;
     },
     ChatRuntimeSnapshot
+  >
+>;
+
+export type SidebarConversationSummaryDependencyTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      projectId: "project-1";
+      projectName: "Lilia";
+      title: "Android remote";
+      status: "blocked";
+      dependsOn: ["dep-1"];
+      createdAt: 1;
+      pinned: false;
+      route: "/projects/project-1/tasks/task-1";
+    },
+    SidebarConversationSummary
   >
 >;
 

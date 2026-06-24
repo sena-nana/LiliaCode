@@ -56,9 +56,9 @@ class RemoteRepository internal constructor(
         return pc
     }
 
-    fun switchActivePc(endpointId: String, now: Long = System.currentTimeMillis()): SavedPc? {
+    fun switchActivePc(pc: SavedPc, now: Long = System.currentTimeMillis()): SavedPc? {
         val saved = savedPcs()
-        val selected = saved.firstOrNull { it.endpointId == endpointId } ?: return null
+        val selected = saved.firstOrNull { activePcConnectionMatches(it, pc) } ?: return null
         val updated = selected.copy(lastActiveAt = now)
         val updatedSavedPcs = upsertSavedPc(saved, updated)
         prefs.edit {
@@ -149,7 +149,7 @@ internal fun activePcConnectionMatches(current: SavedPc, candidate: SavedPc): Bo
     current.endpointId == candidate.endpointId && current.bridgeUrl == candidate.bridgeUrl
 
 private fun upsertSavedPc(savedPcs: List<SavedPc>, pc: SavedPc): List<SavedPc> =
-    (savedPcs.filterNot { it.endpointId == pc.endpointId } + pc)
+    (savedPcs.filterNot { activePcConnectionMatches(it, pc) } + pc)
         .sortedByDescending { it.lastActiveAt }
 
 private fun RemotePreferencesEditor.putActivePc(pc: SavedPc) {

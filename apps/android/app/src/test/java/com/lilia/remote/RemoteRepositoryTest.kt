@@ -58,25 +58,53 @@ class RemoteRepositoryTest {
     }
 
     @Test
-    fun switchActivePcPersistsSelectedSavedPcAndUpdatesSeenAt() {
+    fun savePairingKeepsSameEndpointPcsWhenBridgeUrlDiffers() {
         val preferences = InMemoryRemotePreferences()
         val repository = RemoteRepository(preferences)
-        repository.savePairing(ticket(endpointId = "pc-desk", pcName = "Desk"))
+
+        repository.savePairing(ticket(endpointId = "pc-shared", pcName = "Desk"))
         repository.savePairing(
             ticket(
-                endpointId = "pc-studio",
+                endpointId = "pc-shared",
+                pcName = "Studio",
+                bridgeUrl = "http://192.168.1.44:41478",
+                rawUri = "lilia-remote://pair?v=1&pc=studio",
+            ),
+        )
+
+        val restored = RemoteRepository(preferences)
+
+        assertEquals("Studio", restored.activePc()?.displayName)
+        assertEquals(
+            setOf("http://192.168.1.12:41478", "http://192.168.1.44:41478"),
+            restored.savedPcs().map { it.bridgeUrl }.toSet(),
+        )
+    }
+
+    @Test
+    fun switchActivePcPersistsSelectedSavedPcByConnectionAndUpdatesSeenAt() {
+        val preferences = InMemoryRemotePreferences()
+        val repository = RemoteRepository(preferences)
+        val desk = repository.savePairing(ticket(endpointId = "pc-shared", pcName = "Desk"))
+        repository.savePairing(
+            ticket(
+                endpointId = "pc-shared",
                 pcName = "Studio",
                 bridgeUrl = "http://192.168.1.44:41478",
             ),
         )
 
-        val selected = repository.switchActivePc("pc-desk", now = 1710000004321)
+        val selected = repository.switchActivePc(desk, now = 1710000004321)
         val restored = RemoteRepository(preferences)
 
-        assertEquals("pc-desk", selected?.endpointId)
-        assertEquals("pc-desk", restored.activePc()?.endpointId)
+        assertEquals("Desk", selected?.displayName)
+        assertEquals("Desk", restored.activePc()?.displayName)
+        assertEquals("http://192.168.1.12:41478", restored.activePc()?.bridgeUrl)
         assertEquals(1710000004321, restored.activePc()?.lastActiveAt)
-        assertEquals(1710000004321, restored.savedPcs().first { it.endpointId == "pc-desk" }.lastActiveAt)
+        assertEquals(
+            1710000004321,
+            restored.savedPcs().first { it.bridgeUrl == "http://192.168.1.12:41478" }.lastActiveAt,
+        )
     }
 
     @Test
