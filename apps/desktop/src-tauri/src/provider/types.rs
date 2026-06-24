@@ -17,6 +17,8 @@ pub(crate) struct AgentInteractionSettings {
     #[serde(default = "default_main_agent_prompt_mode")]
     pub(crate) main_agent_prompt_mode: String,
     #[serde(default)]
+    pub(crate) main_agent_custom_prompt: String,
+    #[serde(default)]
     pub(crate) codex_profile: CodexProfileSettings,
     #[serde(default)]
     pub(crate) subagent_mode: SubagentModeSettings,
@@ -312,6 +314,7 @@ mod tests {
         assert!(!settings.debug);
         assert_eq!(settings.permission_mode, "ask");
         assert_eq!(settings.main_agent_prompt_mode, "conservative");
+        assert!(settings.main_agent_custom_prompt.is_empty());
         assert_eq!(settings.codex_profile.profile, "default");
         assert!(settings.codex_profile.model.is_none());
         assert!(settings.codex_profile.runtime_workspace_roots.is_empty());
@@ -337,6 +340,7 @@ mod tests {
             settings.main_agent_prompt_mode,
             default_main_agent_prompt_mode()
         );
+        assert!(settings.main_agent_custom_prompt.is_empty());
         assert_eq!(settings.codex_profile, CodexProfileSettings::default());
         assert_eq!(
             settings.subagent_mode.enabled,

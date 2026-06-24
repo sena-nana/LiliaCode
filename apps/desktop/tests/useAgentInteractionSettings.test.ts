@@ -27,6 +27,7 @@ describe("useAgentInteractionSettings", () => {
     });
     expect(store.settings.value.permissionMode).toBe("ask");
     expect(store.settings.value.mainAgentPromptMode).toBe("conservative");
+    expect(store.settings.value.mainAgentCustomPrompt).toBe("");
     expect(store.settings.value.autoTurnDecision).toEqual({
       enabled: true,
       allowModelTier: true,
@@ -60,8 +61,33 @@ describe("useAgentInteractionSettings", () => {
     await store.update({ mainAgentPromptMode: "aggressive" });
     expect(store.settings.value.mainAgentPromptMode).toBe("aggressive");
 
+    await store.update({
+      mainAgentPromptMode: "custom",
+      mainAgentCustomPrompt: "Custom strategy\nwith details",
+    });
+    expect(store.settings.value.mainAgentPromptMode).toBe("custom");
+    expect(store.settings.value.mainAgentCustomPrompt).toBe("Custom strategy\nwith details");
+
     await store.update({ mainAgentPromptMode: "conservative" });
     expect(store.settings.value.mainAgentPromptMode).toBe("conservative");
+  });
+
+  it("saves custom main agent prompt changes without changing mode", async () => {
+    const { useAgentInteractionSettings } = await loadStoreModule();
+    const store = useAgentInteractionSettings();
+    await store.load();
+    await store.update({
+      mainAgentPromptMode: "custom",
+      mainAgentCustomPrompt: "Initial custom strategy",
+    });
+    mockInvoke.mockClear();
+
+    await store.update({ mainAgentCustomPrompt: "Updated custom strategy" });
+
+    expect(store.settings.value.mainAgentPromptMode).toBe("custom");
+    expect(store.settings.value.mainAgentCustomPrompt).toBe("Updated custom strategy");
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_set_settings"))
+      .toBe(true);
   });
 
   it("rolls back subagent settings when saving fails", async () => {

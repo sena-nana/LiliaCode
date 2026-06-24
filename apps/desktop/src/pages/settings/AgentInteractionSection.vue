@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
 import {
   AlertTriangle,
   ChevronDown,
@@ -11,6 +11,7 @@ import {
   AUTO_TURN_DECISION_PERMISSION_OPTIONS,
   PERMISSION_MODE_DISPLAY,
   PERMISSION_MODE_DISPLAY_ORDER,
+  PROMPT_MAIN_AGENT,
 } from "@lilia/contracts";
 import {
   useAgentInteractionSettings,
@@ -40,6 +41,7 @@ const agentInteractionStore = useAgentInteractionSettings();
 const agentInteraction = agentInteractionStore.settings;
 const savingAgentInteraction = ref(false);
 const agentInteractionError = ref<string | null>(null);
+const mainAgentCustomPromptDraft = ref("");
 const subagentCardExpanded = ref(false);
 const subagentCatalogReady = ref(false);
 const subagentDetailsId = "agent-subagent-mode-details";
@@ -61,6 +63,12 @@ type SubagentModePatch = Partial<Omit<AgentInteractionSettings["subagentMode"], 
 };
 
 const autoTurnDecisionPermissionOptions = AUTO_TURN_DECISION_PERMISSION_OPTIONS;
+const mainAgentSkillsPrompt = PROMPT_MAIN_AGENT.skillOrder
+  .map((key) => PROMPT_MAIN_AGENT.skills[key])
+  .filter((skill): skill is NonNullable<typeof skill> => Boolean(skill))
+  .map((skill) => `## ${skill.title.trim()}\n${skill.prompt.trim()}`)
+  .filter((part) => part.trim())
+  .join("\n\n");
 const mainAgentPromptModeOptions: Array<{
   value: MainAgentPromptMode;
   label: string;
@@ -76,7 +84,54 @@ const mainAgentPromptModeOptions: Array<{
     label: "激进",
     description: "允许根因级检查和必要功能重构。",
   },
+  {
+    value: "custom",
+    label: "自定义",
+    description: "使用自己填写的策略片段，保留内置工具与技能提示。",
+  },
 ];
+
+function mainAgentStrategyPrompt(mode: MainAgentPromptMode, customPrompt: string): string {
+  if (mode === "custom") {
+    const trimmed = customPrompt.trim();
+    if (trimmed) return trimmed;
+    return PROMPT_MAIN_AGENT.modes.conservative.trim();
+  }
+  return PROMPT_MAIN_AGENT.modes[mode].trim();
+}
+
+function buildMainAgentPromptPreview(mode: MainAgentPromptMode, customPrompt: string): string {
+  return [
+    PROMPT_MAIN_AGENT.basePrompt.trim(),
+    mainAgentStrategyPrompt(mode, customPrompt),
+    PROMPT_MAIN_AGENT.toolsPrompt.trim(),
+    mainAgentSkillsPrompt,
+  ]
+    .filter((part) => part.trim())
+    .join("\n\n");
+}
+
+function activeMainAgentPromptDescription(): string {
+  return mainAgentPromptModeOptions.find((option) => option.value === agentInteraction.value.mainAgentPromptMode)
+    ?.description ?? mainAgentPromptModeOptions[0].description;
+}
+
+function defaultCustomMainAgentPrompt(): string {
+  const persisted = agentInteraction.value.mainAgentCustomPrompt.trim();
+  if (persisted) return persisted;
+  const currentMode = agentInteraction.value.mainAgentPromptMode;
+  if (currentMode === "custom") return PROMPT_MAIN_AGENT.modes.conservative.trim();
+  return mainAgentStrategyPrompt(currentMode, "");
+}
+
+const mainAgentPromptPreview = computed(() =>
+  buildMainAgentPromptPreview(
+    agentInteraction.value.mainAgentPromptMode,
+    agentInteraction.value.mainAgentPromptMode === "custom"
+      ? mainAgentCustomPromptDraft.value
+      : agentInteraction.value.mainAgentCustomPrompt,
+  )
+);
 
 function activePermissionDescription(): string {
   return permissionModeOptions.find((option) => option.value === agentInteraction.value.permissionMode)
@@ -105,7 +160,20 @@ async function setPermissionMode(permissionMode: PermissionMode) {
 }
 
 async function setMainAgentPromptMode(mainAgentPromptMode: MainAgentPromptMode) {
+  if (mainAgentPromptMode === "custom") {
+    const mainAgentCustomPrompt = defaultCustomMainAgentPrompt();
+    mainAgentCustomPromptDraft.value = mainAgentCustomPrompt;
+    await setAgentInteraction({ mainAgentPromptMode, mainAgentCustomPrompt });
+    return;
+  }
   await setAgentInteraction({ mainAgentPromptMode });
+}
+
+async function saveMainAgentCustomPrompt() {
+  await setAgentInteraction({
+    mainAgentPromptMode: "custom",
+    mainAgentCustomPrompt: mainAgentCustomPromptDraft.value,
+  });
 }
 
 function nextSubagentMode(
@@ -219,6 +287,14 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => agentInteraction.value.mainAgentCustomPrompt,
+  (prompt) => {
+    mainAgentCustomPromptDraft.value = prompt;
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   disposed = false;
   void loadAgentInteraction();
@@ -295,13 +371,43 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <span class="settings-row__status muted">
-          {{
-            mainAgentPromptModeOptions.find((option) => option.value === agentInteraction.mainAgentPromptMode)
-              ?.description ?? mainAgentPromptModeOptions[0].description
-          }}
+          {{ activeMainAgentPromptDescription() }}
         </span>
       </div>
     </div>
+
+    <section class="main-agent-prompt-panel" aria-label="主 Agent 提示词">
+      <div class="main-agent-prompt-panel__head">
+        <div class="settings-row__label">主 Agent 提示词预览</div>
+        <span class="main-agent-prompt-panel__meta">
+          {{ agentInteraction.mainAgentPromptMode === "custom" ? "自定义策略" : "内置策略" }}
+        </span>
+      </div>
+      <pre class="main-agent-prompt-panel__preview">{{ mainAgentPromptPreview }}</pre>
+      <div
+        v-if="agentInteraction.mainAgentPromptMode === 'custom'"
+        class="main-agent-prompt-panel__editor"
+      >
+        <label class="settings-row__label" for="main-agent-custom-prompt">
+          自定义主 Agent 提示词
+        </label>
+        <textarea
+          id="main-agent-custom-prompt"
+          v-model="mainAgentCustomPromptDraft"
+          class="ui-textarea main-agent-prompt-panel__textarea"
+          rows="8"
+          :disabled="savingAgentInteraction"
+        />
+        <button
+          type="button"
+          class="ui-button ui-button--ghost main-agent-prompt-panel__save"
+          :disabled="savingAgentInteraction"
+          @click="saveMainAgentCustomPrompt"
+        >
+          应用自定义提示词
+        </button>
+      </div>
+    </section>
 
     <div class="settings-row">
       <div class="settings-row__label">非打断模式</div>
@@ -675,6 +781,58 @@ onBeforeUnmount(() => {
   margin-right: 4px;
   color: var(--text-primary, rgba(255, 255, 255, 0.82));
   font-weight: 600;
+}
+
+.main-agent-prompt-panel {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0 12px;
+  padding: 12px 0;
+  border-block: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
+}
+
+.main-agent-prompt-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.main-agent-prompt-panel__meta {
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  font-size: 12px;
+}
+
+.main-agent-prompt-panel__preview {
+  max-height: 240px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--bg-elev-2, rgba(255, 255, 255, 0.02));
+  color: var(--text-secondary, rgba(255, 255, 255, 0.68));
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.main-agent-prompt-panel__editor {
+  display: grid;
+  gap: 8px;
+}
+
+.main-agent-prompt-panel__textarea {
+  min-height: 156px;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.main-agent-prompt-panel__save {
+  justify-self: start;
 }
 
 .subagent-mode-card__header {

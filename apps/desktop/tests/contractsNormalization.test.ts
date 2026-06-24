@@ -3598,7 +3598,8 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
-      mainAgentPromptMode: "aggressive",
+      mainAgentPromptMode: "custom",
+      mainAgentCustomPrompt: "  custom strategy\nwith details  ",
       codexProfile: {
         profile: "fast",
         model: " gpt-5.4 ",
@@ -3631,7 +3632,8 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
-      mainAgentPromptMode: "aggressive",
+      mainAgentPromptMode: "custom",
+      mainAgentCustomPrompt: "custom strategy\nwith details",
       codexProfile: {
         profile: "fast",
         model: "gpt-5.4",
@@ -3664,6 +3666,7 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: "yes" as never,
       debug: 1 as never,
       mainAgentPromptMode: "deep" as never,
+      mainAgentCustomPrompt: 42 as never,
       subagentMode: {
         enabled: "true" as never,
         codex: { enabled: 0 as never },
@@ -3685,6 +3688,7 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: false,
       debug: false,
       mainAgentPromptMode: "conservative",
+      mainAgentCustomPrompt: "",
       subagentMode: {
         enabled: false,
         codex: { enabled: true },

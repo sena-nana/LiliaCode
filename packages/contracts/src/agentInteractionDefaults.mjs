@@ -20,7 +20,7 @@ export const AUTO_TURN_DECISION_PERMISSION_KEYS = Object.freeze(
   AUTO_TURN_DECISION_PERMISSION_OPTIONS.map((option) => option.key),
 );
 
-const MAIN_AGENT_PROMPT_MODES = Object.freeze(["conservative", "aggressive"]);
+const MAIN_AGENT_PROMPT_MODES = Object.freeze(["conservative", "aggressive", "custom"]);
 const MAIN_AGENT_PROMPT_MODE_SET = new Set(MAIN_AGENT_PROMPT_MODES);
 
 const defaults = readAgentInteractionDefaultsManifest(agentInteractionDefaults);
@@ -37,6 +37,10 @@ export function normalizeMainAgentPromptMode(value, fallback = "conservative") {
   return typeof value === "string" && MAIN_AGENT_PROMPT_MODE_SET.has(value)
     ? value
     : fallback;
+}
+
+export function normalizeMainAgentCustomPrompt(value, fallback = "") {
+  return typeof value === "string" ? value.trim() : fallback;
 }
 
 export function normalizeAgentSubagentModeSettings(
@@ -91,6 +95,10 @@ export function normalizeAgentInteractionSettings(
       input?.mainAgentPromptMode,
       base.mainAgentPromptMode,
     ),
+    mainAgentCustomPrompt: normalizeMainAgentCustomPrompt(
+      input?.mainAgentCustomPrompt,
+      base.mainAgentCustomPrompt,
+    ),
     codexProfile: normalizeCodexProfileSettings(input?.codexProfile, base.codexProfile),
     subagentMode: normalizeAgentSubagentModeSettings(input?.subagentMode, base.subagentMode),
     autoTurnDecision: normalizeAutoTurnDecisionSettings(
@@ -126,6 +134,7 @@ function readAgentInteractionDefaultsManifest(value) {
     debug: booleanManifestField(row, "debug", "agent-interaction-defaults.json"),
     permissionMode: row.permissionMode,
     mainAgentPromptMode: normalizeMainAgentPromptMode(row.mainAgentPromptMode),
+    mainAgentCustomPrompt: normalizeMainAgentCustomPrompt(row.mainAgentCustomPrompt),
     codexProfile: normalizeCodexProfileSettings(
       codexProfile,
       DEFAULT_CODEX_PROFILE_SETTINGS,
@@ -214,6 +223,7 @@ function freezeAgentInteractionSettings(value) {
     debug: value.debug,
     permissionMode: value.permissionMode,
     mainAgentPromptMode: value.mainAgentPromptMode,
+    mainAgentCustomPrompt: value.mainAgentCustomPrompt,
     codexProfile: Object.freeze({ ...value.codexProfile }),
     subagentMode: freezeSubagentModeSettings(value.subagentMode),
     autoTurnDecision: Object.freeze({ ...value.autoTurnDecision }),

@@ -146,11 +146,18 @@ pub(crate) fn main_agent_prompt_mode(mode: &str) -> &'static str {
     }
 }
 
-pub(crate) fn build_main_agent_prompt(mode: &str) -> String {
+pub(crate) fn build_main_agent_prompt(mode: &str, custom_prompt: Option<&str>) -> String {
     let prompts = main_agent_prompts();
+    let strategy_prompt = match mode {
+        "custom" => custom_prompt
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+            .unwrap_or_else(|| main_agent_prompt_mode("conservative")),
+        _ => main_agent_prompt_mode(mode),
+    };
     let mut parts = vec![
         prompts.base_prompt.trim().to_string(),
-        main_agent_prompt_mode(mode).trim().to_string(),
+        strategy_prompt.trim().to_string(),
         prompts.tools_prompt.trim().to_string(),
     ];
     let skills = prompts
@@ -262,7 +269,7 @@ mod tests {
             main_agent.skills.len(),
             "mainAgent.skillOrder must list every configured skill"
         );
-        let built_main_agent_prompt = build_main_agent_prompt("aggressive");
+        let built_main_agent_prompt = build_main_agent_prompt("aggressive", None);
         assert!(built_main_agent_prompt.len() > main_agent.base_prompt.len());
         assert!(
             built_main_agent_prompt.contains("不替代当前 provider 的原生系统提示"),
@@ -310,5 +317,29 @@ mod tests {
             .trim()
             .is_empty());
         assert!(!subagent_prompts.delegation_rules.is_empty());
+    }
+
+    #[test]
+    fn custom_main_agent_prompt_replaces_strategy_segment_only() {
+        let main_agent = main_agent_prompts();
+        let built = build_main_agent_prompt("custom", Some("Custom strategy segment."));
+
+        assert!(built.contains(main_agent.base_prompt.trim()));
+        assert!(built.contains(main_agent.tools_prompt.trim()));
+        assert!(built.contains("Custom strategy segment."));
+        assert!(!built.contains(main_agent_prompt_mode("conservative").trim()));
+        assert!(!built.contains(main_agent_prompt_mode("aggressive").trim()));
+        for key in &main_agent.skill_order {
+            let skill = main_agent.skills.get(key).unwrap();
+            assert!(built.contains(&format!("## {}", skill.title.trim())));
+        }
+    }
+
+    #[test]
+    fn empty_custom_main_agent_prompt_uses_conservative_strategy() {
+        let built = build_main_agent_prompt("custom", Some("   "));
+
+        assert!(built.contains(main_agent_prompt_mode("conservative").trim()));
+        assert!(!built.contains(main_agent_prompt_mode("aggressive").trim()));
     }
 }

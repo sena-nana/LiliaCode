@@ -82,6 +82,7 @@ export async function updateAgentInteractionSettings(
     next.debug === previous.debug &&
     next.permissionMode === previous.permissionMode &&
     next.mainAgentPromptMode === previous.mainAgentPromptMode &&
+    next.mainAgentCustomPrompt === previous.mainAgentCustomPrompt &&
     sameCodexProfile(next.codexProfile, previous.codexProfile) &&
     sameSubagentMode(next.subagentMode, previous.subagentMode) &&
     sameJsonValue(next.autoTurnDecision, previous.autoTurnDecision)
@@ -106,6 +107,7 @@ export function useAgentInteractionSettings() {
     debug: computed(() => settings.value.debug),
     permissionMode: computed(() => settings.value.permissionMode),
     mainAgentPromptMode: computed(() => settings.value.mainAgentPromptMode),
+    mainAgentCustomPrompt: computed(() => settings.value.mainAgentCustomPrompt),
     load: loadAgentInteractionSettings,
     loadSubagents: loadCustomSubagentDefinitions,
     saveSubagent: saveCustomSubagentDefinition,
