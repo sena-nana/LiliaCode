@@ -25,7 +25,9 @@
         "lilia_memory_mode",
         "lilia_memory_reset"
       ],
-      "normal": [],
+      "normal": [
+        "lilia_task_workflow"
+      ],
       "deep": [
         "lilia_review",
         "lilia_fix_suggestion",

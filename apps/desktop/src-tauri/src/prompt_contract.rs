@@ -22,15 +22,16 @@ struct PromptContract {
 pub(crate) struct MainAgentPrompts {
     pub(crate) base_prompt: String,
     pub(crate) tools_prompt: String,
-    pub(crate) skills: std::collections::BTreeMap<String, MainAgentSkillPrompt>,
+    pub(crate) workflow_types: std::collections::BTreeMap<String, MainAgentWorkflowPrompt>,
     pub(crate) modes: MainAgentModePrompts,
-    pub(crate) skill_order: Vec<String>,
+    pub(crate) workflow_order: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct MainAgentSkillPrompt {
+pub(crate) struct MainAgentWorkflowPrompt {
     pub(crate) title: String,
+    pub(crate) summary: String,
     pub(crate) prompt: String,
 }
 
@@ -160,15 +161,22 @@ pub(crate) fn build_main_agent_prompt(mode: &str, custom_prompt: Option<&str>) -
         strategy_prompt.trim().to_string(),
         prompts.tools_prompt.trim().to_string(),
     ];
-    let skills = prompts
-        .skill_order
+    let workflows = prompts
+        .workflow_order
         .iter()
-        .filter_map(|key| prompts.skills.get(key))
-        .map(|skill| format!("## {}\n{}", skill.title.trim(), skill.prompt.trim()))
+        .filter_map(|key| prompts.workflow_types.get(key))
+        .map(|workflow| {
+            format!(
+                "## {}\n{}\n\n{}",
+                workflow.title.trim(),
+                workflow.summary.trim(),
+                workflow.prompt.trim()
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
-    if !skills.trim().is_empty() {
-        parts.push(skills);
+    if !workflows.trim().is_empty() {
+        parts.push(workflows);
     }
     parts
         .into_iter()
@@ -260,14 +268,14 @@ mod tests {
         let main_agent = main_agent_prompts();
         assert!(!main_agent.base_prompt.trim().is_empty());
         assert!(!main_agent.tools_prompt.trim().is_empty());
-        assert!(!main_agent.skills.is_empty());
-        assert!(!main_agent.skill_order.is_empty());
+        assert!(!main_agent.workflow_types.is_empty());
+        assert!(!main_agent.workflow_order.is_empty());
         assert!(!main_agent_prompt_mode("conservative").trim().is_empty());
         assert!(!main_agent_prompt_mode("aggressive").trim().is_empty());
         assert_eq!(
-            main_agent.skill_order.len(),
-            main_agent.skills.len(),
-            "mainAgent.skillOrder must list every configured skill"
+            main_agent.workflow_order.len(),
+            main_agent.workflow_types.len(),
+            "mainAgent.workflowOrder must list every configured workflow type"
         );
         let built_main_agent_prompt = build_main_agent_prompt("aggressive", None);
         assert!(built_main_agent_prompt.len() > main_agent.base_prompt.len());
@@ -275,26 +283,29 @@ mod tests {
             built_main_agent_prompt.contains("不替代当前 provider 的原生系统提示"),
             "mainAgent prompt must preserve provider-native prompt precedence"
         );
-        for key in main_agent.skills.keys() {
-            assert!(main_agent.skill_order.contains(key));
+        for key in main_agent.workflow_types.keys() {
+            assert!(main_agent.workflow_order.contains(key));
         }
-        for key in &main_agent.skill_order {
-            let skill = main_agent
-                .skills
-                .get(key)
-                .unwrap_or_else(|| panic!("mainAgent.skillOrder references missing skill: {key}"));
+        for key in &main_agent.workflow_order {
+            let workflow = main_agent.workflow_types.get(key).unwrap_or_else(|| {
+                panic!("mainAgent.workflowOrder references missing workflow type: {key}")
+            });
             assert!(
-                !skill.title.trim().is_empty(),
-                "mainAgent skill {key} must have a title"
+                !workflow.title.trim().is_empty(),
+                "mainAgent workflow {key} must have a title"
             );
             assert!(
-                !skill.prompt.trim().is_empty(),
-                "mainAgent skill {key} must have a prompt"
+                !workflow.summary.trim().is_empty(),
+                "mainAgent workflow {key} must have a summary"
             );
             assert!(
-                built_main_agent_prompt.contains(&format!("## {}", skill.title.trim())),
-                "mainAgent prompt must include skill title: {}",
-                skill.title
+                !workflow.prompt.trim().is_empty(),
+                "mainAgent workflow {key} must have a prompt"
+            );
+            assert!(
+                built_main_agent_prompt.contains(&format!("## {}", workflow.title.trim())),
+                "mainAgent prompt must include workflow title: {}",
+                workflow.title
             );
         }
         assert!(!title_system_instruction().trim().is_empty());
@@ -329,9 +340,9 @@ mod tests {
         assert!(built.contains("Custom strategy segment."));
         assert!(!built.contains(main_agent_prompt_mode("conservative").trim()));
         assert!(!built.contains(main_agent_prompt_mode("aggressive").trim()));
-        for key in &main_agent.skill_order {
-            let skill = main_agent.skills.get(key).unwrap();
-            assert!(built.contains(&format!("## {}", skill.title.trim())));
+        for key in &main_agent.workflow_order {
+            let workflow = main_agent.workflow_types.get(key).unwrap();
+            assert!(built.contains(&format!("## {}", workflow.title.trim())));
         }
     }
 

@@ -183,6 +183,17 @@ export type LiliaBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
+export type LiliaTaskWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_task_workflow";
+      kind: "frontend";
+      instructions: "调整按钮布局";
+    },
+    ChatWorkflow
+  >
+>;
+
 export type SessionForkRuntimeCommandTypeTest = Assert<
   Extends<
     {

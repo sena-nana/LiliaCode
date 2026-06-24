@@ -1733,16 +1733,20 @@ mod main_agent_prompt_tests {
             .as_str()
             .unwrap();
         let aggressive = crate::prompt_contract::main_agent_prompt_mode("aggressive");
-        let first_skill_title = crate::prompt_contract::main_agent_prompts()
-            .skill_order
+        let first_workflow_title = crate::prompt_contract::main_agent_prompts()
+            .workflow_order
             .first()
-            .and_then(|key| crate::prompt_contract::main_agent_prompts().skills.get(key))
-            .map(|skill| skill.title.as_str())
+            .and_then(|key| {
+                crate::prompt_contract::main_agent_prompts()
+                    .workflow_types
+                    .get(key)
+            })
+            .map(|workflow| workflow.title.as_str())
             .unwrap();
 
         assert!(context.starts_with("existing context\n\n"));
         assert!(context.contains(aggressive));
-        assert!(context.contains(first_skill_title));
+        assert!(context.contains(first_workflow_title));
     }
 
     #[test]
@@ -1772,11 +1776,15 @@ mod main_agent_prompt_tests {
         let context = value["provider"]["codex"]["additionalContext"]
             .as_str()
             .unwrap();
-        let first_skill_title = crate::prompt_contract::main_agent_prompts()
-            .skill_order
+        let first_workflow_title = crate::prompt_contract::main_agent_prompts()
+            .workflow_order
             .first()
-            .and_then(|key| crate::prompt_contract::main_agent_prompts().skills.get(key))
-            .map(|skill| skill.title.as_str())
+            .and_then(|key| {
+                crate::prompt_contract::main_agent_prompts()
+                    .workflow_types
+                    .get(key)
+            })
+            .map(|workflow| workflow.title.as_str())
             .unwrap();
 
         assert!(context.contains("Custom strategy for this workspace."));
@@ -1785,7 +1793,7 @@ mod main_agent_prompt_tests {
                 "conservative"
             ))
         );
-        assert!(context.contains(first_skill_title));
+        assert!(context.contains(first_workflow_title));
     }
 }
 

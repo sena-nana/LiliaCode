@@ -16,6 +16,7 @@ static SESSION_MANAGEMENT_CONTRACT: OnceLock<SessionManagementContract> = OnceLo
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LiliaWorkflowContract {
+    task_workflow: WorkflowTypeEntry,
     review: WorkflowTypeEntry,
     fix_suggestion: WorkflowTypeEntry,
     batch_apply: WorkflowTypeEntry,
@@ -86,6 +87,10 @@ fn session_management_contract() -> &'static SessionManagementContract {
 
 pub(super) fn review_workflow_type() -> &'static str {
     &lilia_workflow_contract().review.kind
+}
+
+pub(super) fn task_workflow_type() -> &'static str {
+    &lilia_workflow_contract().task_workflow.kind
 }
 
 pub(super) fn fix_suggestion_workflow_type() -> &'static str {

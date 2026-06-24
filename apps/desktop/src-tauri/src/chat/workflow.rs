@@ -8,6 +8,7 @@ pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<String> {
             workflow_contract::fix_suggestion_workflow_type()
         }
         ChatWorkflow::LiliaBatchApply { .. } => workflow_contract::batch_apply_workflow_type(),
+        ChatWorkflow::LiliaTaskWorkflow { .. } => workflow_contract::task_workflow_type(),
         ChatWorkflow::LiliaGoal { .. } => workflow_contract::goal_workflow_type(),
         ChatWorkflow::LiliaCompact => workflow_contract::compact_workflow_type(),
         ChatWorkflow::LiliaBackgroundTerminalsClean => {
@@ -93,6 +94,10 @@ mod tests {
                 source_summary: "summary".to_string(),
                 instructions: None,
             },
+            ChatWorkflow::LiliaTaskWorkflow {
+                kind: "frontend".to_string(),
+                instructions: None,
+            },
             ChatWorkflow::LiliaGoal {
                 action: "start".to_string(),
                 objective: None,
@@ -162,6 +167,7 @@ mod tests {
             workflow_contract::review_workflow_type().to_string(),
             workflow_contract::fix_suggestion_workflow_type().to_string(),
             workflow_contract::batch_apply_workflow_type().to_string(),
+            workflow_contract::task_workflow_type().to_string(),
             workflow_contract::goal_workflow_type().to_string(),
             workflow_contract::compact_workflow_type().to_string(),
             workflow_contract::background_terminals_clean_workflow_type().to_string(),

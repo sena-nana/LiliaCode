@@ -56,6 +56,7 @@ import {
   createLiliaFixSuggestionWorkflow as createLiliaFixSuggestionWorkflowImpl,
   createLiliaGoalWorkflow as createLiliaGoalWorkflowImpl,
   createLiliaReviewWorkflow as createLiliaReviewWorkflowImpl,
+  createLiliaTaskWorkflow as createLiliaTaskWorkflowImpl,
   DEFAULT_LILIA_CONFIG_DIAGNOSTICS_INCLUDE_LAYERS,
   DEFAULT_LILIA_FIX_SUGGESTION_MODE,
   DEFAULT_LILIA_GOAL_STATUS,
@@ -71,6 +72,7 @@ import {
   isLiliaQueryWorkflowType as isLiliaQueryWorkflowTypeImpl,
   isLiliaReviewDelivery as isLiliaReviewDeliveryImpl,
   isLiliaReviewTargetType as isLiliaReviewTargetTypeImpl,
+  isLiliaTaskWorkflowKind as isLiliaTaskWorkflowKindImpl,
   LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE,
   LILIA_BATCH_APPLY_SOURCE_KINDS,
   LILIA_BATCH_APPLY_WORKFLOW_TYPE,
@@ -88,6 +90,8 @@ import {
   LILIA_REVIEW_DELIVERIES,
   LILIA_REVIEW_TARGET_TYPES,
   LILIA_REVIEW_WORKFLOW_TYPE,
+  LILIA_TASK_WORKFLOW_KINDS,
+  LILIA_TASK_WORKFLOW_TYPE,
   normalizeLiliaBatchApplyWorkflow as normalizeLiliaBatchApplyWorkflowImpl,
   normalizeLiliaConfigDiagnosticsWorkflow as normalizeLiliaConfigDiagnosticsWorkflowImpl,
   normalizeLiliaFixSuggestionMode as normalizeLiliaFixSuggestionModeImpl,
@@ -98,10 +102,12 @@ import {
   normalizeLiliaReviewDelivery as normalizeLiliaReviewDeliveryImpl,
   normalizeLiliaReviewTarget as normalizeLiliaReviewTargetImpl,
   normalizeLiliaReviewWorkflow as normalizeLiliaReviewWorkflowImpl,
+  normalizeLiliaTaskWorkflow as normalizeLiliaTaskWorkflowImpl,
   type CreateLiliaBatchApplyWorkflowOptions as ContractCreateLiliaBatchApplyWorkflowOptions,
   type CreateLiliaFixSuggestionWorkflowOptions as ContractCreateLiliaFixSuggestionWorkflowOptions,
   type CreateLiliaGoalWorkflowOptions as ContractCreateLiliaGoalWorkflowOptions,
   type CreateLiliaReviewWorkflowOptions as ContractCreateLiliaReviewWorkflowOptions,
+  type CreateLiliaTaskWorkflowOptions as ContractCreateLiliaTaskWorkflowOptions,
   type LiliaBatchApplySourceKind as ContractLiliaBatchApplySourceKind,
   type LiliaFixSuggestionMode as ContractLiliaFixSuggestionMode,
   type LiliaGoalAction as ContractLiliaGoalAction,
@@ -111,12 +117,14 @@ import {
   type LiliaReviewDelivery as ContractLiliaReviewDelivery,
   type LiliaReviewTarget as ContractLiliaReviewTarget,
   type LiliaReviewTargetType as ContractLiliaReviewTargetType,
+  type LiliaTaskWorkflowKind as ContractLiliaTaskWorkflowKind,
   type NormalizedLiliaBatchApplyWorkflow as ContractNormalizedLiliaBatchApplyWorkflow,
   type NormalizedLiliaConfigDiagnosticsWorkflow as ContractNormalizedLiliaConfigDiagnosticsWorkflow,
   type NormalizedLiliaFixSuggestionWorkflow as ContractNormalizedLiliaFixSuggestionWorkflow,
   type NormalizedLiliaGoalWorkflow as ContractNormalizedLiliaGoalWorkflow,
   type NormalizedLiliaMemoryModeWorkflow as ContractNormalizedLiliaMemoryModeWorkflow,
   type NormalizedLiliaReviewWorkflow as ContractNormalizedLiliaReviewWorkflow,
+  type NormalizedLiliaTaskWorkflow as ContractNormalizedLiliaTaskWorkflow,
 } from "./liliaWorkflowContract.mjs";
 import {
   AUTO_CONTEXT_THRESHOLDS,
@@ -665,7 +673,17 @@ export interface ChatSlashCommandSearchResult {
   matchedBy: "name" | "title" | "description";
 }
 
-export type ChatWorkflowSlashKind = "review" | "fix_suggestion";
+export type ChatWorkflowSlashKind =
+  | "review"
+  | "fix_suggestion"
+  | "task:generalTask"
+  | "task:bugLocalization"
+  | "task:frontend"
+  | "task:refactor"
+  | "task:testAndVerification"
+  | "task:docsAndPrompt"
+  | "task:gitAndRelease"
+  | "task:architectureAndMemory";
 
 export const CHAT_WORKFLOW_SLASH_COMMANDS: ReadonlyArray<{
   kind: ChatWorkflowSlashKind;
@@ -689,6 +707,94 @@ export const CHAT_WORKFLOW_SLASH_COMMANDS: ReadonlyArray<{
       name: "fix",
       title: "修复建议",
       description: "生成修复建议。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:generalTask",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:generalTask`,
+      name: "task",
+      title: "通用实现任务",
+      description: "按通用实现任务工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:bugLocalization",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:bugLocalization`,
+      name: "debug",
+      title: "问题定位",
+      description: "按问题定位工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:frontend",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:frontend`,
+      name: "frontend",
+      title: "前端与交互",
+      description: "按前端与交互工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:refactor",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:refactor`,
+      name: "refactor",
+      title: "重构与结构调整",
+      description: "按重构与结构调整工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:testAndVerification",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:testAndVerification`,
+      name: "verify",
+      title: "测试与验证",
+      description: "按测试与验证工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:docsAndPrompt",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:docsAndPrompt`,
+      name: "docs",
+      title: "文档与提示词",
+      description: "按文档与提示词工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:gitAndRelease",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:gitAndRelease`,
+      name: "git",
+      title: "Git 与发布",
+      description: "按 Git 与发布工作流发送。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "task:architectureAndMemory",
+    command: {
+      id: `workflow:${LILIA_TASK_WORKFLOW_TYPE}:architectureAndMemory`,
+      name: "architecture",
+      title: "架构图与记忆",
+      description: "按架构图与记忆工作流发送。",
       source: "native",
       parameters: [],
     },
@@ -809,9 +915,12 @@ export {
   LILIA_REVIEW_DELIVERIES,
   LILIA_REVIEW_TARGET_TYPES,
   LILIA_REVIEW_WORKFLOW_TYPE,
+  LILIA_TASK_WORKFLOW_KINDS,
+  LILIA_TASK_WORKFLOW_TYPE,
 };
 
 export type LiliaQueryWorkflowType = ContractLiliaQueryWorkflowType;
+export type LiliaTaskWorkflowKind = ContractLiliaTaskWorkflowKind;
 export type LiliaReviewTargetType = ContractLiliaReviewTargetType;
 export type LiliaReviewDelivery = ContractLiliaReviewDelivery;
 export type LiliaFixSuggestionMode = ContractLiliaFixSuggestionMode;
@@ -837,6 +946,12 @@ export interface LiliaBatchApplyWorkflow {
   sourceTurnId: string;
   sourceKind: LiliaBatchApplySourceKind;
   sourceSummary: string;
+  instructions?: string;
+}
+
+export interface LiliaTaskWorkflow {
+  type: typeof LILIA_TASK_WORKFLOW_TYPE;
+  kind: LiliaTaskWorkflowKind;
   instructions?: string;
 }
 
@@ -894,6 +1009,7 @@ export type NormalizedLiliaMemoryModeWorkflow =
 export type NormalizedLiliaConfigDiagnosticsWorkflow =
   ContractNormalizedLiliaConfigDiagnosticsWorkflow;
 export type NormalizedLiliaReviewWorkflow = ContractNormalizedLiliaReviewWorkflow;
+export type NormalizedLiliaTaskWorkflow = ContractNormalizedLiliaTaskWorkflow;
 export type NormalizedLiliaFixSuggestionWorkflow =
   ContractNormalizedLiliaFixSuggestionWorkflow;
 export type NormalizedLiliaBatchApplyWorkflow =
@@ -912,6 +1028,8 @@ export interface NormalizedChatSlashCommandWorkflow {
 export type CreateLiliaGoalWorkflowOptions = ContractCreateLiliaGoalWorkflowOptions;
 export type CreateLiliaReviewWorkflowOptions =
   ContractCreateLiliaReviewWorkflowOptions;
+export type CreateLiliaTaskWorkflowOptions =
+  ContractCreateLiliaTaskWorkflowOptions;
 export type CreateLiliaFixSuggestionWorkflowOptions =
   ContractCreateLiliaFixSuggestionWorkflowOptions;
 export type CreateLiliaBatchApplyWorkflowOptions =
@@ -925,6 +1043,7 @@ export interface CreateChatSlashCommandWorkflowInput {
 
 export const isLiliaReviewTargetType = isLiliaReviewTargetTypeImpl;
 export const isLiliaQueryWorkflowType = isLiliaQueryWorkflowTypeImpl;
+export const isLiliaTaskWorkflowKind = isLiliaTaskWorkflowKindImpl;
 export const isLiliaReviewDelivery = isLiliaReviewDeliveryImpl;
 export const isLiliaFixSuggestionMode = isLiliaFixSuggestionModeImpl;
 export const isLiliaBatchApplySourceKind = isLiliaBatchApplySourceKindImpl;
@@ -936,10 +1055,12 @@ export const normalizeLiliaReviewTarget = normalizeLiliaReviewTargetImpl;
 export const normalizeLiliaReviewDelivery = normalizeLiliaReviewDeliveryImpl;
 export const normalizeLiliaFixSuggestionMode = normalizeLiliaFixSuggestionModeImpl;
 export const normalizeLiliaReviewWorkflow = normalizeLiliaReviewWorkflowImpl;
+export const normalizeLiliaTaskWorkflow = normalizeLiliaTaskWorkflowImpl;
 export const normalizeLiliaFixSuggestionWorkflow =
   normalizeLiliaFixSuggestionWorkflowImpl;
 export const normalizeLiliaBatchApplyWorkflow = normalizeLiliaBatchApplyWorkflowImpl;
 export const createLiliaReviewWorkflow = createLiliaReviewWorkflowImpl;
+export const createLiliaTaskWorkflow = createLiliaTaskWorkflowImpl;
 export const createLiliaFixSuggestionWorkflow = createLiliaFixSuggestionWorkflowImpl;
 export const createLiliaBatchApplyWorkflow = createLiliaBatchApplyWorkflowImpl;
 export const normalizeLiliaGoalWorkflow = normalizeLiliaGoalWorkflowImpl;
@@ -1467,6 +1588,7 @@ export type ChatWorkflow =
   | LiliaReviewWorkflow
   | LiliaFixSuggestionWorkflow
   | LiliaBatchApplyWorkflow
+  | LiliaTaskWorkflow
   | LiliaGoalWorkflow
   | LiliaCompactWorkflow
   | LiliaBackgroundTerminalsCleanWorkflow

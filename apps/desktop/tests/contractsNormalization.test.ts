@@ -227,6 +227,8 @@ import {
   LILIA_REVIEW_DELIVERIES,
   LILIA_REVIEW_TARGET_TYPES,
   LILIA_REVIEW_WORKFLOW_TYPE,
+  LILIA_TASK_WORKFLOW_KINDS,
+  LILIA_TASK_WORKFLOW_TYPE,
   MCP_ELICITATION_INTERACTION_KIND,
   MILESTONE_CREATE_COMMAND,
   MILESTONE_DELETE_COMMAND,
@@ -498,6 +500,7 @@ import {
   createLiliaFixSuggestionWorkflow,
   createLiliaGoalWorkflow,
   createLiliaReviewWorkflow,
+  createLiliaTaskWorkflow,
   createMemoryUpsertInput,
   createPermissionApprovalResult,
   createRemoteEnvironmentCommand,
@@ -553,6 +556,7 @@ import {
   isLiliaQueryWorkflowType,
   isLiliaReviewDelivery,
   isLiliaReviewTargetType,
+  isLiliaTaskWorkflowKind,
   isLiliaAskUserTool,
   isLiliaArchitectureTool,
   isLiliaConversationContextTool,
@@ -602,6 +606,7 @@ import {
   normalizeLiliaReviewDelivery,
   normalizeLiliaReviewTarget,
   normalizeLiliaReviewWorkflow,
+  normalizeLiliaTaskWorkflow,
   normalizeMemoryScope,
   normalizeMemorySettings,
   normalizeMemoryTags,
@@ -1616,11 +1621,17 @@ describe("contracts normalization helpers", () => {
       "lilia_review",
       "lilia_fix_suggestion",
       "lilia_batch_apply",
+      "lilia_task_workflow",
       "lilia_compact",
     ]);
     expect(isLiliaQueryWorkflowType("lilia_review")).toBe(true);
+    expect(isLiliaQueryWorkflowType("lilia_task_workflow")).toBe(true);
     expect(isLiliaQueryWorkflowType("lilia_compact")).toBe(true);
     expect(isLiliaQueryWorkflowType("lilia_goal")).toBe(false);
+    expect(LILIA_TASK_WORKFLOW_TYPE).toBe("lilia_task_workflow");
+    expect(LILIA_TASK_WORKFLOW_KINDS).toContain("frontend");
+    expect(isLiliaTaskWorkflowKind("frontend")).toBe(true);
+    expect(isLiliaTaskWorkflowKind("unknown")).toBe(false);
     expect(LILIA_REVIEW_TARGET_TYPES).toEqual([
       "uncommittedChanges",
       "baseBranch",
@@ -1680,6 +1691,11 @@ describe("contracts normalization helpers", () => {
       sourceKind: "review",
       sourceSummary: "summary",
     });
+    expect(createLiliaTaskWorkflow("frontend", { instructions: " ui " })).toEqual({
+      type: "lilia_task_workflow",
+      kind: "frontend",
+      instructions: "ui",
+    });
     expect(normalizeLiliaReviewWorkflow({
       type: "lilia_review",
       target: { type: "commit", sha: " abc " },
@@ -1709,6 +1725,18 @@ describe("contracts normalization helpers", () => {
       sourceSummary: "summary",
       instructions: "apply",
     });
+    expect(normalizeLiliaTaskWorkflow({
+      type: "lilia_task_workflow",
+      kind: "bugLocalization",
+      instructions: " trace ",
+    })).toEqual({
+      kind: "bugLocalization",
+      instructions: "trace",
+    });
+    expect(() => normalizeLiliaTaskWorkflow({
+      type: "lilia_task_workflow",
+      kind: "missing",
+    })).toThrow("valid kind");
     expect(() => normalizeLiliaBatchApplyWorkflow({
       type: "lilia_batch_apply",
       sourceKind: "review",
@@ -2188,14 +2216,38 @@ describe("contracts normalization helpers", () => {
     expect(CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => item.kind)).toEqual([
       "review",
       "fix_suggestion",
+      "task:generalTask",
+      "task:bugLocalization",
+      "task:frontend",
+      "task:refactor",
+      "task:testAndVerification",
+      "task:docsAndPrompt",
+      "task:gitAndRelease",
+      "task:architectureAndMemory",
     ]);
     expect(CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => item.command.name)).toEqual([
       "review",
       "fix",
+      "task",
+      "debug",
+      "frontend",
+      "refactor",
+      "verify",
+      "docs",
+      "git",
+      "architecture",
     ]);
     expect(CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => item.command.id)).toEqual([
       `workflow:${LILIA_REVIEW_WORKFLOW_TYPE}`,
       `workflow:${LILIA_FIX_SUGGESTION_WORKFLOW_TYPE}`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:generalTask`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:bugLocalization`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:frontend`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:refactor`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:testAndVerification`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:docsAndPrompt`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:gitAndRelease`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:architectureAndMemory`,
     ]);
     expect(createChatSlashCommandWorkflow({
       commandId: " native:help ",

@@ -3,8 +3,23 @@
     "lilia_review",
     "lilia_fix_suggestion",
     "lilia_batch_apply",
+    "lilia_task_workflow",
     "lilia_compact"
   ],
+  "taskWorkflow": {
+    "type": "lilia_task_workflow",
+    "kinds": [
+      "generalTask",
+      "review",
+      "bugLocalization",
+      "frontend",
+      "refactor",
+      "testAndVerification",
+      "docsAndPrompt",
+      "gitAndRelease",
+      "architectureAndMemory"
+    ]
+  },
   "review": {
     "type": "lilia_review",
     "targetTypes": [
