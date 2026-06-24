@@ -16,6 +16,7 @@ import {
 import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus } from "../services/chat";
+import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "../utils/perf";
 import {
   codexQuotaUnavailableStatus,
   formatCompactNumber,
@@ -24,6 +25,8 @@ import {
 } from "../utils/quotaDisplay";
 
 const QUOTA_STALE_MS = 60_000;
+const STARTUP_CONNECTION_REFRESH_DELAY_MS = 1_200;
+const STARTUP_REMOTE_REFRESH_DELAY_MS = 2_500;
 
 const props = withDefaults(defineProps<{
   to?: RouteLocationRaw | null;
@@ -61,7 +64,9 @@ const closeTimerId = ref<number | null>(null);
 const updateCloseTimerId = ref<number | null>(null);
 let quotaRequestSeq = 0;
 let quotaInflight: Promise<void> | null = null;
-let initialRefreshTimerId: number | null = null;
+let startupSeq = 0;
+let cancelStartupConnectionRefresh: (() => void) | null = null;
+let cancelStartupRemoteRefresh: (() => void) | null = null;
 let disposed = false;
 let quotaOpenIntent = false;
 const openState = computed(() => quotaTooltipOpen.value);
@@ -214,19 +219,93 @@ function cancelUpdateCloseTimer() {
   }
 }
 
-function cancelInitialRefreshTimer() {
-  if (initialRefreshTimerId !== null) {
-    window.clearTimeout(initialRefreshTimerId);
-    initialRefreshTimerId = null;
-  }
-}
-
 function scheduleCloseQuotaDetails() {
   cancelCloseTimer();
   closeTimerId.value = window.setTimeout(() => {
     quotaTooltipOpen.value = false;
     closeTimerId.value = null;
   }, 80);
+}
+
+function scheduleDelayedIdle(delayMs: number, run: () => void): () => void {
+  let active = true;
+  let idleHandle: number | null = null;
+  let timerId: number | null = window.setTimeout(() => {
+    timerId = null;
+    if (!active) return;
+    idleHandle = runWhenIdle(() => {
+      idleHandle = null;
+      if (active) run();
+    });
+  }, delayMs);
+  return () => {
+    active = false;
+    if (timerId !== null) {
+      window.clearTimeout(timerId);
+      timerId = null;
+    }
+    if (idleHandle !== null) {
+      cancelIdleRun(idleHandle);
+      idleHandle = null;
+    }
+  };
+}
+
+function scheduleAfterPaintDelayedIdle(delayMs: number, run: () => void): () => void {
+  let cancelDelay: (() => void) | null = null;
+  let cancelPaint: (() => void) | null = scheduleAfterPaint(() => {
+    cancelPaint = null;
+    cancelDelay = scheduleDelayedIdle(delayMs, run);
+  });
+  return () => {
+    cancelPaint?.();
+    cancelPaint = null;
+    cancelDelay?.();
+    cancelDelay = null;
+  };
+}
+
+function cancelStartupRefreshSchedule() {
+  startupSeq += 1;
+  cancelStartupConnectionRefresh?.();
+  cancelStartupConnectionRefresh = null;
+  cancelStartupRemoteRefresh?.();
+  cancelStartupRemoteRefresh = null;
+}
+
+function shouldRunStartupRemoteRefresh(): boolean {
+  return activeBackend.value === "codex" &&
+    connectionModeUsesCodexAccount(activeStatus.value?.connectionMode);
+}
+
+function scheduleStartupRemoteRefresh(seq: number) {
+  cancelStartupRemoteRefresh?.();
+  cancelStartupRemoteRefresh = scheduleDelayedIdle(STARTUP_REMOTE_REFRESH_DELAY_MS, () => {
+    if (disposed || seq !== startupSeq || !shouldRunStartupRemoteRefresh()) return;
+    void Promise.all([
+      checkCodexAppServerUpdate(),
+      loadOfficialQuota(),
+    ]).catch((err) => {
+      console.error("[provider-connection] startup remote refresh failed", err);
+    });
+  });
+}
+
+function scheduleStartupRefresh() {
+  cancelStartupRefreshSchedule();
+  const seq = startupSeq;
+  cancelStartupConnectionRefresh = scheduleAfterPaintDelayedIdle(
+    STARTUP_CONNECTION_REFRESH_DELAY_MS,
+    () => {
+      if (disposed || seq !== startupSeq) return;
+      void refresh(false).then(() => {
+        if (disposed || seq !== startupSeq) return;
+        scheduleStartupRemoteRefresh(seq);
+      }).catch((err) => {
+        console.error("[provider-connection] startup connection refresh failed", err);
+      });
+    },
+  );
 }
 
 async function loadOfficialQuota() {
@@ -310,10 +389,9 @@ function clearOfficialQuota() {
 watch(
   isCodexOfficialAccount,
   (enabled) => {
-    if (enabled) {
-      void loadOfficialQuota();
-      return;
-    }
+    if (enabled) return;
+    cancelStartupRemoteRefresh?.();
+    cancelStartupRemoteRefresh = null;
     clearOfficialQuota();
   },
   { immediate: true },
@@ -349,15 +427,7 @@ watch(
 
 onMounted(() => {
   disposed = false;
-  initialRefreshTimerId = window.setTimeout(() => {
-    initialRefreshTimerId = null;
-    if (disposed) return;
-    void refresh(false).then(() => {
-      if (disposed) return;
-      void checkCodexAppServerUpdate();
-      void loadOfficialQuota();
-    });
-  }, 0);
+  scheduleStartupRefresh();
 });
 
 onBeforeUnmount(() => {
@@ -366,7 +436,7 @@ onBeforeUnmount(() => {
   quotaRequestSeq += 1;
   quotaInflight = null;
   quotaLoading.value = false;
-  cancelInitialRefreshTimer();
+  cancelStartupRefreshSchedule();
   cancelCloseTimer();
   cancelUpdateCloseTimer();
 });

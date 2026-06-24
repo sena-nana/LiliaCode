@@ -1256,7 +1256,13 @@ pub fn quota_usage_get_stats(
 }
 
 #[tauri::command]
-pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuotaStatus {
+pub async fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuotaStatus {
+    tauri::async_runtime::spawn_blocking(move || quota_usage_get_codex_account_status_sync(app))
+        .await
+        .expect("quota_usage_get_codex_account_status blocking task panicked")
+}
+
+fn quota_usage_get_codex_account_status_sync(app: AppHandle) -> CodexAccountQuotaStatus {
     let connection = resolve_connection_for(&app, BACKEND_CODEX);
     if connection.mode != ConnectionMode::CodexAccount {
         return codex_account_quota_unavailable(connection.mode, None);
@@ -1268,7 +1274,18 @@ pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuota
 }
 
 #[tauri::command]
-pub fn quota_usage_consume_codex_rate_limit_reset_credit(
+pub async fn quota_usage_consume_codex_rate_limit_reset_credit(
+    input: CodexRateLimitResetCreditConsumeInput,
+    app: AppHandle,
+) -> Result<CodexRateLimitResetCreditConsumeResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        quota_usage_consume_codex_rate_limit_reset_credit_sync(input, app)
+    })
+    .await
+    .expect("quota_usage_consume_codex_rate_limit_reset_credit blocking task panicked")
+}
+
+fn quota_usage_consume_codex_rate_limit_reset_credit_sync(
     input: CodexRateLimitResetCreditConsumeInput,
     app: AppHandle,
 ) -> Result<CodexRateLimitResetCreditConsumeResult, String> {
