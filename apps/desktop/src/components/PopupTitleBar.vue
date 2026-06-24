@@ -211,13 +211,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="popup-titlebar" data-tauri-drag-region>
+  <header class="popup-titlebar" data-agent-id="popup.titlebar" data-tauri-drag-region>
     <div class="popup-titlebar__controls popup-titlebar__controls--left">
       <button
         type="button"
         class="titlebar__btn"
         aria-label="回到主窗口"
         title="回到主窗口"
+        data-agent-id="popup.titlebar.focus-main"
         @click="onFocusMain"
       >
         <ExternalLink :size="14" aria-hidden="true" />
@@ -227,6 +228,7 @@ onBeforeUnmount(() => {
         class="titlebar__btn"
         aria-label="新对话"
         title="新对话"
+        data-agent-id="popup.titlebar.new-chat"
         @click="onNewChat"
       >
         <MessageSquarePlus :size="15" aria-hidden="true" />
@@ -261,6 +263,7 @@ onBeforeUnmount(() => {
         class="titlebar__btn"
         aria-label="重试加载弹窗数据"
         title="重试加载弹窗数据"
+        data-agent-id="popup.titlebar.retry"
         @click="retryPopupStoresLoad"
       >
         <RefreshCw :size="14" aria-hidden="true" />
@@ -270,6 +273,7 @@ onBeforeUnmount(() => {
         class="titlebar__btn titlebar__btn--danger"
         aria-label="关闭弹出窗口"
         title="关闭"
+        data-agent-id="popup.titlebar.close"
         @click="onClose"
       >
         <X :size="15" aria-hidden="true" />

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import {
   WORKTREE_ATTACH_TASK_COMMAND,
   WORKTREE_CLEANUP_ARCHIVE_COMMAND,

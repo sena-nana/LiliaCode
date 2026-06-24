@@ -163,6 +163,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
   <li
     v-if="entry.type === 'group'"
     class="agent-timeline__item agent-timeline__item--group"
+    :data-agent-id="`timeline.group.${entry.id}`"
     :data-scroll-anchor-ids="groupScrollAnchorIds(entry)"
     :class="[
       timelineKindClass('agent-timeline__item--', entry.representative.kind),
@@ -187,6 +188,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
           <button
             type="button"
             class="agent-timeline__title"
+            :data-agent-id="`timeline.group.${entry.id}.toggle`"
             :aria-expanded="groupExpanded(entry)"
             :aria-controls="`agent-timeline-details-${entry.id}`"
             @click="emit('toggleGroup', entry)"
@@ -212,6 +214,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
             v-for="event in entry.events"
             :key="event.id"
             class="agent-timeline__group-item"
+            :data-agent-id="`timeline.event.${event.id}`"
             :data-scroll-anchor-id="event.id"
             :class="[timelineKindClass('agent-timeline__group-item--', event.kind), timelineStatusClass(event.status)]"
           >
@@ -231,6 +234,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 <button
                   type="button"
                   class="agent-timeline__title agent-timeline__group-title"
+                  :data-agent-id="`timeline.event.${event.id}.toggle`"
                   :aria-expanded="expanded(event)"
                   :aria-controls="`agent-timeline-details-${event.id}`"
                   :aria-label="titleAriaLabel(event)"
@@ -260,6 +264,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                   v-if="canRetry(event)"
                   type="button"
                   class="agent-timeline__retry"
+                  :data-agent-id="`timeline.event.${event.id}.retry`"
                   title="重新发送上下文"
                   aria-label="重试"
                   @click.stop="emit('retry-event', event)"
@@ -293,6 +298,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
   <li
     v-else
     class="agent-timeline__item"
+    :data-agent-id="`timeline.event.${entry.event.id}`"
     :data-scroll-anchor-id="entry.event.id"
     :class="[
       timelineKindClass('agent-timeline__item--', entry.event.kind),
@@ -336,14 +342,16 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
             <span
               v-if="isTimelineErrorReply(entry.event)"
               class="agent-timeline__title"
+              :data-agent-id="`timeline.event.${entry.event.id}.toggle`"
             >
               <span>{{ labelText(entry.event) }}</span>
             </span>
             <button
               v-if="!isTimelineFinalReply(entry.event)"
-              type="button"
-              class="agent-timeline__title"
-              :aria-expanded="expanded(entry.event)"
+      type="button"
+      class="agent-timeline__title"
+      :data-agent-id="`timeline.entry.toggle.${entry.event.id}`"
+      :aria-expanded="expanded(entry.event)"
               :aria-controls="`agent-timeline-details-${entry.event.id}`"
               :aria-label="titleAriaLabel(entry.event)"
               :disabled="!canToggle(entry.event)"
@@ -372,6 +380,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               v-if="canRetry(entry.event)"
               type="button"
               class="agent-timeline__retry"
+              :data-agent-id="`timeline.event.${entry.event.id}.retry`"
               title="重新发送上下文"
               aria-label="重试"
               @click.stop="emit('retry-event', entry.event)"
@@ -383,6 +392,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               v-if="hasProcessEvents(entry)"
               type="button"
               class="agent-timeline__process-toggle"
+              :data-agent-id="`timeline.event.${entry.event.id}.process-toggle`"
               :class="{ 'agent-timeline__process-toggle--running': processGroupRunning(entry) }"
               :aria-expanded="processGroupExpanded(entry.event)"
               @click="emit('toggleProcessGroup', entry.event)"

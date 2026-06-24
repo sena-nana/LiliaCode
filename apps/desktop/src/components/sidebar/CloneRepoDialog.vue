@@ -331,6 +331,7 @@ onBeforeUnmount(() => {
         role="dialog"
         aria-modal="true"
         aria-label="从 GitHub clone"
+        data-agent-id="clone-repo.dialog"
         @click.self="emit('close')"
       >
         <div class="search-palette__card dialog__card dialog__card--repo-dropdown">
@@ -346,6 +347,7 @@ onBeforeUnmount(() => {
                 v-model="query"
                 type="text"
                 class="ui-input"
+                data-agent-id="clone-repo.query"
                 placeholder="owner/repo 或 https://github.com/owner/repo.git"
                 @keydown.enter.prevent="confirmClone"
               />
@@ -374,6 +376,7 @@ onBeforeUnmount(() => {
                       class="search-dropdown__item"
                       :class="{ 'is-active': selectedRepo?.id === repo.id }"
                       role="option"
+                      :data-agent-id="`clone-repo.repo.${repo.id}`"
                       :aria-selected="selectedRepo?.id === repo.id"
                       @click="selectRepo(repo)"
                     >
@@ -399,6 +402,7 @@ onBeforeUnmount(() => {
                     class="search-dropdown__item"
                     role="option"
                     aria-selected="false"
+                    data-agent-id="clone-repo.direct"
                     @click="selectedRepo = null; repoDropdownOpen = false"
                   >
                     <span class="search-dropdown__title">直接克隆 {{ directCloneRepo }}</span>
@@ -422,9 +426,10 @@ onBeforeUnmount(() => {
                   type="text"
                   class="ui-input"
                   placeholder="选择克隆到哪个目录下"
+                  data-agent-id="clone-repo.parent"
                   readonly
                 />
-                <button type="button" class="ui-button ui-button--ghost" :disabled="cloneBusy" @click="pickCloneParent">
+                <button type="button" class="ui-button ui-button--ghost" data-agent-id="clone-repo.parent.pick" :disabled="cloneBusy" @click="pickCloneParent">
                   <FolderOpen :size="12" aria-hidden="true" /> 选择
                 </button>
               </div>
@@ -442,6 +447,7 @@ onBeforeUnmount(() => {
                 v-if="githubBindingExpired"
                 type="button"
                 class="ui-button ui-button--ghost"
+                data-agent-id="clone-repo.github.rebind"
                 @click="openGitHubBindingSettings"
               >
                 重新绑定 GitHub
@@ -449,8 +455,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ui-button ui-button--ghost" :disabled="cloneBusy" @click="emit('close')">取消</button>
-            <button type="button" class="ui-button ui-button--primary" :disabled="cloneBusy" @click="confirmClone">
+            <button type="button" class="ui-button ui-button--ghost" data-agent-id="clone-repo.cancel" :disabled="cloneBusy" @click="emit('close')">取消</button>
+            <button type="button" class="ui-button ui-button--primary" data-agent-id="clone-repo.confirm" :disabled="cloneBusy" @click="confirmClone">
               {{ cloneBusy ? "克隆中…" : "克隆并添加" }}
             </button>
           </div>

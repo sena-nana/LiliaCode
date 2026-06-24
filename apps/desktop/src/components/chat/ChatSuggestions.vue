@@ -60,6 +60,7 @@ const suggestionViewRows = computed(() =>
           type="button"
           class="chat-suggestion"
           :class="{ 'chat-suggestion--with-source': row.sourceLabel }"
+          :data-agent-id="`chat.suggestions.item.${row.suggestion.id}`"
           :title="row.title"
           @mousedown.prevent
           @click="emit('select', row.suggestion)"
@@ -85,6 +86,7 @@ const suggestionViewRows = computed(() =>
         v-else-if="suggestionStatus === 'empty'"
         type="button"
         class="chat-suggestions__inspire"
+        data-agent-id="chat.suggestions.refresh-empty"
         @mousedown.prevent
         @click="emit('refresh-suggestions')"
       >
@@ -99,6 +101,7 @@ const suggestionViewRows = computed(() =>
         <button
           type="button"
           class="chat-suggestions__retry"
+          data-agent-id="chat.suggestions.retry"
           @mousedown.prevent
           @click="emit('refresh-suggestions')"
         >

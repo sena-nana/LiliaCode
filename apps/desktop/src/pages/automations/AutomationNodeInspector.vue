@@ -59,6 +59,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
       <label>标题</label>
       <input
         :value="selectedAutomationNode?.title"
+        data-agent-id="automations.node.title"
         @input="emit('update-title', ($event.target as HTMLInputElement).value)"
       />
     </div>
@@ -67,6 +68,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>触发类型</label>
         <select
           :value="configString('triggerKind') || 'manual'"
+          data-agent-id="automations.node.trigger.kind"
           @change="emit('update-config', 'triggerKind', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="kind in AUTOMATION_TRIGGER_KINDS" :key="kind" :value="kind">
@@ -80,6 +82,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <input
           :checked="configBoolean('createTask')"
           type="checkbox"
+          data-agent-id="automations.node.agent.create-task"
           @change="emit('update-config', 'createTask', ($event.target as HTMLInputElement).checked)"
         />
         <span>新建任务</span>
@@ -88,6 +91,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>Task ID</label>
         <input
           :value="configString('taskId')"
+          data-agent-id="automations.node.agent.task-id"
           placeholder="${trigger.taskId}"
           @input="emit('update-config', 'taskId', ($event.target as HTMLInputElement).value)"
         />
@@ -96,6 +100,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>项目 ID</label>
         <input
           :value="configString('projectId')"
+          data-agent-id="automations.node.agent.project-id"
           placeholder="${trigger.projectId}"
           @input="emit('update-config', 'projectId', ($event.target as HTMLInputElement).value)"
         />
@@ -104,6 +109,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>任务标题</label>
         <input
           :value="configString('title')"
+          data-agent-id="automations.node.agent.title"
           placeholder="自动化 Agent 任务"
           @input="emit('update-config', 'title', ($event.target as HTMLInputElement).value)"
         />
@@ -112,6 +118,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>后端</label>
         <select
           :value="configString('backend') || DEFAULT_CHAT_BACKEND"
+          data-agent-id="automations.node.agent.backend"
           @change="emit('update-config', 'backend', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="option in chatBackendOptions" :key="option.value" :value="option.value">
@@ -124,6 +131,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <input
           id="automation-agent-model"
           :value="configString('model')"
+          data-agent-id="automations.node.agent.model"
           :placeholder="modelPlaceholder"
           @input="emit('update-config', 'model', ($event.target as HTMLInputElement).value)"
         />
@@ -133,6 +141,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <input
           id="automation-agent-project-cwd"
           :value="configString('projectCwd')"
+          data-agent-id="automations.node.agent.project-cwd"
           placeholder="${trigger.projectCwd}"
           @input="emit('update-config', 'projectCwd', ($event.target as HTMLInputElement).value)"
         />
@@ -142,6 +151,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <textarea
           class="ui-input ui-textarea"
           :value="configString('prompt')"
+          data-agent-id="automations.node.agent.prompt"
           @input="emit('update-config', 'prompt', ($event.target as HTMLTextAreaElement).value)"
         />
       </div>
@@ -149,6 +159,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>权限</label>
         <select
           :value="normalizePermissionMode(configString('permission'))"
+          data-agent-id="automations.node.agent.permission"
           @change="emit('update-config', 'permission', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="mode in PERMISSION_MODES" :key="mode" :value="mode">{{ mode }}</option>
@@ -160,6 +171,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>逻辑</label>
         <select
           :value="normalizeAutomationLogicKind(configString('logic'))"
+          data-agent-id="automations.node.logic.kind"
           @change="emit('update-config', 'logic', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="kind in AUTOMATION_LOGIC_KINDS" :key="kind" :value="kind">
@@ -171,6 +183,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>路径</label>
         <input
           :value="configString('path')"
+          data-agent-id="automations.node.logic.path"
           :placeholder="DEFAULT_AUTOMATION_LOGIC_PATH"
           @input="emit('update-config', 'path', ($event.target as HTMLInputElement).value)"
         />
@@ -179,6 +192,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>等于</label>
         <input
           :value="configString('equals')"
+          data-agent-id="automations.node.logic.equals"
           placeholder="task_changed"
           @input="emit('update-config', 'equals', ($event.target as HTMLInputElement).value)"
         />
@@ -190,6 +204,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>分支值</label>
         <input
           :value="configString('cases')"
+          data-agent-id="automations.node.logic.cases"
           placeholder="done, blocked"
           @input="emit('update-config', 'cases', ($event.target as HTMLInputElement).value)"
         />
@@ -201,6 +216,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <select
           id="automation-tool-action"
           :value="configString('action') || DEFAULT_AUTOMATION_TOOL_ACTION"
+          data-agent-id="automations.node.tool.action"
           @change="emit('update-config', 'action', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="action in AUTOMATION_TOOL_ACTIONS" :key="action" :value="action">
@@ -215,6 +231,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>Task ID</label>
         <input
           :value="configString('taskId')"
+          data-agent-id="automations.node.tool.task-id"
           placeholder="${trigger.taskId}"
           @input="emit('update-config', 'taskId', ($event.target as HTMLInputElement).value)"
         />
@@ -226,6 +243,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>项目 ID</label>
         <input
           :value="configString('projectId')"
+          data-agent-id="automations.node.tool.project-id"
           placeholder="${trigger.projectId}"
           @input="emit('update-config', 'projectId', ($event.target as HTMLInputElement).value)"
         />
@@ -237,6 +255,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>标题</label>
         <input
           :value="configString('title')"
+          data-agent-id="automations.node.tool.title"
           placeholder="自动化任务"
           @input="emit('update-config', 'title', ($event.target as HTMLInputElement).value)"
         />
@@ -250,6 +269,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
           id="automation-tool-text"
           class="ui-input ui-textarea"
           :value="configString('text')"
+          data-agent-id="automations.node.tool.text"
           placeholder="自动化 Todo"
           @input="emit('update-config', 'text', ($event.target as HTMLTextAreaElement).value)"
         />
@@ -262,6 +282,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <textarea
           class="ui-input ui-textarea"
           :value="configString('summary')"
+          data-agent-id="automations.node.tool.summary"
           placeholder="写入时间线的摘要"
           @input="emit('update-config', 'summary', ($event.target as HTMLTextAreaElement).value)"
         />
@@ -273,6 +294,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>状态</label>
         <input
           :value="configString('status')"
+          data-agent-id="automations.node.tool.status"
           placeholder="waiting"
           @input="emit('update-config', 'status', ($event.target as HTMLInputElement).value)"
         />
@@ -284,6 +306,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>记录后端</label>
         <select
           :value="configString('backend') || DEFAULT_CHAT_BACKEND"
+          data-agent-id="automations.node.tool.backend"
           @change="emit('update-config', 'backend', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="option in chatBackendOptions" :key="option.value" :value="option.value">
@@ -299,6 +322,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <select
           id="automation-tool-priority"
           :value="configString('priority') || DEFAULT_AUTOMATION_TOOL_PRIORITY"
+          data-agent-id="automations.node.tool.priority"
           @change="emit('update-config', 'priority', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="priority in AUTOMATION_TOOL_PRIORITIES" :key="priority" :value="priority">
@@ -312,6 +336,7 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
         <label>提示</label>
         <textarea
           class="ui-input ui-textarea"
+          data-agent-id="automations.node.human.prompt"
           :value="configString('prompt')"
           @input="emit('update-config', 'prompt', ($event.target as HTMLTextAreaElement).value)"
         />

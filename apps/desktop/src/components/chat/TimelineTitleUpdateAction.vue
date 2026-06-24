@@ -32,6 +32,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="timeline.title-update.decline"
         @click="emit('decline')"
       >
         忽略
@@ -39,6 +40,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--primary composer-inline__btn"
+        data-agent-id="timeline.title-update.accept"
         @click="emit('accept')"
       >
         同意

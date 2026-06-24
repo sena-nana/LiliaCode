@@ -76,6 +76,7 @@ const env = {
   ...process.env,
   LILIA_DEV_PORT: String(port),
   LILIA_DEV_STRICT_PORT: "1",
+  VITE_LILIA_AGENT_DEBUG: process.env.LILIA_AGENT_DEBUG === "1" ? "1" : process.env.VITE_LILIA_AGENT_DEBUG,
 };
 
 if (process.env.LILIA_TAURI_DEV_DRY_RUN === "1") {
@@ -86,6 +87,7 @@ if (process.env.LILIA_TAURI_DEV_DRY_RUN === "1") {
       env: {
         LILIA_DEV_PORT: env.LILIA_DEV_PORT,
         LILIA_DEV_STRICT_PORT: env.LILIA_DEV_STRICT_PORT,
+        VITE_LILIA_AGENT_DEBUG: env.VITE_LILIA_AGENT_DEBUG,
       },
     }),
   );

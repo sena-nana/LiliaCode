@@ -265,11 +265,12 @@ function processAnchorIdsForEntry(entry: TimelineEntry): string[] {
     </div>
     <ol class="agent-timeline__list">
       <li v-if="hiddenOlderEntryCount > 0" class="agent-timeline__window-row">
-        <button
-          type="button"
-          class="agent-timeline__window-button"
-          @click="revealOlderEntries"
-        >
+    <button
+      type="button"
+      class="agent-timeline__window-button"
+      data-agent-id="timeline.reveal-older"
+      @click="revealOlderEntries"
+    >
           显示更早 {{ hiddenOlderEntryCount }} 项
         </button>
       </li>

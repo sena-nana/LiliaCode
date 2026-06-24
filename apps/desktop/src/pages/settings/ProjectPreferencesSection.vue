@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card">
+  <div class="card" data-agent-id="settings.project">
     <h2>
       <span class="card-h2__title">
         <FolderTree :size="14" aria-hidden="true" />
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
         <span class="settings-row__value muted">
           {{ projectSettings.cloneParentDir || "未设置（用家目录）" }}
         </span>
-        <button type="button" class="ui-button ui-button--ghost" :disabled="savingProject" @click="pickCloneParent">
+        <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.project.clone-parent.pick" :disabled="savingProject" @click="pickCloneParent">
           <FolderOpen :size="12" aria-hidden="true" />
           选择
         </button>
@@ -356,6 +356,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ui-segmented__item"
+            data-agent-id="settings.project.worktree.mode.current"
             :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'current' }"
             :disabled="savingProject"
             @click="setWorktreeDefaultMode('current')"
@@ -365,6 +366,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ui-segmented__item"
+            data-agent-id="settings.project.worktree.mode.create"
             :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'create' }"
             :disabled="savingProject"
             @click="setWorktreeDefaultMode('create')"
@@ -374,6 +376,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ui-segmented__item"
+            data-agent-id="settings.project.worktree.mode.existing"
             :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'existing' }"
             :disabled="savingProject"
             @click="setWorktreeDefaultMode('existing')"
@@ -384,6 +387,7 @@ onBeforeUnmount(() => {
         <label class="ui-checkbox">
           <input
             type="checkbox"
+            data-agent-id="settings.project.worktree.cleanup-on-archive"
             :checked="normalizeWorktreeSettings(projectSettings.worktree).cleanupOnArchive"
             :disabled="savingProject"
             @change="setWorktreeCleanup(($event.target as HTMLInputElement).checked)"
@@ -399,7 +403,7 @@ onBeforeUnmount(() => {
         <span class="settings-row__value muted">
           {{ normalizeWorktreeSettings(projectSettings.worktree).parentDir || "未设置（使用主仓库同级目录）" }}
         </span>
-        <button type="button" class="ui-button ui-button--ghost" :disabled="savingProject" @click="pickWorktreeParent">
+        <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.project.worktree-parent.pick" :disabled="savingProject" @click="pickWorktreeParent">
           <FolderOpen :size="12" aria-hidden="true" />
           选择
         </button>
@@ -411,6 +415,7 @@ onBeforeUnmount(() => {
       <textarea
         class="ui-input ui-textarea"
         rows="4"
+        data-agent-id="settings.project.worktree.auto-instructions"
         :value="normalizeWorktreeSettings(projectSettings.worktree).autoInstructions"
         :disabled="savingProject"
         @change="saveWorktreeInstructions"
@@ -444,6 +449,7 @@ onBeforeUnmount(() => {
           v-if="!isBound"
           type="button"
           class="ui-button ui-button--primary"
+          data-agent-id="settings.project.github.bind"
           :disabled="bindingBusy"
           @click="startBinding"
         >
@@ -456,6 +462,7 @@ onBeforeUnmount(() => {
           v-if="deviceFlow"
           type="button"
           class="ui-button ui-button--ghost"
+          data-agent-id="settings.project.github.copy-code-open"
           @click="copyCodeAndOpenBrowser"
         >
           <Copy :size="12" aria-hidden="true" />
@@ -466,6 +473,7 @@ onBeforeUnmount(() => {
           v-if="deviceFlow"
           type="button"
           class="ui-button ui-button--ghost"
+          data-agent-id="settings.project.github.open"
           @click="openUrl(deviceFlow.verificationUri)"
         >
           <Link2 :size="12" aria-hidden="true" />
@@ -476,6 +484,7 @@ onBeforeUnmount(() => {
           v-if="isBound"
           type="button"
           class="ui-button ui-button--ghost ui-button--danger"
+          data-agent-id="settings.project.github.unbind"
           :disabled="bindingBusy"
           @click="handleUnbind"
         >

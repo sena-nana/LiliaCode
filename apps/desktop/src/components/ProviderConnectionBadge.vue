@@ -63,6 +63,7 @@ let quotaRequestSeq = 0;
 let quotaInflight: Promise<void> | null = null;
 let initialRefreshTimerId: number | null = null;
 let disposed = false;
+let quotaOpenIntent = false;
 const openState = computed(() => quotaTooltipOpen.value);
 const updateOpenState = computed(() => updateTooltipOpen.value);
 const preferredPlacement = computed(() => props.preferredPlacement);
@@ -254,17 +255,20 @@ async function loadOfficialQuota() {
   return quotaInflight;
 }
 
-function openQuotaDetails() {
+async function openQuotaDetails() {
   if (!isCodexOfficialAccount.value) return;
+  quotaOpenIntent = true;
   cancelCloseTimer();
+  await loadOfficialQuota();
+  if (disposed || !quotaOpenIntent || !isCodexOfficialAccount.value) return;
   quotaTooltipOpen.value = true;
-  void loadOfficialQuota();
   void nextTick(() => {
     if (!disposed && quotaTooltipOpen.value) void updateQuotaPopoverPosition();
   });
 }
 
 function closeQuotaDetails() {
+  quotaOpenIntent = false;
   scheduleCloseQuotaDetails();
 }
 
@@ -296,6 +300,7 @@ async function installUpdate() {
 
 function clearOfficialQuota() {
   cancelCloseTimer();
+  quotaOpenIntent = false;
   quotaRequestSeq += 1;
   officialQuota.value = null;
   quotaLoading.value = false;
@@ -357,6 +362,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true;
+  quotaOpenIntent = false;
   quotaRequestSeq += 1;
   quotaInflight = null;
   quotaLoading.value = false;
@@ -379,6 +385,7 @@ onBeforeUnmount(() => {
         `sb-conn--${connectionTone}`,
         { 'sb-conn--quota': shouldShowQuotaRings },
       ]"
+      data-agent-id="provider-connection.badge"
       :title="connectionTooltip"
       :aria-label="connectionTooltip"
       :aria-describedby="quotaTooltipOpen ? popoverId : undefined"
@@ -418,6 +425,7 @@ onBeforeUnmount(() => {
       ref="updateAnchorEl"
       type="button"
       class="sb-conn-update"
+      data-agent-id="provider-connection.codex-update"
       :disabled="codexAppServerUpdating"
       :title="codexUpdateTitle"
       :aria-label="codexUpdateTitle"

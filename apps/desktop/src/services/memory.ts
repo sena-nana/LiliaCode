@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import {
   MEMORY_DELETE_COMMAND,
   MEMORY_GET_INJECTION_STATE_COMMAND,

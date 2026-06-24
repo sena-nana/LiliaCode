@@ -36,6 +36,8 @@ import type {
   HooksOverview,
   SidebarConversationSummary,
   RemoteRetryChatRequest,
+  AgentDebugSnapshot,
+  AgentDebugAction,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -257,6 +259,53 @@ export type RemoteRetryChatRequestWithEventTypeTest = Assert<
       eventId: null;
     },
     RemoteRetryChatRequest
+  >
+>;
+
+export type AgentDebugSnapshotTypeTest = Assert<
+  Extends<
+    {
+      enabled: true;
+      route: "/projects";
+      title: "LiliaCode";
+      capturedAt: 1;
+      viewport: { x: 0; y: 0; width: 960; height: 600 };
+      activeElement: "chat.composer.input";
+      visibleText: "Lilia";
+      elements: [{
+        id: "chat.composer.send";
+        role: "button";
+        text: "发送";
+        tagName: "button";
+        selector: "[data-agent-id=\"chat.composer.send\"]";
+        rect: { x: 1; y: 2; width: 3; height: 4 };
+        visible: true;
+        enabled: true;
+        checked: null;
+        expanded: null;
+      }];
+      missingAgentIds: [{
+        role: "menuitemradio";
+        text: "未标记模型";
+        tagName: "button";
+        selector: "button:nth-of-type(2)";
+        rect: { x: 1; y: 2; width: 3; height: 4 };
+        nearestAgentId: null;
+      }];
+      errors: [];
+      invokes: [];
+    },
+    AgentDebugSnapshot
+  >
+>;
+
+export type AgentDebugActionTypeTest = Assert<
+  Extends<
+    | { type: "click"; target: "chat.composer.send"; actionId: "act-1" }
+    | { type: "focus"; target: "chat.composer.input" }
+    | { type: "type"; target: "chat.composer.input"; text: "hello"; clear: true }
+    | { type: "hotkey"; keys: ["Control", "Enter"] },
+    AgentDebugAction
   >
 >;
 

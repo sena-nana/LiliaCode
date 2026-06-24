@@ -34,6 +34,7 @@ const emit = defineEmits<{
         v-if="open"
         class="search-palette"
         role="dialog" aria-modal="true" :aria-label="serverLabel"
+        data-agent-id="plugins.mcp-editor"
         @click.self="emit('update:open', false)"
       >
         <div class="search-palette__card dialog__card">
@@ -47,6 +48,7 @@ const emit = defineEmits<{
               <input
                 :value="name" type="text"
                 class="ui-input"
+                data-agent-id="plugins.mcp-editor.name"
                 placeholder="weather-mcp"
                 @input="emit('update:name', ($event.target as HTMLInputElement).value)"
               />
@@ -56,6 +58,7 @@ const emit = defineEmits<{
               <input
                 :value="command" type="text"
                 class="ui-input"
+                data-agent-id="plugins.mcp-editor.command"
                 placeholder="node"
                 @input="emit('update:command', ($event.target as HTMLInputElement).value)"
               />
@@ -65,6 +68,7 @@ const emit = defineEmits<{
               <textarea
                 :value="argsText"
                 class="ui-input"
+                data-agent-id="plugins.mcp-editor.args"
                 rows="4"
                 placeholder="每行一个参数"
                 @input="emit('update:argsText', ($event.target as HTMLTextAreaElement).value)"
@@ -73,7 +77,7 @@ const emit = defineEmits<{
             <div class="plugins-env-editor">
               <div class="plugins-env-editor__head">
                 <span>Env</span>
-                <button type="button" class="ui-button ui-button--ghost" @click="emit('add-env-row')">
+                <button type="button" class="ui-button ui-button--ghost" data-agent-id="plugins.mcp-editor.env.add" @click="emit('add-env-row')">
                   <Plus :size="12" aria-hidden="true" /> 添加
                 </button>
               </div>
@@ -86,18 +90,21 @@ const emit = defineEmits<{
                   v-model="row.key"
                   type="text"
                   class="ui-input"
+                  :data-agent-id="`plugins.mcp-editor.env.${index}.key`"
                   placeholder="KEY"
                 />
                 <input
                   v-model="row.value"
                   type="password"
                   class="ui-input"
+                  :data-agent-id="`plugins.mcp-editor.env.${index}.value`"
                   :placeholder="editingMcp?.envKeys.includes(row.key) ? '留空保留现有值' : 'value'"
                 />
                 <button
                   type="button"
                   class="ui-button ui-button--ghost"
                   aria-label="删除 Env"
+                  :data-agent-id="`plugins.mcp-editor.env.${index}.remove`"
                   @click="emit('remove-env-row', index)"
                 >
                   <Trash2 :size="12" aria-hidden="true" />
@@ -110,10 +117,10 @@ const emit = defineEmits<{
             </p>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ui-button ui-button--ghost" :disabled="saving" @click="emit('update:open', false)">
+            <button type="button" class="ui-button ui-button--ghost" data-agent-id="plugins.mcp-editor.cancel" :disabled="saving" @click="emit('update:open', false)">
               取消
             </button>
-            <button type="button" class="ui-button ui-button--primary" :disabled="saving" @click="emit('confirm')">
+            <button type="button" class="ui-button ui-button--primary" data-agent-id="plugins.mcp-editor.save" :disabled="saving" @click="emit('confirm')">
               {{ saving ? "保存中…" : "保存" }}
             </button>
           </div>

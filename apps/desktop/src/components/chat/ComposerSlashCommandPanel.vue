@@ -51,6 +51,7 @@ function commandIcon(result: ComposerSlashCommandItem) {
         type="button"
         class="chat-composer__context-item chat-composer__slash-item"
         :class="{ 'is-active': index === activeIndex }"
+        :data-agent-id="`chat.composer.slash-target.${target.id}`"
         role="option"
         :aria-selected="index === activeIndex"
         @mousedown.prevent
@@ -82,6 +83,7 @@ function commandIcon(result: ComposerSlashCommandItem) {
         type="button"
         class="chat-composer__context-item chat-composer__slash-item"
         :class="{ 'is-active': index === activeIndex }"
+        :data-agent-id="`chat.composer.slash-command.${result.command.id}`"
         role="option"
         :aria-selected="index === activeIndex"
         @mousedown.prevent

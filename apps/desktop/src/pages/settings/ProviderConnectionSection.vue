@@ -387,10 +387,11 @@ watch(showCodexRuntimeStatus, (enabled) => {
         <button
           v-for="opt in backendOptions"
           :key="opt.value"
-          type="button"
-          role="radio"
-          :aria-checked="selectedBackend === opt.value"
-          :class="{ 'is-active': selectedBackend === opt.value }"
+            type="button"
+            role="radio"
+            :aria-checked="selectedBackend === opt.value"
+            :data-agent-id="`settings.provider.backend.${opt.value}`"
+            :class="{ 'is-active': selectedBackend === opt.value }"
           :disabled="switchingBackend !== null"
           @click="selectBackend(opt.value)"
         >
@@ -414,6 +415,7 @@ watch(showCodexRuntimeStatus, (enabled) => {
             type="button"
             role="radio"
             :aria-checked="selectedRouterMode === opt.value"
+            :data-agent-id="`settings.provider.codex-mode.${opt.value}`"
             :class="{ 'is-active': selectedRouterMode === opt.value }"
             :disabled="savingRouter"
             @click="selectRouterMode(opt.value)"
@@ -439,6 +441,7 @@ watch(showCodexRuntimeStatus, (enabled) => {
             v-if="codexLoginNeedsAction"
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.codex-login"
             :disabled="codexLoginStarting"
             @click="startCodexLogin"
           >
@@ -455,6 +458,7 @@ watch(showCodexRuntimeStatus, (enabled) => {
             v-if="showCodexUpdateAction || codexAppServerUpdating"
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.codex-update"
             :disabled="codexAppServerUpdating"
             @click="installCodexUpdate"
           >
@@ -467,7 +471,7 @@ watch(showCodexRuntimeStatus, (enabled) => {
             <Download v-else :size="12" aria-hidden="true" />
             {{ codexAppServerUpdating ? "更新中..." : codexUpdateLabel }}
           </button>
-          <button type="button" class="ui-button ui-button--ghost" :disabled="probing" @click="probe">
+        <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.provider.probe" :disabled="probing" @click="probe">
             <RotateCw :size="11" aria-hidden="true" />
             重新检测
           </button>
@@ -491,10 +495,11 @@ watch(showCodexRuntimeStatus, (enabled) => {
       <div class="settings-row">
         <div class="settings-row__label">Base URL</div>
         <input
-          type="text"
-          class="ui-input"
-          :placeholder="apiDefaultUrl"
-          :value="selectedProviderForm.baseUrl ?? ''"
+            type="text"
+            class="ui-input"
+            :placeholder="apiDefaultUrl"
+            data-agent-id="settings.provider.base-url"
+            :value="selectedProviderForm.baseUrl ?? ''"
           @input="(e) => (selectedProviderForm.baseUrl = (e.target as HTMLInputElement).value)"
         />
       </div>
@@ -506,12 +511,14 @@ watch(showCodexRuntimeStatus, (enabled) => {
             type="password"
             class="ui-input"
             :placeholder="selectedProviderForm.hasApiKey ? '已保存，留空保留现有值' : apiKeyEnv"
+            data-agent-id="settings.provider.api-key"
             :value="selectedProviderForm.apiKey ?? ''"
             @input="(e) => (selectedProviderForm.apiKey = (e.target as HTMLInputElement).value)"
           />
           <button
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.clear-key"
             :disabled="savingProvider || !selectedProviderForm.hasApiKey"
             title="清除已保存的 API key"
             @click="clearProviderKey"
@@ -532,6 +539,7 @@ watch(showCodexRuntimeStatus, (enabled) => {
           <button
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.save"
             :disabled="savingProvider"
             @click="saveProvider"
           >
@@ -562,7 +570,7 @@ watch(showCodexRuntimeStatus, (enabled) => {
         <div class="conn-banner__title">{{ selectedDiagnostic.title }}</div>
         <div class="conn-banner__hint">
           {{ selectedDiagnostic.hint }}
-          <button type="button" class="inline-link" :disabled="probing" @click="probe">
+        <button type="button" class="inline-link" data-agent-id="settings.provider.retry-probe" :disabled="probing" @click="probe">
             <RotateCw :size="11" aria-hidden="true" />
             重新检测
           </button>

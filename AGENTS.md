@@ -30,5 +30,7 @@
 
 - 功能实现后根据任务风险和影响范围选择是否验证;可选验证包括 `yarn verify:desktop:test`、`yarn verify:contracts` 或相关定向测试。
 - 文档、注释、配置说明等低风险改动可不跑测试;涉及跨端契约、持久化、调度、权限、构建配置或用户关键路径时,优先运行最小必要验证。
+- 涉及大型 UI、Agent runtime、Tauri command、持久化、权限、构建配置、跨端契约或用户关键路径的大型改动,必须运行 `yarn verify:agent-debug` 做 Agent 调试确认;该脚本会自动准备 `tauri-driver` 与 EdgeDriver,若仍因 cargo、网络、Edge 版本探测或 debug binary 缺失阻塞,最终说明必须写清楚 blocker、`agent-debug-runs/` 产物路径和剩余风险。
+- Agent 调试确认以开发态为准:设置 `LILIA_AGENT_DEBUG=1` / `VITE_LILIA_AGENT_DEBUG=1`,通过 `data-agent-id` 结构化操作,并用截图确认界面表现;调试层不得进入生产功能面。
 - 完整构建或全量验证,如 `yarn verify:desktop:build`、`yarn verify:tauri` 或 `yarn verify`,仅在用户要求、改动范围较大或风险确实需要时运行。
 - 若未运行测试、构建或验证,在最终说明里写清楚原因;若验证无法运行,写清楚阻塞原因和剩余风险。

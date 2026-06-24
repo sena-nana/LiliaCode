@@ -44,17 +44,19 @@ const emit = defineEmits<{
       </div>
       <div class="composer-inline__actions">
         <button
-          type="button"
-          class="ui-button ui-button--ghost composer-inline__btn"
-          :disabled="disabled"
+      type="button"
+      class="ui-button ui-button--ghost composer-inline__btn"
+      data-agent-id="timeline.architecture.deny"
+      :disabled="disabled"
           @click="emit('deny')"
         >
           拒绝
         </button>
         <button
-          type="button"
-          class="ui-button ui-button--primary composer-inline__btn"
-          :disabled="disabled"
+      type="button"
+      class="ui-button ui-button--primary composer-inline__btn"
+      data-agent-id="timeline.architecture.allow"
+      :disabled="disabled"
           @click="emit('allow')"
         >
           应用

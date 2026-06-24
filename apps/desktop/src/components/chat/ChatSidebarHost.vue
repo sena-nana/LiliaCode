@@ -153,6 +153,7 @@ watch(
             type="button"
             class="chat-sidebar__tab"
             :class="{ 'is-active': activePanel?.id === panel.id }"
+            :data-agent-id="`chat.sidebar.tab.${panel.id}`"
             role="tab"
             :aria-selected="activePanel?.id === panel.id"
             :title="panel.title"
@@ -180,7 +181,12 @@ watch(
         </div>
         <div v-else-if="activePanelError" class="chat-sidebar__empty">
           <span>{{ activePanelError }}</span>
-          <button type="button" class="chat-sidebar__retry" @click="retryActivePanelLoad">
+          <button
+            type="button"
+            class="chat-sidebar__retry"
+            data-agent-id="chat.sidebar.retry"
+            @click="retryActivePanelLoad"
+          >
             重试
           </button>
         </div>

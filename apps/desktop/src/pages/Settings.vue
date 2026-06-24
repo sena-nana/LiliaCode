@@ -76,8 +76,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <component v-if="isFullPageSection" :is="activeTabSection" />
-  <section v-else class="settings-page">
+  <component v-if="isFullPageSection" :is="activeTabSection" data-agent-id="settings.full-page-section" />
+  <section v-else class="settings-page" :data-agent-id="`settings.page.${activeTab}`">
     <component :is="activeTabSection" />
   </section>
 </template>

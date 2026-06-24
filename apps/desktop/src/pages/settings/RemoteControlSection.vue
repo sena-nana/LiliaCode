@@ -190,7 +190,7 @@ onBeforeUnmount(stopRemoteControlPolling);
 </script>
 
 <template>
-  <div class="card remote-control-card">
+  <div class="card remote-control-card" data-agent-id="settings.remote-control">
     <h2>
       <span class="card-h2__title">
         <MonitorSmartphone :size="14" aria-hidden="true" />
@@ -204,6 +204,7 @@ onBeforeUnmount(stopRemoteControlPolling);
         <button
           type="button"
           class="ui-button"
+          data-agent-id="settings.remote-control.host.toggle"
           :class="{ 'ui-button--ghost': hostEnabled }"
           :disabled="loading"
           @click="toggleHost"
@@ -212,7 +213,7 @@ onBeforeUnmount(stopRemoteControlPolling);
           {{ hostEnabled ? "关闭远控" : "启用远控" }}
         </button>
         <span class="settings-row__status-text muted">{{ connectionLabel }}</span>
-        <button type="button" class="ui-button ui-button--ghost" :disabled="loading" @click="handleRefreshClick">
+        <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.remote-control.refresh" :disabled="loading" @click="handleRefreshClick">
           <RotateCw :size="11" aria-hidden="true" />
           刷新
         </button>
@@ -222,10 +223,11 @@ onBeforeUnmount(stopRemoteControlPolling);
     <div class="settings-row">
       <div class="settings-row__label">PC 名称</div>
       <div class="settings-row__control">
-        <input v-model="pcNameDraft" type="text" class="ui-input" placeholder="Lilia PC" />
+        <input v-model="pcNameDraft" type="text" class="ui-input" data-agent-id="settings.remote-control.pc-name" placeholder="Lilia PC" />
         <button
           type="button"
           class="ui-button ui-button--ghost"
+          data-agent-id="settings.remote-control.pc-name.save"
           :disabled="savingName"
           aria-label="保存 PC 名称"
           @click="savePcName"
@@ -255,7 +257,7 @@ onBeforeUnmount(stopRemoteControlPolling);
             </template>
           </div>
           <div class="remote-pairing__actions">
-            <button type="button" class="ui-button ui-button--ghost" :disabled="pairing" @click="beginPairing">
+            <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.remote-control.pairing.begin" :disabled="pairing" @click="beginPairing">
               <QrCode :size="12" aria-hidden="true" />
               {{ activeTicket ? "重新生成" : "生成二维码" }}
             </button>
@@ -263,6 +265,7 @@ onBeforeUnmount(stopRemoteControlPolling);
               v-if="activeTicket"
               type="button"
               class="ui-button ui-button--ghost"
+              data-agent-id="settings.remote-control.pairing.cancel"
               :disabled="pairing"
               @click="cancelPairing"
             >
@@ -293,6 +296,7 @@ onBeforeUnmount(stopRemoteControlPolling);
           <button
             type="button"
             class="ui-button ui-button--ghost"
+            :data-agent-id="`settings.remote-control.device.${device.id}.revoke`"
             :disabled="!device.trusted || loading"
             title="撤销设备"
             @click="revokeDevice(device.id)"

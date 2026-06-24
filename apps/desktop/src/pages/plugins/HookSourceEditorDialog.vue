@@ -29,6 +29,7 @@ const emit = defineEmits<{
         role="dialog"
         aria-modal="true"
         aria-label="Hooks 编辑器"
+        data-agent-id="plugins.hook-editor"
         @click.self="emit('update:open', false)"
       >
         <div class="search-palette__card dialog__card plugins-hook-editor">
@@ -46,7 +47,7 @@ const emit = defineEmits<{
             </p>
             <div class="plugins-hook-editor__head">
               <span>Handlers</span>
-              <button type="button" class="ui-button ui-button--ghost" @click="emit('add-handler')">
+              <button type="button" class="ui-button ui-button--ghost" data-agent-id="plugins.hook-editor.add-handler" @click="emit('add-handler')">
                 <Plus :size="12" aria-hidden="true" /> 添加 Handler
               </button>
             </div>
@@ -61,6 +62,7 @@ const emit = defineEmits<{
                   type="button"
                   class="ui-button ui-button--ghost"
                   aria-label="删除 Handler"
+                  :data-agent-id="`plugins.hook-editor.handler.${index}.remove`"
                   @click="emit('remove-handler', index)"
                 >
                   <Trash2 :size="12" aria-hidden="true" />
@@ -69,37 +71,38 @@ const emit = defineEmits<{
               <div class="plugins-hook-editor__grid">
                 <label>
                   <span>Event</span>
-                  <input v-model="row.event" type="text" class="ui-input" placeholder="PostToolUse" />
+                  <input v-model="row.event" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.event`" placeholder="PostToolUse" />
                 </label>
                 <label>
                   <span>Matcher</span>
-                  <input v-model="row.matcher" type="text" class="ui-input" placeholder="Bash" />
+                  <input v-model="row.matcher" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.matcher`" placeholder="Bash" />
                 </label>
                 <label>
                   <span>Type</span>
-                  <input v-model="row.type" type="text" class="ui-input" placeholder="command" />
+                  <input v-model="row.type" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.type`" placeholder="command" />
                 </label>
                 <label>
                   <span>Timeout</span>
-                  <input v-model="row.timeoutSeconds" type="text" class="ui-input" placeholder="30" />
+                  <input v-model="row.timeoutSeconds" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.timeout`" placeholder="30" />
                 </label>
                 <label>
                   <span>Command</span>
-                  <input v-model="row.command" type="text" class="ui-input" placeholder="node hook.js" />
+                  <input v-model="row.command" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.command`" placeholder="node hook.js" />
                 </label>
                 <label>
                   <span>Windows Command</span>
-                  <input v-model="row.commandWindows" type="text" class="ui-input" placeholder="powershell -File hook.ps1" />
+                  <input v-model="row.commandWindows" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.command-windows`" placeholder="powershell -File hook.ps1" />
                 </label>
                 <label class="plugins-hook-editor__field-wide">
                   <span>Status Message</span>
-                  <input v-model="row.statusMessage" type="text" class="ui-input" placeholder="Running hook…" />
+                  <input v-model="row.statusMessage" type="text" class="ui-input" :data-agent-id="`plugins.hook-editor.handler.${index}.status-message`" placeholder="Running hook…" />
                 </label>
                 <label class="plugins-hook-editor__field-wide">
                   <span>Group JSON</span>
                   <textarea
                     v-model="row.groupAdvancedJson"
                     class="ui-input"
+                    :data-agent-id="`plugins.hook-editor.handler.${index}.group-json`"
                     rows="4"
                     placeholder='{"share": "group fields"}'
                   />
@@ -109,6 +112,7 @@ const emit = defineEmits<{
                   <textarea
                     v-model="row.advancedJson"
                     class="ui-input"
+                    :data-agent-id="`plugins.hook-editor.handler.${index}.handler-json`"
                     rows="5"
                     placeholder='{"env": {"FOO": "bar"}}'
                   />
@@ -121,12 +125,13 @@ const emit = defineEmits<{
             <button
               type="button"
               class="ui-button ui-button--ghost"
+              data-agent-id="plugins.hook-editor.cancel"
               :disabled="saving"
               @click="emit('update:open', false)"
             >
               取消
             </button>
-            <button type="button" class="ui-button ui-button--primary" :disabled="saving" @click="emit('confirm')">
+            <button type="button" class="ui-button ui-button--primary" data-agent-id="plugins.hook-editor.save" :disabled="saving" @click="emit('confirm')">
               {{ saving ? "保存中…" : "保存" }}
             </button>
           </div>

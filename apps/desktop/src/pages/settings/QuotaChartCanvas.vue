@@ -119,7 +119,12 @@ onBeforeUnmount(() => {
     <canvas ref="canvasRef" aria-hidden="true" />
     <div v-if="chartStatus === 'error'" class="quota-chart-canvas__error">
       <span>{{ chartError || "图表加载失败。" }}</span>
-      <button type="button" class="quota-chart-canvas__retry" @click="retryChartLoad">
+      <button
+        type="button"
+        class="quota-chart-canvas__retry"
+        data-agent-id="settings.quota.chart.retry"
+        @click="retryChartLoad"
+      >
         重试
       </button>
     </div>
