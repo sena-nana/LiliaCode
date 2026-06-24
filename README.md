@@ -60,7 +60,7 @@ LiliaCode still prioritizes its own recoverable task structure over upstream CLI
 
 ## Feature Status
 
-The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-13.
+The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-24.
 
 ### Shared Agent Capabilities
 
@@ -74,7 +74,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
 - [x] Unified Lilia protocol: built-in task workflows, review, fix suggestion, batch apply, context compact, Goal, memory, config diagnostics, and background-terminal cleanup stay in the user-facing workflow layer; session fork and provider session controls use runtime commands and dispatch internally by backend.
 - [x] File context: mention files, directories, images, and other context with `@`, with pasted or dropped attachments also supported.
-- [ ] Intelligent model selection: Lilia does not yet automatically choose model level or reasoning intensity based on request type.
+- [x] Intelligent model selection: in the current backend flow, model and thinking intensity are auto-selected by task context and can still be manually overridden before send.
 - [x] Slash commands: open the composer `/` panel, run built-in commands and project commands from `.lilia/commands`, and write command execution results back to the task timeline; full backend-native command proxying is not yet supported.
 
 ### Claude Code Integration
@@ -86,10 +86,10 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Claude Skills: manage user-level and project-level Skills, and pass enabled skill names into the SDK.
 - [x] Claude tool display: normalize common tools including Bash, Read / Write / Edit / MultiEdit, Glob / Grep, NotebookEdit, WebSearch / WebFetch, TodoWrite, Task / Agent, and ExitPlanMode.
 - [x] Claude Lilia protocol: built-in task workflows and review / fix suggestion / batch apply run through structured Claude prompts, session fork uses runtime command handling backed by the SDK, and Goal plus unsupported native-only actions write Lilia timeline diagnostics.
-- [ ] Claude MCP management (partial): the UI can create, edit, delete, and enable stdio MCP servers; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are not yet integrated.
-- [ ] Claude Plugins (partial): Lilia can discover and enable user-level local plugins, then pass enabled plugin paths to the SDK; installation, updates, project-level scope, and marketplace scope are not yet integrated.
-- [ ] Claude Hooks (partial): the runtime registers a small SDK hook set and can display some hook lifecycle events; hooks configuration management and execution result panels are not yet available.
-- [ ] Claude Subagents (partial): Task / Agent calls, task progress, and notifications can be displayed; subagent definitions, list management, and proactive scheduling UI are not yet available.
+- [ ] Claude MCP management (partial): v1.0.0 supports stdio MCP create/edit/delete/enable UI management; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are complex and deferred to v2.0.
+- [ ] Claude Plugins (partial): user-level local plugin discovery and enablement are available with SDK path injection; installation, updates, project-level scope, and marketplace scope are complex and deferred to v2.0.
+- [ ] Claude Hooks (partial): a small SDK hook set is displayed; hooks configuration management and execution-result panels are complex and deferred to v2.0.
+- [ ] Claude Subagents (partial): Task / Agent calls, task progress, and notifications are shown; subagent definitions, list management, and proactive scheduling UI are deferred to v2.0.
 
 ### Codex Integration
 
@@ -110,11 +110,11 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Task-based conversations: conversations are persisted as tasks, with draft promotion, project conversations, orphan conversations, archiving, pinning, and ordering.
 - [x] Task tree: parent-child relationships, dependency updates, tree drag-and-drop, and blocker status hints are available; automatic scheduling from blockers and dependencies is still not complete.
 - [x] Built-in Lilia workflow types: general task, frontend, refactor, test / verification, docs / prompt, Git / release, and architecture / memory entries route through `lilia_task_workflow.kind` instead of the Plugin / Skill page.
-- [ ] Plugin system (partial): Claude Skills / Plugins / MCP and Codex MCP management can feed runtime extensions; a generic plugin system with selectable behavior plugins is not yet complete.
+- [ ] Plugin system (partial): runtime management and injection for Claude Skills / Plugins / MCP and Codex MCP are in place for v1.0; full governance, behavior-policy plugins, and distribution-level plugin surface are deferred to v2/v3.
 - [x] Memory: user-level and project-level memory can be saved manually and injected as the Layer 1 baseline at session start; external model retrieval and opportunity-window guidance are not implemented.
 - [x] Roadmap and milestones: persisted project milestones and task milestone links are available; explanatory metrics and advanced summary views still need polish.
-- [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
-- [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
+- [ ] Automatic orchestration (target: `v2.0`): Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
+- [ ] Helper agents (target: `v2.0`): lower-cost agents do not yet run inside a session to supervise or assist the main agent.
 - [x] Built-in Lilia protocol: keep a single built-in runtime path.
 
 ## Project Structure
