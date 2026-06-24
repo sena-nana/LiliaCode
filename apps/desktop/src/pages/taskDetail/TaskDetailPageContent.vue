@@ -14,6 +14,7 @@ import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { useTaskAttachments } from "./useTaskAttachments";
 import { useTaskComposerController } from "./useTaskComposerController";
+import { isAgentDebugFrontendEnabled } from "../../agentDebug/harness";
 import {
   useTaskConversationContext,
   type TaskDetailRouteProps,
@@ -391,7 +392,7 @@ function shouldRegisterDebugPanel() {
   return sidebarPanelsActivated.value &&
     agentInteractionSettingsReady.value &&
     hasContext.value &&
-    composerController.agentInteractionSettings.debug.value;
+    (composerController.agentInteractionSettings.debug.value || isAgentDebugFrontendEnabled());
 }
 
 function shouldRegisterArchitecturePanel() {

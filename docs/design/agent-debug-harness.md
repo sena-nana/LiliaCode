@@ -65,10 +65,25 @@ yarn verify:agent-debug
 - `before.png`
 - `after.png`
 - `replay.json`
+- `scenario-results.json`
 - `summary.json`
 - `tauri-driver.log`
 
 若自动准备失败且最终仍缺少 `tauri-driver`、EdgeDriver 或 debug app binary，脚本会写 `summary.json` 并以 blocked 状态退出。
+
+## v1.0 核心对话回归
+
+`verify:agent-debug` 先保留原有 smoke：确认调试 API 启用、可见交互元素都有 `data-agent-id`、`mark` 可记录、缺失目标会返回可诊断错误。
+
+smoke 之后会运行可重放场景，所有动作写入 `replay.json`，每个场景截图和结果写入 `scenario-results.json`：
+
+- 普通发送：创建开发态新对话，输入内容，点击 `chat.composer.send`，确认到达 `chat_send_message` invoke 边界。
+- 继续历史会话：在同一对话路由继续输入并发送，确认继续发送仍到达 `chat_send_message` invoke 边界。
+- 任务恢复：离开当前对话后通过浏览器历史恢复原任务路由，确认 `chat.composer.input` 可重新操作。
+- plan pending action：通过 Debug 侧栏 `debug.timeline.plan` 注入计划确认，使用 `chat.pending.plan.accept` / `chat.composer.plan.accept` 同意并确认时间线进入已同意状态。
+- permission pending action：通过 Debug 侧栏 `debug.timeline.permission` 注入权限申请，使用 `chat.pending.tool.allow` / `chat.composer.tool.allow` 同意并确认时间线进入已同意状态。
+
+这些场景只验证开发态 UI、调试注入和 Tauri invoke 边界，不等待真实 provider 生成回复。`VITE_LILIA_AGENT_DEBUG=1` 下任务详情会自动注册 Debug 侧栏面板，避免验证依赖用户本机设置里的 debug 开关。
 
 ## 大型改动标准
 
