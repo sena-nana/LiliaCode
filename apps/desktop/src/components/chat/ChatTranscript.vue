@@ -512,7 +512,7 @@ watch(
           <div class="chat-transcript__loading-card chat-transcript__loading-card--compact" />
         </div>
       </template>
-      <div class="chat-controls-wrap">
+      <div v-if="$slots.controls" class="chat-controls-wrap">
         <slot name="controls" />
       </div>
     </div>

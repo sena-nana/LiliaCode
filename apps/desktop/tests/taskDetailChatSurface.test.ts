@@ -43,12 +43,13 @@ vi.mock("../src/components/chat/ImageViewer.vue", () => ({
 
 const triggerConversationReference = vi.fn();
 const fillSuggestionPrompt = vi.fn();
+let renderTranscriptSlots = true;
 
 vi.mock("../src/components/chat/ChatTranscript.vue", () => ({
   default: defineComponent({
     name: "MockChatTranscript",
     setup(_, { slots }) {
-      return () => h("div", slots.controls?.());
+      return () => h("div", renderTranscriptSlots ? slots.controls?.() : null);
     },
   }),
 }));
@@ -83,6 +84,7 @@ vi.mock("../src/components/chat/ChatComposer.vue", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  renderTranscriptSlots = true;
 });
 
 afterEach(() => {
@@ -195,6 +197,13 @@ describe("TaskDetailChatSurface", () => {
       [],
       { type: "uncommittedChanges" },
     ]);
+  });
+
+  it("renders the composer independently from transcript slots", async () => {
+    renderTranscriptSlots = false;
+    const view = renderSurface();
+
+    await waitFor(() => view.getByRole("button", { name: "stub fix suggestion" }));
   });
 
   it("exposes conversation reference trigger through the surface", async () => {
