@@ -13,6 +13,7 @@ import {
   QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
   QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
   QUOTA_USAGE_GET_STATS_COMMAND,
+  REMOTE_CONTROL_STATUS_COMMAND,
   SYSTEM_OPEN_URL_COMMAND,
 } from "@lilia/contracts";
 import Settings from "../src/pages/Settings.vue";
@@ -151,6 +152,17 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === QUOTA_USAGE_GET_STATS_COMMAND)).toBe(true);
     });
+  });
+
+  it("连接页初始化不会挂载 Android 远控或刷新远控状态", async () => {
+    mockInvoke.mockClear();
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByRole("heading", { level: 2, name: "连接" })).toBeInTheDocument();
+    });
+    expect(view.queryByRole("heading", { level: 2, name: "Android 远控" })).not.toBeInTheDocument();
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === REMOTE_CONTROL_STATUS_COMMAND)).toBe(false);
   });
 
   it("外观页可以切换侧边栏样式并写入本地偏好", async () => {

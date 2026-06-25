@@ -315,10 +315,6 @@ onBeforeUnmount(stopRemoteControlPolling);
 </template>
 
 <style scoped>
-.remote-control-card {
-  margin-top: 14px;
-}
-
 .remote-pairing {
   display: grid;
   grid-template-columns: 148px minmax(0, 1fr);

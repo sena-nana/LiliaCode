@@ -42,7 +42,6 @@ import {
   startCodexAccountLogin,
 } from "../../services/chat";
 import { codexQuotaUnavailableStatus } from "../../utils/quotaDisplay";
-import RemoteControlSection from "./RemoteControlSection.vue";
 
 const {
   report,
@@ -572,5 +571,4 @@ watch(showCodexRuntimeStatus, (enabled) => {
       </div>
     </div>
   </div>
-  <RemoteControlSection />
 </template>
