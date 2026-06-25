@@ -389,10 +389,11 @@ function supportsSidebarIab(backend: string) {
 }
 
 function shouldRegisterDebugPanel() {
+  if (isAgentDebugFrontendEnabled()) return hasContext.value;
   return sidebarPanelsActivated.value &&
     agentInteractionSettingsReady.value &&
     hasContext.value &&
-    (composerController.agentInteractionSettings.debug.value || isAgentDebugFrontendEnabled());
+    composerController.agentInteractionSettings.debug.value;
 }
 
 function shouldRegisterArchitecturePanel() {

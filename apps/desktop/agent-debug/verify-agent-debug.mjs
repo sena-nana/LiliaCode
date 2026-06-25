@@ -24,6 +24,17 @@ const replay = [];
 const scenarioResults = [];
 
 const CHAT_SEND_MESSAGE_COMMAND = "chat_send_message";
+const SLOW_INVOKE_WARNING_MS = 1000;
+const SLOW_INVOKE_HIGH_MS = 5000;
+const SEND_ERROR_TEXT_MARKERS = ["发生错误", "发送失败"];
+const PROVIDER_BLOCK_ERROR_MARKERS = [
+  "辅助模型未配置",
+  "Base URL",
+  "API key",
+  "Codex app-server 环境不满足",
+  "Provider 设置",
+  "Responses API",
+];
 const SCENARIOS = {
   ordinarySend: {
     id: "ordinary-send",
@@ -51,6 +62,14 @@ const SCENARIOS = {
     artifact: "scenario-permission-pending-action.png",
   },
 };
+
+class SmokeBlockedError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "SmokeBlockedError";
+    this.details = details;
+  }
+}
 
 function commandExists(command, args = ["--version"]) {
   const result = spawnSync(command, args, { stdio: "ignore" });
@@ -397,18 +416,57 @@ async function waitForRouteChange(sessionId, previousRoute, timeoutMs = 15_000) 
   );
 }
 
-async function waitForInvokeCount(sessionId, command, minimumCount, timeoutMs = 20_000) {
-  return await waitForCondition(
-    sessionId,
-    `${command} invoke count >= ${minimumCount}`,
-    (snapshot) => (snapshot?.invokes ?? []).filter((entry) => entry.command === command).length >= minimumCount,
-    timeoutMs,
-  );
-}
-
 async function invokeCount(sessionId, command) {
   const snapshot = await observe(sessionId);
   return (snapshot?.invokes ?? []).filter((entry) => entry.command === command).length;
+}
+
+function commandInvokeAfter(snapshot, command, previousCount) {
+  const matchingInvokes = (snapshot?.invokes ?? []).filter((entry) => entry.command === command);
+  return matchingInvokes.slice(previousCount).at(-1) ?? matchingInvokes.at(-1) ?? null;
+}
+
+async function waitForCommandInvoke(sessionId, command, previousCount, timeoutMs = 20_000) {
+  const snapshot = await waitForCondition(
+    sessionId,
+    `${command} invoke after ${previousCount} finished`,
+    (next) => {
+      const invoke = commandInvokeAfter(next, command, previousCount);
+      return Boolean(invoke && invoke.status !== "started");
+    },
+    timeoutMs,
+  );
+  return {
+    snapshot,
+    invoke: commandInvokeAfter(snapshot, command, previousCount),
+  };
+}
+
+function sendErrorText(snapshot) {
+  const visibleText = String(snapshot?.visibleText ?? "");
+  return SEND_ERROR_TEXT_MARKERS.find((marker) => visibleText.includes(marker)) ?? null;
+}
+
+function isProviderBlockError(message) {
+  const text = String(message ?? "");
+  return PROVIDER_BLOCK_ERROR_MARKERS.some((marker) => text.includes(marker));
+}
+
+function summarizeSlowInvokes(invokes) {
+  return (invokes ?? [])
+    .filter((entry) => Number(entry?.durationMs ?? 0) >= SLOW_INVOKE_WARNING_MS)
+    .map((entry) => ({
+      command: entry.command,
+      status: entry.status,
+      durationMs: entry.durationMs,
+      severity: Number(entry.durationMs ?? 0) >= SLOW_INVOKE_HIGH_MS ? "high" : "warning",
+      error: entry.error ?? null,
+    }))
+    .sort((a, b) => b.durationMs - a.durationMs);
+}
+
+async function collectInvokeLogs(sessionId) {
+  return await execute(sessionId, "return window.__liliaAgentDebug?.observe?.().invokes ?? [];");
 }
 
 async function act(sessionId, action, scenarioId) {
@@ -467,10 +525,6 @@ async function recordScenarioResult(sessionId, scenario, status, details = {}) {
 
 async function finishScenario(sessionId, scenario, details = {}) {
   return await recordScenarioResult(sessionId, scenario, "passed", details);
-}
-
-async function skipScenario(sessionId, scenario, details = {}) {
-  return await recordScenarioResult(sessionId, scenario, "skipped", details);
 }
 
 async function findDebugPanelOpener(sessionId) {
@@ -538,10 +592,35 @@ async function runSendScenario(sessionId, scenario, input) {
   const beforeCount = await invokeCount(sessionId, CHAT_SEND_MESSAGE_COMMAND);
   await typeAgent(sessionId, "chat.composer.input", input, scenario.id);
   await clickAgent(sessionId, "chat.composer.send", scenario.id);
-  await waitForInvokeCount(sessionId, CHAT_SEND_MESSAGE_COMMAND, beforeCount + 1);
+  const { snapshot, invoke } = await waitForCommandInvoke(sessionId, CHAT_SEND_MESSAGE_COMMAND, beforeCount);
+  if (!invoke) {
+    throw new Error(`${CHAT_SEND_MESSAGE_COMMAND} invoke was not captured for ${scenario.id}`);
+  }
+  if (invoke.status === "error" && isProviderBlockError(invoke.error)) {
+    await recordScenarioResult(sessionId, scenario, "blocked", {
+      reason: "provider is not ready for agent debug smoke",
+      commandStatus: invoke.status,
+      commandError: invoke.error,
+      durationMs: invoke.durationMs,
+    });
+    throw new SmokeBlockedError(`Provider is not ready for agent debug smoke: ${invoke.error}`, {
+      scenario: scenario.id,
+      command: CHAT_SEND_MESSAGE_COMMAND,
+      error: invoke.error,
+    });
+  }
+  if (invoke.status !== "success") {
+    throw new Error(`${CHAT_SEND_MESSAGE_COMMAND} returned ${invoke.status}: ${invoke.error ?? "unknown error"}`);
+  }
+  const marker = sendErrorText(snapshot);
+  if (marker) {
+    throw new Error(`${scenario.id} still shows send error text: ${marker}`);
+  }
   return await finishScenario(sessionId, scenario, {
     expectedCommand: CHAT_SEND_MESSAGE_COMMAND,
     expectedCommandCount: beforeCount + 1,
+    commandStatus: invoke.status,
+    durationMs: invoke.durationMs,
   });
 }
 
@@ -586,9 +665,11 @@ async function runPendingActionScenario(sessionId, input) {
   const { scenario, triggerTarget, resolutionTargets, expectedText, details } = input;
   await markScenario(sessionId, scenario);
   if (!(await ensureDebugPanel(sessionId, scenario.id))) {
-    return await skipScenario(sessionId, scenario, {
-      reason: "debug sidebar panel is not registered on the current route",
+    const reason = "debug sidebar panel is not reachable on the current route";
+    await recordScenarioResult(sessionId, scenario, "failed", {
+      reason,
     });
+    throw new Error(reason);
   }
   await clickAgent(sessionId, triggerTarget, scenario.id);
   await clickFirstAvailable(sessionId, resolutionTargets, scenario.id);
@@ -730,7 +811,8 @@ async function main() {
     }
     replay.push({ type: "click", target: "missing.debug.target", expectedError: true });
     await runCoreConversationScenarios(sessionId);
-    const logs = await execute(sessionId, "return window.__liliaAgentDebug?.observe?.().invokes ?? [];");
+    const logs = await collectInvokeLogs(sessionId);
+    const slowInvokes = summarizeSlowInvokes(logs);
     const afterScreenshotPath = await screenshot(sessionId, "after.png");
     await writeJson("logs.json", logs);
     await writeJson("replay.json", replay);
@@ -744,14 +826,25 @@ async function main() {
       afterScreenshotPath,
       observePath: path.join(runDir, "observe.json"),
       logsPath: path.join(runDir, "logs.json"),
+      slowInvokes,
       replayPath: path.join(runDir, "replay.json"),
       scenarioResultsPath,
     });
   } catch (error) {
+    const blocked = error instanceof SmokeBlockedError;
     let failureDiagnosticsPath = null;
     let failureScreenshotPath = null;
+    let logsPath = null;
+    let replayPath = null;
+    let scenarioResultsPath = null;
+    let slowInvokes = [];
     if (sessionId) {
       failureScreenshotPath = await screenshot(sessionId, "failure.png").catch(() => null);
+      const logs = await collectInvokeLogs(sessionId).catch(() => []);
+      slowInvokes = summarizeSlowInvokes(logs);
+      logsPath = await writeJson("logs.json", logs).catch(() => null);
+      replayPath = await writeJson("replay.json", replay).catch(() => null);
+      scenarioResultsPath = await writeJson("scenario-results.json", scenarioResults).catch(() => null);
       const diagnostics = await execute(
         sessionId,
         `return {
@@ -765,18 +858,24 @@ async function main() {
       failureDiagnosticsPath = await writeJson("failure-diagnostics.json", diagnostics).catch(() => null);
     }
     await writeJson("summary.json", {
-      status: "failed",
+      status: blocked ? "blocked" : "failed",
       runId,
       preflight,
+      reason: blocked ? error.message : undefined,
       message: error?.message ?? String(error),
+      details: blocked ? error.details : undefined,
       driverOutput,
       devServerOutput,
       failureScreenshotPath,
       failureDiagnosticsPath,
+      logsPath,
+      slowInvokes,
+      replayPath,
+      scenarioResultsPath,
       replay,
       scenarios: scenarioResults,
     });
-    process.exitCode = 1;
+    process.exitCode = blocked ? 2 : 1;
   } finally {
     if (sessionId) {
       await request("DELETE", `/session/${sessionId}`).catch(() => undefined);
