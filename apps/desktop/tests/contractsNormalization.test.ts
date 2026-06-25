@@ -227,6 +227,8 @@ import {
   LILIA_REVIEW_DELIVERIES,
   LILIA_REVIEW_TARGET_TYPES,
   LILIA_REVIEW_WORKFLOW_TYPE,
+  LILIA_TASK_WORKFLOW_KINDS,
+  LILIA_TASK_WORKFLOW_TYPE,
   MCP_ELICITATION_INTERACTION_KIND,
   MILESTONE_CREATE_COMMAND,
   MILESTONE_DELETE_COMMAND,
@@ -285,6 +287,7 @@ import {
   POPUP_NAVIGATE_EVENT_NAME,
   PLUGIN_MCP_TRANSPORTS,
   PLUGIN_SCOPES,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
@@ -498,6 +501,7 @@ import {
   createLiliaFixSuggestionWorkflow,
   createLiliaGoalWorkflow,
   createLiliaReviewWorkflow,
+  createLiliaTaskWorkflow,
   createMemoryUpsertInput,
   createPermissionApprovalResult,
   createRemoteEnvironmentCommand,
@@ -553,6 +557,7 @@ import {
   isLiliaQueryWorkflowType,
   isLiliaReviewDelivery,
   isLiliaReviewTargetType,
+  isLiliaTaskWorkflowKind,
   isLiliaAskUserTool,
   isLiliaArchitectureTool,
   isLiliaConversationContextTool,
@@ -602,6 +607,7 @@ import {
   normalizeLiliaReviewDelivery,
   normalizeLiliaReviewTarget,
   normalizeLiliaReviewWorkflow,
+  normalizeLiliaTaskWorkflow,
   normalizeMemoryScope,
   normalizeMemorySettings,
   normalizeMemoryTags,
@@ -1275,6 +1281,9 @@ describe("contracts normalization helpers", () => {
     expect(PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND).toBe(
       "provider_codex_app_server_install_update",
     );
+    expect(PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND).toBe(
+      "provider_codex_account_start_login",
+    );
     expect(ROUTER_GET_MODE_COMMAND).toBe("router_get_mode");
     expect(ROUTER_SET_MODE_COMMAND).toBe("router_set_mode");
     expect(ASSISTANT_AI_GET_CONFIG_COMMAND).toBe("assistant_ai_get_config");
@@ -1616,11 +1625,17 @@ describe("contracts normalization helpers", () => {
       "lilia_review",
       "lilia_fix_suggestion",
       "lilia_batch_apply",
+      "lilia_task_workflow",
       "lilia_compact",
     ]);
     expect(isLiliaQueryWorkflowType("lilia_review")).toBe(true);
+    expect(isLiliaQueryWorkflowType("lilia_task_workflow")).toBe(true);
     expect(isLiliaQueryWorkflowType("lilia_compact")).toBe(true);
     expect(isLiliaQueryWorkflowType("lilia_goal")).toBe(false);
+    expect(LILIA_TASK_WORKFLOW_TYPE).toBe("lilia_task_workflow");
+    expect(LILIA_TASK_WORKFLOW_KINDS).toContain("frontend");
+    expect(isLiliaTaskWorkflowKind("frontend")).toBe(true);
+    expect(isLiliaTaskWorkflowKind("unknown")).toBe(false);
     expect(LILIA_REVIEW_TARGET_TYPES).toEqual([
       "uncommittedChanges",
       "baseBranch",
@@ -1680,6 +1695,11 @@ describe("contracts normalization helpers", () => {
       sourceKind: "review",
       sourceSummary: "summary",
     });
+    expect(createLiliaTaskWorkflow("frontend", { instructions: " ui " })).toEqual({
+      type: "lilia_task_workflow",
+      kind: "frontend",
+      instructions: "ui",
+    });
     expect(normalizeLiliaReviewWorkflow({
       type: "lilia_review",
       target: { type: "commit", sha: " abc " },
@@ -1709,6 +1729,18 @@ describe("contracts normalization helpers", () => {
       sourceSummary: "summary",
       instructions: "apply",
     });
+    expect(normalizeLiliaTaskWorkflow({
+      type: "lilia_task_workflow",
+      kind: "bugLocalization",
+      instructions: " trace ",
+    })).toEqual({
+      kind: "bugLocalization",
+      instructions: "trace",
+    });
+    expect(() => normalizeLiliaTaskWorkflow({
+      type: "lilia_task_workflow",
+      kind: "missing",
+    })).toThrow("valid kind");
     expect(() => normalizeLiliaBatchApplyWorkflow({
       type: "lilia_batch_apply",
       sourceKind: "review",
@@ -2188,14 +2220,38 @@ describe("contracts normalization helpers", () => {
     expect(CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => item.kind)).toEqual([
       "review",
       "fix_suggestion",
+      "task:generalTask",
+      "task:bugLocalization",
+      "task:frontend",
+      "task:refactor",
+      "task:testAndVerification",
+      "task:docsAndPrompt",
+      "task:gitAndRelease",
+      "task:architectureAndMemory",
     ]);
     expect(CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => item.command.name)).toEqual([
       "review",
       "fix",
+      "task",
+      "debug",
+      "frontend",
+      "refactor",
+      "verify",
+      "docs",
+      "git",
+      "architecture",
     ]);
     expect(CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => item.command.id)).toEqual([
       `workflow:${LILIA_REVIEW_WORKFLOW_TYPE}`,
       `workflow:${LILIA_FIX_SUGGESTION_WORKFLOW_TYPE}`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:generalTask`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:bugLocalization`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:frontend`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:refactor`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:testAndVerification`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:docsAndPrompt`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:gitAndRelease`,
+      `workflow:${LILIA_TASK_WORKFLOW_TYPE}:architectureAndMemory`,
     ]);
     expect(createChatSlashCommandWorkflow({
       commandId: " native:help ",
@@ -2251,10 +2307,11 @@ describe("contracts normalization helpers", () => {
       "conversation_suggestions_set_settings",
     );
     expect(suggestionSourceSettingLabel("assistant-ai")).toBe("辅助模型");
-    expect(SUGGESTION_ITEM_SOURCES).toEqual(["task", "github", "local-git", "claude"]);
+    expect(SUGGESTION_ITEM_SOURCES).toEqual(["task", "github", "local-git", "codex-thread", "claude"]);
     expect(SUGGESTION_LOADING_SOURCE_LABELS).toMatchObject({
       task: "历史任务",
       github: "GitHub 活动",
+      "codex-thread": "Codex thread",
       claude: "Claude 建议",
     });
     expect(SUGGESTION_LOCAL_GIT_LOADING_LABELS.default).toBe("本地 Git 上下文");
@@ -2281,6 +2338,7 @@ describe("contracts normalization helpers", () => {
         { ...githubActivity, id: "gh-2", title: "Bug #7" },
       ],
       localGitContexts: [],
+      codexThreads: [],
     })).toBe("openai/lilia · PR #42 +1");
     expect(suggestionSourceLabel({
       githubActivities: [],
@@ -2291,13 +2349,19 @@ describe("contracts normalization helpers", () => {
         changedFiles: [],
         recentCommits: [],
       }],
+      codexThreads: [],
     })).toBe("本地 Git · feature/contracts");
-    expect(suggestionSourceLabel({ githubActivities: [], localGitContexts: [] })).toBe("");
+    expect(suggestionSourceLabel({
+      githubActivities: [],
+      localGitContexts: [],
+      codexThreads: [{ id: "thread-1", title: " 补齐建议 ", updatedAt: 1, preview: "预览" }],
+    })).toBe("Codex thread · 补齐建议");
+    expect(suggestionSourceLabel({ githubActivities: [], localGitContexts: [], codexThreads: [] })).toBe("");
     expect(conversationSuggestionLoadingText({ sources: ["claude"] })).toBe("正在读取 Claude 建议");
     expect(conversationSuggestionLoadingText({
-      sources: ["task", "github", "local-git"],
+      sources: ["task", "github", "local-git", "codex-thread"],
       localGit: { hasRecentCommits: true, hasChangedFiles: true },
-    })).toBe("正在检查历史任务、GitHub 活动和本地提交和未提交变更");
+    })).toBe("正在检查历史任务、GitHub 活动、本地提交和未提交变更和 Codex thread");
     expect(conversationSuggestionLoadingText({ sources: [] })).toBe("正在寻找灵感");
     expect(suggestionStatusDisplayText({
       hasSuggestions: false,
@@ -3590,7 +3654,8 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
-      mainAgentPromptMode: "aggressive",
+      mainAgentPromptMode: "custom",
+      mainAgentCustomPrompt: "  custom strategy\nwith details  ",
       codexProfile: {
         profile: "fast",
         model: " gpt-5.4 ",
@@ -3623,7 +3688,8 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
-      mainAgentPromptMode: "aggressive",
+      mainAgentPromptMode: "custom",
+      mainAgentCustomPrompt: "custom strategy\nwith details",
       codexProfile: {
         profile: "fast",
         model: "gpt-5.4",
@@ -3656,6 +3722,7 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: "yes" as never,
       debug: 1 as never,
       mainAgentPromptMode: "deep" as never,
+      mainAgentCustomPrompt: 42 as never,
       subagentMode: {
         enabled: "true" as never,
         codex: { enabled: 0 as never },
@@ -3677,6 +3744,7 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: false,
       debug: false,
       mainAgentPromptMode: "conservative",
+      mainAgentCustomPrompt: "",
       subagentMode: {
         enabled: false,
         codex: { enabled: true },

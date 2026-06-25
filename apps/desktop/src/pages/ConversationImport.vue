@@ -514,7 +514,7 @@ watch(
 </script>
 
 <template>
-  <section class="conversation-import-page">
+  <section class="conversation-import-page" data-agent-id="conversation-import.page">
     <div class="conversation-import">
       <div class="conversation-import__content">
         <aside class="conversation-import__sidebar" aria-label="导入来源和对话列表">
@@ -525,6 +525,7 @@ watch(
                 class="ui-tabs__tab"
                 :class="{ 'is-active': source === 'codex' }"
                 role="tab"
+                data-agent-id="conversation-import.source.codex"
                 :aria-selected="source === 'codex'"
                 @click="setSource('codex')"
               >
@@ -536,6 +537,7 @@ watch(
                 class="ui-tabs__tab"
                 :class="{ 'is-active': source === 'claude' }"
                 role="tab"
+                data-agent-id="conversation-import.source.claude"
                 :aria-selected="source === 'claude'"
                 @click="setSource('claude')"
               >
@@ -553,10 +555,11 @@ watch(
                 type="search"
                 :placeholder="searchPlaceholder"
                 :aria-label="searchPlaceholder"
+                data-agent-id="conversation-import.search"
               />
             </label>
             <label v-if="showArchivedToggle" class="conversation-import__toggle ui-switch">
-              <input v-model="includeArchived" type="checkbox" />
+              <input v-model="includeArchived" type="checkbox" data-agent-id="conversation-import.include-archived" />
               <span>包含归档</span>
             </label>
           </div>
@@ -580,6 +583,7 @@ watch(
                 <button
                   type="button"
                   class="conversation-import__row-select"
+                  :data-agent-id="`conversation-import.item.${row.item.id}.select`"
                   :title="row.item.title"
                   @click="selectHistoryImport(row.item)"
                 >
@@ -621,6 +625,7 @@ watch(
                     :disabled="cleaningThreadId !== null"
                     title="清理后台终端"
                     aria-label="清理后台终端"
+                    :data-agent-id="`conversation-import.item.${row.item.id}.clean`"
                     @click="cleanHistoryImport(row.item)"
                   >
                     <Loader2
@@ -638,6 +643,7 @@ watch(
               v-if="nextCursor"
               type="button"
               class="conversation-import__more ui-button ui-button--ghost"
+              data-agent-id="conversation-import.load-more"
               :disabled="loadingMore"
               @click="loadHistoryImports(nextCursor)"
             >
@@ -660,6 +666,7 @@ watch(
               <button
                 type="button"
                 class="conversation-import__import-button ui-button ui-button--primary"
+                data-agent-id="conversation-import.import"
                 :disabled="!selectedItem || importing"
                 @click="importSelectedItem"
               >

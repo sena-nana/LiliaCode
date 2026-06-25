@@ -4,7 +4,7 @@
  * Rust 端字段已 `rename_all = "camelCase"`，前端不需要再做 key 映射。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ChatAttachment,

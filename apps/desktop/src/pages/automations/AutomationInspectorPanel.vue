@@ -88,7 +88,12 @@ function formatTime(value: number | null): string {
     <section class="automations-page__section">
       <h3 class="automations-page__section-title">作用域</h3>
       <label class="ui-switch">
-        <input :checked="scope.includeInbox" type="checkbox" @change="emit('toggle-scope-include-inbox')" />
+        <input
+          :checked="scope.includeInbox"
+          type="checkbox"
+          data-agent-id="automations.scope.include-inbox"
+          @change="emit('toggle-scope-include-inbox')"
+        />
         <span>包含收集箱</span>
       </label>
       <div class="automations-page__field">
@@ -100,6 +105,7 @@ function formatTime(value: number | null): string {
             type="button"
             class="automations-page__chip"
             :class="{ 'is-active': scope.projectIds.includes(project.id) }"
+            :data-agent-id="`automations.scope.project.${project.id}`"
             @click="emit('toggle-scope-list', 'projectIds', project.id)"
           >
             {{ project.name }}
@@ -115,6 +121,7 @@ function formatTime(value: number | null): string {
             type="button"
             class="automations-page__chip"
             :class="{ 'is-active': scope.taskStatuses.includes(status) }"
+            :data-agent-id="`automations.scope.task-status.${status}`"
             @click="emit('toggle-scope-list', 'taskStatuses', status)"
           >
             {{ taskStatusLabel(status) }}
@@ -130,6 +137,7 @@ function formatTime(value: number | null): string {
             type="button"
             class="automations-page__chip"
             :class="{ 'is-active': scope.backends.includes(backend) }"
+            :data-agent-id="`automations.scope.backend.${backend}`"
             @click="emit('toggle-scope-backend', backend)"
           >
             {{ backend }}
@@ -145,6 +153,7 @@ function formatTime(value: number | null): string {
             type="button"
             class="automations-page__chip"
             :class="{ 'is-active': scope.eventKinds.includes(eventKind) }"
+            :data-agent-id="`automations.scope.event-kind.${eventKind}`"
             @click="emit('toggle-scope-list', 'eventKinds', eventKind)"
           >
             {{ eventKind }}
@@ -174,6 +183,7 @@ function formatTime(value: number | null): string {
           type="button"
           class="automations-page__run"
           :class="{ 'is-active': run.id === selectedRunId }"
+          :data-agent-id="`automations.run.${run.id}`"
           @click="emit('select-run', run)"
         >
           <span class="automations-page__run-main">
@@ -199,6 +209,7 @@ function formatTime(value: number | null): string {
           type="button"
           class="automations-page__node-state"
           :class="{ 'is-active': state.nodeId === selectedRunNodeId }"
+          :data-agent-id="`automations.run-node.${state.nodeId}`"
           @click="emit('select-run-node-state', state)"
         >
           <span>{{ state.nodeId }}</span>
@@ -232,6 +243,7 @@ function formatTime(value: number | null): string {
             <button
               type="button"
               class="ui-button ui-button--primary composer-inline__btn"
+              data-agent-id="automations.run.resume"
               :disabled="resuming"
               @click="emit('resume-selected-run')"
             >

@@ -1,6 +1,11 @@
 import {
   CHAT_BACKENDS,
   AGENT_TIMELINE_LIST_COMMAND,
+  AGENT_DEBUG_LOGS_COMMAND,
+  AGENT_DEBUG_RECORD_ACTION_COMMAND,
+  AGENT_DEBUG_RESET_STATE_COMMAND,
+  AGENT_DEBUG_RUNTIME_SNAPSHOT_COMMAND,
+  AGENT_DEBUG_STATUS_COMMAND,
   CHAT_ACK_RESTORED_ROLLBACK_COMMAND,
   CHAT_CHECK_ENV_COMMAND,
   CHAT_DESCRIBE_ATTACHMENTS_COMMAND,
@@ -88,6 +93,7 @@ import {
   PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
   PROVIDER_GET_CONFIG_COMMAND,
   PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
@@ -207,6 +213,7 @@ const tasks = [
 ];
 
 let taskWorktrees: Record<string, any> = {};
+let agentDebugLogs: Record<string, unknown>[] = [];
 
 const defaultWorktreeSettings = {
   defaultMode: "current",
@@ -420,6 +427,39 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
   if (noops.has(cmd)) return undefined as T;
 
   switch (cmd) {
+    case AGENT_DEBUG_STATUS_COMMAND:
+      return {
+        enabled: true,
+        reason: null,
+        startedAt: now,
+        logCount: agentDebugLogs.length,
+      } as T;
+    case AGENT_DEBUG_LOGS_COMMAND:
+      return clone(agentDebugLogs.slice(-(typeof args.limit === "number" ? args.limit : 200))) as T;
+    case AGENT_DEBUG_RECORD_ACTION_COMMAND: {
+      const entry = args.entry && typeof args.entry === "object" && !Array.isArray(args.entry)
+        ? args.entry as Record<string, unknown>
+        : {};
+      agentDebugLogs = [...agentDebugLogs, { ...entry }];
+      return undefined as T;
+    }
+    case AGENT_DEBUG_RESET_STATE_COMMAND:
+      agentDebugLogs = [];
+      return {
+        enabled: true,
+        reason: null,
+        startedAt: Date.now(),
+        logCount: 0,
+      } as T;
+    case AGENT_DEBUG_RUNTIME_SNAPSHOT_COMMAND:
+      return {
+        enabled: true,
+        capturedAt: Date.now(),
+        mainWindowPresent: true,
+        liliaHome: "C:\\Users\\dev\\.lilia",
+        runningTaskCount: 0,
+        queuedTaskCount: 0,
+      } as T;
     case TAURI_PLUGIN_DIALOG_OPEN_COMMAND:
       return null as T;
     case PROJECT_LIST_COMMAND:
@@ -712,6 +752,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         releaseNotes: [],
         updateError: null,
       } as T;
+    case PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND:
+      return undefined as T;
     case PROVIDER_GET_ACTIVE_BACKEND_COMMAND:
       return "codex" as T;
     case PROVIDER_GET_CONFIG_COMMAND:

@@ -206,13 +206,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="memory-view">
+  <div class="memory-view" data-agent-id="memory.page">
     <header class="memory-view__toolbar">
       <div class="memory-view__switches" aria-label="Memory 设置">
         <label class="memory-view__toggle">
           <input
             v-model="settings.enabled"
             type="checkbox"
+            data-agent-id="memory.settings.enabled"
             :disabled="settingsSaving"
             @change="saveSettings"
           >
@@ -222,6 +223,7 @@ onBeforeUnmount(() => {
           <input
             v-model="settings.baselineInjectionEnabled"
             type="checkbox"
+            data-agent-id="memory.settings.baseline-injection"
             :disabled="settingsSaving || !settings.enabled"
             @change="saveSettings"
           >
@@ -234,6 +236,7 @@ onBeforeUnmount(() => {
             type="number"
             min="1"
             max="100"
+            data-agent-id="memory.settings.cooldown-turns"
             :disabled="settingsSaving"
             @change="saveSettings"
           >
@@ -242,6 +245,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         class="memory-view__icon-button"
+        data-agent-id="memory.refresh"
         :disabled="loading"
         title="刷新"
         @click="loadMemoryView"
@@ -257,7 +261,7 @@ onBeforeUnmount(() => {
         <template v-for="section in memorySections" :key="section.scope">
           <div class="memory-view__section-head">
             <h2>{{ section.title }}</h2>
-            <button type="button" class="memory-view__text-button" @click="addMemory(section.scope)">
+            <button type="button" class="memory-view__text-button" :data-agent-id="`memory.${section.scope}.add`" @click="addMemory(section.scope)">
               <Plus :size="14" aria-hidden="true" />
               <span>新增</span>
             </button>
@@ -269,7 +273,7 @@ onBeforeUnmount(() => {
               class="memory-view__item"
               :class="{ 'is-active': form.id === memory.id, 'is-disabled': !memory.enabled }"
             >
-              <button type="button" class="memory-view__item-main" @click="editMemory(memory)">
+              <button type="button" class="memory-view__item-main" :data-agent-id="`memory.item.${memory.id}.open`" @click="editMemory(memory)">
                 <span class="memory-view__item-title">{{ memory.title }}</span>
                 <span class="memory-view__item-body">{{ memory.body }}</span>
                 <span class="memory-view__item-meta">
@@ -277,13 +281,13 @@ onBeforeUnmount(() => {
                 </span>
               </button>
               <div class="memory-view__item-actions">
-                <button type="button" title="编辑" @click="editMemory(memory)">
+                <button type="button" title="编辑" :data-agent-id="`memory.item.${memory.id}.edit`" @click="editMemory(memory)">
                   <Pencil :size="14" aria-hidden="true" />
                 </button>
-                <button type="button" :title="memory.enabled ? '停用' : '启用'" @click="toggleMemory(memory)">
+                <button type="button" :title="memory.enabled ? '停用' : '启用'" :data-agent-id="`memory.item.${memory.id}.toggle`" @click="toggleMemory(memory)">
                   <Check :size="14" aria-hidden="true" />
                 </button>
-                <button type="button" title="删除" @click="removeMemory(memory)">
+                <button type="button" title="删除" :data-agent-id="`memory.item.${memory.id}.delete`" @click="removeMemory(memory)">
                   <Trash2 :size="14" aria-hidden="true" />
                 </button>
               </div>
@@ -298,11 +302,11 @@ onBeforeUnmount(() => {
           <h2>{{ isEditing ? "编辑记忆" : "新增记忆" }}</h2>
           <div class="memory-view__scope">
             <label>
-              <input v-model="form.scope" type="radio" value="project">
+              <input v-model="form.scope" type="radio" value="project" data-agent-id="memory.form.scope.project">
               <span>项目</span>
             </label>
             <label>
-              <input v-model="form.scope" type="radio" value="user">
+              <input v-model="form.scope" type="radio" value="user" data-agent-id="memory.form.scope.user">
               <span>用户</span>
             </label>
           </div>
@@ -310,18 +314,18 @@ onBeforeUnmount(() => {
 
         <label class="memory-view__field">
           <span>标题</span>
-          <input v-model="form.title" type="text" maxlength="120" required>
+          <input v-model="form.title" type="text" maxlength="120" required data-agent-id="memory.form.title">
         </label>
         <label class="memory-view__field">
           <span>正文</span>
-          <textarea v-model="form.body" rows="8" required />
+          <textarea v-model="form.body" rows="8" required data-agent-id="memory.form.body" />
         </label>
         <label class="memory-view__field">
           <span>标签</span>
-          <input v-model="form.tags" type="text" placeholder="逗号分隔">
+          <input v-model="form.tags" type="text" placeholder="逗号分隔" data-agent-id="memory.form.tags">
         </label>
         <label class="memory-view__toggle memory-view__toggle--standalone">
-          <input v-model="form.enabled" type="checkbox">
+          <input v-model="form.enabled" type="checkbox" data-agent-id="memory.form.enabled">
           <span>启用这条记忆</span>
         </label>
 
@@ -329,6 +333,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="memory-view__text-button"
+            data-agent-id="memory.form.clear"
             :disabled="saving"
             @click="resetForm('project')"
           >
@@ -338,6 +343,7 @@ onBeforeUnmount(() => {
           <button
             type="submit"
             class="memory-view__primary"
+            data-agent-id="memory.form.save"
             :disabled="saving || !form.title.trim() || !form.body.trim()"
           >
             <Save :size="15" aria-hidden="true" />

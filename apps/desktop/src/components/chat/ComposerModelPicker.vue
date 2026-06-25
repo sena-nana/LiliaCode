@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="composer-model-picker">
+  <div ref="root" class="composer-model-picker" data-agent-id="chat.model-picker">
     <button
       type="button"
       class="composer-model-picker__trigger"
@@ -114,6 +114,7 @@ onBeforeUnmount(() => {
       :title="triggerLabel"
       aria-haspopup="menu"
       :aria-expanded="open"
+      data-agent-id="chat.model-picker.trigger"
       @click="toggle"
     >
       <Brain :size="14" aria-hidden="true" />
@@ -123,6 +124,7 @@ onBeforeUnmount(() => {
       v-if="open"
       class="composer-model-picker__menu"
       role="menu"
+      data-agent-id="chat.model-picker.menu"
     >
       <button
         type="button"
@@ -130,6 +132,7 @@ onBeforeUnmount(() => {
         :class="{ 'is-active': !manualMode }"
         role="menuitemradio"
         :aria-checked="!manualMode"
+        data-agent-id="chat.model-picker.auto"
         @click="setAuto"
       >
         <Sparkles :size="14" aria-hidden="true" />
@@ -146,6 +149,7 @@ onBeforeUnmount(() => {
         :class="{ 'is-active': manualMode && state.model === option.id }"
         role="menuitemradio"
         :aria-checked="manualMode && state.model === option.id"
+        :data-agent-id="`chat.model-picker.model.${option.id}`"
         @click="setModel(option.id)"
       >
         <span class="composer-model-picker__main">{{ option.label }}</span>
@@ -162,6 +166,7 @@ onBeforeUnmount(() => {
           :class="{ 'is-active': manualMode && effectiveEffort === effort }"
           role="menuitemradio"
           :aria-checked="manualMode && effectiveEffort === effort"
+          :data-agent-id="`chat.model-picker.effort.${effort}`"
           @click="setEffort(effort)"
         >
           {{ effort }}

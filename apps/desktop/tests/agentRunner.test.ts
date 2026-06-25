@@ -18,6 +18,7 @@ import {
   LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
   LILIA_GOAL_WORKFLOW_TYPE,
   LILIA_REVIEW_WORKFLOW_TYPE,
+  LILIA_TASK_WORKFLOW_TYPE,
   REMOTE_ENVIRONMENT_COMMAND_TYPE,
   RUNTIME_SETTINGS_COMMAND_TYPE,
   SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
@@ -64,6 +65,7 @@ import {
   buildCodexBatchApplyPrompt,
   buildCodexFixSuggestionPrompt,
   buildCodexPlanRevisionPrompt,
+  buildCodexTaskWorkflowPrompt,
   runCodex,
   runCodexAppServer,
   maybeHandleCodexServerRequest,
@@ -108,6 +110,9 @@ import {
 import {
   runClaudeSessionManagementRuntimeCommand,
 } from "../agent-runner/sessionManagement.mjs";
+import {
+  buildClaudeWorkflowPrompt,
+} from "../agent-runner/promptManager.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
@@ -4449,6 +4454,31 @@ describe("Codex app-server mapping", () => {
     expect(prompt).toContain("wait for Lilia plan approval");
     expect(prompt).toContain("Source suggestions:\n建议统一权限边界。");
     expect(prompt).toContain("User instructions:\n应用最小改动");
+  });
+
+  it("builds provider prompts for Lilia task workflows", () => {
+    const workflow = {
+      type: LILIA_TASK_WORKFLOW_TYPE,
+      kind: "frontend",
+      instructions: "调整按钮布局",
+    };
+
+    const codexPrompt = buildCodexTaskWorkflowPrompt(workflow, {
+      prompt: "调整按钮布局",
+      cwd: "C:/repo",
+    });
+    expect(codexPrompt).toContain("Lilia task workflow: frontend");
+    expect(codexPrompt).toContain("Provider: Codex");
+    expect(codexPrompt).toContain("Workspace cwd: C:/repo");
+    expect(codexPrompt).toContain("User workflow instructions: 调整按钮布局");
+
+    const claudePrompt = buildClaudeWorkflowPrompt({
+      taskWorkflow: workflow,
+      prompt: "调整按钮布局",
+    });
+    expect(claudePrompt).toContain("Lilia task workflow: frontend");
+    expect(claudePrompt).toContain("Provider: Claude");
+    expect(claudePrompt).toContain("User workflow instructions: 调整按钮布局");
   });
 
   it("Codex batch apply workflow 强制先走 Plan，确认后再执行", async () => {

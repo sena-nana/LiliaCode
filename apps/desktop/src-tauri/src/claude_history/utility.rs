@@ -5,6 +5,7 @@ use tauri::AppHandle;
 
 use super::types::ClaudeHistoryUtilityOutput;
 use crate::chat::runner::locate_agent_runner;
+use crate::process_command::hide_console_window;
 
 fn locate_claude_history_utility(app: &AppHandle) -> std::path::PathBuf {
     let runner = locate_agent_runner(app);
@@ -20,7 +21,9 @@ pub(super) fn run_claude_history_utility(
 ) -> Result<ClaudeHistoryUtilityOutput, String> {
     let script = locate_claude_history_utility(app);
     let node = std::env::var("LILIA_NODE_BIN").unwrap_or_else(|_| "node".to_string());
-    let mut child = Command::new(node)
+    let mut command = Command::new(node);
+    hide_console_window(&mut command);
+    let mut child = command
         .arg(script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

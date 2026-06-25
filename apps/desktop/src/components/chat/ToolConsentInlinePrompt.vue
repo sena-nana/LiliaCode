@@ -47,6 +47,7 @@ const emit = defineEmits<{
     ]"
     role="alert"
     aria-live="assertive"
+    data-agent-id="tool-consent.prompt"
   >
     <div class="composer-inline__tool-row">
       <span class="composer-inline__icon" aria-hidden="true">
@@ -72,6 +73,7 @@ const emit = defineEmits<{
         v-if="toolInputJson && toolInputJson !== '{}'"
         type="button"
         class="composer-inline__toggle"
+        data-agent-id="tool-consent.toggle-input"
         :aria-expanded="toolExpanded"
         @click="emit('updateToolExpanded', !toolExpanded)"
       >

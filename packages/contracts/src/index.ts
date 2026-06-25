@@ -19,6 +19,7 @@ export * from "./automation";
 export * from "./architecture";
 export * from "./remote-control";
 export * from "./prompt";
+export * from "./agent-debug";
 
 export {
   deriveTimelineDisplay,

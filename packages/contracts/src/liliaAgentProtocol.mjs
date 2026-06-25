@@ -10,6 +10,7 @@ import {
   LILIA_MEMORY_MODE_WORKFLOW_TYPE,
   LILIA_MEMORY_RESET_WORKFLOW_TYPE,
   LILIA_REVIEW_WORKFLOW_TYPE,
+  LILIA_TASK_WORKFLOW_TYPE,
 } from "./liliaWorkflowContract.mjs";
 import {
   PROCESS_SESSION_COMMAND_TYPE,
@@ -30,6 +31,7 @@ function buildManifest() {
       metadataEntry(LILIA_REVIEW_WORKFLOW_TYPE),
       metadataEntry(LILIA_FIX_SUGGESTION_WORKFLOW_TYPE),
       metadataEntry(LILIA_BATCH_APPLY_WORKFLOW_TYPE),
+      metadataEntry(LILIA_TASK_WORKFLOW_TYPE),
       metadataEntry(LILIA_GOAL_WORKFLOW_TYPE),
       metadataEntry(LILIA_COMPACT_WORKFLOW_TYPE),
       metadataEntry(LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE),

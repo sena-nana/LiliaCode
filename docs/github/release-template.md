@@ -1,4 +1,4 @@
-# LiliaCode v0.1.0-alpha.1
+# LiliaCode v1.0.0-beta
 
 ## 发布摘要
 
@@ -18,11 +18,22 @@
 ## Windows 安装验证
 
 - [ ] 从 draft Release 下载 Windows 安装包。
-- [ ] 在干净 Windows 环境运行安装包。
-- [ ] 确认安装后可以启动 LiliaCode，并能打开主窗口。
+- [ ] 已确认 `yarn release:smoke:windows --tag <tag>` 或本地 `yarn release:smoke:windows --installer <安装包路径>` 通过。
+- [ ] smoke 已覆盖安装包安装、启动 LiliaCode、通过 `liliacode <测试项目路径>` 打开项目。
 - [ ] 确认基础窗口操作正常。
-- [ ] 确认卸载流程可完成。
+- [ ] smoke 已覆盖卸载流程，并确认卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
 - [ ] 完成验证后再将 draft Release 正式发布。
+
+## Windows 安装验证记录
+
+- 验证人：
+- 验证日期：
+- Windows 环境：
+- 安装包文件名：LiliaCode_1.0.0-beta_x64-setup.exe
+- 安装：
+- 启动：
+- CLI 入口：
+- 卸载：
 
 ## 已知限制
 

@@ -84,6 +84,7 @@ afterEach(async () => {
     await vi.dynamicImportSettled();
   }
   cleanup();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   closeChatSidebar();
   localStorage.clear();
@@ -142,5 +143,18 @@ describe("TaskDetail sidebar panel activation", () => {
     await waitFor(() => {
       expect(sidebarElement(view.container)).toHaveClass("is-open");
     });
+  });
+
+  it("Agent Debug 模式下关闭状态也会注册 Debug panel 供自动化触达", async () => {
+    vi.stubEnv("VITE_LILIA_AGENT_DEBUG", "1");
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(sidebarPanelRegistrations.debug).toHaveBeenCalledTimes(1);
+    });
+
+    expect(sidebarPanelRegistrations.architecture).not.toHaveBeenCalled();
+    expect(sidebarPanelRegistrations.iab).not.toHaveBeenCalled();
+    expect(view.container.querySelector(".chat-sidebar")).toBeInstanceOf(HTMLElement);
   });
 });

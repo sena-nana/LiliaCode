@@ -3,8 +3,9 @@ export interface PromptRunnerContract {
   attachmentUserMessageLabel: string;
 }
 
-export interface PromptMainAgentSkill {
+export interface PromptMainAgentWorkflow {
   title: string;
+  summary: string;
   prompt: string;
 }
 
@@ -16,9 +17,9 @@ export interface PromptMainAgentModes {
 export interface PromptMainAgentContract {
   basePrompt: string;
   toolsPrompt: string;
-  skills: Record<string, PromptMainAgentSkill>;
+  workflowTypes: Record<string, PromptMainAgentWorkflow>;
   modes: PromptMainAgentModes;
-  skillOrder: readonly string[];
+  workflowOrder: readonly string[];
 }
 
 export interface PromptClaudeContract {

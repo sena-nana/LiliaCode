@@ -118,13 +118,19 @@ onBeforeUnmount(() => {
         <RouterLink
           :to="row.route"
           class="sessions-view__link ui-list-item"
+          :data-agent-id="`project.sessions.open.${row.task.id}`"
         >
           <span class="sessions-view__title">{{ row.task.title }}</span>
           <span class="sessions-view__status">{{ row.task.status }}</span>
         </RouterLink>
       </li>
       <li v-if="hiddenTaskCount > 0" class="sessions-view__row">
-        <button type="button" class="sessions-view__more ui-list-item" @click="revealMoreSessions">
+        <button
+          type="button"
+          class="sessions-view__more ui-list-item"
+          data-agent-id="project.sessions.load-more"
+          @click="revealMoreSessions"
+        >
           加载更多 {{ hiddenTaskCount }}
         </button>
       </li>

@@ -9,26 +9,28 @@ import { homeDir } from "@tauri-apps/api/path";
 const mocks = vi.hoisted(() => ({
   ensureProjectLoaded: vi.fn(),
   ensureTaskLoaded: vi.fn(),
+  getProject: vi.fn(),
+  getTask: vi.fn(),
+  getOrphanConversation: vi.fn(),
+  promoteDraftOrphan: vi.fn(),
+  promoteDraftTask: vi.fn(),
+  resolveConversationRouteState: vi.fn(),
 }));
 
 vi.mock("../src/services/projectsStore", () => ({
   ensureProjectLoaded: mocks.ensureProjectLoaded,
-  getProject: vi.fn(() => undefined),
+  getProject: mocks.getProject,
 }));
 
 vi.mock("../src/services/tasksStore", () => ({
   createDraftOrphan: vi.fn(() => ({ id: "draft-orphan" })),
   createDraftTask: vi.fn(() => ({ id: "draft-task" })),
   ensureTaskLoaded: mocks.ensureTaskLoaded,
-  getOrphanConversation: vi.fn(() => undefined),
-  getTask: vi.fn(() => undefined),
-  promoteDraftOrphan: vi.fn(),
-  promoteDraftTask: vi.fn(),
-  resolveConversationRouteState: vi.fn(() => ({
-    isDraftRoute: false,
-    isLiveDraft: false,
-    isLostDraft: false,
-  })),
+  getOrphanConversation: mocks.getOrphanConversation,
+  getTask: mocks.getTask,
+  promoteDraftOrphan: mocks.promoteDraftOrphan,
+  promoteDraftTask: mocks.promoteDraftTask,
+  resolveConversationRouteState: mocks.resolveConversationRouteState,
 }));
 
 vi.mock("../src/services/popupWindows", () => ({
@@ -59,9 +61,103 @@ async function createRouterPlugin() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ensureProjectLoaded.mockResolvedValue(null);
+  mocks.ensureTaskLoaded.mockResolvedValue(null);
+  mocks.getProject.mockReturnValue(undefined);
+  mocks.getTask.mockReturnValue(undefined);
+  mocks.getOrphanConversation.mockReturnValue(undefined);
+  mocks.resolveConversationRouteState.mockReturnValue({
+    isDraftRoute: false,
+    isLiveDraft: false,
+    isLostDraft: false,
+  });
 });
 
 describe("useTaskConversationContext", () => {
+  it("项目草稿不等待项目缓存即可渲染聊天界面", async () => {
+    mocks.resolveConversationRouteState.mockReturnValue({
+      isDraftRoute: true,
+      isLiveDraft: true,
+      isLostDraft: false,
+    });
+    mocks.getTask.mockReturnValue({
+      id: "t-draft-1",
+      projectId: "lilia",
+      sessionId: "t-draft-1",
+      title: "新对话",
+      status: "draft",
+      createdAt: 1,
+      pinned: false,
+      parentId: null,
+      dependsOn: [],
+    });
+
+    let context: ReturnType<typeof useTaskConversationContext> | null = null;
+    const Harness = defineComponent({
+      setup() {
+        context = useTaskConversationContext({
+          variant: "main",
+          projectId: "lilia",
+          taskId: "t-draft-1",
+        });
+        return () => null;
+      },
+    });
+
+    render(Harness, {
+      global: {
+        plugins: [await createRouterPlugin()],
+      },
+    });
+    await nextTick();
+
+    expect(context?.hasContext.value).toBe(true);
+    expect(context?.shouldRenderChat.value).toBe(true);
+    expect(context?.isContextLoading.value).toBe(false);
+  });
+
+  it("发送项目草稿前先加载项目上下文", async () => {
+    mocks.resolveConversationRouteState.mockReturnValue({
+      isDraftRoute: true,
+      isLiveDraft: true,
+      isLostDraft: false,
+    });
+    mocks.ensureProjectLoaded.mockResolvedValue({
+      id: "lilia",
+      name: "Lilia",
+      cwd: "C:\\Files\\workspace\\Lilia",
+      sessionCount: 0,
+      pinned: false,
+    });
+
+    let context: ReturnType<typeof useTaskConversationContext> | null = null;
+    const Harness = defineComponent({
+      setup() {
+        context = useTaskConversationContext({
+          variant: "main",
+          projectId: "lilia",
+          taskId: "t-draft-1",
+        });
+        return () => null;
+      },
+    });
+
+    render(Harness, {
+      global: {
+        plugins: [await createRouterPlugin()],
+      },
+    });
+    await nextTick();
+
+    await context!.ensureTaskReadyForMessage("开始实现", []);
+
+    expect(mocks.ensureProjectLoaded).toHaveBeenCalledWith("lilia");
+    expect(mocks.promoteDraftTask).toHaveBeenCalledWith("t-draft-1", "开始实现");
+    expect(mocks.ensureProjectLoaded.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.promoteDraftTask.mock.invocationCallOrder[0],
+    );
+  });
+
   it("卸载后忽略仍在完成的弹窗上下文加载结果", async () => {
     const projectLoad = deferred();
     const taskLoad = deferred();

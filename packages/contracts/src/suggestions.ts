@@ -97,6 +97,13 @@ export interface SuggestionLocalGitContextRef {
   recentCommits: string[];
 }
 
+export interface SuggestionCodexThreadRef {
+  id: string;
+  title: string;
+  updatedAt: number | null;
+  preview: string | null;
+}
+
 export interface SuggestionItem {
   id: string;
   projectId: string | null;
@@ -104,6 +111,7 @@ export interface SuggestionItem {
   source: SuggestionItemSource;
   githubActivities: SuggestionGitHubActivityRef[];
   localGitContexts: SuggestionLocalGitContextRef[];
+  codexThreads: SuggestionCodexThreadRef[];
   summary: string;
   reason: string;
   prompt: string;
@@ -140,16 +148,24 @@ export function suggestionGitHubSourceLabel(suggestion: Pick<SuggestionItem, "gi
 }
 
 export function suggestionSourceLabel(
-  suggestion: Pick<SuggestionItem, "githubActivities" | "localGitContexts">,
+  suggestion: Pick<SuggestionItem, "githubActivities" | "localGitContexts" | "codexThreads">,
 ): string {
   const githubLabel = suggestionGitHubSourceLabel(suggestion);
   if (githubLabel) return githubLabel;
   const localGitContexts = suggestion.localGitContexts ?? [];
   const [context] = localGitContexts;
-  if (!context) return "";
-  const branch = context.branch.trim();
-  const source = branch ? `本地 Git · ${branch}` : "本地 Git";
-  const extraCount = localGitContexts.length - 1;
+  if (context) {
+    const branch = context.branch.trim();
+    const source = branch ? `本地 Git · ${branch}` : "本地 Git";
+    const extraCount = localGitContexts.length - 1;
+    return extraCount > 0 ? `${source} +${extraCount}` : source;
+  }
+  const codexThreads = suggestion.codexThreads ?? [];
+  const [thread] = codexThreads;
+  if (!thread) return "";
+  const title = thread.title.trim();
+  const source = title ? `Codex thread · ${title}` : "Codex thread";
+  const extraCount = codexThreads.length - 1;
   return extraCount > 0 ? `${source} +${extraCount}` : source;
 }
 
@@ -164,6 +180,7 @@ export function conversationSuggestionLoadingText(probe: ConversationSuggestionS
   if (sources.has("local-git")) {
     labels.push(localGitLoadingLabel(probe.localGit));
   }
+  if (sources.has("codex-thread")) labels.push(SUGGESTION_LOADING_SOURCE_LABELS["codex-thread"]);
   if (labels.length === 0) return DEFAULT_SUGGESTION_LOADING_TEXT;
   return `正在检查${joinSuggestionSourceLabels(labels)}`;
 }

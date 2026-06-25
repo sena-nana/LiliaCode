@@ -45,6 +45,7 @@ use crate::chat::types::{
     TurnStartedEvent,
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
+use crate::process_command::hide_console_window;
 use crate::provider::{
     build_effective_claude_settings, build_effective_codex_subagent_settings,
     load_agent_interaction_settings, normalize_codex_settings_profile, normalize_json_object,
@@ -547,6 +548,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
     );
 
     let mut cmd = Command::new("node");
+    hide_console_window(&mut cmd);
     cmd.arg(&script_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1646,6 +1648,7 @@ fn apply_main_agent_prompt_to_runtime_options<R: Runtime>(
         backend,
         runtime_options,
         &settings.main_agent_prompt_mode,
+        &settings.main_agent_custom_prompt,
     )
 }
 
@@ -1653,11 +1656,12 @@ fn append_main_agent_prompt_to_runtime_options(
     backend: &str,
     runtime_options: Option<JsonValue>,
     mode: &str,
+    custom_prompt: &str,
 ) -> Option<JsonValue> {
     crate::memory::append_context_to_runtime_options(
         backend,
         runtime_options,
-        &crate::prompt_contract::build_main_agent_prompt(mode),
+        &crate::prompt_contract::build_main_agent_prompt(mode, Some(custom_prompt)),
     )
 }
 
@@ -1724,28 +1728,34 @@ mod main_agent_prompt_tests {
                 }
             })),
             "aggressive",
+            "",
         )
         .unwrap();
         let context = value["provider"]["codex"]["additionalContext"]
             .as_str()
             .unwrap();
         let aggressive = crate::prompt_contract::main_agent_prompt_mode("aggressive");
-        let first_skill_title = crate::prompt_contract::main_agent_prompts()
-            .skill_order
+        let first_workflow_title = crate::prompt_contract::main_agent_prompts()
+            .workflow_order
             .first()
-            .and_then(|key| crate::prompt_contract::main_agent_prompts().skills.get(key))
-            .map(|skill| skill.title.as_str())
+            .and_then(|key| {
+                crate::prompt_contract::main_agent_prompts()
+                    .workflow_types
+                    .get(key)
+            })
+            .map(|workflow| workflow.title.as_str())
             .unwrap();
 
         assert!(context.starts_with("existing context\n\n"));
         assert!(context.contains(aggressive));
-        assert!(context.contains(first_skill_title));
+        assert!(context.contains(first_workflow_title));
     }
 
     #[test]
     fn main_agent_prompt_unknown_mode_uses_conservative_context() {
         let value =
-            append_main_agent_prompt_to_runtime_options(BACKEND_CLAUDE, None, "unknown").unwrap();
+            append_main_agent_prompt_to_runtime_options(BACKEND_CLAUDE, None, "unknown", "")
+                .unwrap();
         let context = value["provider"]["claude"]["additionalContext"]
             .as_str()
             .unwrap();
@@ -1754,6 +1764,38 @@ mod main_agent_prompt_tests {
 
         assert!(context.contains(conservative));
         assert!(!context.contains(aggressive));
+    }
+
+    #[test]
+    fn main_agent_prompt_custom_mode_uses_custom_strategy_context() {
+        let value = append_main_agent_prompt_to_runtime_options(
+            BACKEND_CODEX,
+            None,
+            "custom",
+            "Custom strategy for this workspace.",
+        )
+        .unwrap();
+        let context = value["provider"]["codex"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let first_workflow_title = crate::prompt_contract::main_agent_prompts()
+            .workflow_order
+            .first()
+            .and_then(|key| {
+                crate::prompt_contract::main_agent_prompts()
+                    .workflow_types
+                    .get(key)
+            })
+            .map(|workflow| workflow.title.as_str())
+            .unwrap();
+
+        assert!(context.contains("Custom strategy for this workspace."));
+        assert!(
+            !context.contains(crate::prompt_contract::main_agent_prompt_mode(
+                "conservative"
+            ))
+        );
+        assert!(context.contains(first_workflow_title));
     }
 }
 

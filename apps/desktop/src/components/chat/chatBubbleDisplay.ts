@@ -4,12 +4,10 @@ import {
   type ChatConversationReference,
   type ChatMessage,
   type ChatMessageDisplay,
-  type ChatMessageSegment,
 } from "@lilia/contracts";
 import { measurePerfSync } from "../../utils/perf";
 
 export type ChatBubbleMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
-export type MessageSegment = ChatMessageSegment;
 export type ChatBubbleDisplay = ChatMessageDisplay;
 
 type CachedChatBubbleDisplay = {

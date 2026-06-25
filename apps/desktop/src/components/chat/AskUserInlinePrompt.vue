@@ -88,6 +88,7 @@ const emit = defineEmits<{
     role="region"
     aria-live="assertive"
     :aria-label="askTitle"
+    data-agent-id="ask-user.prompt"
     :tabindex="tabindex"
     @keydown="emit('keydown', $event)"
   >
@@ -108,6 +109,7 @@ const emit = defineEmits<{
         type="button"
         class="composer-inline__close"
         aria-label="关闭"
+        data-agent-id="ask-user.close"
         :disabled="actionsBlocked"
         @click="emit('cancelAsk')"
       >
@@ -149,6 +151,7 @@ const emit = defineEmits<{
               type="button"
               class="composer-inline__option-btn"
               :role="askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE ? 'radio' : 'checkbox'"
+              :data-agent-id="`ask-user.option.${opt.id}`"
               :aria-checked="askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE
                 ? singlePick === opt.id
                 : multiPicks.has(opt.id)"
@@ -198,6 +201,7 @@ const emit = defineEmits<{
         v-if="askQuestion.skippable !== false && askTotal > 1"
         type="button"
         class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
+        data-agent-id="ask-user.skip"
         :disabled="actionsBlocked"
         @click="emit('skipAsk')"
       >
@@ -208,6 +212,7 @@ const emit = defineEmits<{
         v-if="canGoPrev"
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="ask-user.back"
         :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
@@ -218,6 +223,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="ask-user.cancel"
         :disabled="actionsBlocked"
         @click="emit('confirmAskNo')"
       >
@@ -226,6 +232,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="composer-inline__btn"
+        data-agent-id="ask-user.confirm"
         :class="askQuestion.danger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked"
         @click="emit('submitAsk')"
@@ -239,6 +246,7 @@ const emit = defineEmits<{
         v-if="askQuestion.skippable !== false && askTotal > 1"
         type="button"
         class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
+        data-agent-id="ask-user.skip"
         :disabled="actionsBlocked"
         @click="emit('skipAsk')"
       >
@@ -249,6 +257,7 @@ const emit = defineEmits<{
         v-if="canGoPrev"
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="ask-user.back"
         :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
@@ -260,6 +269,7 @@ const emit = defineEmits<{
         :value="freeformText"
         :class="inputClass"
         rows="1"
+        data-agent-id="ask-user.freeform"
         :placeholder="inputPlaceholder"
         @input="emit('update:freeformText', ($event.target as HTMLTextAreaElement).value)"
       />
@@ -267,6 +277,7 @@ const emit = defineEmits<{
         v-if="askQuestion.mode === DEFAULT_ASK_USER_MODE"
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
+        data-agent-id="ask-user.cancel"
         :disabled="actionsBlocked"
         @click="emit('confirmAskNo')"
       >
@@ -275,6 +286,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="composer-inline__btn"
+        data-agent-id="ask-user.confirm"
         :class="askQuestion.danger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked || (askQuestion.mode !== DEFAULT_ASK_USER_MODE && !canAskSubmit)"
         @click="emit('submitAsk')"

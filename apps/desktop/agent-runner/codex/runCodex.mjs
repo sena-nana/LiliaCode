@@ -88,6 +88,7 @@ import {
   normalizeLiliaFixSuggestionWorkflow,
   normalizeLiliaMemoryModeWorkflow,
   normalizeLiliaReviewWorkflow,
+  normalizeLiliaTaskWorkflow,
 } from "@lilia/contracts/liliaWorkflowContract.mjs";
 
 export async function initializeCodexAppServer(server) {
@@ -395,6 +396,10 @@ function readCodexBatchApplyWorkflow(cmd) {
   return normalizeLiliaBatchApplyWorkflow(readCodexWorkflow(cmd));
 }
 
+function readCodexTaskWorkflow(cmd) {
+  return normalizeLiliaTaskWorkflow(readCodexWorkflow(cmd));
+}
+
 function codexReviewTargetForAppServer(target) {
   return target?.type === "commit" ? { ...target, title: null } : target;
 }
@@ -630,6 +635,10 @@ export function buildCodexFixSuggestionPrompt(workflow, cmd) {
 
 export function buildCodexBatchApplyPrompt(workflow, cmd) {
   return buildCodexWorkflowPrompt("batchApply", { workflow, cmd });
+}
+
+export function buildCodexTaskWorkflowPrompt(workflow, cmd) {
+  return buildCodexWorkflowPrompt("taskWorkflow", { workflow, cmd });
 }
 
 function readCollaborationModes(result) {
@@ -1144,6 +1153,68 @@ async function runCodexBatchApplyWorkflow(server, threadId, cmd, ctx, cwdFn = pr
     sourceId: `codex:batch-apply:completed:${threadId}:${workflow.sourceTurnId}`,
   });
   finalizeCodexRunContext(ctx);
+  return true;
+}
+
+async function runCodexTaskWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const workflow = readCodexTaskWorkflow(cmd);
+  if (!workflow) return false;
+  const turnCmd = {
+    ...cmd,
+    cwd: cmd.cwd || cwdFn(),
+  };
+  const prompt = buildCodexTaskWorkflowPrompt(workflow, turnCmd);
+  const selectedModel = normalizeCodexSettings(turnCmd).model || ctx.selectedModel || null;
+  const timelinePayload = {
+    backend: "codex",
+    subkind: "task_workflow",
+    method: "turn/start",
+    threadId,
+    kind: workflow.kind,
+    hasInstructions: Boolean(workflow.instructions),
+  };
+  emitCodexDiagnostic(ctx, {
+    status: "started",
+    title: "Codex task workflow started",
+    summary: workflow.kind,
+    payload: timelinePayload,
+    sourceId: `codex:task-workflow:start:${threadId}:${workflow.kind}`,
+  });
+  try {
+    const completed = await runCodexTurnLoop(
+      server,
+      threadId,
+      turnCmd,
+      ctx,
+      cwdFn,
+      {
+        initialPrompt: prompt,
+        initialTurnKind: "default",
+        selectedModel,
+        timeoutMessage: "Codex task workflow timed out",
+      },
+    );
+    if (!completed) return true;
+    if (ctx.turnFailedSeen) {
+      throw new Error("Codex task workflow turn failed");
+    }
+  } catch (err) {
+    emitCodexDiagnostic(ctx, {
+      status: "error",
+      title: "Codex task workflow failed",
+      payload: timelinePayload,
+      sourceId: `codex:task-workflow:error:${threadId}:${workflow.kind}`,
+      error: err,
+    });
+    throw err;
+  }
+  emitCodexDiagnostic(ctx, {
+    status: "success",
+    title: "Codex task workflow completed",
+    summary: workflow.kind,
+    payload: timelinePayload,
+    sourceId: `codex:task-workflow:completed:${threadId}:${workflow.kind}`,
+  });
   return true;
 }
 
@@ -2136,6 +2207,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },
+  { run: runCodexTaskWorkflow, needsCwd: true, finalize: true },
 ];
 
 async function runCodexWorkflowIfPresent(server, threadId, cmd, ctx, cwdFn) {

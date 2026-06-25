@@ -112,6 +112,7 @@ onBeforeUnmount(() => {
           type="text"
           class="ui-input"
           readonly
+          data-agent-id="settings.popup.shortcut"
           :value="shortcutLabel(popupWindowSettings.shortcut)"
           aria-label="弹出窗口快捷键"
           title="聚焦后按组合键录入，Backspace 或 Delete 清空"
@@ -120,6 +121,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="ui-button ui-button--ghost"
+          data-agent-id="settings.popup.shortcut.clear"
           :disabled="savingPopupWindow"
           @click="clearPopupShortcut"
         >
@@ -129,6 +131,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="ui-button ui-button--ghost"
+          data-agent-id="settings.popup.shortcut.save"
           :disabled="savingPopupWindow"
           @click="savePopupWindowSettings"
         >

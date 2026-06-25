@@ -108,6 +108,18 @@ fn sample_local_git_context(branch: &str) -> LocalGitContextSample {
     }
 }
 
+fn sample_codex_thread(id: &str, title: &str) -> CodexThreadSample {
+    CodexThreadSample {
+        thread: SuggestionCodexThreadRef {
+            id: id.to_string(),
+            title: title.to_string(),
+            updated_at: Some(2_000),
+            preview: Some("用户要求继续补齐 Codex thread 建议来源。".to_string()),
+        },
+        fingerprint: format!("{id}@2000:{title}:preview"),
+    }
+}
+
 fn insert_task(conn: &Connection, id: &str, project_id: &str, archived: bool) {
     conn.execute(
             "INSERT INTO tasks (id, project_id, session_id, title, status, created_at, archived) VALUES (?1, ?2, ?1, ?3, 'running', 1, ?4)",
@@ -191,6 +203,7 @@ fn prompt_builder_truncates_long_history() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         tasks: vec![TaskSample {
             id: "t1".to_string(),
             title: "x".repeat(200),
@@ -218,9 +231,15 @@ fn scope_ignores_recent_tasks_without_unfinished_signals() {
     insert_event(&conn, "done", 20, "最近对话");
     insert_todo(&conn, "done", "已完成事项", true, 0);
 
-    let scope =
-        build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None, Vec::new())
-            .unwrap();
+    let scope = build_scope_from_parts(
+        &conn,
+        Some("p1"),
+        empty_project_context(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
 
     assert!(scope.is_none());
 }
@@ -232,10 +251,16 @@ fn scope_uses_unfinished_task_todos_in_prompt() {
     insert_event(&conn, "todo-task", 20, "继续做权限检查");
     insert_todo(&conn, "todo-task", "补齐权限失败回退", false, 0);
 
-    let scope =
-        build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None, Vec::new())
-            .unwrap()
-            .unwrap();
+    let scope = build_scope_from_parts(
+        &conn,
+        Some("p1"),
+        empty_project_context(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap()
+    .unwrap();
     let prompt = build_generation_prompt(&scope);
 
     assert_eq!(scope.tasks.len(), 1);
@@ -260,10 +285,16 @@ fn todo_list_payload_samples_only_unfinished_items() {
         ]),
     );
 
-    let scope =
-        build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None, Vec::new())
-            .unwrap()
-            .unwrap();
+    let scope = build_scope_from_parts(
+        &conn,
+        Some("p1"),
+        empty_project_context(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap()
+    .unwrap();
     let signals = &scope.tasks[0].unfinished_signals;
 
     assert_eq!(signals, &vec!["todo: 继续同步 pending 状态".to_string()]);
@@ -359,6 +390,7 @@ fn scope_can_use_github_activity_without_unfinished_tasks() {
             vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
         )),
         vec![sample_local_git_context("feature/local-git")],
+        Vec::new(),
     )
     .unwrap()
     .unwrap();
@@ -384,6 +416,7 @@ fn source_probe_reports_task_and_github_sources() {
             vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
         )),
         vec![sample_local_git_context("feature/local-git")],
+        Vec::new(),
     )
     .unwrap()
     .unwrap();
@@ -406,6 +439,7 @@ fn source_probe_reports_local_git_details() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
 
@@ -428,6 +462,7 @@ fn source_probe_distinguishes_clean_local_git_context() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: vec![context],
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
 
@@ -435,6 +470,25 @@ fn source_probe_distinguishes_clean_local_git_context() {
 
     assert!(local_git.has_recent_commits);
     assert!(!local_git.has_changed_files);
+}
+
+#[test]
+fn source_probe_reports_codex_thread_source() {
+    let scope = SuggestionScope {
+        project_id: Some("p1".to_string()),
+        project_name: Some("Lilia".to_string()),
+        latest_updated_at: 2_000,
+        github_repo: None,
+        github_activities: Vec::new(),
+        local_git_contexts: Vec::new(),
+        codex_threads: vec![sample_codex_thread("thread-1", "补齐 Codex 建议")],
+        tasks: Vec::new(),
+    };
+
+    let probe = summarize_scope_sources(&scope);
+
+    assert_eq!(probe.sources, vec![SuggestionItemSource::CodexThread]);
+    assert!(probe.local_git.is_none());
 }
 
 #[test]
@@ -446,6 +500,7 @@ fn prompt_includes_github_activity_ids() {
         github_repo: Some(sample_github_repo()),
         github_activities: vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
 
@@ -469,6 +524,7 @@ fn scope_can_use_local_git_context_without_unfinished_tasks() {
         empty_project_context(),
         None,
         vec![sample_local_git_context("feature/local-git")],
+        Vec::new(),
     )
     .unwrap()
     .unwrap();
@@ -487,6 +543,7 @@ fn prompt_includes_local_git_context_ids() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
 
@@ -500,6 +557,27 @@ fn prompt_includes_local_git_context_ids() {
 }
 
 #[test]
+fn prompt_includes_codex_thread_ids() {
+    let scope = SuggestionScope {
+        project_id: Some("p1".to_string()),
+        project_name: Some("Lilia".to_string()),
+        latest_updated_at: 2_000,
+        github_repo: None,
+        github_activities: Vec::new(),
+        local_git_contexts: Vec::new(),
+        codex_threads: vec![sample_codex_thread("thread-1", "补齐 Codex 建议")],
+        tasks: Vec::new(),
+    };
+
+    let prompt = build_generation_prompt(&scope);
+
+    assert!(prompt.contains("codexThreadIds"));
+    assert!(prompt.contains("Codex thread thread-1"));
+    assert!(prompt.contains("标题: 补齐 Codex 建议"));
+    assert!(prompt.contains("thread 预览: 用户要求继续补齐 Codex thread 建议来源。"));
+}
+
+#[test]
 fn materialize_allows_github_only_suggestions() {
     let scope = SuggestionScope {
         project_id: Some("p1".to_string()),
@@ -508,6 +586,7 @@ fn materialize_allows_github_only_suggestions() {
         github_repo: Some(sample_github_repo()),
         github_activities: vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
     let raw = vec![
@@ -515,6 +594,7 @@ fn materialize_allows_github_only_suggestions() {
             task_ids: Vec::new(),
             github_activity_ids: vec!["missing".to_string()],
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("无效活动".to_string()),
             reason: Some("引用不存在的 GitHub 活动".to_string()),
             prompt: Some("请处理不存在的活动。".to_string()),
@@ -523,6 +603,7 @@ fn materialize_allows_github_only_suggestions() {
             task_ids: Vec::new(),
             github_activity_ids: vec!["gh-pr-1".to_string()],
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("跟进 PR 活动".to_string()),
             reason: Some("近期 PR 打开后需要继续确认实现范围。".to_string()),
             prompt: Some(
@@ -549,6 +630,7 @@ fn materialize_allows_local_git_only_suggestions() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
     let raw = vec![
@@ -556,6 +638,7 @@ fn materialize_allows_local_git_only_suggestions() {
             task_ids: Vec::new(),
             github_activity_ids: Vec::new(),
             local_git_context_ids: vec!["missing".to_string()],
+            codex_thread_ids: Vec::new(),
             summary: Some("无效本地上下文".to_string()),
             reason: Some("引用不存在的本地 Git 上下文。".to_string()),
             prompt: Some("请处理不存在的上下文。".to_string()),
@@ -564,6 +647,7 @@ fn materialize_allows_local_git_only_suggestions() {
             task_ids: Vec::new(),
             github_activity_ids: Vec::new(),
             local_git_context_ids: vec!["local-git-current".to_string()],
+            codex_thread_ids: Vec::new(),
             summary: Some("跟进本地变更".to_string()),
             reason: Some("当前分支有未提交变更需要继续处理。".to_string()),
             prompt: Some(
@@ -583,6 +667,49 @@ fn materialize_allows_local_git_only_suggestions() {
 }
 
 #[test]
+fn materialize_allows_codex_thread_only_suggestions() {
+    let scope = SuggestionScope {
+        project_id: Some("p1".to_string()),
+        project_name: None,
+        latest_updated_at: 2_000,
+        github_repo: None,
+        github_activities: Vec::new(),
+        local_git_contexts: Vec::new(),
+        codex_threads: vec![sample_codex_thread("thread-1", "补齐 Codex 建议")],
+        tasks: Vec::new(),
+    };
+    let raw = vec![
+        RawSuggestion {
+            task_ids: Vec::new(),
+            github_activity_ids: Vec::new(),
+            local_git_context_ids: Vec::new(),
+            codex_thread_ids: vec!["missing".to_string()],
+            summary: Some("无效 thread".to_string()),
+            reason: Some("引用不存在的 Codex thread。".to_string()),
+            prompt: Some("请处理不存在的 thread。".to_string()),
+        },
+        RawSuggestion {
+            task_ids: Vec::new(),
+            github_activity_ids: Vec::new(),
+            local_git_context_ids: Vec::new(),
+            codex_thread_ids: vec!["thread-1".to_string()],
+            summary: Some("继续 Codex thread".to_string()),
+            reason: Some("最近 Codex thread 的预览显示建议来源还没补完。".to_string()),
+            prompt: Some("请基于“补齐 Codex 建议”这个 Codex thread 继续补齐建议来源。".to_string()),
+        },
+    ];
+
+    let items = materialize_items(raw, &scope);
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].source, SuggestionItemSource::CodexThread);
+    assert!(items[0].task_ids.is_empty());
+    assert!(items[0].github_activities.is_empty());
+    assert!(items[0].local_git_contexts.is_empty());
+    assert_eq!(items[0].codex_threads[0].id, "thread-1");
+}
+
+#[test]
 fn claude_native_suggestions_are_project_scoped_and_ttl_limited() {
     let now = 10_000;
     let item = SuggestionItem {
@@ -592,6 +719,7 @@ fn claude_native_suggestions_are_project_scoped_and_ttl_limited() {
         source: SuggestionItemSource::Claude,
         github_activities: Vec::new(),
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         summary: "继续检查建议展示".to_string(),
         reason: "Claude 根据上一轮对话预测的下一条提示。".to_string(),
         prompt: "请继续检查 Claude 原生建议展示。".to_string(),
@@ -650,6 +778,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         tasks: vec![TaskSample {
             id: "t1".to_string(),
             title: "任务 t1".to_string(),
@@ -668,6 +797,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
             task_ids: Vec::new(),
             github_activity_ids: Vec::new(),
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("泛化建议".to_string()),
             reason: Some("没有任务锚点".to_string()),
             prompt: Some("请随便优化一下。".to_string()),
@@ -676,6 +806,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
             task_ids: vec!["missing".to_string()],
             github_activity_ids: Vec::new(),
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("错误锚点".to_string()),
             reason: Some("引用不存在任务".to_string()),
             prompt: Some("请处理不存在任务。".to_string()),
@@ -684,6 +815,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
             task_ids: vec!["t1".to_string()],
             github_activity_ids: Vec::new(),
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("继续一".to_string()),
             reason: Some("锚定未完成信号一".to_string()),
             prompt: Some("请继续处理一。".to_string()),
@@ -692,6 +824,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
             task_ids: vec!["t1".to_string()],
             github_activity_ids: Vec::new(),
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("继续二".to_string()),
             reason: Some("锚定未完成信号二".to_string()),
             prompt: Some("请继续处理二。".to_string()),
@@ -700,6 +833,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
             task_ids: vec!["t1".to_string()],
             github_activity_ids: Vec::new(),
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("继续三".to_string()),
             reason: Some("锚定未完成信号三".to_string()),
             prompt: Some("请继续处理三。".to_string()),
@@ -708,6 +842,7 @@ fn materialize_supports_zero_to_three_items_and_requires_task_anchor() {
             task_ids: vec!["t1".to_string()],
             github_activity_ids: Vec::new(),
             local_git_context_ids: Vec::new(),
+            codex_thread_ids: Vec::new(),
             summary: Some("继续四".to_string()),
             reason: Some("超过数量上限".to_string()),
             prompt: Some("请继续处理四。".to_string()),
@@ -739,6 +874,7 @@ fn cache_key_changes_when_unfinished_signals_change() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         tasks: vec![TaskSample {
             id: "t1".to_string(),
             title: "任务 t1".to_string(),
@@ -773,6 +909,7 @@ fn cache_key_changes_when_github_activity_changes() {
         github_repo: Some(sample_github_repo()),
         github_activities: vec![sample_github_activity("gh-pr-1", "PR #1: 第一版")],
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
     let first = build_cache_key(&scope, &model);
@@ -798,10 +935,37 @@ fn cache_key_changes_when_local_git_context_changes() {
         github_repo: None,
         github_activities: Vec::new(),
         local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+        codex_threads: Vec::new(),
         tasks: Vec::new(),
     };
     let first = build_cache_key(&scope, &model);
     scope.local_git_contexts[0] = sample_local_git_context("feature/next");
+    let second = build_cache_key(&scope, &model);
+
+    assert_ne!(first, second);
+}
+
+#[test]
+fn cache_key_changes_when_codex_thread_changes() {
+    let model = ModelRequest {
+        source: SuggestionSource::AssistantAi,
+        backend: None,
+        model: "mini".to_string(),
+        base_url: "http://localhost".to_string(),
+        api_key: "key".to_string(),
+    };
+    let mut scope = SuggestionScope {
+        project_id: Some("p1".to_string()),
+        project_name: None,
+        latest_updated_at: 2_000,
+        github_repo: None,
+        github_activities: Vec::new(),
+        local_git_contexts: Vec::new(),
+        codex_threads: vec![sample_codex_thread("thread-1", "第一版")],
+        tasks: Vec::new(),
+    };
+    let first = build_cache_key(&scope, &model);
+    scope.codex_threads[0] = sample_codex_thread("thread-1", "第二版");
     let second = build_cache_key(&scope, &model);
 
     assert_ne!(first, second);
@@ -821,6 +985,7 @@ fn cache_hit_requires_same_key_and_fresh_entry() {
         source: SuggestionItemSource::Task,
         github_activities: Vec::new(),
         local_git_contexts: Vec::new(),
+        codex_threads: Vec::new(),
         summary: "继续测试".to_string(),
         reason: "缓存命中需要稳定判断".to_string(),
         prompt: "请验证建议缓存命中。".to_string(),

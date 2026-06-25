@@ -1,7 +1,7 @@
 {
   "name": "@lilia/contracts",
   "private": true,
-  "version": "0.1.0-alpha.1",
+  "version": "1.0.0-beta",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",

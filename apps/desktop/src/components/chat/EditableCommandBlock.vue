@@ -31,15 +31,17 @@ function updateCommand(event: Event) {
       ref="commandInput"
       :value="modelValue"
       class="editable-command__input"
+      data-agent-id="chat.editable-command.input"
       rows="3"
       aria-label="编辑命令"
       @input="updateCommand"
     />
     <button
       v-else
-      type="button"
-      class="editable-command__preview timeline-code-block"
-      aria-label="编辑完整命令"
+    type="button"
+    class="editable-command__preview timeline-code-block"
+    data-agent-id="chat.editable-command.preview"
+    aria-label="编辑完整命令"
       @click="emit('begin-edit')"
     >
       <code>{{ modelValue }}</code>

@@ -57,6 +57,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     resolveConversationRouteState(props.projectId, props.taskId),
   );
   const hasContext = computed(() => {
+    if (conversationRouteState.value.isLiveDraft) return true;
     if (!isPopup.value) return !!project.value || !!orphan.value;
     return props.projectId
       ? !!project.value && !!projectTask.value
@@ -172,8 +173,11 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
     const title = titleForMessage(content, outgoingAttachments);
     assertContextSnapshotCurrent(snapshotVersion, projectId, taskId);
-    if (projectId) await promoteDraftTask(taskId, title);
-    else await promoteDraftOrphan(taskId, title);
+    if (projectId) {
+      await ensureProjectLoaded(projectId);
+      assertContextSnapshotCurrent(snapshotVersion, projectId, taskId);
+      await promoteDraftTask(taskId, title);
+    } else await promoteDraftOrphan(taskId, title);
     assertContextSnapshotCurrent(snapshotVersion, projectId, taskId);
   }
 

@@ -95,6 +95,7 @@ import {
   PLUGINS_UPDATE_MCP_SERVER_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
   PROVIDER_GET_CONFIG_COMMAND,
   PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
@@ -3466,6 +3467,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         releaseNotes: [...codexAppServerStatus.releaseNotes],
       };
 
+    case PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND:
+      return undefined;
+
     case PROVIDER_GET_ACTIVE_BACKEND_COMMAND:
       return activeBackend;
 
@@ -3582,6 +3586,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           taskIds: ["t-002"],
           source: "task",
           githubActivities: [],
+          localGitContexts: [],
+          codexThreads: [],
           summary: "补齐建议缓存测试",
           reason: "最近对话已经接入了设置与空草稿入口，但缓存失效路径还需要验证。",
           prompt: "请检查新对话建议的缓存命中、强制刷新和最近 timeline 更新失效逻辑，并补齐最小测试。",
@@ -3601,6 +3607,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
               url: "https://github.com/sena-nana/LiliaCode/pull/1",
             },
           ],
+          localGitContexts: [],
+          codexThreads: [],
           summary: "优化空状态体验",
           reason: "空草稿页现在可以显示建议，下一步可以确认加载失败和无建议时的轻量反馈。",
           prompt: "请优化空白新对话页的建议加载失败和无建议状态，保持不阻塞输入并符合现有样式。",

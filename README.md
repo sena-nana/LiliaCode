@@ -60,7 +60,7 @@ LiliaCode still prioritizes its own recoverable task structure over upstream CLI
 
 ## Feature Status
 
-The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-13.
+The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-25.
 
 ### Shared Agent Capabilities
 
@@ -72,9 +72,9 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Guidance queue: create, queue, and serially dispatch user guidance todos, with queue state recovered during active runs.
 - [x] Basic MCP integration: Claude stdio MCP servers can be managed by Lilia and injected into runtime; Codex stdio MCP servers can be read from and managed in `~/.codex/config.toml`.
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
-- [x] Unified Lilia protocol: review, fix suggestion, batch apply, context compact, Goal, memory, config diagnostics, and background-terminal cleanup stay in the user-facing workflow layer; session fork and provider session controls use runtime commands and dispatch internally by backend.
+- [x] Unified Lilia protocol: built-in task workflows, review, fix suggestion, batch apply, context compact, Goal, memory, config diagnostics, and background-terminal cleanup stay in the user-facing workflow layer; session fork and provider session controls use runtime commands and dispatch internally by backend.
 - [x] File context: mention files, directories, images, and other context with `@`, with pasted or dropped attachments also supported.
-- [ ] Intelligent model selection: Lilia does not yet automatically choose model level or reasoning intensity based on request type.
+- [x] Intelligent model selection: in the current backend flow, model and thinking intensity are auto-selected by task context and can still be manually overridden before send.
 - [x] Slash commands: open the composer `/` panel, run built-in commands and project commands from `.lilia/commands`, and write command execution results back to the task timeline; full backend-native command proxying is not yet supported.
 
 ### Claude Code Integration
@@ -85,11 +85,11 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Claude history: search local Claude JSONL sessions, preview messages / timeline, import them as Lilia tasks, and continue from the attached SDK session.
 - [x] Claude Skills: manage user-level and project-level Skills, and pass enabled skill names into the SDK.
 - [x] Claude tool display: normalize common tools including Bash, Read / Write / Edit / MultiEdit, Glob / Grep, NotebookEdit, WebSearch / WebFetch, TodoWrite, Task / Agent, and ExitPlanMode.
-- [x] Claude Lilia protocol: review / fix suggestion / batch apply run through structured Claude prompts, session fork uses runtime command handling backed by the SDK, and Goal plus unsupported native-only actions write Lilia timeline diagnostics.
-- [ ] Claude MCP management (partial): the UI can create, edit, delete, and enable stdio MCP servers; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are not yet integrated.
-- [ ] Claude Plugins (partial): Lilia can discover and enable user-level local plugins, then pass enabled plugin paths to the SDK; installation, updates, project-level scope, and marketplace scope are not yet integrated.
-- [ ] Claude Hooks (partial): the runtime registers a small SDK hook set and can display some hook lifecycle events; hooks configuration management and execution result panels are not yet available.
-- [ ] Claude Subagents (partial): Task / Agent calls, task progress, and notifications can be displayed; subagent definitions, list management, and proactive scheduling UI are not yet available.
+- [x] Claude Lilia protocol: built-in task workflows and review / fix suggestion / batch apply run through structured Claude prompts, session fork uses runtime command handling backed by the SDK, and Goal plus unsupported native-only actions write Lilia timeline diagnostics.
+- [ ] Claude MCP management (partial): v1.0.0 supports stdio MCP create/edit/delete/enable UI management; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are complex and deferred to v2.0.
+- [ ] Claude Plugins (partial): user-level local plugin discovery and enablement are available with SDK path injection; installation, updates, project-level scope, and marketplace scope are complex and deferred to v2.0.
+- [ ] Claude Hooks (partial): a small SDK hook set is displayed; hooks configuration management and execution-result panels are complex and deferred to v2.0.
+- [ ] Claude Subagents (partial): Task / Agent calls, task progress, and notifications are shown; subagent definitions, list management, and proactive scheduling UI are deferred to v2.0.
 
 ### Codex Integration
 
@@ -101,7 +101,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Codex MCP management: the UI can view, create, edit, delete, and enable user-level stdio MCP servers in `~/.codex/config.toml`; HTTP / OAuth / unknown transports remain read-only.
 - [x] Codex profiles: support global and project-level profiles, reasoning effort, runtime workspace roots, controlled permissions, and sticky `thread/settings/update`.
 - [x] Codex history: search, preview, import, and continue existing Codex app-server threads from the left sidebar import entry.
-- [x] Codex Lilia adapter: the workflow layer handles review, fix suggestion, batch apply, compact, Goal, memory mode / reset, config diagnostics, and background-terminal cleanup; runtime commands handle session fork and session controls through Codex app-server methods.
+- [x] Codex Lilia adapter: the workflow layer handles built-in task workflows, review, fix suggestion, batch apply, compact, Goal, memory mode / reset, config diagnostics, and background-terminal cleanup; runtime commands handle session fork and session controls through Codex app-server methods.
 - [x] Built-in browser interaction: Codex can open and navigate an IAB window, collect page title / URL / screenshot metadata, and send the result back to the running turn or as a message attachment; screenshot capture is currently Windows-first.
 
 ### LiliaCode-Specific Features
@@ -109,12 +109,20 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Project management: local projects, GitHub clone projects, dashboards, task status distribution, recent activity, session / task statistics, and known usage cost are available.
 - [x] Task-based conversations: conversations are persisted as tasks, with draft promotion, project conversations, orphan conversations, archiving, pinning, and ordering.
 - [x] Task tree: parent-child relationships, dependency updates, tree drag-and-drop, and blocker status hints are available; automatic scheduling from blockers and dependencies is still not complete.
-- [ ] Plugin system (partial): Claude Skills / Plugins / MCP and Codex MCP management can feed runtime extensions; a generic plugin system with selectable behavior plugins is not yet complete.
+- [x] Built-in Lilia workflow types: general task, frontend, refactor, test / verification, docs / prompt, Git / release, and architecture / memory entries route through `lilia_task_workflow.kind` instead of the Plugin / Skill page.
+- [ ] Plugin system (partial): runtime management and injection for Claude Skills / Plugins / MCP and Codex MCP are in place for v1.0; full governance, behavior-policy plugins, and distribution-level plugin surface are deferred to v2/v3.
 - [x] Memory: user-level and project-level memory can be saved manually and injected as the Layer 1 baseline at session start; external model retrieval and opportunity-window guidance are not implemented.
 - [x] Roadmap and milestones: persisted project milestones and task milestone links are available; explanatory metrics and advanced summary views still need polish.
-- [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
-- [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
+- [ ] Automatic orchestration (target: `v2.0`): Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
+- [ ] Helper agents (target: `v2.0`): lower-cost agents do not yet run inside a session to supervise or assist the main agent.
 - [x] Built-in Lilia protocol: keep a single built-in runtime path.
+
+### Android Remote Beta
+
+- [x] Experimental Android companion: PC HTTP bridge, QR pairing, trusted devices, active PC, task inbox, task detail, timeline polling, composer, interrupt / retry, process commands, session fork, and pending interaction responses are wired through the PC runner and task timeline.
+- [x] Remote-control contract baseline: `packages/contracts` owns typed remote-control request / response / event shapes; `remote-control-command-contract.json` remains the Tauri IPC command-name manifest.
+- [ ] v1 beta limits: offline queues, PC-PC routing, multi-device collaboration, Android-local agent execution, a full Android settings surface, push-style event streaming, and full release regression are not promised.
+- [ ] Android release readiness: attach companion APKs only as experimental beta assets with a fresh `yarn android:verify` record.
 
 ## Project Structure
 
@@ -123,6 +131,7 @@ The list below tracks the current real integration surface. Only capabilities th
 ```text
 Lilia/
 ├── apps/
+│   ├── android/                # Experimental Android remote companion
 │   └── desktop/                # Main app: Vue 3 + Tauri 2
 │       ├── src/
 │       │   ├── layouts/        # AppShell / SecondaryPanel / TitleBar
@@ -179,7 +188,9 @@ Windows first-release packaging is driven by the release workflow. Before taggin
 yarn release:check --tag vX.Y.Z
 ```
 
-Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, and uploads a draft GitHub Release. Keep the release as a draft until the Windows installer has been downloaded and manually verified for install, launch, basic window operation, and uninstall. Current release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
+Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, uploads a draft GitHub Release, and runs `yarn release:smoke:windows --tag <tag>` against the draft installer. Keep the release as a draft until the Windows installer smoke has verified install, launch, `liliacode <test-project-path>`, and uninstall-time CLI cleanup, and the Release verification record has been filled in. Current stable release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
+
+Android companion APKs are experimental beta assets. Only attach them to a release when `yarn android:verify` has passed for that build, and label the artifact as Android remote beta rather than as a stable full remote-control product.
 
 The Tauri icon source is [apps/desktop/src-tauri/icons/icon.png](apps/desktop/src-tauri/icons/icon.png). To regenerate the desktop PNG / ICO set through the Tauri CLI, run `yarn icons:generate`. `yarn icons:tauri` is kept as the same generation entrypoint.
 

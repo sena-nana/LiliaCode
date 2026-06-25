@@ -4,6 +4,8 @@ use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
+use crate::process_command::hide_console_window;
+
 use super::codex_probe::{
     build_codex_app_server_probe_status_cached, managed_codex_install_dir, parse_codex_cli_version,
 };
@@ -164,6 +166,7 @@ pub(crate) fn codex_install_command_spec(install_dir: &Path) -> CodexInstallComm
 
 fn run_install_command(spec: &CodexInstallCommandSpec) -> Result<(), String> {
     let mut command = Command::new(&spec.program);
+    hide_console_window(&mut command);
     command
         .args(&spec.args)
         .stdout(Stdio::piped())

@@ -1,6 +1,7 @@
 use tauri::{utils::config::Color, Manager, Runtime, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
+mod agent_debug;
 pub mod agent_events;
 mod agent_extensions;
 mod agent_interaction_contract;
@@ -31,6 +32,7 @@ mod plugins;
 #[cfg(test)]
 mod plugins_command_contract;
 mod popup_windows;
+mod process_command;
 mod project_architecture_contract;
 #[cfg(test)]
 mod project_contract;
@@ -137,8 +139,36 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+#[cfg(debug_assertions)]
+fn apply_agent_debug_dev_url_override<R: Runtime>(context: &mut tauri::Context<R>) {
+    if !agent_debug::agent_debug_enabled() {
+        return;
+    }
+    let Ok(dev_url) = std::env::var("LILIA_AGENT_DEBUG_DEV_URL") else {
+        return;
+    };
+    let dev_url = dev_url.trim();
+    if dev_url.is_empty() {
+        return;
+    }
+    match tauri::Url::parse(dev_url) {
+        Ok(url) => {
+            context.config_mut().build.dev_url = Some(url);
+        }
+        Err(err) => {
+            eprintln!("[agent-debug] ignored invalid LILIA_AGENT_DEBUG_DEV_URL={dev_url:?}: {err}");
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn apply_agent_debug_dev_url_override<R: Runtime>(_context: &mut tauri::Context<R>) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    apply_agent_debug_dev_url_override(&mut context);
+
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
@@ -245,6 +275,7 @@ pub fn run() {
             provider::provider_set_active_backend,
             provider::provider_codex_app_server_check_update,
             provider::provider_codex_app_server_install_update,
+            provider::provider_codex_account_start_login,
             provider::assistant_ai_get_config,
             provider::assistant_ai_set_config,
             provider::assistant_ai_test_connection,
@@ -364,7 +395,12 @@ pub fn run() {
             automation::commands::automation_resume_run,
             automation::commands::automation_list_runs,
             automation::commands::automation_get_run,
+            agent_debug::agent_debug_status,
+            agent_debug::agent_debug_logs,
+            agent_debug::agent_debug_runtime_snapshot,
+            agent_debug::agent_debug_record_action,
+            agent_debug::agent_debug_reset_state,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }

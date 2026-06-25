@@ -35,6 +35,7 @@ function onSelect(event: Event) {
   <div class="composer-project-picker" aria-label="选择对话项目">
     <select
       class="composer-project-picker__select"
+      data-agent-id="chat.composer.project-picker.select"
       aria-label="选择项目"
       @change="onSelect"
     >
@@ -50,6 +51,7 @@ function onSelect(event: Event) {
     <button
       type="button"
       class="composer-project-picker__new"
+      data-agent-id="chat.composer.project-picker.new"
       title="打开新项目"
       aria-label="打开新项目"
       @click="openAddMenu"

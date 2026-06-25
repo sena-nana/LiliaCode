@@ -117,10 +117,11 @@ onBeforeUnmount(() => {
     <div v-else-if="summaries.length" class="projects-overview__dashboard">
       <RouterLink
         v-for="project in summaries"
-        :key="project.id"
-        :to="`/projects/${project.id}`"
-        class="projects-overview__card"
-      >
+      :key="project.id"
+      :to="`/projects/${project.id}`"
+      class="projects-overview__card"
+      :data-agent-id="`projects.overview.open.${project.id}`"
+    >
         <span class="projects-overview__card-head">
           <span class="projects-overview__main">
             <span class="projects-overview__name">

@@ -29,6 +29,7 @@ import {
   ASK_USER_MULTI_SELECT_MODE,
   ASK_USER_SINGLE_SELECT_MODE,
   chatAttachmentMetaLabel,
+  createLiliaTaskWorkflow,
   DEFAULT_ASK_USER_MODE,
   isLargeChatAttachmentDirectory,
   type AskUserResult,
@@ -42,6 +43,7 @@ import {
   type ChatSlashCommandWorkflow,
   type ChatWorkflow,
   type LiliaReviewTarget,
+  type LiliaTaskWorkflowKind,
   type PermissionMode,
 } from "@lilia/contracts";
 import {
@@ -578,6 +580,7 @@ async function ensureSlashCommandsLoaded() {
             kind === "review"
               ? startLiliaReview(target)
               : startLiliaFixSuggestion(target),
+          startTaskWorkflow: startLiliaTaskWorkflow,
         }));
         if (!controller) {
           scope.stop();
@@ -821,6 +824,7 @@ const hasPendingComposerUi = computed(() => hasPending.value && pendingInteracti
 const toolIconForPanel = computed<Component>(() => toolIcon.value ?? FileText);
 
 function workflowSuggestionLabel(workflow: ChatWorkflow): string {
+  if (workflow.type === "lilia_task_workflow") return "任务工作流";
   if (workflow.type === "lilia_review") return "代码审查";
   if (workflow.type === "lilia_fix_suggestion") return "修复建议";
   if (workflow.type === "lilia_batch_apply") return "批量应用";
@@ -1169,6 +1173,20 @@ function startLiliaFixSuggestion(target: LiliaReviewTarget) {
   clearComposerContextState();
 }
 
+function startLiliaTaskWorkflow(kind: LiliaTaskWorkflowKind) {
+  if (hasPending.value) return;
+  const value = richInput.serializedText.value.trim();
+  emit(
+    "send",
+    value,
+    attachmentsForView.value,
+    richInput.conversationReferences.value,
+    createLiliaTaskWorkflow(kind),
+  );
+  richInput.resetInput();
+  clearComposerContextState();
+}
+
 function getDraftSnapshot() {
   return {
     content: hasPending.value ? inputValue.value : richInput.plainText.value,
@@ -1446,12 +1464,14 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
 <template>
   <div
     class="chat-composer"
+    data-agent-id="chat.composer"
     @pointerenter="requestComposerChrome"
     @focusin="requestComposerChrome"
   >
     <Transition name="chat-composer-pending-panel">
       <ComposerPendingPanel
         v-if="hasPendingPanel && pendingInteractionReady"
+        data-agent-id="chat.composer.pending-panel"
         :key="pendingKey"
         :active-ask="activeAsk"
         :ask-question="askQuestion"
@@ -1499,6 +1519,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
     <Transition name="chat-composer-stack">
       <ComposerConversationReferencePanel
         v-if="conversationSearch.panelOpen.value"
+        data-agent-id="chat.composer.conversation-reference-panel"
         :results="conversationSearch.results.value"
         :active-index="conversationSearch.activeIndex.value"
         :loading="conversationSearch.loading.value"
@@ -1511,6 +1532,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
     <Transition name="chat-composer-stack">
       <ComposerContextPanel
         v-if="contextSearch.panelOpen.value"
+        data-agent-id="chat.composer.context-panel"
         :results="contextSearch.results.value"
         :active-index="contextSearch.activeIndex.value"
         :loading="contextSearch.loading.value"
@@ -1529,6 +1551,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
     <Transition name="chat-composer-stack">
       <ComposerSlashCommandPanel
         v-if="slashCommands.panelOpen.value"
+        data-agent-id="chat.composer.slash-command-panel"
         :results="slashCommands.results.value"
         :target-items="slashCommands.targetItems.value"
         :active-workflow-kind="slashCommands.activeWorkflowKind.value"
@@ -1543,12 +1566,14 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
 
     <div
       class="chat-composer__entry-row"
+      data-agent-id="chat.composer.entry"
       :class="{ 'chat-composer__entry-row--pending': hasPending }"
     >
       <textarea
         v-if="hasPendingComposerUi && (!askUsesInputActions || askOtherSelected)"
         ref="textareaMeasure"
         class="chat-composer__input chat-composer__input-measure"
+        data-agent-id="chat.composer.input-measure"
         rows="1"
         tabindex="-1"
         aria-hidden="true"
@@ -1558,6 +1583,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         ref="textarea"
         v-model="inputValue"
         class="chat-composer__input"
+        data-agent-id="chat.composer.pending-input"
         rows="1"
         :placeholder="inputPlaceholder"
         @input="onInputEvent"
@@ -1568,6 +1594,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
       />
       <ComposerRichInput
         v-else-if="!hasPending"
+        data-agent-id="chat.composer.input"
         :placeholder="inputPlaceholder"
         :is-empty="richInput.isEmpty.value"
         @editor="richInput.setEditor"
@@ -1626,6 +1653,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             v-if="pendingEntryActionsMode === 'ask-input' && askQuestion?.skippable !== false && askTotal > 1"
             type="button"
             class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
+            data-agent-id="chat.composer.pending.skip"
             :disabled="actionsBlocked"
             @click="skipAsk"
           >
@@ -1637,6 +1665,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
               v-if="canGoPrev"
               type="button"
               class="ui-button ui-button--ghost composer-inline__btn"
+              data-agent-id="chat.composer.pending.back"
               :disabled="actionsBlocked"
               @click="backAsk"
             >
@@ -1645,6 +1674,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             <button
               type="button"
               class="ui-button ui-button--primary composer-inline__btn"
+              data-agent-id="chat.composer.pending.submit"
               :disabled="actionsBlocked || !canAskSubmit"
               @click="submitAsk"
             >
@@ -1656,6 +1686,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             <button
               type="button"
               class="ui-button ui-button--ghost composer-inline__btn"
+              data-agent-id="chat.composer.plan.modify"
               :disabled="actionsBlocked || !hasPendingInputText"
               @click="modifyPlanApproval"
             >
@@ -1664,6 +1695,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             <button
               type="button"
               class="ui-button ui-button--primary composer-inline__btn"
+              data-agent-id="chat.composer.plan.accept"
               :disabled="actionsBlocked"
               @click="submitAsk"
             >
@@ -1675,6 +1707,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             <button
               type="button"
               class="ui-button ui-button--ghost composer-inline__btn"
+              data-agent-id="chat.composer.tool.deny"
               :disabled="actionsBlocked || toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
               @click="isEditingToolCommand ? cancelCommandEdit() : decideToolConsent('deny')"
             >
@@ -1691,6 +1724,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             <button
               type="button"
               class="composer-inline__btn"
+              data-agent-id="chat.composer.tool.allow"
               :class="toolDanger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
               :disabled="actionsBlocked || toolSubmitting !== null || toolCommandIsEmpty"
               @click="decideToolConsent('allow')"
@@ -1703,6 +1737,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             v-if="pendingEntryActionsMode === 'ask-confirm' || pendingEntryActionsMode === 'none'"
             type="button"
             class="chat-composer__send"
+            data-agent-id="chat.composer.pending.send"
             :class="{ 'chat-composer__send--interrupt': canInterrupt }"
             :disabled="actionsBlocked || !canSubmitEntry"
             :title="sendTitle"
@@ -1727,6 +1762,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         <button
           type="button"
           class="ui-button ui-button--ghost composer-inline__btn"
+          data-agent-id="chat.composer.route-suggestion.apply"
           :disabled="actionsBlocked || promptRouteWorkflowApplied"
           @click="applyPromptRouteWorkflow"
         >
@@ -1735,6 +1771,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         <button
           type="button"
           class="ui-button ui-button--ghost composer-inline__btn"
+          data-agent-id="chat.composer.route-suggestion.dismiss"
           :disabled="actionsBlocked"
           @click="dismissPromptRouteWorkflow"
         >
@@ -1747,6 +1784,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
       <component
         :is="composerToolbarComponent"
         v-if="!hasPending && composerToolbarComponent"
+        data-agent-id="chat.composer.toolbar"
         :state="state"
         :worktree-value="worktreeValue ?? '__current__'"
         :worktree-options="worktreeOptions ?? []"
@@ -1784,6 +1822,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         v-else-if="!hasPending"
         type="button"
         class="chat-composer__send chat-composer__send--toolbar-fallback"
+        data-agent-id="chat.composer.send"
         :class="{ 'chat-composer__send--interrupt': canInterrupt }"
         :disabled="actionsBlocked || !canSubmitEntry"
         :title="sendTitle"

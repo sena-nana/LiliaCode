@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   GITHUB_POLL_DEVICE_FLOW_COMMAND,
   GITHUB_START_DEVICE_FLOW_COMMAND,
   POPUP_SET_WINDOW_SETTINGS_COMMAND,
@@ -12,6 +13,7 @@ import {
   QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
   QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
   QUOTA_USAGE_GET_STATS_COMMAND,
+  REMOTE_CONTROL_STATUS_COMMAND,
   SYSTEM_OPEN_URL_COMMAND,
 } from "@lilia/contracts";
 import Settings from "../src/pages/Settings.vue";
@@ -150,6 +152,17 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === QUOTA_USAGE_GET_STATS_COMMAND)).toBe(true);
     });
+  });
+
+  it("连接页初始化不会挂载 Android 远控或刷新远控状态", async () => {
+    mockInvoke.mockClear();
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByRole("heading", { level: 2, name: "连接" })).toBeInTheDocument();
+    });
+    expect(view.queryByRole("heading", { level: 2, name: "Android 远控" })).not.toBeInTheDocument();
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === REMOTE_CONTROL_STATUS_COMMAND)).toBe(false);
   });
 
   it("外观页可以切换侧边栏样式并写入本地偏好", async () => {
@@ -559,7 +572,11 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("codex-cli 0.136.0 / latest 0.141.0")).toBeInTheDocument();
+      expect(view.getByText("当前版本：codex-cli 0.136.0 / latest 0.141.0")).toBeInTheDocument();
+      expect(view.queryByText("运行时状态")).not.toBeInTheDocument();
+      expect(view.queryByText(/路径：/)).not.toBeInTheDocument();
+      expect(view.queryByText("将安装到 Lilia 管理目录")).not.toBeInTheDocument();
+      expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
       expect(view.getByRole("button", { name: /更新到 0.141.0/ })).toBeEnabled();
     });
 
@@ -568,6 +585,51 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(lastInvokeInput("provider_codex_app_server_install_update")).toEqual({});
       expect(view.queryByRole("button", { name: /更新到 0.141.0/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAccountQuotaStatus({
+      available: false,
+      connectionMode: "codex-account",
+      limitId: null,
+      limitName: null,
+      planType: null,
+      rateLimitReachedType: null,
+      fiveHour: null,
+      weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
+      rateLimitResetCredits: null,
+      accountUsage: null,
+      usageError: null,
+      fetchedAt: Date.now(),
+      error: "Codex 未登录",
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.queryByText("运行时状态")).not.toBeInTheDocument();
+      expect(view.getByText("登录状态：未登录")).toBeInTheDocument();
+      expect(view.queryByText(/路径：/)).not.toBeInTheDocument();
+      expect(view.queryByText("将安装到 Lilia 管理目录")).not.toBeInTheDocument();
+      expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
+      expect(view.getByRole("button", { name: "登录" })).toBeEnabled();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "登录" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
+        {},
+        undefined,
+      );
     });
   });
 
@@ -674,8 +736,11 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("Agent 交互")).toBeInTheDocument();
     expect(view.queryByText("权限行为")).toBeInTheDocument();
     expect(view.queryByText("主 Agent 策略")).toBeInTheDocument();
+    expect(view.queryByText("主 Agent 工作流提示预览")).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
+    expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();
+    expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "询问" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "只读" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "完全访问" })).toBeInTheDocument();
@@ -721,6 +786,43 @@ describe("Settings provider switch", () => {
         }),
       });
     });
+  });
+
+  it("Agent 设置页可以编辑并保存自定义主 Agent 提示词", async () => {
+    const view = await renderSettings("/settings?tab=agent");
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
+      ).toBe(true);
+    });
+
+    await fireEvent.click(view.getByRole("radio", { name: "自定义" }));
+
+    const textarea = await view.findByLabelText("自定义主 Agent 提示词");
+    expect((textarea as HTMLTextAreaElement).value).toContain("主 Agent 策略：保守");
+    expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          mainAgentPromptMode: "custom",
+          mainAgentCustomPrompt: expect.stringContaining("主 Agent 策略：保守"),
+        }),
+      });
+    });
+
+    await fireEvent.update(textarea, "按用户的项目约束优先实现。\n必要时重构。");
+    await fireEvent.click(view.getByRole("button", { name: "应用自定义提示词" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          mainAgentPromptMode: "custom",
+          mainAgentCustomPrompt: "按用户的项目约束优先实现。\n必要时重构。",
+        }),
+      });
+    });
+    expect(view.getByText(/按用户的项目约束优先实现/)).toBeInTheDocument();
   });
 
   it("Agent 设置页会在首屏后再加载自定义 Agent 目录", async () => {
