@@ -31,7 +31,6 @@ import {
   PLUGINS_OPEN_MCP_CONFIG_COMMAND,
   PLUGINS_OVERVIEW_COMMAND,
   PLUGINS_READ_HOOK_SOURCE_COMMAND,
-  PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
   PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
   PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
   PLUGINS_SET_SKILL_ENABLED_COMMAND,
@@ -177,16 +176,6 @@ export function createHookSource(
 
 export function deleteHookSource(source: HookSourceSummary): Promise<void> {
   return invoke<void>(PLUGINS_DELETE_HOOK_SOURCE_COMMAND, { source });
-}
-
-export function setHookSourceEnabled(
-  source: HookSourceSummary,
-  enabled: boolean,
-): Promise<HookSourceSummary> {
-  return invoke<HookSourceSummary>(PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND, {
-    source,
-    enabled,
-  });
 }
 
 export function openHookConfig(source: HookSourceSummary): Promise<void> {

@@ -65,7 +65,7 @@ onBeforeUnmount(() => {
     <div class="automations-shell__body">
       <p class="automations-shell__eyebrow">Automations</p>
       <h1>正在准备自动化工作区</h1>
-      <p>先让路由完成切换，再异步挂载画布和运行历史。</p>
+      <p>正在加载画布和运行历史。</p>
     </div>
   </section>
 </template>

@@ -1,16 +1,12 @@
 import { invoke } from "../tauri/runtime";
 import {
   MEMORY_DELETE_COMMAND,
-  MEMORY_GET_INJECTION_STATE_COMMAND,
   MEMORY_GET_SETTINGS_COMMAND,
   MEMORY_LIST_COMMAND,
-  MEMORY_RESET_TASK_COOLDOWN_COMMAND,
   MEMORY_SET_ENABLED_COMMAND,
   MEMORY_SET_SETTINGS_COMMAND,
-  MEMORY_SET_TASK_ENABLED_COMMAND,
   MEMORY_UPSERT_COMMAND,
   type Memory,
-  type MemoryInjectionState,
   type MemorySettings,
   type MemoryUpsertInput,
 } from "@lilia/contracts";
@@ -37,19 +33,4 @@ export function getMemorySettings(): Promise<MemorySettings> {
 
 export function setMemorySettings(settings: MemorySettings): Promise<void> {
   return invoke<void>(MEMORY_SET_SETTINGS_COMMAND, { settings });
-}
-
-export function getMemoryInjectionState(taskId: string): Promise<MemoryInjectionState> {
-  return invoke<MemoryInjectionState>(MEMORY_GET_INJECTION_STATE_COMMAND, { taskId });
-}
-
-export function setTaskMemoryEnabled(
-  taskId: string,
-  enabled: boolean,
-): Promise<MemoryInjectionState> {
-  return invoke<MemoryInjectionState>(MEMORY_SET_TASK_ENABLED_COMMAND, { taskId, enabled });
-}
-
-export function resetTaskMemoryCooldown(taskId: string): Promise<MemoryInjectionState> {
-  return invoke<MemoryInjectionState>(MEMORY_RESET_TASK_COOLDOWN_COMMAND, { taskId });
 }
