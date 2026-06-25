@@ -4,6 +4,7 @@ import {
   FolderCog,
   Gauge,
   Info,
+  MonitorSmartphone,
   Network,
   PanelTop,
   Palette,
@@ -15,6 +16,7 @@ export type SettingsTabKey =
   | "appearance"
   | "window"
   | "providers"
+  | "remote-control"
   | "assistant"
   | "agent"
   | "quota"
@@ -44,6 +46,11 @@ export const SETTINGS_TABS: SettingsTab[] = [
     key: "providers",
     label: "连接",
     icon: Network,
+  },
+  {
+    key: "remote-control",
+    label: "Android 远控",
+    icon: MonitorSmartphone,
   },
   {
     key: "assistant",
