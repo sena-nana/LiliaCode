@@ -102,13 +102,24 @@ assert.match(deviceHelp, /yarn android:smoke --start-avd --avd=LiliaRemoteApi36/
 assert.match(deviceHelp, /x86_64 AVDs require hardware acceleration/);
 
 assert.deepEqual(
-  androidSmokeOptions(["--skip-install", "--require-pairing", "--start-avd", "--avd=LiliaRemoteApi36", "--windowed-avd"], {}),
+  androidSmokeOptions(
+    [
+      "--skip-install",
+      "--require-pairing",
+      "--start-avd",
+      "--avd=LiliaRemoteApi36",
+      "--windowed-avd",
+      "--mock-remote-regression",
+    ],
+    {},
+  ),
   {
     skipInstall: true,
     requirePairing: true,
     startAvd: true,
     avdName: "LiliaRemoteApi36",
     avdWindowed: true,
+    mockRemoteRegression: true,
   },
 );
 assert.deepEqual(
@@ -117,6 +128,7 @@ assert.deepEqual(
     ANDROID_SMOKE_REQUIRE_PAIRING: "1",
     ANDROID_AVD: "EnvAvd",
     ANDROID_SMOKE_AVD_WINDOWED: "1",
+    ANDROID_SMOKE_MOCK_REMOTE_REGRESSION: "1",
   }),
   {
     skipInstall: false,
@@ -124,6 +136,7 @@ assert.deepEqual(
     startAvd: true,
     avdName: "EnvAvd",
     avdWindowed: true,
+    mockRemoteRegression: true,
   },
 );
 assert.throws(

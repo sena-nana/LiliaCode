@@ -86,6 +86,7 @@ export function androidSmokeOptions(args = [], env = {}) {
     startAvd: env.ANDROID_SMOKE_START_AVD === "1",
     avdName: env.ANDROID_AVD?.trim() || "",
     avdWindowed: env.ANDROID_SMOKE_AVD_WINDOWED === "1",
+    mockRemoteRegression: env.ANDROID_SMOKE_MOCK_REMOTE_REGRESSION === "1",
   };
 
   for (const arg of args) {
@@ -103,6 +104,10 @@ export function androidSmokeOptions(args = [], env = {}) {
     }
     if (arg === "--windowed-avd") {
       options.avdWindowed = true;
+      continue;
+    }
+    if (arg === "--mock-remote-regression") {
+      options.mockRemoteRegression = true;
       continue;
     }
     if (arg.startsWith("--avd=")) {
