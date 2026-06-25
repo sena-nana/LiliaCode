@@ -43,7 +43,7 @@ labels: release,area: docs
 #### 当前准入落点
 
 - `yarn release:check --tag <tag>` 自动核对版本号、Tauri Windows 打包配置、NSIS CLI 安装 hook、release notes 已知限制、安装包命名预期和 Windows 安装验证记录入口。
-- 安装、启动、`liliacode <测试项目路径>` 和卸载验证仍必须在 Windows draft Release 安装包上人工执行，并写回 Release 正文的 Windows 安装验证记录。
+- `yarn release:smoke:windows --tag <tag>` 可对 Windows draft Release 安装包重复执行安装、启动、`liliacode <测试项目路径>` 和卸载后的 CLI 清理 smoke，结果写入 Release 正文的 Windows 安装验证记录。
 <!-- /issue -->
 
 <!-- issue

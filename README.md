@@ -180,7 +180,7 @@ Windows first-release packaging is driven by the release workflow. Before taggin
 yarn release:check --tag vX.Y.Z
 ```
 
-Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, and uploads a draft GitHub Release. Keep the release as a draft until the Windows installer has been downloaded and manually verified for install, launch, basic window operation, and uninstall. Current release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
+Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, uploads a draft GitHub Release, and runs `yarn release:smoke:windows --tag <tag>` against the draft installer. Keep the release as a draft until the Windows installer smoke has verified install, launch, `liliacode <test-project-path>`, and uninstall-time CLI cleanup, and the Release verification record has been filled in. Current release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
 
 The Tauri icon source is [apps/desktop/src-tauri/icons/icon.png](apps/desktop/src-tauri/icons/icon.png). To regenerate the desktop PNG / ICO set through the Tauri CLI, run `yarn icons:generate`. `yarn icons:tauri` is kept as the same generation entrypoint.
 

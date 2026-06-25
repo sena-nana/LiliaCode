@@ -115,9 +115,11 @@ function verifyReleaseTemplate(expectedVersion, productName) {
     [`安装包文件名：${expectedInstaller}`, `include a validation record entry for ${expectedInstaller}`],
     ["## Windows 安装验证", "include the Windows install verification checklist"],
     ["从 draft Release 下载 Windows 安装包", "include the draft Release download check"],
-    ["确认安装后可以启动 LiliaCode，并能打开主窗口", "include the launch verification check"],
+    ["yarn release:smoke:windows --tag <tag>", "include the repeatable draft Release smoke command"],
+    ["yarn release:smoke:windows --installer <安装包路径>", "include the repeatable local installer smoke command"],
+    ["启动 LiliaCode", "include the launch verification check"],
     ["liliacode <测试项目路径>", "include the liliacode CLI verification check"],
-    ["确认卸载流程可完成", "include the uninstall verification check"],
+    ["卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用", "include the uninstall CLI cleanup check"],
     ["## Windows 安装验证记录", "include a Windows verification record section"],
     ["验证人：", "include a verifier entry"],
     ["Windows 环境：", "include a Windows environment entry"],
@@ -140,18 +142,21 @@ function verifyReleaseDocs() {
 
   requireSnippets(developmentGuidePath, developmentGuide, [
     ["`release:check` 会自动核对版本号", "describe the automated release:check gate"],
-    ["Windows 安装验证记录入口", "describe the Windows verification record gate"],
-    ["仍必须人工执行", "list the release steps that remain manual"],
+    ["`release:smoke:windows` 可重复执行", "describe the repeatable Windows installer smoke gate"],
+    ["安装、启动、`liliacode <测试项目路径>` 和卸载后的 CLI 清理", "describe the automated Windows smoke coverage"],
+    ["Windows 安装验证记录", "describe the Windows verification record gate"],
   ]);
   requireSnippets(phaseRoadmapPath, phaseRoadmap, [
     ["`yarn release:check --tag <tag>`", "record the release gate script entrypoint"],
     [
-      "安装、启动、`liliacode <测试项目路径>` 和卸载验证仍必须在 Windows draft Release 安装包上人工执行",
-      "record that installer verification remains manual",
+      "`yarn release:smoke:windows --tag <tag>` 可对 Windows draft Release 安装包重复执行安装、启动、`liliacode <测试项目路径>` 和卸载后的 CLI 清理 smoke",
+      "record the repeatable Windows installer smoke entrypoint",
     ],
   ]);
   requireSnippets(releaseWorkflowPath, releaseWorkflow, [
     ["assetNamePattern: LiliaCode_[version]_[arch][setup][ext]", "keep the Tauri action asset naming pattern"],
+    ["Smoke Windows installer", "run the Windows installer smoke after publishing the draft Release"],
+    ["corepack yarn release:smoke:windows --tag", "keep the Windows installer smoke workflow entrypoint"],
     ["LiliaCode_<version>_x64-setup.*", "keep the draft Release checklist installer naming expectation"],
     ["Windows 安装验证记录", "keep the draft Release verification record entry"],
     ["liliacode <测试项目路径>", "keep the draft Release CLI verification check"],
@@ -226,7 +231,7 @@ if (!tagMatch) {
     }
     console.log(`[release:check] Expected Windows installers: ${installers.join(" and/or ")}`);
     console.log("[release:check] Release notes known limitations and Windows verification record entry are present.");
-    console.log("[release:check] Manual before publishing: download the draft Release installer on Windows, verify install, launch, liliacode CLI project open, and uninstall.");
+    console.log("[release:check] Automated before publishing: run release:smoke:windows against the draft Release installer and record the result in the Release body.");
   }
 }
 
