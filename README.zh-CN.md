@@ -180,7 +180,7 @@ Windows 首发安装包由 release workflow 生成。发布前先同步根 `pack
 yarn release:check --tag vX.Y.Z
 ```
 
-推送 `v*` tag 后，workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri 安装包并上传到 draft GitHub Release。正式发布前保持 draft 状态，在 Windows 环境下载安装包并验证安装、启动主窗口、基础窗口操作和卸载流程。当前发布包仅面向 Windows，没有代码签名，不包含 Tauri updater，升级方式是手动下载并安装新版安装包。
+推送 `v*` tag 后，workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri 安装包并上传到 draft GitHub Release，随后对 draft 安装包运行 `yarn release:smoke:windows --tag <tag>`。正式发布前保持 draft 状态，确认 Windows 安装包 smoke 已覆盖安装、启动主窗口、`liliacode <测试项目路径>` 和卸载后的 CLI 清理，并补全 Release 验证记录。当前发布包仅面向 Windows，没有代码签名，不包含 Tauri updater，升级方式是手动下载并安装新版安装包。
 
 Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon.png](apps/desktop/src-tauri/icons/icon.png)。要通过 Tauri CLI 重新生成桌面 PNG / ICO 时跑 `yarn icons:generate`。`yarn icons:tauri` 保留为同一套生成入口。
 

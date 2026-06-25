@@ -24,6 +24,7 @@
     "predocs:preview": "node scripts/check-package-manager.mjs",
     "docs:preview": "yarn check:package-manager && vitepress preview docs",
     "release:check": "yarn check:package-manager && node scripts/verify-release.mjs",
+    "release:smoke:windows": "yarn check:package-manager && node scripts/windows-installer-smoke.mjs",
     "icons:generate": "yarn check:package-manager && node scripts/generate-icons.mjs",
     "icons:tauri": "yarn check:package-manager && node scripts/generate-icons.mjs",
     "android:doctor": "yarn check:package-manager && node scripts/android-doctor.mjs",
