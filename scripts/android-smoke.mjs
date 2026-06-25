@@ -34,12 +34,14 @@ if (!adb) {
   fail("adb was not found. Run yarn android:doctor and install Android platform-tools first.");
 }
 
-const pairing = selectPairingUri();
-const bridgeProbe = selectBridgeProbe(pairing);
-const bridgeStatusBeforePairing = await verifyBridgeBeforePairing(bridgeProbe);
 startAvdIfRequested();
 const selectedDevice = selectOnlineDeviceFromAdb();
 const adbBaseArgs = selectedDevice ? ["-s", selectedDevice.serial] : [];
+let pairing = null;
+const mockRegression = options.mockRemoteRegression ? await startMockRemoteRegression() : null;
+pairing = mockRegression?.primaryPairing ?? selectPairingUri();
+const bridgeProbe = selectBridgeProbe(pairing);
+const bridgeStatusBeforePairing = await verifyBridgeBeforePairing(bridgeProbe);
 
 console.log(`Android smoke target: ${selectedDevice.serial}`);
 console.log(
@@ -65,26 +67,13 @@ const launchResult = runAdbStep([...adbBaseArgs, "shell", `am start -W -n ${appI
 });
 assertAmStartSucceeded(launchResult, "main activity launch");
 
-const deepLinkResult = runAdbStep(
-  [
-    ...adbBaseArgs,
-    "shell",
-    [
-      "am",
-      "start",
-      "-W",
-      "-a",
-      "android.intent.action.VIEW",
-      "-d",
-      quoteForAdbShell(pairing.uri),
-      appId,
-    ].join(" "),
-  ],
-  { title: "Launching pairing deep link" },
-);
+const deepLinkResult = launchPairingDeepLink(pairing.uri, "Launching pairing deep link");
 assertAmStartSucceeded(deepLinkResult, "pairing deep link launch");
 const trustedEndpointId = await verifyBridgeAfterPairing(bridgeProbe, bridgeStatusBeforePairing);
 await verifyBridgeResume(bridgeProbe, trustedEndpointId);
+if (mockRegression) {
+  await runMockRemoteRegression(mockRegression, trustedEndpointId);
+}
 
 const pid = runAdb([...adbBaseArgs, "shell", `pidof ${appId}`], {
   title: "Checking app process",
@@ -198,6 +187,316 @@ async function verifyBridgeResume(probe, deviceEndpointId) {
   console.log(`Desktop bridge accepted connection.resume for ${deviceEndpointId}.`);
 }
 
+async function startMockRemoteRegression() {
+  console.log("");
+  console.log("Starting Android remote regression mock bridges");
+  const pcA = await createMockBridge({
+    key: "pc-a",
+    pcName: "Smoke PC A",
+    pcEndpointId: "pc-smoke-a",
+    ticketId: "smoke-ticket-a",
+    challenge: "smoke-challenge-a",
+    taskId: "smoke-task-shared",
+    taskTitle: "Smoke Shared Task",
+    retryEventId: "smoke-retry-event-a",
+  });
+  const pcB = await createMockBridge({
+    key: "pc-b",
+    pcName: "Smoke PC B",
+    pcEndpointId: "pc-smoke-b",
+    ticketId: "smoke-ticket-b",
+    challenge: "smoke-challenge-b",
+    taskId: "smoke-task-shared",
+    taskTitle: "Smoke Shared Task",
+    retryEventId: "smoke-retry-event-b",
+  });
+  const regression = {
+    pcA,
+    pcB,
+    primaryPairing: pcA.pairing,
+    close() {
+      pcA.close();
+      pcB.close();
+    },
+  };
+  process.on("exit", () => regression.close());
+
+  for (const bridge of [pcA, pcB]) {
+    runAdbStep([...adbBaseArgs, "reverse", `tcp:${bridge.port}`, `tcp:${bridge.port}`], {
+      title: `Exposing ${bridge.pcName} mock bridge to Android via adb reverse`,
+    });
+  }
+  console.log(`Mock remote regression bridges are ready on ports ${pcA.port} and ${pcB.port}.`);
+  return regression;
+}
+
+async function runMockRemoteRegression(regression, primaryEndpointId) {
+  const { pcA, pcB } = regression;
+  const endpointId = primaryEndpointId || pcA.trustedEndpointId();
+  if (!endpointId) {
+    fail("Mock remote regression could not determine the paired Android endpoint id.");
+  }
+
+  console.log("");
+  console.log("Running Android remote regression smoke checks");
+  await pcA.waitForDispatch("connection.resume", (request) => request.androidEndpointId === endpointId);
+  await pcA.waitForDispatch("tasks.list");
+
+  await tapText(pcA.taskTitle);
+  await pcA.waitForDispatch("tasks.get", (request) => request.taskId === pcA.taskId);
+  await pcA.waitForDispatch("timeline.snapshot", (request) => request.taskId === pcA.taskId);
+  await pcA.waitForDispatch("interaction.pending.read", (request) => request.taskId === pcA.taskId);
+  await waitForText(pcA.taskTitle);
+  console.log("Opened mock task on Smoke PC A.");
+
+  const pcBProbe = selectBridgeProbe(pcB.pairing);
+  const pcBStatusBeforePairing = await verifyBridgeBeforePairing(pcBProbe);
+  const pcBDeepLink = launchPairingDeepLink(pcB.pairing.uri, "Launching second mock PC pairing deep link");
+  assertAmStartSucceeded(pcBDeepLink, "second mock PC pairing deep link launch");
+  const secondEndpointId = await verifyBridgeAfterPairing(pcBProbe, pcBStatusBeforePairing);
+  await verifyBridgeResume(pcBProbe, secondEndpointId);
+  await pcB.waitForDispatch("connection.resume");
+  await pcB.waitForDispatch("tasks.list");
+
+  await tapText(pcB.taskTitle);
+  await pcB.waitForDispatch("tasks.get", (request) => request.taskId === pcB.taskId);
+  await waitForText(pcB.pcName);
+  console.log("Opened mock task on Smoke PC B.");
+
+  const pcATaskGetsBeforeSwitch = pcA.dispatchCount("tasks.get");
+  await tapText(pcB.pcName);
+  await tapText(pcA.pcName);
+  await pcA.waitForDispatch(
+    "tasks.get",
+    (request) => request.taskId === pcA.taskId,
+    { after: pcATaskGetsBeforeSwitch },
+  );
+  await waitForText(pcA.pcName);
+  console.log("Verified PC switch reopens the current task on Smoke PC A.");
+
+  const retryCountBefore = pcA.dispatchCount("chat.retry");
+  await tapTimelineRetry();
+  await pcA.waitForDispatch(
+    "chat.retry",
+    (request) => request.taskId === pcA.taskId && request.eventId === pcA.retryEventId,
+    { after: retryCountBefore },
+  );
+  console.log(`Verified precise retry dispatch includes eventId=${pcA.retryEventId}.`);
+
+  const resumeCountBefore = pcA.dispatchCount("connection.resume");
+  const taskGetCountBefore = pcA.dispatchCount("tasks.get");
+  runAdbStep([...adbBaseArgs, "shell", "input keyevent KEYCODE_HOME"], {
+    title: "Sending app to background",
+  });
+  sleepMs(1_000);
+  const resumeResult = runAdbStep([...adbBaseArgs, "shell", `am start -W -n ${appId}/.MainActivity`], {
+    title: "Returning app to foreground",
+  });
+  assertAmStartSucceeded(resumeResult, "foreground restore launch");
+  await pcA.waitForDispatch("connection.resume", null, { after: resumeCountBefore });
+  await pcA.waitForDispatch(
+    "tasks.get",
+    (request) => request.taskId === pcA.taskId,
+    { after: taskGetCountBefore },
+  );
+  console.log("Verified foreground restore resumes the bridge and refreshes the active task.");
+}
+
+async function createMockBridge(config) {
+  const state = {
+    trustedEndpointId: "",
+    lastSeenAt: null,
+    dispatches: [],
+  };
+  let activeTicket = {
+    id: config.ticketId,
+    pcName: config.pcName,
+    pcEndpoint: { endpointId: config.pcEndpointId, relayUrl: null, directAddresses: [] },
+    protocolVersion: 1,
+    challenge: config.challenge,
+    expiresAt: Date.now() + 10 * 60_000,
+    pairingUri: "",
+  };
+  const capabilities = {
+    protocolVersion: 1,
+    minProtocolVersion: 1,
+    alpn: "lilia.remote-control.v1",
+    supportsPairing: true,
+    supportsTaskInbox: true,
+    supportsTimelineSubscription: true,
+    supportsChatSend: true,
+    supportsInteractionResponse: true,
+    supportsInterrupt: true,
+  };
+  const task = {
+    id: config.taskId,
+    taskId: config.taskId,
+    title: config.taskTitle,
+    projectName: "Android smoke",
+    status: "waiting",
+    dependsOn: [],
+    createdAt: 1_720_000_000_000,
+  };
+  const peer = () => ({
+    id: `${config.key}-android`,
+    kind: "android",
+    displayName: "Android smoke device",
+    endpointId: state.trustedEndpointId,
+    protocolVersion: 1,
+    trusted: true,
+    firstPairedAt: state.lastSeenAt ?? Date.now(),
+    lastSeenAt: state.lastSeenAt,
+    revokedAt: null,
+  });
+  const timeline = () => [
+    {
+      id: `${config.key}-user-message`,
+      kind: "message",
+      status: "success",
+      turnId: `${config.key}-turn`,
+      payload: { role: "user", content: `Retry payload for ${config.pcName}` },
+    },
+    {
+      id: config.retryEventId,
+      kind: "error",
+      title: "Retry anchor",
+      status: "failed",
+      turnId: `${config.key}-turn`,
+      payload: { retryContext: { content: `Retry payload for ${config.pcName}` } },
+    },
+  ];
+  const responseEnvelope = (envelope, payload) => ({
+    id: `mock-${Date.now()}`,
+    requestId: envelope.id,
+    protocolVersion: 1,
+    sentAt: Date.now(),
+    ok: true,
+    payload,
+  });
+  const dispatchPayload = (request) => {
+    switch (request.type) {
+      case "connection.resume":
+        state.lastSeenAt = Date.now();
+        return { type: "connection.resume", accepted: true, peer: peer() };
+      case "provider.status.read":
+        return { type: "provider.status", backend: "mock", ready: true };
+      case "tasks.list":
+        return { type: "tasks.list", tasks: [task] };
+      case "tasks.get":
+        return { type: "tasks.get", task, runtime: { phase: "waiting", processSessionId: null } };
+      case "timeline.snapshot":
+      case "timeline.subscribe":
+        return { type: request.type, taskId: config.taskId, events: timeline() };
+      case "interaction.pending.read":
+        return { type: "interaction.pending", interactions: [] };
+      case "chat.retry":
+        return { type: "chat.retry", result: { accepted: true } };
+      default:
+        return { type: request.type ?? "unknown" };
+    }
+  };
+  const server = http.createServer(async (request, response) => {
+    try {
+      if (request.method === "GET" && request.url === "/status") {
+        writeJson(response, {
+          ok: true,
+          status: {
+            hostEnabled: true,
+            state: "listening",
+            pcName: config.pcName,
+            endpoint: { endpointId: config.pcEndpointId, relayUrl: null, directAddresses: [] },
+            activeTicket,
+            trustedDevices: state.trustedEndpointId ? [peer()] : [],
+            capabilities,
+          },
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/pair") {
+        const body = await readRequestJson(request);
+        if (body.ticketId !== config.ticketId || body.challenge !== config.challenge) {
+          writeJson(response, {
+            ok: false,
+            error: { code: "unauthorized", message: "Mock pairing ticket mismatch" },
+          });
+          return;
+        }
+        state.trustedEndpointId = String(body.androidEndpoint?.endpointId ?? "").trim();
+        state.lastSeenAt = Date.now();
+        activeTicket = null;
+        writeJson(response, { ok: true, peer: peer() });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/dispatch") {
+        const envelope = await readRequestJson(request);
+        const remoteRequest = envelope.request ?? {};
+        state.dispatches.push({
+          at: Date.now(),
+          envelope,
+          request: remoteRequest,
+        });
+        if (!state.trustedEndpointId || envelope.deviceId !== state.trustedEndpointId) {
+          writeJson(response, {
+            id: `mock-${Date.now()}`,
+            requestId: envelope.id,
+            protocolVersion: 1,
+            sentAt: Date.now(),
+            ok: false,
+            error: { code: "unauthorized", message: "Mock bridge does not trust this Android endpoint" },
+          });
+        } else {
+          writeJson(response, responseEnvelope(envelope, dispatchPayload(remoteRequest)));
+        }
+        return;
+      }
+      writeJson(response, { ok: false, error: { code: "invalidRequest", message: "Not found" } }, 404);
+    } catch (err) {
+      writeJson(
+        response,
+        {
+          ok: false,
+          error: {
+            code: "internal",
+            message: err instanceof Error ? err.message : String(err),
+          },
+        },
+        500,
+      );
+    }
+  });
+  await new Promise((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+  const port = server.address().port;
+  const bridgeUrl = `http://127.0.0.1:${port}`;
+  const pairingUri = [
+    "lilia-remote://pair?v=1",
+    `ticket=${encodeURIComponent(config.ticketId)}`,
+    `challenge=${encodeURIComponent(config.challenge)}`,
+    `endpoint=${encodeURIComponent(config.pcEndpointId)}`,
+    `name=${encodeURIComponent(config.pcName)}`,
+    `bridge=${encodeURIComponent(bridgeUrl)}`,
+  ].join("&");
+  activeTicket.pairingUri = pairingUri;
+  return {
+    ...config,
+    port,
+    pairing: { uri: pairingUri, synthetic: false },
+    trustedEndpointId: () => state.trustedEndpointId,
+    dispatchCount: (type) => state.dispatches.filter((entry) => entry.request.type === type).length,
+    waitForDispatch: async (type, predicate = null, { after = 0, timeoutMs = 15_000 } = {}) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const matches = state.dispatches.filter((entry) => entry.request.type === type);
+        const candidate = matches.slice(after).find((entry) => !predicate || predicate(entry.request, entry.envelope));
+        if (candidate) return candidate;
+        sleepMs(250);
+      }
+      const seen = state.dispatches.map((entry) => entry.request.type).join(", ") || "(none)";
+      fail(`Timed out waiting for mock dispatch ${type}. Seen dispatches: ${seen}`);
+    },
+    close: () => server.close(),
+  };
+}
+
 async function fetchBridgeStatus(statusUrl) {
   try {
     return await getJson(statusUrl, 5_000);
@@ -276,6 +575,137 @@ function runAdbStep(args, options = {}) {
   });
 }
 
+function launchPairingDeepLink(uri, title) {
+  return runAdbStep(
+    [
+      ...adbBaseArgs,
+      "shell",
+      [
+        "am",
+        "start",
+        "-W",
+        "-a",
+        "android.intent.action.VIEW",
+        "-d",
+        quoteForAdbShell(uri),
+        appId,
+      ].join(" "),
+    ],
+    { title },
+  );
+}
+
+async function waitForText(text, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const nodes = dumpWindowNodes().filter((node) => node.text === text || node.contentDesc === text);
+    if (nodes.length > 0) return nodes;
+    sleepMs(300);
+  }
+  fail(`Timed out waiting for Android UI text: ${text}`);
+}
+
+async function tapText(text, { occurrence = "first", timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const nodes = dumpWindowNodes().filter((node) => node.text === text || node.contentDesc === text);
+    const node = selectNodeOccurrence(nodes, occurrence);
+    if (node) {
+      tapBounds(node.bounds, `text "${text}"`);
+      return;
+    }
+    sleepMs(300);
+  }
+  fail(`Timed out waiting to tap Android UI text: ${text}`);
+}
+
+async function tapTimelineRetry() {
+  const deadline = Date.now() + 15_000;
+  let scrolled = false;
+  while (Date.now() < deadline) {
+    const retryNodes = dumpWindowNodes().filter((node) => node.text === "Retry" || node.contentDesc === "Retry");
+    if (retryNodes.length >= 2 || (scrolled && retryNodes.length === 1)) {
+      tapBounds(retryNodes[retryNodes.length - 1].bounds, "timeline Retry");
+      return;
+    }
+    runAdbStep([...adbBaseArgs, "shell", "input swipe 540 1500 540 700 350"], {
+      title: "Scrolling task detail to timeline retry",
+    });
+    scrolled = true;
+    sleepMs(500);
+  }
+  fail("Timed out waiting for timeline retry button.");
+}
+
+function selectNodeOccurrence(nodes, occurrence) {
+  if (nodes.length === 0) return null;
+  if (occurrence === "last") return nodes[nodes.length - 1];
+  if (typeof occurrence === "number") return nodes[occurrence] ?? null;
+  return nodes[0];
+}
+
+function tapBounds(bounds, label) {
+  if (!bounds) {
+    fail(`Cannot tap ${label}; UI node has no bounds.`);
+  }
+  const x = Math.round((bounds.left + bounds.right) / 2);
+  const y = Math.round((bounds.top + bounds.bottom) / 2);
+  runAdbStep([...adbBaseArgs, "shell", `input tap ${x} ${y}`], {
+    title: `Tapping ${label}`,
+  });
+}
+
+function dumpWindowNodes() {
+  runAdb([...adbBaseArgs, "shell", "uiautomator dump /sdcard/lilia-smoke-window.xml"], {
+    allowFailure: true,
+    capture: true,
+  });
+  const result = runAdb([...adbBaseArgs, "exec-out", "cat", "/sdcard/lilia-smoke-window.xml"], {
+    allowFailure: true,
+    capture: true,
+  });
+  const xml = result.stdout ?? "";
+  return parseUiAutomatorNodes(xml);
+}
+
+function parseUiAutomatorNodes(xml) {
+  const nodes = [];
+  for (const match of xml.matchAll(/<node\b[^>]*>/g)) {
+    const tag = match[0];
+    nodes.push({
+      text: decodeXmlAttribute(attributeValue(tag, "text")),
+      contentDesc: decodeXmlAttribute(attributeValue(tag, "content-desc")),
+      bounds: parseBounds(attributeValue(tag, "bounds")),
+    });
+  }
+  return nodes;
+}
+
+function attributeValue(tag, name) {
+  const match = tag.match(new RegExp(`${name}="([^"]*)"`));
+  return match?.[1] ?? "";
+}
+
+function decodeXmlAttribute(value) {
+  return value
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function parseBounds(value) {
+  const match = value.match(/\[(\d+),(\d+)]\[(\d+),(\d+)]/);
+  if (!match) return null;
+  return {
+    left: Number(match[1]),
+    top: Number(match[2]),
+    right: Number(match[3]),
+    bottom: Number(match[4]),
+  };
+}
+
 function waitForBootCompleted() {
   console.log("Waiting for Android device to boot");
   runAdb(["wait-for-device"], {
@@ -351,6 +781,7 @@ function assertAmStartSucceeded(result, label) {
 function dumpDeviceDiagnostics(reason) {
   console.error("");
   console.error(`Android smoke diagnostics (${reason})`);
+  const diagnosticPairingUri = pairing?.uri ?? "lilia-remote://pair";
 
   runDiagnosticAdb("Installed package", ["shell", `pm path ${appId}`]);
   runDiagnosticAdb("Main activity resolution", [
@@ -367,7 +798,7 @@ function dumpDeviceDiagnostics(reason) {
       "-a",
       "android.intent.action.VIEW",
       "-d",
-      quoteForAdbShell(pairing.uri),
+      quoteForAdbShell(diagnosticPairingUri),
       appId,
     ].join(" "),
   ]);
@@ -561,6 +992,31 @@ function postJson(url, payload, timeoutMs) {
     request.on("error", reject);
     request.end(body);
   });
+}
+
+function readRequestJson(request) {
+  return new Promise((resolvePromise, reject) => {
+    const chunks = [];
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      try {
+        resolvePromise(JSON.parse(chunks.join("") || "{}"));
+      } catch (err) {
+        reject(new Error(`invalid JSON request: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+function writeJson(response, payload, statusCode = 200) {
+  const body = JSON.stringify(payload);
+  response.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+  });
+  response.end(body);
 }
 
 function sleepMs(ms) {
