@@ -38,7 +38,6 @@ import {
   CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND,
   CHAT_SEARCH_SLASH_COMMANDS_COMMAND,
   CHAT_SEND_MESSAGE_COMMAND,
-  CHAT_SEND_PROCESS_SESSION_COMMAND,
   CHAT_SET_COMPOSER_STATE_COMMAND,
   CHAT_TURN_STARTED_EVENT_NAME,
   CONVERSATION_SUGGESTIONS_GET_COMMAND,
@@ -50,7 +49,6 @@ import {
   HISTORY_IMPORT_PREVIEW_COMMAND,
   HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
   HISTORY_IMPORT_SEARCH_COMMAND,
-  LILIA_IAB_SUBMIT_COMMAND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
@@ -67,8 +65,6 @@ import {
   QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
   QUOTA_USAGE_GET_STATS_COMMAND,
   REMOTE_CONTROL_CANCEL_PAIRING_COMMAND,
-  REMOTE_CONTROL_DISPATCH_REQUEST_COMMAND,
-  REMOTE_CONTROL_PAIR_DEVICE_COMMAND,
   REMOTE_CONTROL_REVOKE_DEVICE_COMMAND,
   REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_PC_NAME_COMMAND,
@@ -124,7 +120,6 @@ import type {
   PermissionApprovalPayload,
   PermissionApprovalResult,
   LiliaIabSnapshot,
-  LiliaIabSubmitResult,
   ChatRollbackResult,
   ChatDoneEvent,
   ChatTurnStartedEvent,
@@ -146,11 +141,7 @@ import type {
   QuotaUsageStats,
   QuotaUsageStatsInput,
   RemoteControlStatus,
-  RemotePairDeviceInput,
   RemotePairingTicket,
-  RemotePeerSummary,
-  RemoteRequestEnvelope,
-  RemoteResponseEnvelope,
 } from "@lilia/contracts";
 
 export type {
@@ -194,7 +185,6 @@ export type {
   PermissionApprovalPayload,
   PermissionApprovalResult,
   LiliaIabSnapshot,
-  LiliaIabSubmitResult,
   ChatRollbackResult,
   ConversationSuggestionSources,
   ConversationSuggestionSourceKind,
@@ -209,11 +199,7 @@ export type {
   QuotaUsageStats,
   QuotaUsageStatsInput,
   RemoteControlStatus,
-  RemotePairDeviceInput,
   RemotePairingTicket,
-  RemotePeerSummary,
-  RemoteRequestEnvelope,
-  RemoteResponseEnvelope,
 };
 
 export type TurnStartedEvent = ChatTurnStartedEvent;
@@ -286,13 +272,6 @@ export function interruptTurn(taskId: string): Promise<ChatInterruptResult> {
   return invoke<ChatInterruptResult>(CHAT_INTERRUPT_TURN_COMMAND, { taskId });
 }
 
-export function sendProcessSessionCommand(
-  taskId: string,
-  command: ChatRuntimeCommand,
-): Promise<void> {
-  return invoke<void>(CHAT_SEND_PROCESS_SESSION_COMMAND, { taskId, command });
-}
-
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
   return invoke<ChatAttachment[]>(CHAT_DESCRIBE_ATTACHMENTS_COMMAND, { paths });
 }
@@ -335,13 +314,6 @@ export function saveClipboardImage(input: {
 
 export function saveClipboardText(input: { text: string }): Promise<ChatAttachment> {
   return invoke<ChatAttachment>(CHAT_SAVE_CLIPBOARD_TEXT_COMMAND, { input });
-}
-
-export function submitLiliaIab(
-  taskId: string,
-  note?: string | null,
-): Promise<LiliaIabSubmitResult> {
-  return invoke<LiliaIabSubmitResult>(LILIA_IAB_SUBMIT_COMMAND, { taskId, note: note ?? null });
 }
 
 export async function pickAttachmentFiles(): Promise<string[]> {
@@ -564,18 +536,8 @@ export function cancelRemoteControlPairing(): Promise<void> {
   return invoke<void>(REMOTE_CONTROL_CANCEL_PAIRING_COMMAND);
 }
 
-export function pairRemoteControlDevice(input: RemotePairDeviceInput): Promise<RemotePeerSummary> {
-  return invoke<RemotePeerSummary>(REMOTE_CONTROL_PAIR_DEVICE_COMMAND, { input });
-}
-
 export function revokeRemoteControlDevice(deviceId: string): Promise<RemoteControlStatus> {
   return invoke<RemoteControlStatus>(REMOTE_CONTROL_REVOKE_DEVICE_COMMAND, { deviceId });
-}
-
-export function dispatchRemoteControlRequest(
-  envelope: RemoteRequestEnvelope,
-): Promise<RemoteResponseEnvelope> {
-  return invoke<RemoteResponseEnvelope>(REMOTE_CONTROL_DISPATCH_REQUEST_COMMAND, { envelope });
 }
 
 export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {
