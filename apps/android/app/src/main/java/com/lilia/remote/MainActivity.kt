@@ -3,6 +3,7 @@ package com.lilia.remote
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -102,8 +103,13 @@ fun LiliaRemoteApp(
     val fallbackRepository = remember { repository }
     val client = remember(fallbackRepository) { fallbackRepository?.let { RemoteHttpClient(it) } }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val initialSavedPcs = remember { fallbackRepository?.savedPcs().orEmpty() }
     val initialPc = remember { fallbackRepository?.activePc() }
+    val initialTaskId = remember { fallbackRepository?.activeTaskId() }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {}
     var savedPcs by remember { mutableStateOf(initialSavedPcs) }
     var activePc by remember { mutableStateOf(initialPc) }
     var selectedTask by remember { mutableStateOf<RemoteTaskDetail?>(null) }
@@ -117,6 +123,7 @@ fun LiliaRemoteApp(
     var pairingBusy by remember { mutableStateOf(false) }
     var pairingError by remember { mutableStateOf("") }
     var pendingPcSwitchTaskId by remember { mutableStateOf<String?>(null) }
+    var pendingColdRestoreTaskId by remember { mutableStateOf(initialTaskId) }
     var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
 
     fun resetActivePcDerivedState() {
@@ -127,6 +134,8 @@ fun LiliaRemoteApp(
         bridgeStatus = null
         providerStatus = null
         pendingBranchAnchor = null
+        fallbackRepository?.setActiveTaskId(null)
+        pendingColdRestoreTaskId = null
     }
 
     fun acceptPairedPc(pc: SavedPc) {
@@ -143,7 +152,9 @@ fun LiliaRemoteApp(
         savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
         activePc = selected
         resetActivePcDerivedState()
+        fallbackRepository?.setActiveTaskId(taskIdToRefresh)
         pendingPcSwitchTaskId = taskIdToRefresh
+        pendingColdRestoreTaskId = taskIdToRefresh
         bridgeTone = "Listening"
         remoteError = ""
         pairingError = ""
@@ -221,7 +232,14 @@ fun LiliaRemoteApp(
 
     fun applyTaskDetail(detail: RemoteTaskDetail) {
         selectedTask = detail
+        fallbackRepository?.setActiveTaskId(detail.task.taskId)
         inboxTasks = syncInboxTaskStatus(inboxTasks, detail)
+    }
+
+    fun closeTaskDetail() {
+        selectedTask = null
+        fallbackRepository?.setActiveTaskId(null)
+        pendingColdRestoreTaskId = null
     }
 
     suspend fun refreshTaskSnapshot(
@@ -359,6 +377,7 @@ fun LiliaRemoteApp(
         val remoteClient = client ?: return
         detailLoading = true
         remoteError = ""
+        fallbackRepository?.setActiveTaskId(taskId)
         scope.launch {
             refreshProviderStatus(pc, remoteClient)
             remoteClient.taskDetail(pc, taskId)
@@ -440,7 +459,7 @@ fun LiliaRemoteApp(
 
     fun resumeActivePcFromForeground(pc: SavedPc) {
         val remoteClient = client ?: return
-        val taskId = selectedTask?.task?.taskId
+        val taskId = selectedTask?.task?.taskId ?: fallbackRepository?.activeTaskId()
         inboxLoading = true
         detailLoading = taskId != null
         remoteError = ""
@@ -450,7 +469,7 @@ fun LiliaRemoteApp(
                 resumed &&
                 taskId != null &&
                 !shouldIgnorePcResult(activePc, pc) &&
-                selectedTask?.task?.taskId == taskId
+                (selectedTask == null || selectedTask?.task?.taskId == taskId)
             ) {
                 remoteClient.taskDetail(pc, taskId)
                     .onSuccess {
@@ -489,10 +508,26 @@ fun LiliaRemoteApp(
         if (!shouldIgnorePcResult(activePc, pc)) {
             inboxLoading = false
         }
-        val taskIdToRefresh = pendingPcSwitchTaskId ?: return@LaunchedEffect
+        val taskIdToRefresh = pendingPcSwitchTaskId ?: pendingColdRestoreTaskId ?: return@LaunchedEffect
         pendingPcSwitchTaskId = null
+        pendingColdRestoreTaskId = null
         if (shouldIgnorePcResult(activePc, pc)) return@LaunchedEffect
         openTask(pc, taskIdToRefresh)
+    }
+
+    LaunchedEffect(activePc?.endpointId, activePc?.bridgeUrl) {
+        if (activePc == null) {
+            RemoteKeepAliveService.stop(context)
+            return@LaunchedEffect
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        RemoteKeepAliveService.start(context)
     }
 
     LaunchedEffect(foregroundResumeToken) {
@@ -567,7 +602,7 @@ fun LiliaRemoteApp(
                     loading = detailLoading,
                     error = remoteError,
                     pendingBranchAnchor = pendingBranchAnchor,
-                    onBack = { selectedTask = null },
+                    onBack = { closeTaskDetail() },
                     onSelectPc = { selectActivePc(it) },
                     onRefresh = { openTask(activePc!!, selectedTask!!.task.taskId) },
                     onInterrupt = {

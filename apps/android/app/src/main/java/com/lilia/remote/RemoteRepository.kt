@@ -33,6 +33,19 @@ class RemoteRepository internal constructor(
         return readActivePcFromPrefs()
     }
 
+    fun activeTaskId(): String? =
+        prefs.getString("active.taskId", null)?.takeIf { it.isNotBlank() }
+
+    fun setActiveTaskId(taskId: String?) {
+        prefs.edit {
+            if (taskId.isNullOrBlank()) {
+                remove("active.taskId")
+            } else {
+                putString("active.taskId", taskId)
+            }
+        }
+    }
+
     fun savedPcs(): List<SavedPc> {
         val saved = readSavedPcs()
         if (saved.isNotEmpty()) return saved
@@ -52,6 +65,7 @@ class RemoteRepository internal constructor(
         prefs.edit {
             putSavedPcList(updatedSavedPcs)
             putActivePc(pc)
+            remove("active.taskId")
         }
         return pc
     }
@@ -83,6 +97,7 @@ class RemoteRepository internal constructor(
     fun clearActivePc() {
         prefs.edit {
             clearActivePcFields()
+            remove("active.taskId")
         }
     }
 
@@ -95,6 +110,7 @@ class RemoteRepository internal constructor(
             putSavedPcList(remaining)
             if (active != null && activePcConnectionMatches(active, pc)) {
                 clearActivePcFields()
+                remove("active.taskId")
             }
         }
     }

@@ -108,6 +108,33 @@ class RemoteRepositoryTest {
     }
 
     @Test
+    fun activeTaskIdPersistsForColdResume() {
+        val preferences = InMemoryRemotePreferences()
+        val repository = RemoteRepository(preferences)
+        repository.savePairing(ticket())
+
+        repository.setActiveTaskId("task-42")
+
+        assertEquals("task-42", RemoteRepository(preferences).activeTaskId())
+    }
+
+    @Test
+    fun savePairingAndClearActivePcDropPersistedActiveTaskId() {
+        val preferences = InMemoryRemotePreferences()
+        val repository = RemoteRepository(preferences)
+        repository.savePairing(ticket())
+        repository.setActiveTaskId("task-42")
+
+        repository.savePairing(ticket(endpointId = "pc-studio"))
+        assertNull(RemoteRepository(preferences).activeTaskId())
+
+        repository.setActiveTaskId("task-99")
+        repository.clearActivePc()
+
+        assertNull(RemoteRepository(preferences).activeTaskId())
+    }
+
+    @Test
     fun forgetPcRemovesOnlySelectedSavedPcAndClearsActiveWhenItMatches() {
         val preferences = InMemoryRemotePreferences()
         val repository = RemoteRepository(preferences)
