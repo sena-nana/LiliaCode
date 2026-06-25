@@ -60,7 +60,7 @@ LiliaCode still prioritizes its own recoverable task structure over upstream CLI
 
 ## Feature Status
 
-The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-24.
+The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-25.
 
 ### Shared Agent Capabilities
 
@@ -117,6 +117,13 @@ The list below tracks the current real integration surface. Only capabilities th
 - [ ] Helper agents (target: `v2.0`): lower-cost agents do not yet run inside a session to supervise or assist the main agent.
 - [x] Built-in Lilia protocol: keep a single built-in runtime path.
 
+### Android Remote Beta
+
+- [x] Experimental Android companion: PC HTTP bridge, QR pairing, trusted devices, active PC, task inbox, task detail, timeline polling, composer, interrupt / retry, process commands, session fork, and pending interaction responses are wired through the PC runner and task timeline.
+- [x] Remote-control contract baseline: `packages/contracts` owns typed remote-control request / response / event shapes; `remote-control-command-contract.json` remains the Tauri IPC command-name manifest.
+- [ ] v1 beta limits: offline queues, PC-PC routing, multi-device collaboration, Android-local agent execution, a full Android settings surface, push-style event streaming, and full release regression are not promised.
+- [ ] Android release readiness: attach companion APKs only as experimental beta assets with a fresh `yarn android:verify` record.
+
 ## Project Structure
 
 > The repository, package names, protocol names, and local configuration paths still use the `lilia` name to avoid breaking existing protocols and persistence paths.
@@ -124,6 +131,7 @@ The list below tracks the current real integration surface. Only capabilities th
 ```text
 Lilia/
 ├── apps/
+│   ├── android/                # Experimental Android remote companion
 │   └── desktop/                # Main app: Vue 3 + Tauri 2
 │       ├── src/
 │       │   ├── layouts/        # AppShell / SecondaryPanel / TitleBar
@@ -180,7 +188,9 @@ Windows first-release packaging is driven by the release workflow. Before taggin
 yarn release:check --tag vX.Y.Z
 ```
 
-Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, uploads a draft GitHub Release, and runs `yarn release:smoke:windows --tag <tag>` against the draft installer. Keep the release as a draft until the Windows installer smoke has verified install, launch, `liliacode <test-project-path>`, and uninstall-time CLI cleanup, and the Release verification record has been filled in. Current release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
+Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, uploads a draft GitHub Release, and runs `yarn release:smoke:windows --tag <tag>` against the draft installer. Keep the release as a draft until the Windows installer smoke has verified install, launch, `liliacode <test-project-path>`, and uninstall-time CLI cleanup, and the Release verification record has been filled in. Current stable release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
+
+Android companion APKs are experimental beta assets. Only attach them to a release when `yarn android:verify` has passed for that build, and label the artifact as Android remote beta rather than as a stable full remote-control product.
 
 The Tauri icon source is [apps/desktop/src-tauri/icons/icon.png](apps/desktop/src-tauri/icons/icon.png). To regenerate the desktop PNG / ICO set through the Tauri CLI, run `yarn icons:generate`. `yarn icons:tauri` is kept as the same generation entrypoint.
 

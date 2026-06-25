@@ -6,7 +6,7 @@ This document is the source for the GitHub milestones and phase issues. It mirro
 
 ### v1.0 稳定化收尾
 
-目标：让当前桌面端首发版本可信可用，不扩展新的大功能面。重点是核心对话链路、当前任务/侧栏/roadmap/memory 基线、插件与工具管理面、IAB/斜杠命令、发布链路和 Android 远控空壳边界。
+目标：让当前首发 beta 版本可信可用，不扩展新的大功能面。重点是核心对话链路、当前任务/侧栏/roadmap/memory 基线、插件与工具管理面、IAB/斜杠命令、发布链路，以及 Android 远控 beta 的实验性边界与验证。
 
 ### v2.0 会话工作台与团队模式
 
@@ -190,25 +190,27 @@ labels: enhancement,area: desktop,area: contracts
 
 <!-- issue
 milestone: v1.0 稳定化收尾
-title: [v1.0] Android 远控空壳与边界冻结
-labels: enhancement,area: docs
+title: [v1.0] Android 远控 beta 边界与验证
+labels: enhancement,area: android,area: contracts,area: docs
 -->
-### [v1.0] Android 远控空壳与边界冻结
+### [v1.0] Android 远控 beta 边界与验证
 
 #### 要做什么
 
-冻结 Android 空壳阶段和设计边界，不在 v1.0 承诺真实扫码、连接、任务收件箱或远控 composer。
+把当前 Android remote 纳入 `v1.0-beta` 的实验性能力面，同时明确它不是稳定完整远控产品承诺。
 
 #### 任务清单
 
-- [ ] 核对 Android 设计文档中的 v1 边界。
-- [ ] 确认空壳阶段不新增 remote-control wire contract。
-- [ ] 把 Android 远控 MVP 明确归入 v2.0。
+- [ ] 同步 Android 设计文档、README、roadmap 和 release 口径。
+- [ ] 确认 `packages/contracts` 的 typed remote-control 类型和 IPC command manifest 是当前权威契约。
+- [ ] 发布 Android companion beta 前运行 `yarn android:verify`。
+- [ ] 在发布说明中标明 Android remote 仍为 experimental，不承诺离线队列、PC-PC、多设备协作、Android 本地 runner 或完整设置面。
 
 #### 完成条件
 
-- [ ] v1.0 发布说明不会暗示 Android 远控已可用。
-- [ ] v2.0 / v3.0 的远控演进边界清楚。
+- [ ] beta 发布不会同时出现“空壳冻结”和“完整远控已稳定”的冲突描述。
+- [ ] Android remote 如进入发布资产，必须带 experimental 标识和 `yarn android:verify` 验证记录。
+- [ ] v2.0 / v3.0 的远控稳定化、多设备和 PC-PC 演进边界清楚。
 <!-- /issue -->
 
 <!-- issue
@@ -558,24 +560,25 @@ labels: enhancement,area: desktop,area: tauri,area: contracts
 
 <!-- issue
 milestone: v2.0 会话工作台与团队模式
-title: [v2.0] Android 远控 MVP
+title: [v2.0] Android 远控稳定化与能力补全
 labels: enhancement,area: contracts,area: docs
 -->
-### [v2.0] Android 远控 MVP
+### [v2.0] Android 远控稳定化与能力补全
 
 #### 要做什么
 
-实现扫码配对、active PC、任务收件箱、任务详情、timeline、composer 和关键交互审批。
+把 `v1.0-beta` 的 Android remote 实验链路收敛为可长期维护的稳定能力，而不是把已存在能力重新当作未来 MVP。
 
 #### 任务清单
 
-- [ ] 从 `packages/contracts` 定义 remote-control request / response / event 类型。
-- [ ] PC 端提供任务收件箱、任务详情、timeline snapshot 和 event stream。
-- [ ] Android 端实现配对、active PC、任务收件箱、任务详情和 composer。
+- [ ] 补齐 remote-control event stream、能力协商和错误语义的跨端回归。
+- [ ] 收敛 HTTP bridge 与后续 iroh / shared remote crate 的取舍，避免重复连接状态机。
+- [ ] 扩展 Android smoke，覆盖配对、active PC、任务继续、pending interaction 和撤销设备。
+- [ ] 补齐通知、前后台恢复、长 timeline 性能和异常恢复。
 
 #### 完成条件
 
-- [ ] Android 可以作为 active PC 的远控端继续关键任务。
+- [ ] Android remote 从 experimental beta 升级为稳定远控入口。
 - [ ] Android 不绕过 PC 端既有权限和 Agent 执行边界。
 <!-- /issue -->
 
@@ -749,7 +752,7 @@ labels: enhancement,area: contracts,area: docs
 
 #### 要做什么
 
-在 Android 远控 MVP 之后评估多设备、PC-PC 和更复杂远程协作。
+在 Android remote 稳定化之后评估多设备、PC-PC 和更复杂远程协作。
 
 #### 任务清单
 
