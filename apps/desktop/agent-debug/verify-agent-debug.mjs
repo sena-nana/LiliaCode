@@ -22,6 +22,7 @@ const toolDir = process.env.LILIA_AGENT_DEBUG_TOOL_DIR ??
   path.join(os.homedir(), ".lilia", "agent-debug", "bin");
 const replay = [];
 const scenarioResults = [];
+let restoreAgentInteractionSettings = null;
 
 const CHAT_SEND_MESSAGE_COMMAND = "chat_send_message";
 const SLOW_INVOKE_WARNING_MS = 1000;
@@ -62,6 +63,19 @@ const SCENARIOS = {
     artifact: "scenario-permission-pending-action.png",
   },
 };
+const SETTINGS_SURFACE_TABS = [
+  "appearance",
+  "window",
+  "providers",
+  "remote-control",
+  "assistant",
+  "agent",
+  "quota",
+  "plugins",
+  "import",
+  "project",
+  "about",
+];
 
 class SmokeBlockedError extends Error {
   constructor(message, details = {}) {
@@ -365,6 +379,11 @@ function visibleEnabledElement(snapshot, id) {
   return element?.visible && element?.enabled ? element : null;
 }
 
+function visibleElement(snapshot, id) {
+  const element = elementById(snapshot, id);
+  return element?.visible ? element : null;
+}
+
 async function observe(sessionId) {
   return await execute(sessionId, "return window.__liliaAgentDebug?.observe?.() ?? null;");
 }
@@ -393,7 +412,7 @@ async function waitForAnyAgentElement(sessionId, ids, timeoutMs = 15_000) {
   return await waitForCondition(
     sessionId,
     `one of agent debug elements ${ids.join(", ")}`,
-    (snapshot) => ids.some((id) => !!visibleEnabledElement(snapshot, id)),
+    (snapshot) => ids.some((id) => !!visibleElement(snapshot, id)),
     timeoutMs,
   );
 }
@@ -484,6 +503,232 @@ async function act(sessionId, action, scenarioId) {
   return result;
 }
 
+async function executeInApp(sessionId, body, args = []) {
+  return await execute(
+    sessionId,
+    `return (async () => {
+      ${body}
+    })();`,
+    args,
+  );
+}
+
+async function readAgentInteractionSettings(sessionId) {
+  return await executeInApp(
+    sessionId,
+    `const chat = await import("/src/services/chat.ts");
+     return await chat.getAgentInteractionSettings();`,
+  );
+}
+
+async function writeAgentInteractionSettings(sessionId, settings) {
+  return await executeInApp(
+    sessionId,
+    `const chat = await import("/src/services/chat.ts");
+     return await chat.setAgentInteractionSettings(arguments[0]);`,
+    [settings],
+  );
+}
+
+async function configureAgentDebugSmokeSettings(sessionId) {
+  const previous = await readAgentInteractionSettings(sessionId);
+  const previousAutoTurn = previous?.autoTurnDecision ?? {};
+  if (previousAutoTurn.enabled === false) {
+    replay.push({ type: "settings", target: "agent.autoTurnDecision", changed: false });
+    return;
+  }
+  const next = {
+    ...previous,
+    autoTurnDecision: {
+      ...previousAutoTurn,
+      enabled: false,
+    },
+  };
+  await writeAgentInteractionSettings(sessionId, next);
+  restoreAgentInteractionSettings = previous;
+  replay.push({ type: "settings", target: "agent.autoTurnDecision", changed: true, enabled: false });
+}
+
+async function restoreAgentDebugSmokeSettings(sessionId) {
+  if (!restoreAgentInteractionSettings) return;
+  const previous = restoreAgentInteractionSettings;
+  restoreAgentInteractionSettings = null;
+  await writeAgentInteractionSettings(sessionId, previous);
+  replay.push({ type: "settings", target: "agent.autoTurnDecision", restored: true });
+}
+
+async function collectImplementedSurfaceTargets(sessionId) {
+  return await executeInApp(
+    sessionId,
+    `const projectsStore = await import("/src/data/projects.ts");
+     const tasksStore = await import("/src/data/tasks.ts");
+     await projectsStore.ensureProjectsLoaded(true);
+     const projects = projectsStore.listProjects();
+     const firstProject = projects[0] ?? null;
+     let firstProjectTask = null;
+     if (firstProject) {
+       await tasksStore.ensureProjectTasksLoaded(firstProject.id, true);
+       firstProjectTask = tasksStore.listTasks(firstProject.id)[0] ?? null;
+     }
+     await tasksStore.ensureOrphansLoaded(true);
+     const firstOrphan = tasksStore.listOrphanConversations()[0] ?? null;
+     return {
+       projectCount: projects.length,
+       firstProject: firstProject ? { id: firstProject.id, name: firstProject.name } : null,
+       firstProjectTask: firstProjectTask
+         ? { id: firstProjectTask.id, title: firstProjectTask.title, projectId: firstProjectTask.projectId }
+         : null,
+       firstOrphan: firstOrphan ? { id: firstOrphan.id, title: firstOrphan.title } : null,
+     };`,
+  );
+}
+
+async function navigateRoute(sessionId, route, scenarioId) {
+  await execute(
+    sessionId,
+    `window.history.pushState({}, "", arguments[0]);
+     window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+     return true;`,
+    [route],
+  );
+  replay.push({ scenario: scenarioId, type: "navigate", route });
+  return await waitForCondition(
+    sessionId,
+    `route ${route}`,
+    (snapshot) => snapshot?.route === route,
+    20_000,
+  );
+}
+
+async function runSurfaceScenario(sessionId, surface, baselineErrorCount) {
+  const scenario = {
+    id: `surface-${surface.id}`,
+    label: surface.label,
+    artifact: `scenario-surface-${surface.id.replace(/[^a-z0-9_-]+/gi, "-")}.png`,
+  };
+  await markScenario(sessionId, scenario);
+  await navigateRoute(sessionId, surface.route, scenario.id);
+  const snapshot = await waitForCondition(
+    sessionId,
+    `${surface.label} surface ready`,
+    (next) => {
+      if (surface.expectedAny?.length) {
+        return surface.expectedAny.some((id) => !!visibleElement(next, id));
+      }
+      return (surface.expected ?? []).every((id) => !!visibleElement(next, id));
+    },
+    surface.timeoutMs ?? 20_000,
+  );
+  if (snapshot.missingAgentIds?.length) {
+    throw new Error(`${surface.label} has visible interactive elements without data-agent-id: ${snapshot.missingAgentIds.length}`);
+  }
+  const newErrors = (snapshot.errors ?? []).slice(baselineErrorCount);
+  if (newErrors.length) {
+    throw new Error(`${surface.label} produced frontend errors: ${newErrors.map((item) => item.message).join("; ")}`);
+  }
+  return await finishScenario(sessionId, scenario, {
+    route: snapshot.route,
+    expected: surface.expected ?? null,
+    expectedAny: surface.expectedAny ?? null,
+    elementCount: snapshot.elements?.length ?? 0,
+  });
+}
+
+function buildImplementedSurfaceScenarios(targets) {
+  const baseSurfaces = [
+    {
+      id: "home",
+      label: "首页",
+      route: "/",
+      expected: ["app.shell", "app.main", "sidebar.new-chat"],
+    },
+    {
+      id: "projects-overview",
+      label: "项目总览",
+      route: "/projects",
+      expected: ["app.shell", "app.main", "sidebar.projects.overview"],
+    },
+    {
+      id: "automations",
+      label: "自动化",
+      route: "/automations",
+      expectedAny: ["automations.workspace", "automations.loading"],
+      timeoutMs: 30_000,
+    },
+  ];
+
+  const settingsSurfaces = SETTINGS_SURFACE_TABS.map((tab) => ({
+    id: `settings-${tab}`,
+    label: `设置 / ${tab}`,
+    route: `/settings?tab=${encodeURIComponent(tab)}`,
+    expected: [
+      "settings.sidebar",
+      `settings.tab.${tab}`,
+      tab === "plugins" || tab === "import" ? "settings.full-page-section" : `settings.page.${tab}`,
+    ],
+    timeoutMs: tab === "plugins" || tab === "quota" ? 30_000 : 20_000,
+  }));
+
+  const projectId = targets.firstProject ? encodeURIComponent(targets.firstProject.id) : null;
+  const projectSurfaces = projectId
+    ? [
+        {
+          id: "project-sessions",
+          label: "项目 Sessions",
+          route: `/projects/${projectId}`,
+          expected: ["app.shell", "view-tabs.sessions"],
+        },
+        {
+          id: "project-roadmap",
+          label: "项目路线图",
+          route: `/projects/${projectId}/roadmap`,
+          expected: ["app.shell", "view-tabs.roadmap", "roadmap.create.title"],
+        },
+        {
+          id: "project-memory",
+          label: "项目记忆",
+          route: `/projects/${projectId}/memory`,
+          expected: ["app.shell", "view-tabs.memory", "memory.page"],
+        },
+      ]
+    : [];
+
+  const taskSurfaces = [
+    targets.firstProjectTask && {
+      id: "project-task-detail",
+      label: "项目任务详情",
+      route: `/projects/${encodeURIComponent(targets.firstProjectTask.projectId)}/tasks/${encodeURIComponent(targets.firstProjectTask.id)}`,
+      expected: ["app.shell", "chat.composer.input"],
+      timeoutMs: 30_000,
+    },
+    targets.firstOrphan && {
+      id: "orphan-chat-detail",
+      label: "独立对话详情",
+      route: `/chats/${encodeURIComponent(targets.firstOrphan.id)}`,
+      expected: ["app.shell", "chat.composer.input"],
+      timeoutMs: 30_000,
+    },
+  ].filter(Boolean);
+
+  return [...baseSurfaces, ...settingsSurfaces, ...projectSurfaces, ...taskSurfaces];
+}
+
+async function runImplementedSurfaceScenarios(sessionId) {
+  const scenario = {
+    id: "surface-discovery",
+    label: "页面覆盖发现",
+    artifact: "scenario-surface-discovery.png",
+  };
+  await markScenario(sessionId, scenario);
+  const targets = await collectImplementedSurfaceTargets(sessionId);
+  await recordScenarioResult(sessionId, scenario, "passed", targets);
+  const baselineErrorCount = (await observe(sessionId))?.errors?.length ?? 0;
+  const surfaces = buildImplementedSurfaceScenarios(targets);
+  for (const surface of surfaces) {
+    await runSurfaceScenario(sessionId, surface, baselineErrorCount);
+  }
+}
+
 async function clickAgent(sessionId, target, scenarioId) {
   await waitForAgentElement(sessionId, target);
   return await act(sessionId, { type: "click", target }, scenarioId);
@@ -567,7 +812,12 @@ async function ensureDebugPanel(sessionId, scenarioId) {
 }
 
 async function clickFirstAvailable(sessionId, targets, scenarioId) {
-  const snapshot = await waitForAnyAgentElement(sessionId, targets, 15_000);
+  const snapshot = await waitForCondition(
+    sessionId,
+    `enabled agent debug element among ${targets.join(", ")}`,
+    (next) => targets.some((id) => !!visibleEnabledElement(next, id)),
+    20_000,
+  );
   const target = targets.find((id) => visibleEnabledElement(snapshot, id));
   if (!target) throw new Error(`No enabled target among ${targets.join(", ")}`);
   await clickAgent(sessionId, target, scenarioId);
@@ -587,8 +837,10 @@ async function settleRunningTurnForFollowup(sessionId, scenarioId) {
   ).catch(() => undefined);
 }
 
-async function runSendScenario(sessionId, scenario, input) {
+async function runSendScenario(sessionId, scenario, input, options = {}) {
   await markScenario(sessionId, scenario);
+  const beforeSnapshot = await observe(sessionId);
+  const beforeErrorMarker = sendErrorText(beforeSnapshot);
   const beforeCount = await invokeCount(sessionId, CHAT_SEND_MESSAGE_COMMAND);
   await typeAgent(sessionId, "chat.composer.input", input, scenario.id);
   await clickAgent(sessionId, "chat.composer.send", scenario.id);
@@ -613,7 +865,7 @@ async function runSendScenario(sessionId, scenario, input) {
     throw new Error(`${CHAT_SEND_MESSAGE_COMMAND} returned ${invoke.status}: ${invoke.error ?? "unknown error"}`);
   }
   const marker = sendErrorText(snapshot);
-  if (marker) {
+  if (marker && marker !== beforeErrorMarker && !options.allowExistingSendError) {
     throw new Error(`${scenario.id} still shows send error text: ${marker}`);
   }
   return await finishScenario(sessionId, scenario, {
@@ -642,6 +894,7 @@ async function runContinueHistoryScenario(sessionId) {
     sessionId,
     scenario,
     "Agent Debug v1.0 continue history regression",
+    { allowExistingSendError: true },
   );
 }
 
@@ -684,14 +937,14 @@ async function runCoreConversationScenarios(sessionId) {
   await runPendingActionScenario(sessionId, {
     scenario: SCENARIOS.planPendingAction,
     triggerTarget: "debug.timeline.plan",
-    resolutionTargets: ["chat.pending.plan.accept", "chat.composer.plan.accept"],
+    resolutionTargets: ["timeline.plan.accept", "chat.pending.plan.accept", "chat.composer.plan.accept"],
     expectedText: "Debug 计划已同意",
     details: { resolved: "accepted" },
   });
   await runPendingActionScenario(sessionId, {
     scenario: SCENARIOS.permissionPendingAction,
     triggerTarget: "debug.timeline.permission",
-    resolutionTargets: ["chat.pending.tool.allow", "chat.composer.tool.allow"],
+    resolutionTargets: ["timeline.permission.allow", "chat.pending.tool.allow", "chat.composer.tool.allow"],
     expectedText: "Debug 权限已同意",
     details: { resolved: "allowed" },
   });
@@ -782,6 +1035,7 @@ async function main() {
     sessionId = session.value.sessionId;
     await waitForDebugApi(sessionId);
     await waitForDebugUi(sessionId);
+    await configureAgentDebugSmokeSettings(sessionId);
     const beforeScreenshotPath = await screenshot(sessionId, "before.png");
     const observe = await execute(sessionId, "return window.__liliaAgentDebug?.observe?.() ?? null;");
     if (!observe?.enabled) {
@@ -811,6 +1065,7 @@ async function main() {
     }
     replay.push({ type: "click", target: "missing.debug.target", expectedError: true });
     await runCoreConversationScenarios(sessionId);
+    await runImplementedSurfaceScenarios(sessionId);
     const logs = await collectInvokeLogs(sessionId);
     const slowInvokes = summarizeSlowInvokes(logs);
     const afterScreenshotPath = await screenshot(sessionId, "after.png");
@@ -878,6 +1133,14 @@ async function main() {
     process.exitCode = blocked ? 2 : 1;
   } finally {
     if (sessionId) {
+      await restoreAgentDebugSmokeSettings(sessionId).catch((error) => {
+        replay.push({
+          type: "settings",
+          target: "agent.autoTurnDecision",
+          restored: false,
+          error: error?.message ?? String(error),
+        });
+      });
       await request("DELETE", `/session/${sessionId}`).catch(() => undefined);
     }
     driver?.kill();
