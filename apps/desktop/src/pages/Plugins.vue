@@ -801,6 +801,7 @@ function canOpenConfig(entry: PluginEntry) {
             v-if="tab === 'claude-skills'"
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="plugins.skill.create"
             @click="openCreate"
           >
             <Plus :size="14" aria-hidden="true" />
@@ -819,6 +820,7 @@ function canOpenConfig(entry: PluginEntry) {
                 type="search"
                 placeholder="搜索当前列表"
                 aria-label="搜索插件和技能"
+                data-agent-id="plugins.search"
               />
             </label>
           </div>
@@ -838,6 +840,7 @@ function canOpenConfig(entry: PluginEntry) {
                 type="button"
                 class="plugins-browser__row ui-list-item"
                 :class="{ 'is-active': selectedKey === entry.key, 'is-disabled': !entry.item.enabled }"
+                :data-agent-id="`plugins.entry.${entry.key}`"
                 :title="entry.title"
                 @click="selectEntry(entry)"
               >
@@ -860,6 +863,7 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canCreateInDetail()"
                   type="button"
                   class="ui-button ui-button--ghost"
+                  data-agent-id="plugins.detail.create"
                   @click="openDetailCreate"
                 >
                   <Plus :size="14" aria-hidden="true" />
@@ -869,6 +873,7 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canOpenConfig(selectedEntry)"
                   type="button"
                   class="ui-button ui-button--ghost"
+                  data-agent-id="plugins.detail.open-config"
                   @click="openSelectedConfig(selectedEntry)"
                 >
                   <FolderOpen :size="14" aria-hidden="true" />
@@ -878,6 +883,7 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canEdit(selectedEntry)"
                   type="button"
                   class="ui-button ui-button--ghost"
+                  data-agent-id="plugins.detail.edit"
                   @click="editSelected(selectedEntry)"
                 >
                   <Pencil :size="14" aria-hidden="true" />
@@ -887,6 +893,7 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canRemove(selectedEntry)"
                   type="button"
                   class="ui-button ui-button--ghost ui-button--danger"
+                  data-agent-id="plugins.detail.remove"
                   @click="removeSelected(selectedEntry)"
                 >
                   <Trash2 :size="14" aria-hidden="true" />
@@ -896,6 +903,7 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canToggle(selectedEntry)"
                   type="button"
                   class="ui-button ui-button--primary"
+                  data-agent-id="plugins.detail.toggle"
                   @click="toggleSelected(selectedEntry)"
                 >
                   <Check :size="14" aria-hidden="true" />
@@ -994,6 +1002,7 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canCreateInDetail()"
                   type="button"
                   class="ui-button ui-button--ghost"
+                  data-agent-id="plugins.detail.create"
                   @click="openDetailCreate"
                 >
                   <Plus :size="14" aria-hidden="true" />

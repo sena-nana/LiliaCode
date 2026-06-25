@@ -11,6 +11,7 @@ use crate::agent_timeline::AgentTimelineEvent;
 use crate::agent_timeline_contract;
 use crate::chat::runner::locate_agent_runner;
 use crate::chat::state::try_normalize_backend;
+use crate::process_command::hide_console_window;
 use crate::provider::{resolve_connection_for, validate_backend_ready_for_send, ConnectionMode};
 use crate::quota_usage_contract::{
     default_usage_stats_days, is_rate_limit_reset_credit_consume_outcome,
@@ -332,7 +333,9 @@ fn run_codex_account_quota_utility_output<R: Runtime>(
     args: &[String],
 ) -> Result<String, String> {
     let script = locate_codex_account_quota_utility(app);
-    let output = Command::new("node")
+    let mut command = Command::new("node");
+    hide_console_window(&mut command);
+    let output = command
         .arg(script)
         .args(args)
         .env_remove("OPENAI_BASE_URL")
@@ -1253,7 +1256,13 @@ pub fn quota_usage_get_stats(
 }
 
 #[tauri::command]
-pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuotaStatus {
+pub async fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuotaStatus {
+    tauri::async_runtime::spawn_blocking(move || quota_usage_get_codex_account_status_sync(app))
+        .await
+        .expect("quota_usage_get_codex_account_status blocking task panicked")
+}
+
+fn quota_usage_get_codex_account_status_sync(app: AppHandle) -> CodexAccountQuotaStatus {
     let connection = resolve_connection_for(&app, BACKEND_CODEX);
     if connection.mode != ConnectionMode::CodexAccount {
         return codex_account_quota_unavailable(connection.mode, None);
@@ -1265,7 +1274,18 @@ pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuota
 }
 
 #[tauri::command]
-pub fn quota_usage_consume_codex_rate_limit_reset_credit(
+pub async fn quota_usage_consume_codex_rate_limit_reset_credit(
+    input: CodexRateLimitResetCreditConsumeInput,
+    app: AppHandle,
+) -> Result<CodexRateLimitResetCreditConsumeResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        quota_usage_consume_codex_rate_limit_reset_credit_sync(input, app)
+    })
+    .await
+    .expect("quota_usage_consume_codex_rate_limit_reset_credit blocking task panicked")
+}
+
+fn quota_usage_consume_codex_rate_limit_reset_credit_sync(
     input: CodexRateLimitResetCreditConsumeInput,
     app: AppHandle,
 ) -> Result<CodexRateLimitResetCreditConsumeResult, String> {

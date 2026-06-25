@@ -24,27 +24,6 @@ const conversationSearchDepsLoad = createLazyLoadState<ConversationSearchDeps>((
     },
   )
 );
-let conversationSearchWarm: Promise<void> | null = null;
-
-async function loadConversationSearchDeps(): Promise<ConversationSearchDeps> {
-  return conversationSearchDepsLoad.load();
-}
-
-export async function warmComposerConversationSearch(): Promise<void> {
-  if (!conversationSearchWarm) {
-    conversationSearchWarm = measurePerfAsync(
-      "chat-composer.conversation-search.prewarm",
-      async () => {
-        const deps = await loadConversationSearchDeps();
-        await deps.ensureSessionSearchCorpusLoaded();
-      },
-    ).catch((err) => {
-      conversationSearchWarm = null;
-      throw err;
-    });
-  }
-  return conversationSearchWarm;
-}
 
 function conversationReferenceFromSearchResult(result: SearchResult): ChatConversationReference {
   return {
@@ -110,7 +89,7 @@ export function useComposerConversationSearch(options: {
     loading.value = true;
     error.value = null;
     try {
-      const deps = await loadConversationSearchDeps();
+      const deps = await conversationSearchDepsLoad.load();
       await measurePerfAsync(
         "chat-composer.conversation-search.hydrate",
         () => deps.ensureSessionSearchCorpusLoaded(),

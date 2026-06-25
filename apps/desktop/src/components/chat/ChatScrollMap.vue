@@ -263,10 +263,11 @@ defineExpose({ show });
       <button
         v-for="marker in markersForMetrics(metrics)"
         :key="`${marker.kind}:${marker.id}:${marker.tooltipItems.length}`"
-        type="button"
-        class="chat-scroll-map__marker"
-        :class="`chat-scroll-map__marker--${marker.kind}`"
-        :style="markerButtonStyle(marker)"
+      type="button"
+      class="chat-scroll-map__marker"
+      :class="`chat-scroll-map__marker--${marker.kind}`"
+      :data-agent-id="`chat.scroll-map.marker.${marker.kind}.${marker.id}`"
+      :style="markerButtonStyle(marker)"
         :aria-label="markerAriaLabel(marker)"
         :aria-describedby="markerTooltipId(marker)"
         @pointerdown.stop

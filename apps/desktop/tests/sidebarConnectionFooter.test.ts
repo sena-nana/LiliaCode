@@ -1,8 +1,11 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CHAT_CHECK_ENV_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
   QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
 } from "@lilia/contracts";
 import SidebarConnectionFooter from "../src/components/sidebar/SidebarConnectionFooter.vue";
@@ -22,6 +25,7 @@ async function renderFooter(initialRoute = "/") {
   await router.push(initialRoute);
   await router.isReady();
   await useConnectionStatus({ probe: false }).refresh(false);
+  mockInvoke.mockClear();
 
   return render(SidebarConnectionFooter, {
     global: {
@@ -103,11 +107,51 @@ function refreshText(resetsAt: number): string {
   return `刷新 ${formatUnixSeconds(resetsAt)}`;
 }
 
+function invokeCount(command: string): number {
+  return mockInvoke.mock.calls.filter(([cmd]) => cmd === command).length;
+}
+
 function popoverMeters(): HTMLElement[] {
   return Array.from(document.body.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
 }
 
 describe("SidebarConnectionFooter provider quota badge", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("delays startup connection and remote quota refreshes", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    vi.stubGlobal("cancelAnimationFrame", undefined);
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAccountQuotaStatus(officialQuota());
+
+    await renderFooter();
+
+    expect(invokeCount(CHAT_CHECK_ENV_COMMAND)).toBe(0);
+    expect(invokeCount(PROVIDER_GET_ACTIVE_BACKEND_COMMAND)).toBe(0);
+    expect(invokeCount(PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND)).toBe(0);
+    expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_200);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(invokeCount(CHAT_CHECK_ENV_COMMAND)).toBe(1);
+    expect(invokeCount(PROVIDER_GET_ACTIVE_BACKEND_COMMAND)).toBe(1);
+    expect(invokeCount(PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND)).toBe(0);
+    expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(2_500);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(invokeCount(PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND)).toBe(1);
+    expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(1);
+  });
+
   it("does not show quota rings for Claude", async () => {
     setMockActiveBackend("claude");
     const view = await renderFooter();
@@ -185,14 +229,18 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     const view = await renderFooter();
     const provider = providerBadge(view.container);
 
+    expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
+    expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(0);
+
+    await fireEvent.mouseEnter(provider);
+
     await waitFor(() => {
+      expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(1);
       expect(view.container.querySelectorAll(".sb-quota-ring")).toHaveLength(2);
     });
     const rings = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-quota-ring"));
     expect(rings[0]).toHaveStyle({ "--quota-progress": "58" });
     expect(rings[1]).toHaveStyle({ "--quota-progress": "9" });
-
-    await fireEvent.mouseEnter(provider);
 
     await view.findByRole("tooltip");
     expect(view.queryByText("Codex 官方账号")).not.toBeInTheDocument();

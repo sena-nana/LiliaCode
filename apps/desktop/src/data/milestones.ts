@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri/runtime";
 import { ref } from "vue";
 import {
   MILESTONE_CREATE_COMMAND,

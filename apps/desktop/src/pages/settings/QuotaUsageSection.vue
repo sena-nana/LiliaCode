@@ -578,7 +578,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card quota-panel">
+  <div class="card quota-panel" data-agent-id="settings.quota">
     <div class="quota-panel__head">
       <h2>
         <span class="card-h2__title">
@@ -589,6 +589,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         class="ui-button ui-button--ghost quota-panel__refresh"
+        data-agent-id="settings.quota.refresh"
         :disabled="refreshing"
         @click="refreshAll"
       >
@@ -604,6 +605,7 @@ onBeforeUnmount(() => {
           :key="opt.value"
           type="button"
           role="radio"
+          :data-agent-id="`settings.quota.backend.${opt.value}`"
           :aria-checked="selectedBackend === opt.value"
           :class="{ 'is-active': selectedBackend === opt.value }"
           :disabled="loading"
@@ -618,6 +620,7 @@ onBeforeUnmount(() => {
           :key="opt.value"
           type="button"
           role="radio"
+          :data-agent-id="`settings.quota.days.${opt.value}`"
           :aria-checked="selectedDays === opt.value"
           :class="{ 'is-active': selectedDays === opt.value }"
           :disabled="loading"
@@ -648,6 +651,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="ui-button ui-button--ghost quota-official__reset"
+          data-agent-id="settings.quota.reset-credit.consume"
           :disabled="!canConsumeResetCredit"
           @click="consumeResetCredit"
         >

@@ -1,0 +1,9 @@
+{
+  "commands": {
+    "status": "agent_debug_status",
+    "logs": "agent_debug_logs",
+    "runtimeSnapshot": "agent_debug_runtime_snapshot",
+    "recordAction": "agent_debug_record_action",
+    "resetState": "agent_debug_reset_state"
+  }
+}

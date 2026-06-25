@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 
 use crate::chat::runner::locate_agent_runner;
+use crate::process_command::hide_console_window;
 use crate::BACKEND_CODEX;
 
 use super::config::{
@@ -71,7 +72,9 @@ fn request_codex_account_spark_with_timeout<R: Runtime>(
         instruction,
         timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
     };
-    let mut child = Command::new("node")
+    let mut command = Command::new("node");
+    hide_console_window(&mut command);
+    let mut child = command
         .arg(&runner)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

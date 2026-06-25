@@ -157,28 +157,31 @@ onBeforeUnmount(() => {
 
     <div class="settings-row">
       <div class="settings-row__label">基础 URL</div>
-      <input
-        type="text"
-        class="ui-input"
-        placeholder="https://api.example.com/v1"
-        :value="assistantAIForm.baseUrl ?? ''"
+          <input
+            type="text"
+            class="ui-input"
+            placeholder="https://api.example.com/v1"
+            data-agent-id="settings.assistant-ai.base-url"
+            :value="assistantAIForm.baseUrl ?? ''"
         @input="(e) => (assistantAIForm.baseUrl = (e.target as HTMLInputElement).value)"
       />
     </div>
     <div class="settings-row">
       <div class="settings-row__label">API 密钥</div>
       <div style="display: flex; gap: 8px; align-items: center;">
-        <input
-          type="password"
-          class="ui-input"
-          :placeholder="assistantAIForm.hasApiKey ? '已保存，留空保留现有值' : 'sk-...'"
-          :value="assistantAIForm.apiKey ?? ''"
+          <input
+            type="password"
+            class="ui-input"
+            :placeholder="assistantAIForm.hasApiKey ? '已保存，留空保留现有值' : 'sk-...'"
+            data-agent-id="settings.assistant-ai.api-key"
+            :value="assistantAIForm.apiKey ?? ''"
           @input="(e) => (assistantAIForm.apiKey = (e.target as HTMLInputElement).value)"
         />
         <button
-          type="button"
-          class="ui-button ui-button--ghost"
-          :disabled="savingAssistantAI || !assistantAIForm.hasApiKey"
+            type="button"
+            class="ui-button ui-button--ghost"
+            data-agent-id="settings.assistant-ai.clear-key"
+            :disabled="savingAssistantAI || !assistantAIForm.hasApiKey"
           title="清除已保存的 API 密钥"
           @click="clearAssistantAIKey"
         >
@@ -189,11 +192,12 @@ onBeforeUnmount(() => {
     </div>
     <div class="settings-row">
       <div class="settings-row__label">模型</div>
-      <input
-        type="text"
-        class="ui-input"
-        placeholder="gpt-4o-mini"
-        :value="assistantAIForm.model ?? ''"
+          <input
+            type="text"
+            class="ui-input"
+            placeholder="gpt-4o-mini"
+            data-agent-id="settings.assistant-ai.model"
+            :value="assistantAIForm.model ?? ''"
         @input="(e) => (assistantAIForm.model = (e.target as HTMLInputElement).value)"
       />
     </div>
@@ -201,19 +205,21 @@ onBeforeUnmount(() => {
       <div class="settings-row__label">Codex 官方账号</div>
       <div class="ui-segmented" role="radiogroup" aria-label="Codex 官方账号 Spark 辅助模型">
         <button
-          type="button"
-          role="radio"
-          :aria-checked="assistantAIForm.codexAccountSparkEnabled"
-          :class="{ 'is-active': assistantAIForm.codexAccountSparkEnabled }"
+            type="button"
+            role="radio"
+            :aria-checked="assistantAIForm.codexAccountSparkEnabled"
+            data-agent-id="settings.assistant-ai.codex-spark.on"
+            :class="{ 'is-active': assistantAIForm.codexAccountSparkEnabled }"
           @click="assistantAIForm.codexAccountSparkEnabled = true"
         >
           使用 Spark
         </button>
         <button
-          type="button"
-          role="radio"
-          :aria-checked="!assistantAIForm.codexAccountSparkEnabled"
-          :class="{ 'is-active': !assistantAIForm.codexAccountSparkEnabled }"
+            type="button"
+            role="radio"
+            :aria-checked="!assistantAIForm.codexAccountSparkEnabled"
+            data-agent-id="settings.assistant-ai.codex-spark.off"
+            :class="{ 'is-active': !assistantAIForm.codexAccountSparkEnabled }"
           @click="assistantAIForm.codexAccountSparkEnabled = false"
         >
           关闭
@@ -228,19 +234,21 @@ onBeforeUnmount(() => {
           <KeyRound :size="12" aria-hidden="true" />
           {{ assistantAIForm.hasApiKey ? "密钥已保存" : "未保存密钥" }}
         </span>
-        <button
-          type="button"
-          class="ui-button ui-button--ghost"
-          :disabled="savingAssistantAI || testingAssistantAI"
+          <button
+            type="button"
+            class="ui-button ui-button--ghost"
+            data-agent-id="settings.assistant-ai.save"
+            :disabled="savingAssistantAI || testingAssistantAI"
           @click="saveAssistantAI"
         >
           <Save :size="12" aria-hidden="true" />
           {{ savingAssistantAI ? "保存中…" : "保存" }}
         </button>
-        <button
-          type="button"
-          class="ui-button ui-button--ghost"
-          :disabled="testingAssistantAI || savingAssistantAI"
+          <button
+            type="button"
+            class="ui-button ui-button--ghost"
+            data-agent-id="settings.assistant-ai.test"
+            :disabled="testingAssistantAI || savingAssistantAI"
           title="GET {baseUrl}/models，不消耗 token"
           @click="testAssistantAI"
         >
@@ -275,20 +283,22 @@ onBeforeUnmount(() => {
       <div class="settings-row__label">启用状态</div>
       <div class="ui-segmented" role="radiogroup" aria-label="新对话建议">
         <button
-          type="button"
-          role="radio"
-          :aria-checked="suggestionSettings.enabled"
-          :class="{ 'is-active': suggestionSettings.enabled }"
+            type="button"
+            role="radio"
+            :aria-checked="suggestionSettings.enabled"
+            data-agent-id="settings.suggestions.enabled.on"
+            :class="{ 'is-active': suggestionSettings.enabled }"
           :disabled="savingSuggestions"
           @click="setSuggestionPatch({ enabled: true })"
         >
           开启
         </button>
         <button
-          type="button"
-          role="radio"
-          :aria-checked="!suggestionSettings.enabled"
-          :class="{ 'is-active': !suggestionSettings.enabled }"
+            type="button"
+            role="radio"
+            :aria-checked="!suggestionSettings.enabled"
+            data-agent-id="settings.suggestions.enabled.off"
+            :class="{ 'is-active': !suggestionSettings.enabled }"
           :disabled="savingSuggestions"
           @click="setSuggestionPatch({ enabled: false })"
         >
@@ -303,10 +313,11 @@ onBeforeUnmount(() => {
         <button
           v-for="opt in suggestionSourceOptions"
           :key="opt.value"
-          type="button"
-          role="radio"
-          :aria-checked="suggestionSettings.source === opt.value"
-          :class="{ 'is-active': suggestionSettings.source === opt.value }"
+            type="button"
+            role="radio"
+            :aria-checked="suggestionSettings.source === opt.value"
+            :data-agent-id="`settings.suggestions.source.${opt.value}`"
+            :class="{ 'is-active': suggestionSettings.source === opt.value }"
           :disabled="savingSuggestions"
           @click="setSuggestionPatch({ source: opt.value })"
         >

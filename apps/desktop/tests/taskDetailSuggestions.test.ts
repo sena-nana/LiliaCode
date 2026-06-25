@@ -139,6 +139,8 @@ describe("TaskDetail conversation suggestions", () => {
             url: "https://github.com/sena-nana/LiliaCode/pull/12",
           },
         ],
+        localGitContexts: [],
+        codexThreads: [],
         summary: "跟进 GitHub 建议来源",
         reason: "近期 PR 活动触发了新对话建议。",
         prompt: "请继续跟进 PR #12 的建议来源展示。",
@@ -156,6 +158,42 @@ describe("TaskDetail conversation suggestions", () => {
     await fireEvent.click(view.getByText("跟进 GitHub 建议来源"));
 
     expect(getComposerTextbox(view)).toHaveTextContent("请继续跟进 PR #12 的建议来源展示。");
+  });
+
+  it("Codex thread 建议会展示 thread 来源且点击填入 prompt", async () => {
+    setMockConversationSuggestions([
+      {
+        id: "sg-codex-thread",
+        projectId: "lilia",
+        taskIds: [],
+        source: "codex-thread",
+        githubActivities: [],
+        localGitContexts: [],
+        codexThreads: [
+          {
+            id: "thread-1",
+            title: "补齐 Codex 建议来源",
+            updatedAt: Date.now(),
+            preview: "继续扩展 conversation suggestions",
+          },
+        ],
+        summary: "继续 Codex thread",
+        reason: "最近 Codex thread 还有可继续处理的上下文。",
+        prompt: "请基于 Codex thread 继续补齐 conversation suggestions。",
+        generatedAt: Date.now(),
+      },
+    ]);
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await waitFor(() => {
+      expect(view.getByText("继续 Codex thread")).toBeInTheDocument();
+      expect(view.getByText("Codex thread · 补齐 Codex 建议来源")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByText("继续 Codex thread"));
+
+    expect(getComposerTextbox(view)).toHaveTextContent("请基于 Codex thread 继续补齐 conversation suggestions。");
   });
 
   it("点击来点灵感会强制刷新新对话建议并显示来源加载文案", async () => {

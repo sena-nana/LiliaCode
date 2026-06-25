@@ -974,6 +974,25 @@ describe("ChatComposer", () => {
     ]);
   });
 
+  it("输入 /frontend 后直接以 task workflow 发送", async () => {
+    const view = renderComposer({ state: codexState, projectCwd });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "调整按钮布局\n/fr");
+    await flushContextSearch();
+    await fireEvent.click(await view.findByRole("option", { name: /\/frontend/ }));
+
+    expect(view.emitted("send")?.[0]).toEqual([
+      "调整按钮布局",
+      [],
+      [],
+      { type: "lilia_task_workflow", kind: "frontend" },
+    ]);
+    expect(view.emitted("start-lilia-review")).toBeUndefined();
+    expect(view.emitted("execute-slash-command")).toBeUndefined();
+    expect(composerText(input)).toBe("");
+  });
+
   it("Codex review 斜杠命令支持对比分支和指定提交目标", async () => {
     const promptSpy = vi.spyOn(window, "prompt");
     promptSpy.mockReturnValueOnce("main");

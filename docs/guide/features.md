@@ -13,9 +13,10 @@
 - [x] MCP 基础接入：支持从 Agent 配置中发现并接入 MCP server。
 - [x] 统一交互协议：跨后端统一计划确认、工具确认和 Agent 提问。
 - [x] 统一 Lilia 协议：界面层只暴露 Lilia 操作，用户可见工作流和运行时命令在内部按 Claude / Codex provider 分发。
+- [x] 内置工作流类型：将通用任务、前端、重构、测试验证、文档提示词、Git 发布、架构记忆等 Lilia 内置工作流作为可持久化 `ChatWorkflow` 路由。
 - [x] 智能模型选择：在当前后端内根据工作流、计划模式、上下文规模和 provider 能力自动选择模型级别与思考强度，并允许发送前手动覆盖。
 - [x] 文件上下文：支持通过 `@` 提及文件、目录和图片等上下文。
-- [x] 斜杠命令：支持在输入框通过 `/` 打开命令面板，执行内置命令和 `.lilia/commands` 项目命令，并把执行结果回写到任务 timeline；还不承诺完整代理后端原生命令。
+- [x] 斜杠命令：支持在输入框通过 `/` 打开命令面板，执行内置命令和 `.lilia/commands` 项目命令，并把执行结果回写到任务 timeline；`v1.0` 稳定当前 Lilia 命令路径，完整代理后端原生命令归入 `v2.0` 对话级补全。
 
 ## Claude Code 接入
 
@@ -24,11 +25,11 @@
 - [x] Claude 历史导入：搜索、预览并导入本地 Claude 历史会话。
 - [x] Claude Skills：管理用户级和项目级 Claude Skills。
 - [x] Claude MCP 管理：在界面中增删改外部 Claude MCP server。
-- [x] Claude Lilia 协议：支持审查、修复建议、批量应用、运行时命令会话分叉和 Goal / 诊断类本地落点。
+- [x] Claude Lilia 协议：支持内置任务工作流、审查、修复建议、批量应用、运行时命令会话分叉和 Goal / 诊断类本地落点。
 - [x] Claude 思考强度：发送时可自动或手动设置 reasoning effort，并映射为 Claude Agent SDK `effort` / adaptive thinking。
-- [ ] Claude Plugins：完整管理 Claude Plugin 的安装、启停、更新和作用域。
-- [x] Claude Hooks：支持 Hook 注入、事件上报与 timeline 记录；完整能力治理与统一展示闭环仍在补齐中。
-- [ ] Claude Subagents：支持 Claude Code Subagents 或自定义 Agent 的展示与调度。
+- [ ] Claude Plugins：完整管理 Claude Plugin 的安装、启停、更新和作用域，目标阶段为 `v2.0`。
+- [x] Claude Hooks：支持 Hook 注入、事件上报与 timeline 记录；`v1.0` 稳定当前管理面，完整能力治理与统一展示闭环归入 `v2.0`。
+- [ ] Claude Subagents：支持 Claude Code Subagents 或自定义 Agent 的展示与调度，目标阶段为 `v2.0`。
 
 ## Codex 接入
 
@@ -38,17 +39,18 @@
 - [x] Codex MCP 管理：读取并增删改启停用户级 stdio Codex MCP server，HTTP / OAuth / 未知 transport 只读展示。
 - [x] Codex 配置档案：支持 profiles、reasoning effort、runtime workspace roots、受控 permissions 和项目级默认。
 - [x] Codex 思考强度：发送时可自动或手动设置 reasoning effort，计划模式使用本轮已选 effort。
-- [x] Codex Lilia 适配：支持审查、修复建议、批量应用、压缩、Goal、memory、配置诊断和后台终端清理，会话分叉通过运行时命令处理。
-- [x] 内置浏览器交互：Codex 可打开和导航 IAB 窗口，采集页面标题 / URL / 截图元数据，并把结果送回运行中的 turn 或作为消息附件；截图采集目前以 Windows 为主。
+- [x] Codex Lilia 适配：支持内置任务工作流、审查、修复建议、批量应用、压缩、Goal、memory、配置诊断和后台终端清理，会话分叉通过运行时命令处理。
+- [x] 内置浏览器交互：Codex 可打开和导航 IAB 窗口，采集页面标题 / URL / 截图元数据，并把结果送回运行中的 turn 或作为消息附件；`v1.0` 稳定 Windows 首发路径，后续扩展归入 `v2.0`。
 
 ## LiliaCode 特色功能
 
-- [x] 项目级管理：管理本地项目和 GitHub clone 项目，项目总览可查看任务状态分布、最近活跃、进行中 / 阻塞数量、会话 / 任务统计和已知用量成本。
+- [x] 项目级管理：管理本地项目和 GitHub clone 项目，项目总览可查看任务状态分布、最近活跃、进行中 / 阻塞数量、会话 / 任务统计和已知用量成本；高级度量解释和项目级资产归入 `v3.0`。
 - [x] 会话任务化：会话以 Task 持久化，支持草稿提升、项目 / 孤儿会话、归档、置顶和排序。
-- [x] 任务树：支持父子关系、依赖维护、树形拖拽和阻塞状态提示；自动驱动、阻塞调度和失败重排闭环尚未在会话主链路中完整打通。
-- [ ] 自动编排：已具备 automation 执行框架，通向会话主路径的多 agent 自动调度与策略闭环仍未完整统一。
-- [x] 插件系统：MCP / Skill / Plugin / Hook 的管理与运行时注入能力已落地，能力治理与行为策略一致化仍需持续完善。
-- [x] Memory：支持手动保存用户级和项目级记忆，并在会话启动时按 Layer 1 基线注入；外置模型检索与机会窗口引导尚未实现。
-- [x] Roadmap / Milestone：项目路线图、里程碑与任务里程碑关联的数据链路已落地；当前主要待补齐的是度量解释性和高级汇总视图体验。
-- [ ] 辅助 Agent：在会话中运行低成本 Agent，实时监督和辅助主 Agent。
+- [x] 任务树：支持父子关系、依赖维护、树形拖拽和阻塞状态提示；`v1.0` 稳定展示和基础维护，自动驱动、阻塞调度、任务分配和失败重排闭环归入 `v2.0`。
+- [x] 内置 Lilia 工作流类型：Lilia 自带工作流目录通过 `lilia_task_workflow.kind` 路由，不作为插件 / 技能页里的外部 Skill 管理。
+- [ ] 自动编排：已具备 automation 执行框架；通向会话主路径的多 Agent 自动调度与策略闭环目标阶段为 `v2.0`，cron / webhook / 子流程等高级能力归入 `v3.0`。
+- [x] 插件系统：MCP / Skill / Plugin / Hook 的管理与运行时注入能力已落地；`v1.0` 稳定当前管理面，能力治理与行为策略一致化归入 `v2.0`，可分发插件 / 工作流归入 `v3.0`。
+- [x] Memory：支持手动保存用户级和项目级记忆，并在会话启动时按 Layer 1 基线注入；`v2.0` 补齐查看、过滤和机会窗口引导，`v3.0` 补齐外置模型检索与质量评估。
+- [x] Roadmap / Milestone：项目路线图、里程碑与任务里程碑关联的数据链路已落地；`v1.0` 稳定当前项目路线图入口，`v3.0` 补齐度量解释性和高级汇总视图体验。
+- [ ] 辅助 Agent：在会话中运行低成本 Agent，实时监督和辅助主 Agent，目标阶段为 `v2.0`。
 - [x] 内置 Lilia 协议：运行时只保留单一内置协议路径。

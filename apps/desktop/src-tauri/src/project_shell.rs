@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::process_command::hide_console_window;
 use crate::provider::CodexProfileSettings;
 use crate::settings_store::{load_store_value, save_store_value};
 
@@ -135,6 +136,7 @@ pub(crate) fn run_git_clone(
     github_auth_header: Option<&str>,
 ) -> Result<(), String> {
     let mut command = Command::new("git");
+    hide_console_window(&mut command);
     command
         .arg("clone")
         .arg("--progress")
@@ -215,7 +217,9 @@ pub fn system_open_in_vscode(path: String) -> Result<(), String> {
     };
     let mut last_err: Option<String> = None;
     for cmd_name in candidates {
-        match Command::new(cmd_name)
+        let mut command = Command::new(cmd_name);
+        hide_console_window(&mut command);
+        match command
             .arg(p)
             .stdout(Stdio::null())
             .stderr(Stdio::null())

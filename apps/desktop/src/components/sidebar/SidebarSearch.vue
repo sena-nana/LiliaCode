@@ -112,6 +112,7 @@ onBeforeUnmount(() => {
     <button
       type="button"
       class="sb-icon-action"
+      data-agent-id="sidebar.search.open"
       title="搜索会话"
       aria-label="搜索会话"
       @click="openSearch"
@@ -136,6 +137,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="search-dropdown__action"
+          data-agent-id="sidebar.search.close"
           title="关闭搜索 (Esc)"
           aria-label="关闭搜索"
           @click="closeSearch"
@@ -152,6 +154,7 @@ onBeforeUnmount(() => {
             type="button"
             class="search-dropdown__item"
             :class="{ 'is-active': index === selectedIdx }"
+            :data-agent-id="`sidebar.search.result.${result.route}`"
             role="option"
             :aria-selected="index === selectedIdx"
             @mouseenter="selectedIdx = index"

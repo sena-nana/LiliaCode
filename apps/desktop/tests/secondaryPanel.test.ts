@@ -93,7 +93,12 @@ function getProjectRow(view: ReturnType<typeof render>, projectName: string): HT
 }
 
 function getConversationRow(view: ReturnType<typeof render>, title: string): HTMLElement {
-  const row = view.getByText(title).closest(".sb-tree__row");
+  const row = view.getAllByText(title)
+    .map((element) => element.closest(".sb-tree__row"))
+    .find((candidate) =>
+      candidate instanceof HTMLElement &&
+      !candidate.classList.contains("sb-tree__row--running-process")
+    );
   if (!(row instanceof HTMLElement)) {
     throw new Error(`未找到对话行：${title}`);
   }
@@ -101,10 +106,33 @@ function getConversationRow(view: ReturnType<typeof render>, title: string): HTM
 }
 
 async function findConversationRow(view: ReturnType<typeof render>, title: string): Promise<HTMLElement> {
+  let row: HTMLElement | null = null;
   await waitFor(() => {
-    expect(view.getByText(title)).toBeInTheDocument();
+    row = getConversationRow(view, title);
+    expect(row).toBeInTheDocument();
   });
-  return getConversationRow(view, title);
+  return row as HTMLElement;
+}
+
+function getRunningProcessRow(view: ReturnType<typeof render>, title: string): HTMLElement {
+  const section = view.getByText("进行中").closest(".sb-section--running-processes");
+  if (!(section instanceof HTMLElement)) {
+    throw new Error("未找到进行中进程区域");
+  }
+  const row = within(section).getByText(title).closest(".sb-tree__row--running-process");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`未找到运行中进程行：${title}`);
+  }
+  return row;
+}
+
+async function findRunningProcessRow(view: ReturnType<typeof render>, title: string): Promise<HTMLElement> {
+  let row: HTMLElement | null = null;
+  await waitFor(() => {
+    row = getRunningProcessRow(view, title);
+    expect(row).toBeInTheDocument();
+  });
+  return row as HTMLElement;
 }
 
 function box(top: number, bottom: number): DOMRect {
@@ -616,6 +644,24 @@ describe("SecondaryPanel project chat navigation", () => {
       expect(within(row).getByLabelText("对话中")).toHaveClass(
         "sb-tree__activity--running",
       );
+    });
+  });
+
+  it("统一列表运行进程可以从进行中区域强行停止", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    setMockChatRunning("t-003", true);
+    const view = await renderSecondaryPanel();
+
+    const row = await findRunningProcessRow(view, "整理窗口快捷键");
+    await fireEvent.click(within(row).getByRole("button", { name: "强行停止进程" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_INTERRUPT_TURN_COMMAND, {
+        taskId: "t-003",
+      }, undefined);
+    });
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: "强行停止进程" })).not.toBeInTheDocument();
     });
   });
 

@@ -146,9 +146,10 @@ function stringPayload(value: unknown): string {
     :aria-labelledby="titleId"
   >
     <button
-      type="button"
-      class="timeline-plan-card__head"
-      :aria-expanded="expanded"
+    type="button"
+    class="timeline-plan-card__head"
+    :data-agent-id="`timeline.plan.toggle.${event.id}`"
+    :aria-expanded="expanded"
       :aria-controls="detailsId"
       :aria-label="titleAriaLabel"
       :disabled="!canToggle"

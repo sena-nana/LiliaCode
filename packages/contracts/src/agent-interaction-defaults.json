@@ -3,6 +3,7 @@
   "debug": false,
   "permissionMode": "ask",
   "mainAgentPromptMode": "conservative",
+  "mainAgentCustomPrompt": "",
   "codexProfile": {
     "profile": "default",
     "model": null,

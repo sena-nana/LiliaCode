@@ -100,8 +100,14 @@ pub(super) fn build_cache_key(scope: &SuggestionScope, model: &ModelRequest) -> 
         .map(|context| context.fingerprint.as_str())
         .collect::<Vec<_>>()
         .join("||");
+    let codex_thread_fingerprint = scope
+        .codex_threads
+        .iter()
+        .map(|thread| thread.fingerprint.as_str())
+        .collect::<Vec<_>>()
+        .join("||");
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         scope.project_id.as_deref().unwrap_or("__recent__"),
         model.source.as_contract_value(),
         model.backend.as_deref().unwrap_or("assistant-ai"),
@@ -114,6 +120,7 @@ pub(super) fn build_cache_key(scope: &SuggestionScope, model: &ModelRequest) -> 
             .map(|repo| repo.full_name.as_str())
             .unwrap_or("__no_github_repo__"),
         github_fingerprint,
-        local_git_fingerprint
+        local_git_fingerprint,
+        codex_thread_fingerprint
     )
 }

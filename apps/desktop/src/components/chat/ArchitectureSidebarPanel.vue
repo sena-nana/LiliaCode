@@ -154,6 +154,7 @@ watch(() => props.projectId, loadArchitecture);
         <button
           type="button"
           class="ui-button ui-button--ghost architecture-panel__rollback"
+          data-agent-id="architecture.rollback"
           :disabled="rollingBack || changes.length === 0"
           @click="rollbackPreviousVersion"
         >

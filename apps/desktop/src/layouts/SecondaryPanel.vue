@@ -13,7 +13,9 @@ import {
   hydrateConversationActivities,
 } from "../composables/useConversationActivity";
 import { createConversationActivityStagePlan } from "../composables/conversationActivityStages";
+import { useSidebarRunningProcesses } from "../composables/useSidebarRunningProcesses";
 import SidebarConnectionFooter from "../components/sidebar/SidebarConnectionFooter.vue";
+import type { SidebarRunningProcessItem } from "../components/sidebar/sidebarTypes";
 import {
   ensureSidebarConversationsLoaded,
   listSidebarConversations,
@@ -41,6 +43,12 @@ const sidebarUnifiedSectionLoad = createLazyLoadState(() =>
     async () => (await import("../components/sidebar/SidebarUnifiedSection.vue")).default,
   )
 );
+const sidebarRunningProcessesSectionLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.running-processes-section.load",
+    async () => (await import("../components/sidebar/SidebarRunningProcessesSection.vue")).default,
+  )
+);
 const secondaryPanelGroupedHostLoad = createLazyLoadState(() =>
   measurePerfAsync(
     "sidebar.grouped-host.load",
@@ -58,6 +66,11 @@ const SidebarUnifiedSection = defineAsyncComponent({
   loader: () => sidebarUnifiedSectionLoad.load(),
 });
 
+const SidebarRunningProcessesSection = defineAsyncComponent({
+  suspensible: false,
+  loader: () => sidebarRunningProcessesSectionLoad.load(),
+});
+
 const SecondaryPanelGroupedHost = defineAsyncComponent({
   suspensible: false,
   loader: () => secondaryPanelGroupedHostLoad.load(),
@@ -71,6 +84,11 @@ const searchActive = ref(false);
 const unifiedLoaded = ref(false);
 const { sidebarDisplayMode } = useSidebarDisplayMode();
 const isUnifiedMode = computed(() => sidebarDisplayMode.value === "unified");
+const {
+  openRunningProcess,
+  stoppingTaskIds,
+  stopRunningProcess,
+} = useSidebarRunningProcesses({ router, reportError: reportProjectError });
 let activityHydrationTimer: number | null = null;
 let deferredActivityHydrationTimer: number | null = null;
 let mountIdleMeasureHandle: number | null = null;
@@ -143,6 +161,16 @@ async function loadUnifiedSidebarData() {
 }
 
 const unifiedConversations = computed(() => listSidebarConversations());
+const runningProcesses = computed<SidebarRunningProcessItem[]>(() =>
+  unifiedConversations.value
+    .filter((item) => conversationActivityForTask(item.taskId) === "running")
+    .map((item) => ({
+      taskId: item.taskId,
+      title: item.title,
+      projectName: item.projectName,
+      route: item.route,
+    }))
+);
 
 const currentTaskId = computed(() =>
   typeof route.params.taskId === "string" ? route.params.taskId : null,
@@ -253,12 +281,14 @@ function prefetchTaskDetailIntent(detail: string) {
 <template>
   <aside
     class="secondary-panel"
+    data-agent-id="sidebar"
   >
     <div class="sb-section sb-section--actions">
       <button
         v-if="!searchActive"
         type="button"
         class="sb-primary-btn"
+        data-agent-id="sidebar.new-chat"
         title="新对话"
         aria-label="新对话"
         @mouseenter="prefetchTaskDetailIntent('sidebar:new-chat')"
@@ -268,13 +298,22 @@ function prefetchTaskDetailIntent(detail: string) {
         <MessageSquarePlus :size="15" aria-hidden="true" />
         <span class="sb-primary-btn__label">新对话</span>
       </button>
-      <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
+    <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
     </div>
+
+    <SidebarRunningProcessesSection
+      v-if="isUnifiedMode && runningProcesses.length > 0"
+      :items="runningProcesses"
+      :stopping-task-ids="stoppingTaskIds"
+      @open="openRunningProcess"
+      @stop="stopRunningProcess"
+    />
 
     <div v-if="isUnifiedMode && projectError" class="sb-banner sb-banner--err">
       <AlertTriangle :size="12" aria-hidden="true" />
       <span class="sb-banner__msg">{{ projectError }}</span>
-      <button type="button" class="sb-icon-btn" @click="dismissError" aria-label="忽略错误">
+      <button type="button" class="sb-icon-btn" data-agent-id="sidebar.error.dismiss" @click="dismissError" aria-label="忽略错误">
+        <span class="sr-only">忽略错误</span>
         <X :size="12" aria-hidden="true" />
       </button>
     </div>

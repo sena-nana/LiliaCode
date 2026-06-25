@@ -76,18 +76,34 @@ GitHub Actions 会在 pull request 到 `main`、推送到 `main` 或手动触发
 推送到 `main` 后，文档站会继续由 Pages workflow 自动发布。发布 Windows 桌面安装包前，先同步并检查四处版本号：根 `package.json`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json`。版本号必须与发布 tag 去掉 `v` 后一致。
 
 ```bash
-yarn release:check --tag v0.1.0-alpha.1
+yarn release:check --tag v1.0.0-beta
 ```
 
 检查通过后推送 `v*` tag：
 
 ```bash
-git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
+git tag v1.0.0-beta && git push origin v1.0.0-beta
 ```
 
 Release workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri NSIS 安装包，并上传到 draft GitHub Release。安装包命名按 `LiliaCode_<version>_x64-setup.*` 检查；release draft 会附带首发检查清单和自动生成的变更记录。
 
-正式发布前必须在 Windows 环境下载 draft Release 里的安装包，确认安装、启动主窗口和卸载流程可完成。当前发布包没有代码签名，Windows SmartScreen 或安全软件警告属于预期风险；当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
+`release:check` 会自动核对版本号、Tauri Windows 打包配置、NSIS CLI 安装 hook、release notes 已知限制、安装包命名预期、Windows 安装验证记录入口，以及 release workflow 是否接入安装包 smoke。检查通过只代表发布元数据、记录入口和 workflow gate 已准备好。
+
+`release:smoke:windows` 可重复执行 Windows 安装包 smoke：从本地安装包或 draft Release 安装包出发，覆盖安装、启动、`liliacode <测试项目路径>` 和卸载后的 CLI 清理。CI 会在 draft Release 生成后自动运行：
+
+```bash
+yarn release:smoke:windows --tag v1.0.0-beta
+```
+
+本地复核已有安装包时传入安装包路径：
+
+```bash
+yarn release:smoke:windows --installer path/to/LiliaCode_1.0.0-beta_x64-setup.exe
+```
+
+正式发布前，仍需要在 Release 正文的 Windows 安装验证记录中写入验证人、验证日期、Windows 环境、安装包文件名和安装 / 启动 / CLI / 卸载结果。
+
+当前发布包没有代码签名，Windows SmartScreen 或安全软件警告属于预期风险；当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
 
 GitHub Release 正文可从 `docs/github/release-template.md` 复制后补全。
 

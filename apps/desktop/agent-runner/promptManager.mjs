@@ -1,6 +1,7 @@
 import {
   PROMPT_CLAUDE,
   PROMPT_CODEX,
+  PROMPT_MAIN_AGENT,
   PROMPT_RUNNER,
 } from "@lilia/contracts/promptContract.mjs";
 import { isRecord, stringOrNull } from "./utils.mjs";
@@ -89,6 +90,7 @@ export function buildClaudeSystemPrompt(platform = process.platform, additionalC
 
 export function buildClaudeWorkflowPrompt({
   review = null,
+  taskWorkflow = null,
   fix = null,
   batch = null,
   providerSettings = null,
@@ -97,6 +99,9 @@ export function buildClaudeWorkflowPrompt({
 } = {}) {
   const userPrompt = stringOrNull(prompt)?.trim();
   const targetText = typeof reviewTargetText === "function" ? reviewTargetText : () => "";
+  if (taskWorkflow) {
+    return buildTaskWorkflowPrompt(taskWorkflow, { prompt: userPrompt, backend: "Claude" });
+  }
   if (review) {
     return composePromptParts([
       PROMPT_CLAUDE.workflows.review.title,
@@ -165,6 +170,14 @@ export function buildCodexPlanPrompt(kind, value) {
 }
 
 export function buildCodexWorkflowPrompt(kind, input = {}) {
+  if (kind === "taskWorkflow") {
+    const { workflow, cmd } = input;
+    return buildTaskWorkflowPrompt(workflow, {
+      prompt: stringOrNull(cmd?.prompt)?.trim() || "",
+      backend: "Codex",
+      cwd: stringOrNull(cmd?.cwd) || "",
+    });
+  }
   if (kind === "fixSuggestion") {
     const { workflow, cmd, targetSummary, targetDescription } = input;
     const prompt = stringOrNull(cmd?.prompt)?.trim() || "";
@@ -221,4 +234,28 @@ export function buildCodexWorkflowPrompt(kind, input = {}) {
     ].join("\n");
   }
   return "";
+}
+
+export function mainAgentWorkflowDefinition(kind) {
+  const key = stringOrNull(kind)?.trim() || "";
+  if (!key) return null;
+  return PROMPT_MAIN_AGENT.workflowTypes?.[key] ?? null;
+}
+
+export function buildTaskWorkflowPrompt(workflow, input = {}) {
+  const definition = mainAgentWorkflowDefinition(workflow?.kind);
+  if (!definition) throw new Error(`Unknown Lilia task workflow: ${workflow?.kind ?? ""}`);
+  const prompt = stringOrNull(input.prompt)?.trim() || "";
+  const instructions = stringOrNull(workflow?.instructions)?.trim() || "";
+  return composePromptParts([
+    `Lilia task workflow: ${workflow.kind}`,
+    `Workflow title: ${definition.title.trim()}`,
+    definition.summary ? `Summary: ${definition.summary.trim()}` : null,
+    input.backend ? `Provider: ${input.backend}` : null,
+    input.cwd ? `Workspace cwd: ${input.cwd}` : null,
+    "Workflow instructions:",
+    definition.prompt,
+    instructions ? `User workflow instructions: ${instructions}` : null,
+    prompt ? `Additional user message: ${prompt}` : null,
+  ], "\n\n");
 }

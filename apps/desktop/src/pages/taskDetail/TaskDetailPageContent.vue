@@ -14,6 +14,7 @@ import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { useTaskAttachments } from "./useTaskAttachments";
 import { useTaskComposerController } from "./useTaskComposerController";
+import { isAgentDebugFrontendEnabled } from "../../agentDebug/harness";
 import {
   useTaskConversationContext,
   type TaskDetailRouteProps,
@@ -67,6 +68,7 @@ const draftProjectPickerProjects = shallowRef<Project[]>([]);
 let suggestionsSeq = 0;
 let draftProjectPickerSeq = 0;
 let deferredHydrationSeq = 0;
+let backgroundStateLoadSeq = 0;
 const taskDetailChatSurfaceLoad = createLazyLoadState(() =>
   measurePerfAsync(
     "task-detail.surface.load",
@@ -91,6 +93,7 @@ let deferredSettingsHydrationHandle: number | null = null;
 let contextUsageListenerInstallHandle: number | null = null;
 let dragDropListenerInstallHandle: number | null = null;
 let cancelDeferredHydrationPaint: (() => void) | null = null;
+let cancelBackgroundStateLoadPaint: (() => void) | null = null;
 let cancelDragDropListenerInstallPaint: (() => void) | null = null;
 let cancelRuntimeListenerInstallPaint: (() => void) | null = null;
 let cancelContextUsageListenerInstallPaint: (() => void) | null = null;
@@ -178,8 +181,6 @@ const {
   blockingPendingAgentActions,
   pendingPlanApproval,
   nonInterruptMode,
-  processSessionBusy,
-  processSessionError,
 } = composerController;
 
 function queryString(value: unknown): string | null {
@@ -214,9 +215,6 @@ const shouldLoadSuggestions = computed(() =>
   suggestionsReady.value &&
   !!props.projectId &&
   isIdleEmptyDraft.value,
-);
-const isLiveDraftRoute = computed(() =>
-  conversationRouteState.value.isLiveDraft,
 );
 const shouldShowDraftProjectPicker = computed(() =>
   sidebarDisplayMode.value === "unified" &&
@@ -290,27 +288,6 @@ function onDraftProjectPickerError(message: string) {
   timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
 }
 
-async function hydrateCriticalTaskDetailState() {
-  await measurePerfAsync(
-    "task-detail.critical",
-    async () => {
-      await Promise.all([
-        measurePerfAsync(
-          "task-detail.critical.context",
-          () => conversation.hydrateMainContext(),
-          { detail: taskDetailPerfDetail() },
-        ),
-        measurePerfAsync(
-          "task-detail.critical.load-all",
-          () => composerController.loadAll(),
-          { detail: taskDetailPerfDetail() },
-        ),
-      ]);
-    },
-    { detail: taskDetailPerfDetail() },
-  );
-}
-
 function scheduleDeferredTaskDetailHydration() {
   cancelDeferredTaskDetailHydrationSchedule();
   const seq = ++deferredHydrationSeq;
@@ -336,6 +313,53 @@ function scheduleDeferredTaskDetailHydration() {
     });
   });
   cancelDeferredHydrationPaint = cancelPaint;
+}
+
+function scheduleBackgroundTaskDetailStateLoad() {
+  const seq = ++backgroundStateLoadSeq;
+  const routeProjectId = props.projectId;
+  const routeTaskId = props.taskId;
+  cancelBackgroundStateLoadPaint?.();
+  const cancelPaint = scheduleAfterPaint(() => {
+    if (cancelBackgroundStateLoadPaint === cancelPaint) {
+      cancelBackgroundStateLoadPaint = null;
+    }
+    if (
+      !taskDetailLifecycle.assertAlive() ||
+      seq !== backgroundStateLoadSeq ||
+      routeProjectId !== props.projectId ||
+      routeTaskId !== props.taskId
+    ) {
+      return;
+    }
+    void measurePerfAsync(
+      "task-detail.background-state",
+      async () => {
+        await conversation.hydrateMainContext();
+        if (
+          !taskDetailLifecycle.assertAlive() ||
+          seq !== backgroundStateLoadSeq ||
+          routeProjectId !== props.projectId ||
+          routeTaskId !== props.taskId
+        ) {
+          return;
+        }
+        if (!conversation.conversationRouteState.value.isLiveDraft) {
+          await composerController.loadAll();
+        }
+      },
+      { detail: taskDetailPerfDetail() },
+    ).catch((err) => {
+      console.error("[task-detail] background state hydration failed", err);
+    });
+  });
+  cancelBackgroundStateLoadPaint = cancelPaint;
+}
+
+function cancelBackgroundTaskDetailStateLoadSchedule() {
+  backgroundStateLoadSeq += 1;
+  cancelBackgroundStateLoadPaint?.();
+  cancelBackgroundStateLoadPaint = null;
 }
 
 function cancelDeferredTaskDetailHydrationSchedule() {
@@ -365,6 +389,7 @@ function supportsSidebarIab(backend: string) {
 }
 
 function shouldRegisterDebugPanel() {
+  if (isAgentDebugFrontendEnabled()) return hasContext.value;
   return sidebarPanelsActivated.value &&
     agentInteractionSettingsReady.value &&
     hasContext.value &&
@@ -561,19 +586,14 @@ function cancelContextUsageListenerInstallSchedule() {
   }
 }
 
-onMounted(async () => {
+onMounted(() => {
   installRuntimeListenersInBackground();
   installContextUsageListenerInBackground();
   scheduleDeferredDragDropListenerInstall();
-  if (conversation.isPopup.value) {
-    scheduleDeferredTaskDetailHydration();
-  } else if (isLiveDraftRoute.value) {
-    scheduleDeferredTaskDetailHydration();
-  } else {
-    await hydrateCriticalTaskDetailState();
-    if (!taskDetailLifecycle.assertAlive()) return;
-    scheduleDeferredTaskDetailHydration();
+  if (!conversation.isPopup.value) {
+    scheduleBackgroundTaskDetailStateLoad();
   }
+  scheduleDeferredTaskDetailHydration();
 });
 
 onUnmounted(async () => {
@@ -585,6 +605,7 @@ onUnmounted(async () => {
   iabPanelRegistrationSeq += 1;
   draftProjectPickerSeq += 1;
   deferredHydrationSeq += 1;
+  cancelBackgroundTaskDetailStateLoadSchedule();
   cancelRuntimeListenerInstallPaint?.();
   cancelRuntimeListenerInstallPaint = null;
   cancelDragDropListenerInstallSchedule();
@@ -623,23 +644,27 @@ watch(
   () => [props.variant, props.projectId, props.taskId, conversation.hasContext.value] as const,
   ([variant, _projectId, _taskId, ready]) => {
     if (variant !== "popup" || !ready) return;
-    void composerController.loadAll();
+    void measurePerfAsync(
+      "task-detail.popup-state",
+      () => composerController.loadAll(),
+      { detail: taskDetailPerfDetail() },
+    ).catch((err) => {
+      console.error("[task-detail] popup state hydration failed", err);
+    });
   },
   { immediate: true },
 );
 
 watch(
   () => [props.projectId, props.taskId] as const,
-  async () => {
+  () => {
     deferredHydrationSeq += 1;
-    const routeHydrationSeq = deferredHydrationSeq;
-    const routeProjectId = props.projectId;
-    const routeTaskId = props.taskId;
     dragDropListenerInstallSeq += 1;
     contextUsageListenerInstallSeq += 1;
     cancelDragDropListenerInstallSchedule();
     cancelContextUsageListenerInstallSchedule();
     cancelDeferredTaskDetailHydrationSchedule();
+    cancelBackgroundTaskDetailStateLoadSchedule();
     suggestionsReady.value = false;
     sidebarPanelsReady.value = false;
     sidebarPanelsActivated.value = chatSidebar.state.open;
@@ -660,19 +685,7 @@ watch(
     }
     installContextUsageListenerInBackground();
     if (!conversation.isPopup.value) {
-      if (isLiveDraftRoute.value) {
-        scheduleDeferredTaskDetailHydration();
-        return;
-      }
-      await hydrateCriticalTaskDetailState();
-      if (
-        !taskDetailLifecycle.assertAlive() ||
-        routeHydrationSeq !== deferredHydrationSeq ||
-        routeProjectId !== props.projectId ||
-        routeTaskId !== props.taskId
-      ) {
-        return;
-      }
+      scheduleBackgroundTaskDetailStateLoad();
       scheduleDeferredTaskDetailHydration();
     }
   },
@@ -842,8 +855,6 @@ watch(
     :has-blocking-pending-action="blockingPendingAgentActions.length > 0"
     :task-run-blocking-reason="composerController.taskRunBlockingReason.value"
     :current-lilia-goal="composerController.currentLiliaGoal.value"
-    :process-session-busy="processSessionBusy"
-    :process-session-error="processSessionError"
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"
     :composer-state="composerForView"
@@ -874,9 +885,6 @@ watch(
     @clear-lilia-goal="composerController.onClearLiliaGoal"
     @insert-draft-text="composerController.onInsertDraftText"
     @clear-branch-anchor="composerController.onClearBranchAnchor"
-    @start-process-session="composerController.onStartProcessSession"
-    @send-process-session-stdin="composerController.onSendProcessSessionStdin"
-    @stop-process-session="composerController.onStopProcessSession"
     @send="composerController.onSend"
     @start-lilia-review="composerController.onStartLiliaReview"
     @start-lilia-fix-suggestion="composerController.onStartLiliaFixSuggestion"

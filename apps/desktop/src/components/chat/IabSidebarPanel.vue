@@ -24,10 +24,11 @@ function openIab() {
           spellcheck="false"
           autocomplete="off"
           aria-label="IAB URL"
+          data-agent-id="chat.iab.url"
           placeholder="about:blank"
         />
       </label>
-      <button type="submit" class="iab-panel__button">
+      <button type="submit" class="iab-panel__button" data-agent-id="chat.iab.open">
         <ExternalLink :size="14" aria-hidden="true" />
         <span>打开 IAB</span>
       </button>

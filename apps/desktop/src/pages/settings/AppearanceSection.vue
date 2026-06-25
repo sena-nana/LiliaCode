@@ -26,6 +26,7 @@ function onCornerRadiusInput(event: Event) {
         <button
           type="button"
           role="radio"
+          data-agent-id="settings.appearance.theme.dark"
           :aria-checked="theme === 'dark'"
           :class="{ 'is-active': theme === 'dark' }"
           @click="setTheme('dark')"
@@ -36,6 +37,7 @@ function onCornerRadiusInput(event: Event) {
         <button
           type="button"
           role="radio"
+          data-agent-id="settings.appearance.theme.light"
           :aria-checked="theme === 'light'"
           :class="{ 'is-active': theme === 'light' }"
           @click="setTheme('light')"
@@ -55,6 +57,7 @@ function onCornerRadiusInput(event: Event) {
         <button
           type="button"
           role="radio"
+          data-agent-id="settings.appearance.corner.smooth"
           :aria-checked="cornerStyle === 'smooth'"
           :class="{ 'is-active': cornerStyle === 'smooth' }"
           @click="setCornerStyle('smooth')"
@@ -65,6 +68,7 @@ function onCornerRadiusInput(event: Event) {
         <button
           type="button"
           role="radio"
+          data-agent-id="settings.appearance.corner.round"
           :aria-checked="cornerStyle === 'round'"
           :class="{ 'is-active': cornerStyle === 'round' }"
           @click="setCornerStyle('round')"
@@ -79,6 +83,7 @@ function onCornerRadiusInput(event: Event) {
       <div class="settings-row__control settings-row__radius-control">
         <input
           type="range"
+          data-agent-id="settings.appearance.corner-radius"
           :min="CORNER_RADIUS_MIN"
           :max="CORNER_RADIUS_MAX"
           step="1"
@@ -95,6 +100,7 @@ function onCornerRadiusInput(event: Event) {
         <button
           type="button"
           role="radio"
+          data-agent-id="settings.appearance.sidebar.grouped"
           :aria-checked="sidebarDisplayMode === 'grouped'"
           :class="{ 'is-active': sidebarDisplayMode === 'grouped' }"
           @click="setSidebarDisplayMode('grouped')"
@@ -105,6 +111,7 @@ function onCornerRadiusInput(event: Event) {
         <button
           type="button"
           role="radio"
+          data-agent-id="settings.appearance.sidebar.unified"
           :aria-checked="sidebarDisplayMode === 'unified'"
           :class="{ 'is-active': sidebarDisplayMode === 'unified' }"
           @click="setSidebarDisplayMode('unified')"

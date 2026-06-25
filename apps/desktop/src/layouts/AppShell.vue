@@ -162,6 +162,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="shell"
+    data-agent-id="app.shell"
     :class="{
       'is-resizing': sidebarWidth.isResizing.value,
       'is-sidebar-collapsed': effectiveSidebarCollapsed,
@@ -183,11 +184,13 @@ onBeforeUnmount(() => {
       v-else-if="isAutomationsRoute"
       class="secondary-panel automations-sidebar"
       aria-label="自动化列表"
+      data-agent-id="automations.sidebar"
     >
       <div class="settings-sidebar__head">
         <button
           type="button"
           class="settings-sidebar__back"
+          data-agent-id="automations.sidebar.back"
           aria-label="返回"
           title="返回"
           @click="goBackFromAutomation"
@@ -202,6 +205,7 @@ onBeforeUnmount(() => {
     <SecondaryPanel v-else />
     <div
       class="shell__resizer"
+      data-agent-id="app.sidebar.resizer"
       role="separator"
       aria-orientation="vertical"
       :aria-disabled="effectiveSidebarCollapsed ? 'true' : undefined"
@@ -212,7 +216,7 @@ onBeforeUnmount(() => {
       @pointerdown="sidebarWidth.startResize"
       @dblclick="sidebarWidth.resetWidth"
     />
-    <main class="shell__main">
+    <main class="shell__main" data-agent-id="app.main">
       <RouterView />
     </main>
   </div>

@@ -1,7 +1,7 @@
 {
   "name": "lilia-workspace",
   "private": true,
-  "version": "0.1.0-alpha.1",
+  "version": "1.0.0-beta",
   "workspaces": [
     "apps/desktop",
     "packages/*"
@@ -24,6 +24,7 @@
     "predocs:preview": "node scripts/check-package-manager.mjs",
     "docs:preview": "yarn check:package-manager && vitepress preview docs",
     "release:check": "yarn check:package-manager && node scripts/verify-release.mjs",
+    "release:smoke:windows": "yarn check:package-manager && node scripts/windows-installer-smoke.mjs",
     "icons:generate": "yarn check:package-manager && node scripts/generate-icons.mjs",
     "icons:tauri": "yarn check:package-manager && node scripts/generate-icons.mjs",
     "android:doctor": "yarn check:package-manager && node scripts/android-doctor.mjs",
@@ -50,7 +51,8 @@
     "preverify:tauri": "node scripts/check-package-manager.mjs",
     "verify:tauri": "yarn check:package-manager && cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "preverify:contracts": "node scripts/check-package-manager.mjs",
-    "verify:contracts": "yarn check:package-manager && node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json"
+    "verify:contracts": "yarn check:package-manager && node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json",
+    "verify:agent-debug": "yarn check:package-manager && node apps/desktop/agent-debug/verify-agent-debug.mjs"
   },
   "devDependencies": {
     "vitepress": "^1.6.4"

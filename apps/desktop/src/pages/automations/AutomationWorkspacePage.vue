@@ -443,9 +443,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="automations-page">
+  <section class="automations-page" data-agent-id="automations.page">
     <Teleport to="#automation-sidebar-host">
-      <div class="automations-page__sidebar">
+      <div class="automations-page__sidebar" data-agent-id="automations.sidebar">
         <div v-if="loading" class="automations-page__notice">
           <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
           读取中
@@ -457,6 +457,7 @@ onBeforeUnmount(() => {
             type="button"
             class="automations-page__row sb-tree__row sb-tree__row--unified"
             :class="{ 'is-active': workflow.id === selectedWorkflowId }"
+            :data-agent-id="`automations.workflow.${workflow.id}`"
             :title="workflow.name"
             @click="selectWorkflow(workflow)"
             @mouseleave="onWorkflowRowLeave(workflow.id)"
@@ -468,6 +469,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="sb-icon-btn"
                 :class="{ 'is-confirming': confirmingDeleteWorkflowId === workflow.id }"
+                :data-agent-id="`automations.workflow.${workflow.id}.delete`"
                 :title="confirmingDeleteWorkflowId === workflow.id ? '确认删除，再点一次' : '删除'"
                 :aria-label="confirmingDeleteWorkflowId === workflow.id ? '确认删除' : '删除'"
                 @click="onDeleteWorkflowClick($event, workflow)"
@@ -486,6 +488,7 @@ onBeforeUnmount(() => {
         class="ui-button ui-icon-button"
         title="新建自动化"
         aria-label="新建自动化"
+        data-agent-id="automations.new"
         :disabled="saving"
         @click="newWorkflow"
       >
@@ -496,6 +499,7 @@ onBeforeUnmount(() => {
     <main class="automations-page__main">
       <AutomationCanvasPane
         v-if="canvasReady"
+        data-agent-id="automations.canvas"
         v-model:nodes="nodes"
         v-model:edges="edges"
         :fit-request-key="canvasFitRequestKey"
@@ -504,12 +508,13 @@ onBeforeUnmount(() => {
         :on-connect="onConnect"
       >
         <template #default="{ fitCanvas, zoomCanvasIn, zoomCanvasOut }">
-          <div class="automations-page__corner-actions automations-page__palette" aria-label="节点库">
+          <div class="automations-page__corner-actions automations-page__palette" aria-label="节点库" data-agent-id="automations.node-palette">
             <button
               v-for="(label, kind) in NODE_KIND_LABELS"
               :key="kind"
               type="button"
               class="ui-button ui-icon-button"
+              :data-agent-id="`automations.node.add.${kind}`"
               :disabled="workflowHydrating || (kind === 'trigger' && hasTriggerNode)"
               :title="label"
               :aria-label="`添加${label}`"
@@ -522,6 +527,7 @@ onBeforeUnmount(() => {
             <input
               v-model="workflowName"
               class="automations-page__name"
+              data-agent-id="automations.workflow.name"
               :class="{ 'is-editing': editingWorkflowName }"
               aria-label="自动化名称"
               placeholder="自动化名称"
@@ -534,6 +540,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ui-button ui-icon-button"
+              data-agent-id="automations.workflow.save-draft"
               :title="saving ? '保存中' : '保存草稿'"
               :aria-label="saving ? '保存中' : '保存草稿'"
               :disabled="saving || workflowHydrating"
@@ -544,6 +551,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ui-button ui-icon-button"
+              data-agent-id="automations.workflow.publish"
               :title="publishing ? '发布中' : '发布'"
               :aria-label="publishing ? '发布中' : '发布'"
               :disabled="publishing || workflowHydrating"
@@ -554,6 +562,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ui-button ui-icon-button"
+              data-agent-id="automations.workflow.toggle-enabled"
               :title="selectedWorkflow?.enabled ? '停用' : '启用'"
               :aria-label="selectedWorkflow?.enabled ? '停用' : '启用'"
               :disabled="!selectedWorkflow || workflowHydrating"
@@ -565,6 +574,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ui-button ui-icon-button ui-button--primary"
+              data-agent-id="automations.workflow.run"
               :title="running ? '运行中' : '手动运行'"
               :aria-label="running ? '运行中' : '手动运行'"
               :disabled="running || workflowHydrating || !selectedWorkflow?.publishedVersionId"
@@ -574,13 +584,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <div class="automations-page__corner-actions automations-page__canvas-controls" role="group" aria-label="画布控制">
-            <button type="button" class="ui-button ui-icon-button" title="放大" aria-label="放大画布" @click="zoomCanvasIn">
+            <button type="button" class="ui-button ui-icon-button" data-agent-id="automations.canvas.zoom-in" title="放大" aria-label="放大画布" @click="zoomCanvasIn">
               <Plus :size="14" aria-hidden="true" />
             </button>
-            <button type="button" class="ui-button ui-icon-button" title="缩小" aria-label="缩小画布" @click="zoomCanvasOut">
+            <button type="button" class="ui-button ui-icon-button" data-agent-id="automations.canvas.zoom-out" title="缩小" aria-label="缩小画布" @click="zoomCanvasOut">
               <Minus :size="14" aria-hidden="true" />
             </button>
-            <button type="button" class="ui-button ui-icon-button" title="适应视图" aria-label="适应视图" @click="fitCanvas">
+            <button type="button" class="ui-button ui-icon-button" data-agent-id="automations.canvas.fit" title="适应视图" aria-label="适应视图" @click="fitCanvas">
               <Maximize2 :size="14" aria-hidden="true" />
             </button>
           </div>
@@ -598,6 +608,7 @@ onBeforeUnmount(() => {
         class="automations-page__canvas"
         aria-busy="true"
         aria-label="自动化画布加载中"
+        data-agent-id="automations.canvas.loading"
       >
         <div class="automations-page__inspector-body">
           <section class="automations-page__section">
@@ -607,12 +618,13 @@ onBeforeUnmount(() => {
       </section>
     </main>
 
-    <aside class="automations-page__inspector" :aria-busy="!inspectorReady" aria-label="自动化检查器">
+    <aside class="automations-page__inspector" :aria-busy="!inspectorReady" aria-label="自动化检查器" data-agent-id="automations.inspector">
       <header class="automations-page__inspector-head">
         <h2 class="automations-page__title">检查器</h2>
       </header>
       <AutomationInspectorPanel
         v-if="inspectorReady"
+        data-agent-id="automations.inspector.panel"
         :scope="scope"
         :project-rows="projectRows"
         :selected-node="selectedNode"

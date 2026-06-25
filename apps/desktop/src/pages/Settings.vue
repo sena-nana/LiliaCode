@@ -34,6 +34,7 @@ const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
   appearance: lazySettingsSection("appearance", () => import("./settings/AppearanceSection.vue")),
   window: lazySettingsSection("window", () => import("./settings/PopupWindowSection.vue")),
   providers: lazySettingsSection("providers", () => import("./settings/ProviderConnectionSection.vue")),
+  "remote-control": lazySettingsSection("remote-control", () => import("./settings/RemoteControlSection.vue")),
   assistant: lazySettingsSection("assistant", () => import("./settings/AssistantAISection.vue")),
   agent: lazySettingsSection("agent", () => import("./settings/AgentInteractionSection.vue")),
   quota: lazySettingsSection("quota", () => import("./settings/QuotaUsageSection.vue")),
@@ -76,8 +77,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <component v-if="isFullPageSection" :is="activeTabSection" />
-  <section v-else class="settings-page">
+  <component v-if="isFullPageSection" :is="activeTabSection" data-agent-id="settings.full-page-section" />
+  <section v-else class="settings-page" :data-agent-id="`settings.page.${activeTab}`">
     <component :is="activeTabSection" />
   </section>
 </template>

@@ -888,6 +888,7 @@ pub(crate) fn should_persist_user_message(
         Some(ChatWorkflow::LiliaReview { .. })
             | Some(ChatWorkflow::LiliaFixSuggestion { .. })
             | Some(ChatWorkflow::LiliaBatchApply { .. })
+            | Some(ChatWorkflow::LiliaTaskWorkflow { .. })
             | Some(ChatWorkflow::LiliaGoal { .. })
             | Some(ChatWorkflow::LiliaCompact)
             | Some(ChatWorkflow::LiliaBackgroundTerminalsClean)

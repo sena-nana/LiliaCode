@@ -146,15 +146,33 @@ onBeforeUnmount(() => {
         role="menu"
         :style="overlayStyle"
       >
-        <button type="button" class="sb-menu__item" role="menuitem" @click="pickLocalFolder">
+        <button
+          type="button"
+          class="sb-menu__item"
+          role="menuitem"
+          data-agent-id="sidebar.project-add.local-folder"
+          @click="pickLocalFolder"
+        >
           <FolderOpen :size="13" aria-hidden="true" />
           <span class="sb-menu__label">使用本地文件夹</span>
         </button>
-        <button type="button" class="sb-menu__item" role="menuitem" @click="openClone">
+        <button
+          type="button"
+          class="sb-menu__item"
+          role="menuitem"
+          data-agent-id="sidebar.project-add.clone"
+          @click="openClone"
+        >
           <Github :size="13" aria-hidden="true" />
           <span class="sb-menu__label">从 GitHub clone</span>
         </button>
-        <button type="button" class="sb-menu__item" role="menuitem" @click="openCategory">
+        <button
+          type="button"
+          class="sb-menu__item"
+          role="menuitem"
+          data-agent-id="sidebar.project-add.category"
+          @click="openCategory"
+        >
           <FolderPlus :size="13" aria-hidden="true" />
           <span class="sb-menu__label">创建空分类</span>
         </button>

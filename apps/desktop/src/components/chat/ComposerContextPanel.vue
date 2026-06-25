@@ -38,13 +38,14 @@ const emit = defineEmits<{
       <button
         v-for="(result, index) in results"
         :key="result.attachment.path"
-        type="button"
-        class="chat-composer__context-item"
-        :class="{
-          'is-active': index === activeIndex,
-          'is-large-directory': isLargeDirectory(result.attachment),
-        }"
-        role="option"
+      type="button"
+      class="chat-composer__context-item"
+      :class="{
+        'is-active': index === activeIndex,
+        'is-large-directory': isLargeDirectory(result.attachment),
+      }"
+      :data-agent-id="`chat.composer.context.${result.attachment.path}`"
+      role="option"
         :aria-selected="index === activeIndex"
         @mousedown.prevent
         @mouseenter="emit('activate', index)"

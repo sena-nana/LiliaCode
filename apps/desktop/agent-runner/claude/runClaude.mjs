@@ -54,6 +54,7 @@ import {
   normalizeLiliaFixSuggestionWorkflow,
   normalizeLiliaMemoryModeWorkflow,
   normalizeLiliaReviewWorkflow,
+  normalizeLiliaTaskWorkflow,
 } from "@lilia/contracts/liliaWorkflowContract.mjs";
 import {
   ASK_USER_CLAUDE_TOOL_NAME,
@@ -344,12 +345,18 @@ function readLiliaBatchApplyWorkflow(cmd) {
   return normalizeLiliaBatchApplyWorkflow(readLiliaWorkflow(cmd));
 }
 
+function readLiliaTaskWorkflow(cmd) {
+  return normalizeLiliaTaskWorkflow(readLiliaWorkflow(cmd));
+}
+
 function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
   const review = readLiliaReviewWorkflow(cmd);
+  const taskWorkflow = readLiliaTaskWorkflow(cmd);
   const fix = readLiliaFixSuggestionWorkflow(cmd);
   const batch = readLiliaBatchApplyWorkflow(cmd);
   return buildManagedClaudeWorkflowPrompt({
     review,
+    taskWorkflow,
     fix,
     batch,
     providerSettings,

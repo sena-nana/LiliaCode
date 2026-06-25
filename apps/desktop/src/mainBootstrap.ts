@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { router } from "./router";
+import { installAgentDebugHarness } from "./agentDebug/harness";
 import "./composables/useCornerStyle";
 import "./composables/useTheme";
 import { vContextMenu } from "./directives/contextMenu";
@@ -61,5 +62,6 @@ export function mountLiliaApp(): void {
   app.directive("context-menu", vContextMenu);
   app.mount("#root");
 
+  installAgentDebugHarness(router);
   scheduleGlobalInstallers();
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   AlertTriangle,
   Download,
   KeyRound,
+  LogIn,
   Loader2,
   Network,
   RotateCw,
@@ -26,6 +27,7 @@ import {
   routerModeUsesApiConfig,
   routerModesForBackend,
   runtimeDiagnostic,
+  type CodexAccountQuotaStatus,
   type ChatBackendKind,
   type ProviderConfig,
   type RouterMode,
@@ -33,11 +35,13 @@ import {
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import {
   getProviderConfig,
+  getCodexAccountQuotaStatus,
   getRouterMode,
   setProviderConfig,
   setRouterMode,
+  startCodexAccountLogin,
 } from "../../services/chat";
-import RemoteControlSection from "./RemoteControlSection.vue";
+import { codexQuotaUnavailableStatus } from "../../utils/quotaDisplay";
 
 const {
   report,
@@ -124,10 +128,39 @@ const codexVersionText = computed(() => {
   const latest = codexAppServerStatus.value?.latestVersion;
   return latest ? `${current} / latest ${latest}` : current;
 });
-const codexInstallPathText = computed(() =>
-  codexAppServerStatus.value?.installPath
-    ? `路径：${codexAppServerStatus.value.installPath}`
-    : "将安装到 Lilia 管理目录",
+const codexAccountStatus = ref<CodexAccountQuotaStatus | null>(null);
+const codexAccountLoading = ref(false);
+const codexLoginStarting = ref(false);
+let codexAccountRequestSeq = 0;
+const showCodexRuntimeStatus = computed(() =>
+  selectedBackend.value === "codex" && selectedRouterMode.value === "codex-account",
+);
+const codexRuntimeStatusText = computed(() =>
+  codexAppServerStatus.value?.supportsRequiredProtocol
+    ? "app-server 可用"
+    : "app-server 不可用",
+);
+const codexLoginNeedsAction = computed(() => {
+  const status = codexAccountStatus.value;
+  if (!status || status.available) return false;
+  const text = (status.error ?? "").toLowerCase();
+  if (!text.trim()) return codexAppServerStatus.value?.supportsRequiredProtocol ?? false;
+  return (
+    text.includes("未登录") ||
+    text.includes("not logged") ||
+    text.includes("login") ||
+    text.includes("auth")
+  );
+});
+const codexLoginStatusText = computed(() => {
+  if (codexAccountLoading.value) return "登录状态：检查中";
+  if (codexAccountStatus.value?.available) return "登录状态：已登录";
+  if (codexLoginNeedsAction.value) return "登录状态：未登录";
+  if (codexAccountStatus.value) return "登录状态：无法确认";
+  return "登录状态：待检测";
+});
+const codexLoginStatusDetail = computed(() =>
+  codexAccountStatus.value?.available ? null : codexAccountStatus.value?.error,
 );
 let disposed = false;
 
@@ -251,12 +284,49 @@ async function probe() {
   if (disposed) return;
   await refresh();
   if (disposed) return;
-  await checkCodexAppServerUpdate();
+  await Promise.all([checkCodexAppServerUpdate(), loadCodexAccountStatus()]);
 }
 
 async function installCodexUpdate() {
   if (disposed) return;
   await installCodexAppServerUpdate();
+}
+
+function clearCodexAccountStatus() {
+  codexAccountRequestSeq += 1;
+  codexAccountStatus.value = null;
+  codexAccountLoading.value = false;
+}
+
+async function loadCodexAccountStatus() {
+  if (!showCodexRuntimeStatus.value) {
+    clearCodexAccountStatus();
+    return;
+  }
+  const seq = ++codexAccountRequestSeq;
+  codexAccountLoading.value = true;
+  try {
+    const result = await getCodexAccountQuotaStatus();
+    if (!disposed && seq === codexAccountRequestSeq) codexAccountStatus.value = result;
+  } catch (err) {
+    if (!disposed && seq === codexAccountRequestSeq) {
+      codexAccountStatus.value = codexQuotaUnavailableStatus(err);
+    }
+  } finally {
+    if (!disposed && seq === codexAccountRequestSeq) codexAccountLoading.value = false;
+  }
+}
+
+async function startCodexLogin() {
+  if (disposed || codexLoginStarting.value) return;
+  codexLoginStarting.value = true;
+  try {
+    await startCodexAccountLogin();
+  } catch (err) {
+    if (!disposed) codexAccountStatus.value = codexQuotaUnavailableStatus(err);
+  } finally {
+    if (!disposed) codexLoginStarting.value = false;
+  }
 }
 
 async function selectBackend(backend: ChatBackendKind) {
@@ -277,13 +347,22 @@ onMounted(async () => {
   disposed = false;
   await Promise.all([loadAllConfig(), refresh()]);
   if (disposed) return;
-  await checkCodexAppServerUpdate();
+  await Promise.all([checkCodexAppServerUpdate(), loadCodexAccountStatus()]);
   if (disposed) return;
   await ensureClaudeApiMode();
 });
 
 onBeforeUnmount(() => {
   disposed = true;
+  codexAccountRequestSeq += 1;
+});
+
+watch(showCodexRuntimeStatus, (enabled) => {
+  if (enabled) {
+    void loadCodexAccountStatus();
+  } else {
+    clearCodexAccountStatus();
+  }
 });
 </script>
 
@@ -302,10 +381,11 @@ onBeforeUnmount(() => {
         <button
           v-for="opt in backendOptions"
           :key="opt.value"
-          type="button"
-          role="radio"
-          :aria-checked="selectedBackend === opt.value"
-          :class="{ 'is-active': selectedBackend === opt.value }"
+            type="button"
+            role="radio"
+            :aria-checked="selectedBackend === opt.value"
+            :data-agent-id="`settings.provider.backend.${opt.value}`"
+            :class="{ 'is-active': selectedBackend === opt.value }"
           :disabled="switchingBackend !== null"
           @click="selectBackend(opt.value)"
         >
@@ -329,6 +409,7 @@ onBeforeUnmount(() => {
             type="button"
             role="radio"
             :aria-checked="selectedRouterMode === opt.value"
+            :data-agent-id="`settings.provider.codex-mode.${opt.value}`"
             :class="{ 'is-active': selectedRouterMode === opt.value }"
             :disabled="savingRouter"
             @click="selectRouterMode(opt.value)"
@@ -340,36 +421,37 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <template v-if="selectedBackend === 'codex' && selectedRouterMode === 'codex-account'">
-      <div class="settings-row settings-row--stacked">
-        <div class="settings-row__label">官方账号</div>
-        <div class="settings-row__status muted">
-          使用 Lilia 内置 Codex app-server 与 Codex 登录态。首次使用前运行 <code>codex login</code>。
-        </div>
-      </div>
-
+    <template v-if="showCodexRuntimeStatus">
       <div class="settings-row">
-        <div class="settings-row__label">账号状态</div>
-        <div class="settings-row__control">
-          <span class="muted" style="display: inline-flex; gap: 4px; align-items: center;">
-            <UserRound :size="12" aria-hidden="true" />
-            {{ codexAppServerStatus?.supportsRequiredProtocol ? "内置 app-server 可用" : "内置 app-server 不可用" }}
-          </span>
-          <button type="button" class="ui-button ui-button--ghost" :disabled="probing" @click="probe">
-            <RotateCw :size="11" aria-hidden="true" />
-            重新检测
-          </button>
-        </div>
-      </div>
-
-      <div class="settings-row settings-row--stacked">
-        <div class="settings-row__label">app-server</div>
+        <span class="settings-row__status muted">
+          <UserRound :size="12" aria-hidden="true" />
+          {{ codexRuntimeStatusText }}
+        </span>
         <div class="settings-row__control settings-row__control--loose">
-          <span class="settings-row__status-text muted">{{ codexVersionText }}</span>
+          <span class="settings-row__status-text muted">当前版本：{{ codexVersionText }}</span>
+          <span class="settings-row__status-text muted">{{ codexLoginStatusText }}</span>
+          <button
+            v-if="codexLoginNeedsAction"
+            type="button"
+            class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.codex-login"
+            :disabled="codexLoginStarting"
+            @click="startCodexLogin"
+          >
+            <Loader2
+              v-if="codexLoginStarting"
+              :size="12"
+              class="is-spinning"
+              aria-hidden="true"
+            />
+            <LogIn v-else :size="12" aria-hidden="true" />
+            {{ codexLoginStarting ? "启动中..." : "登录" }}
+          </button>
           <button
             v-if="showCodexUpdateAction || codexAppServerUpdating"
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.codex-update"
             :disabled="codexAppServerUpdating"
             @click="installCodexUpdate"
           >
@@ -383,9 +465,14 @@ onBeforeUnmount(() => {
             {{ codexAppServerUpdating ? "更新中..." : codexUpdateLabel }}
           </button>
         </div>
+      </div>
+      <div
+        v-if="codexLoginStatusDetail || codexAppServerUpdateError"
+        class="settings-row settings-row--stacked"
+      >
         <div class="settings-row__status muted">
-          {{ codexInstallPathText }}
-          <span v-if="codexAppServerUpdateError">；{{ codexAppServerUpdateError }}</span>
+          <span v-if="codexLoginStatusDetail">{{ codexLoginStatusDetail }}</span>
+          <span v-if="codexAppServerUpdateError">{{ codexAppServerUpdateError }}</span>
         </div>
       </div>
     </template>
@@ -401,10 +488,11 @@ onBeforeUnmount(() => {
       <div class="settings-row">
         <div class="settings-row__label">Base URL</div>
         <input
-          type="text"
-          class="ui-input"
-          :placeholder="apiDefaultUrl"
-          :value="selectedProviderForm.baseUrl ?? ''"
+            type="text"
+            class="ui-input"
+            :placeholder="apiDefaultUrl"
+            data-agent-id="settings.provider.base-url"
+            :value="selectedProviderForm.baseUrl ?? ''"
           @input="(e) => (selectedProviderForm.baseUrl = (e.target as HTMLInputElement).value)"
         />
       </div>
@@ -416,12 +504,14 @@ onBeforeUnmount(() => {
             type="password"
             class="ui-input"
             :placeholder="selectedProviderForm.hasApiKey ? '已保存，留空保留现有值' : apiKeyEnv"
+            data-agent-id="settings.provider.api-key"
             :value="selectedProviderForm.apiKey ?? ''"
             @input="(e) => (selectedProviderForm.apiKey = (e.target as HTMLInputElement).value)"
           />
           <button
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.clear-key"
             :disabled="savingProvider || !selectedProviderForm.hasApiKey"
             title="清除已保存的 API key"
             @click="clearProviderKey"
@@ -442,6 +532,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.save"
             :disabled="savingProvider"
             @click="saveProvider"
           >
@@ -472,7 +563,7 @@ onBeforeUnmount(() => {
         <div class="conn-banner__title">{{ selectedDiagnostic.title }}</div>
         <div class="conn-banner__hint">
           {{ selectedDiagnostic.hint }}
-          <button type="button" class="inline-link" :disabled="probing" @click="probe">
+        <button type="button" class="inline-link" data-agent-id="settings.provider.retry-probe" :disabled="probing" @click="probe">
             <RotateCw :size="11" aria-hidden="true" />
             重新检测
           </button>
@@ -480,5 +571,4 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
-  <RemoteControlSection />
 </template>

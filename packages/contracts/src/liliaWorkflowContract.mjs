@@ -4,6 +4,8 @@ const manifest = deepFreeze(liliaWorkflowContract);
 
 export const LILIA_WORKFLOW_CONTRACT = manifest;
 export const LILIA_QUERY_WORKFLOW_TYPES = manifest.queryWorkflowTypes;
+export const LILIA_TASK_WORKFLOW_TYPE = manifest.taskWorkflow.type;
+export const LILIA_TASK_WORKFLOW_KINDS = manifest.taskWorkflow.kinds;
 export const LILIA_REVIEW_WORKFLOW_TYPE = manifest.review.type;
 export const LILIA_REVIEW_TARGET_TYPES = manifest.review.targetTypes;
 export const LILIA_REVIEW_DELIVERIES = manifest.review.deliveries;
@@ -31,6 +33,7 @@ export const CHAT_SLASH_COMMAND_WORKFLOW_TYPE = manifest.slashCommand.type;
 
 const reviewTargetTypeSet = new Set(LILIA_REVIEW_TARGET_TYPES);
 const queryWorkflowTypeSet = new Set(LILIA_QUERY_WORKFLOW_TYPES);
+const taskWorkflowKindSet = new Set(LILIA_TASK_WORKFLOW_KINDS);
 const reviewDeliverySet = new Set(LILIA_REVIEW_DELIVERIES);
 const fixSuggestionModeSet = new Set(LILIA_FIX_SUGGESTION_MODES);
 const batchApplySourceKindSet = new Set(LILIA_BATCH_APPLY_SOURCE_KINDS);
@@ -45,6 +48,10 @@ export function isLiliaReviewTargetType(value) {
 
 export function isLiliaQueryWorkflowType(value) {
   return typeof value === "string" && queryWorkflowTypeSet.has(value);
+}
+
+export function isLiliaTaskWorkflowKind(value) {
+  return typeof value === "string" && taskWorkflowKindSet.has(value);
 }
 
 export function isLiliaReviewDelivery(value) {
@@ -90,6 +97,21 @@ export function normalizeLiliaReviewTarget(value) {
 
 export function normalizeLiliaReviewDelivery(value) {
   return isLiliaReviewDelivery(value) ? value : DEFAULT_LILIA_REVIEW_DELIVERY;
+}
+
+export function normalizeLiliaTaskWorkflow(value) {
+  const workflow = isRecord(value) && value.type === LILIA_TASK_WORKFLOW_TYPE
+    ? value
+    : null;
+  if (!workflow) return null;
+  const kind = stringOrNull(workflow.kind);
+  if (!isLiliaTaskWorkflowKind(kind)) {
+    throw new Error("Lilia task workflow missing a valid kind");
+  }
+  return {
+    kind,
+    instructions: stringOrNull(workflow.instructions)?.trim() || "",
+  };
 }
 
 export function normalizeLiliaFixSuggestionMode(value) {
@@ -155,6 +177,21 @@ export function createLiliaReviewWorkflow(target, options = {}) {
   };
   const instructions = stringOrNull(options.instructions)?.trim() || "";
   if (instructions) workflow.instructions = instructions;
+  return workflow;
+}
+
+export function createLiliaTaskWorkflow(kind, options = {}) {
+  const normalized = normalizeLiliaTaskWorkflow({
+    type: LILIA_TASK_WORKFLOW_TYPE,
+    kind,
+    instructions: options.instructions,
+  });
+  if (!normalized) throw new Error("Lilia task workflow missing a valid kind");
+  const workflow = {
+    type: LILIA_TASK_WORKFLOW_TYPE,
+    kind: normalized.kind,
+  };
+  if (normalized.instructions) workflow.instructions = normalized.instructions;
   return workflow;
 }
 

@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use crate::process_command::hide_console_window;
+
 use super::generation::compact_line;
 use super::types::{
     LocalGitContextSample, SuggestionLocalGitContextRef, LOCAL_GIT_COMMIT_LIMIT,
@@ -68,7 +70,9 @@ fn git_command_stdout<const N: usize>(
     cwd: &str,
     args: [&str; N],
 ) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    hide_console_window(&mut command);
+    let output = command
         .arg("-C")
         .arg(cwd)
         .args(args)

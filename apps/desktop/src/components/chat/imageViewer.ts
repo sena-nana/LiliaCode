@@ -1,4 +1,4 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "../../tauri/runtime";
 import { isChatImageAttachment, type ChatAttachment } from "@lilia/contracts";
 
 export interface ChatImageViewerSource {

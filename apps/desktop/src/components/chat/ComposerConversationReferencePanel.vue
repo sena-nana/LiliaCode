@@ -34,10 +34,11 @@ function resultScope(result: SearchResult): string {
       <button
         v-for="(result, index) in results"
         :key="result.route"
-        type="button"
-        class="chat-composer__context-item chat-composer__context-item--conversation"
-        :class="{ 'is-active': index === activeIndex }"
-        role="option"
+      type="button"
+      class="chat-composer__context-item chat-composer__context-item--conversation"
+      :class="{ 'is-active': index === activeIndex }"
+      :data-agent-id="`chat.composer.conversation-reference.${result.route}`"
+      role="option"
         :aria-selected="index === activeIndex"
         @mousedown.prevent
         @mouseenter="emit('activate', index)"

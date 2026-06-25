@@ -101,13 +101,14 @@ onBeforeUnmount(() => {
         <button
           v-for="(item, i) in state.items"
           :key="item.id ?? i"
-          type="button"
-          class="sb-menu__item ctx-menu__item"
-          :class="{
-            'ctx-menu__item--danger': isDanger(item),
-            'ctx-menu__item--pending': isContextMenuItemPending(item),
-          }"
-          :disabled="item.disabled"
+            type="button"
+            class="sb-menu__item ctx-menu__item"
+            :class="{
+              'ctx-menu__item--danger': isDanger(item),
+              'ctx-menu__item--pending': isContextMenuItemPending(item),
+            }"
+            :data-agent-id="`context-menu.item.${item.id ?? i}`"
+            :disabled="item.disabled"
           role="menuitem"
           @click="selectContextMenuItem(item)"
         >

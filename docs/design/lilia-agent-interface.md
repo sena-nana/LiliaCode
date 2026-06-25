@@ -51,6 +51,7 @@ runner stdin 的稳定形状是：
 
 | workflow | 含义 | 空 prompt |
 |---|---|---|
+| `lilia_task_workflow` | Lilia 内置工作流类型目录，用 `kind` 指向 `generalTask`、`frontend`、`refactor` 等内置工作流。 | 支持 |
 | `lilia_review` | 对指定代码范围做审查。 | 支持 |
 | `lilia_fix_suggestion` | 生成修复建议或按模式应用修复。 | 支持 |
 | `lilia_batch_apply` | 批量应用 review / fix suggestion 的结果。 | 支持 |
@@ -64,6 +65,8 @@ runner stdin 的稳定形状是：
 | `slash_command` | 执行 Lilia native / project slash command。 | 支持 |
 
 空 prompt 规则由 `packages/contracts/src/liliaAgentProtocol.mjs` 从拆分后的 workflow / runtime command contract manifest 生成。不要再新增散落字符串集合维护空 prompt workflow。
+
+`lilia_task_workflow` 是 Lilia 自己的用户可见 `ChatWorkflow`。它不是 runtime command，也不是 Claude / Codex provider plugin skill；插件 / 技能页仍只管理外部 Claude Skill、Plugin、MCP 和 Hook。结构化 `lilia_review`、`lilia_fix_suggestion`、`lilia_batch_apply` 继续承载有专用数据结构的场景，不折叠进通用 task workflow。
 
 ## ChatRuntimeCommand
 
@@ -139,7 +142,7 @@ agent-runner 以 provider adapter registry 分发：
 | `handler` | 处理 Lilia 落点，不暴露 provider 方法名给 UI。 |
 | `fallback` | provider 不支持时写 diagnostic / unsupported result。 |
 
-公共 review / fix / batch / goal validation 放在共享模块。Codex / Claude adapter 只做 provider 映射和降级，不重复解析相同 Lilia workflow。
+公共 task / review / fix / batch / goal validation 放在共享模块。Codex / Claude adapter 只做 provider 映射和降级，不重复解析相同 Lilia workflow。
 
 ## Interaction 契约
 
@@ -163,7 +166,7 @@ Codex 的 `threadId`、`turnId`、`itemId`、`strictAutoReview`、原始 permiss
 | 落点 | 层级 | Lilia 语义 | 不支持时 |
 |---|---|---|---|
 | 普通 turn | turn | 启动一轮 agent 输入，写 timeline 和 session checkpoint。 | 写 error timeline。 |
-| review / fix / batch / goal | workflow | 用户可见 agent 工作流。 | 构造 Lilia prompt 或写错误。 |
+| task / review / fix / batch / goal | workflow | 用户可见 agent 工作流。 | 构造 Lilia prompt 或写错误。 |
 | compact / memory / diagnostics | workflow | 用户触发的会话维护和诊断。 | 写 diagnostic。 |
 | automation / slash command | workflow | 自动化或命令触发的 Lilia 行为。 | 拒绝启动并保留状态。 |
 | session fork / management | runtime command | provider session 控制，不是 UI workflow。 | 写 unsupported diagnostic。 |
