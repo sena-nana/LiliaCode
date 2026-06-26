@@ -14,6 +14,7 @@ import {
   cancelRemoteControlPairing,
   getRemoteControlStatus,
   revokeRemoteControlDevice,
+  setRemoteControlKeepAwakeEnabled,
   setRemoteControlHostEnabled,
   setRemoteControlPcName,
   startRemoteControlPairing,
@@ -26,10 +27,12 @@ const qrDataUrl = ref("");
 const pcNameDraft = ref("");
 const loading = ref(false);
 const savingName = ref(false);
+const savingKeepAwake = ref(false);
 const pairing = ref(false);
 const errorText = ref("");
 
 const hostEnabled = computed(() => status.value?.hostEnabled ?? false);
+const keepAwakeEnabled = computed(() => status.value?.keepAwakeEnabled ?? true);
 const trustedDevices = computed(() => status.value?.trustedDevices ?? []);
 const activeTicket = computed(() => status.value?.activeTicket ?? null);
 const shouldPollRemoteControl = computed(() => hostEnabled.value || activeTicket.value !== null);
@@ -142,6 +145,21 @@ async function savePcName() {
   }
 }
 
+async function toggleKeepAwake(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const next = input.checked;
+  savingKeepAwake.value = true;
+  errorText.value = "";
+  try {
+    applyRemoteControlStatus(await setRemoteControlKeepAwakeEnabled(next));
+  } catch (err) {
+    input.checked = keepAwakeEnabled.value;
+    errorText.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingKeepAwake.value = false;
+  }
+}
+
 async function beginPairing() {
   pairing.value = true;
   errorText.value = "";
@@ -217,6 +235,25 @@ onBeforeUnmount(stopRemoteControlPolling);
           <RotateCw :size="11" aria-hidden="true" />
           刷新
         </button>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">保持唤醒</div>
+      <div class="settings-row__control">
+        <label class="ui-switch remote-control-wake">
+          <input
+            type="checkbox"
+            data-agent-id="settings.remote-control.keep-awake"
+            :checked="keepAwakeEnabled"
+            :disabled="savingKeepAwake"
+            @change="toggleKeepAwake"
+          />
+          <span>远控期间保持电脑唤醒</span>
+        </label>
+        <span class="settings-row__status-text muted">
+          {{ keepAwakeEnabled ? "已开启" : "已关闭" }}
+        </span>
       </div>
     </div>
 

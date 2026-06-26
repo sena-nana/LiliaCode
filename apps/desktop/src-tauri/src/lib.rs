@@ -48,6 +48,7 @@ mod settings_store;
 mod store;
 #[cfg(test)]
 mod system_popup_command_contract;
+mod system_wake;
 #[cfg(test)]
 mod task_command_contract;
 mod task_contract;
@@ -381,6 +382,7 @@ pub fn run() {
             remote_control::remote_control_status,
             remote_control::remote_control_set_host_enabled,
             remote_control::remote_control_set_pc_name,
+            remote_control::remote_control_set_keep_awake_enabled,
             remote_control::remote_control_start_pairing,
             remote_control::remote_control_cancel_pairing,
             remote_control::remote_control_pair_device,
