@@ -10,41 +10,41 @@ name = "lilia_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "image-png", "tray-icon"] }
-tauri-plugin-opener = "2"
-tauri-plugin-store = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-global-shortcut = "2"
+tauri = { version = "2.11.3", features = ["protocol-asset", "image-png", "tray-icon"] }
+tauri-plugin-opener = "2.5.4"
+tauri-plugin-store = "2.4.3"
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-single-instance = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml_edit = "0.25"
-base64 = "0.22"
-clipboard-win = "5.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+toml_edit = "0.25.12"
+base64 = "0.22.1"
+clipboard-win = "5.4.1"
 # lilia-store：SQLite 持久化层。bundled 让 rusqlite 自带 SQLite，
 # 不依赖系统库，Windows 上免去 vcpkg/sqlite3 安装步骤。
-rusqlite = { version = "0.32", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.25"
-dirs = "5"
-uuid = { version = "1", features = ["v4"] }
-ignore = "0.4"
+rusqlite = { version = "0.39", features = ["bundled"] }
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.34.0"
+dirs = "6.0.0"
+uuid = { version = "1.23.4", features = ["v4"] }
+ignore = "0.4.26"
 # 辅助模型连通性测试（GET {baseUrl}/models）的极简同步 HTTP 客户端。
 # rustls-tls：避免依赖 OpenSSL；blocking：用在 Tauri command 同步上下文里，无需引入 tokio。
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-flate2 = "1"
-sha2 = "0.10"
-tar = "0.4"
-keyring = "4.0.1"
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+flate2 = "1.1.9"
+sha2 = "0.11.0"
+tar = "0.4.44"
+keyring = "4.1.2"
 keyring-core = "1.0.0"
 
 [target.'cfg(windows)'.dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
-raw-window-handle = "0.6"
-windows = { version = "0.61", features = [
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+raw-window-handle = "0.6.2"
+windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_System_Power",
