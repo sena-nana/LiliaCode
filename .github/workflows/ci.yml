@@ -21,6 +21,10 @@ jobs:
     name: Verify workspace
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Checkout
@@ -36,16 +40,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
       - name: Cache Rust
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/desktop/src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: apps/desktop/src-tauri -> target
 
       - name: Enable Corepack
         run: corepack enable
@@ -55,6 +56,10 @@ jobs:
 
       - name: Verify workspace
         run: corepack yarn verify
+
+      - name: Show sccache stats
+        shell: pwsh
+        run: "& $env:SCCACHE_PATH --show-stats"
 
   build-docs:
     name: Build docs
