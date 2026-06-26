@@ -68,8 +68,11 @@ yarn verify:agent-debug
 - `scenario-results.json`
 - `summary.json`
 - `tauri-driver.log`
+- `dev-server.log`
 
-若自动准备失败且最终仍缺少 `tauri-driver`、EdgeDriver 或 debug app binary，脚本会写 `summary.json` 并以 blocked 状态退出。
+`logs.json`、`replay.json`、`scenario-results.json`、`tauri-driver.log`、`dev-server.log` 和 `summary.json` 是门禁固定产物。即使自动准备失败、provider 未就绪或场景中途失败，脚本也必须写出这些文件，并在 `summary.json` 中记录对应路径。
+
+若自动准备失败且最终仍缺少 `tauri-driver`、EdgeDriver 或 debug app binary，脚本会以 blocked 状态退出；此时 `scenario-results.json` 为空，`summary.json` 的截图引用为 `null`。
 
 ## v1.0 核心对话回归
 
@@ -84,6 +87,8 @@ smoke 之后会运行可重放场景，所有动作写入 `replay.json`，每个
 - permission pending action：通过 Debug 侧栏 `debug.timeline.permission` 注入权限申请，使用 `chat.pending.tool.allow` / `chat.composer.tool.allow` 同意并确认时间线进入已同意状态。
 
 这些场景只验证开发态 UI、调试注入和 Tauri invoke 边界，不等待真实 provider 生成回复。`VITE_LILIA_AGENT_DEBUG=1` 下任务详情会自动注册 Debug 侧栏面板，避免验证依赖用户本机设置里的 debug 开关。
+
+如果 `chat_send_message` 到达 invoke 边界但返回 provider-not-ready 类错误，门禁会把当前场景写为 `blocked`，保留场景截图，并以退出码 2 结束。若任一场景在开始后中途失败，门禁会把当前 active scenario 补写为 `failed`，引用 `failure.png`，从而让 partial run 也能定位最后失败的场景。
 
 ## 大型改动标准
 
