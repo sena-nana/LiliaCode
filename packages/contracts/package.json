@@ -54,6 +54,6 @@
     "check": "node ../../scripts/check-package-manager.mjs && tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "typescript": "~5.8.3"
+    "typescript": "^6.0.3"
   }
 }
