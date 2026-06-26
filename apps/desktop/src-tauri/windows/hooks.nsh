@@ -1,9 +1,3 @@
-!include WinMessages.nsh
-
-!macro LILIA_BROADCAST_ENVIRONMENT_CHANGE
-  System::Call 'user32::SendMessageTimeout(p 0xffff, i ${WM_SETTINGCHANGE}, p 0, t "Environment", i 0x0002, i 5000, *p .r0)'
-!macroend
-
 !macro LILIA_WRITE_PATH_SCRIPT SCRIPT_PATH MODE
   FileOpen $0 "${SCRIPT_PATH}" w
   FileWrite $0 "$$installDir = @'$\r$\n"
@@ -27,15 +21,14 @@
 !macro LILIA_RUN_PATH_SCRIPT MODE
   StrCpy $1 "$TEMP\liliacode-path-${MODE}.ps1"
   !insertmacro LILIA_WRITE_PATH_SCRIPT "$1" "${MODE}"
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$1"'
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$1"'
   Delete "$1"
-  !insertmacro LILIA_BROADCAST_ENVIRONMENT_CHANGE
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
   FileOpen $0 "$INSTDIR\liliacode.cmd" w
   FileWrite $0 "@echo off$\r$\n"
-  FileWrite $0 "start """" ""$INSTDIR\LiliaCode.exe"" %*$\r$\n"
+  FileWrite $0 "$\"%~dp0LiliaCode.exe$\" %*$\r$\n"
   FileClose $0
   !insertmacro LILIA_RUN_PATH_SCRIPT "install"
 !macroend
