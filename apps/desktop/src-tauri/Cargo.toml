@@ -47,3 +47,18 @@ windows = { version = "0.61", features = [
   "Win32_System_Power",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+codegen-units = 256
+
+[profile.dev.package."*"]
+debug = false
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+incremental = false

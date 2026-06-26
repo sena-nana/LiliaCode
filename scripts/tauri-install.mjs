@@ -3,15 +3,19 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 
+const nativeCpuFlag = "-C target-cpu=native";
+const dryRun = process.env.TAURI_TEMPLATE_INSTALL_DRY_RUN === "1";
+
 function fail(message) {
   throw new Error(`[tauri:install] ${message}`);
 }
 
-function runCommand(command, args = []) {
+function runCommand(command, args = [], options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     stdio: "inherit",
     windowsHide: true,
+    ...options,
   });
   if (result.error) {
     fail(`${command} 启动失败: ${result.error.message}`);
@@ -77,7 +81,44 @@ function install(installerPath) {
   fail(`不支持的安装包类型: ${ext}`);
 }
 
+function nativeBuildEnv() {
+  const env = { ...process.env };
+  const rustflags = env.RUSTFLAGS?.trim();
+  env.RUSTFLAGS = rustflags && !rustflags.includes("target-cpu=")
+    ? `${rustflags} ${nativeCpuFlag}`
+    : rustflags || nativeCpuFlag;
+  return env;
+}
+
+function buildCommand() {
+  if (process.platform === "win32") {
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "yarn.cmd tauri build"],
+    };
+  }
+
+  return {
+    command: "yarn",
+    args: ["tauri", "build"],
+  };
+}
+
+function yarnBuild() {
+  const env = nativeBuildEnv();
+  const { command, args } = buildCommand();
+
+  if (dryRun) {
+    console.log(JSON.stringify({ command, args, env: { RUSTFLAGS: env.RUSTFLAGS } }, null, 2));
+    return;
+  }
+
+  runCommand(command, args, { env });
+}
+
 function main() {
+  yarnBuild();
+  if (dryRun) process.exit(0);
   const installer = resolveInstaller();
   console.log(`[tauri:install] Running installer: ${installer}`);
   install(installer);

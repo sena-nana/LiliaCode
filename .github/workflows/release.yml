@@ -23,6 +23,10 @@ jobs:
     name: Verify release
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Resolve ref
@@ -61,16 +65,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
       - name: Cache Rust
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/desktop/src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: apps/desktop/src-tauri -> target
 
       - name: Enable Corepack
         run: corepack enable
@@ -84,11 +85,19 @@ jobs:
       - name: Verify release metadata
         run: corepack yarn release:check --tag ${{ steps.release_ref.outputs.tag }}
 
+      - name: Show sccache stats
+        shell: pwsh
+        run: "& $env:SCCACHE_PATH --show-stats"
+
   publish-windows:
     name: Publish Windows bundle
     needs: verify
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Resolve ref
@@ -127,16 +136,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
       - name: Cache Rust
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/desktop/src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: apps/desktop/src-tauri -> target
 
       - name: Enable Corepack
         run: corepack enable
@@ -186,6 +192,10 @@ jobs:
             - 当前安装包没有代码签名，Windows SmartScreen 或安全软件提示属于预期风险。
             - 当前不包含 Tauri updater 自动更新能力。
             - 当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包。
+
+      - name: Show sccache stats
+        shell: pwsh
+        run: "& $env:SCCACHE_PATH --show-stats"
 
   smoke-windows-installer:
     name: Smoke Windows installer
