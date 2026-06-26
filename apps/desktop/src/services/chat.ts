@@ -66,6 +66,7 @@ import {
   QUOTA_USAGE_GET_STATS_COMMAND,
   REMOTE_CONTROL_CANCEL_PAIRING_COMMAND,
   REMOTE_CONTROL_REVOKE_DEVICE_COMMAND,
+  REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_PC_NAME_COMMAND,
   REMOTE_CONTROL_START_PAIRING_COMMAND,
@@ -526,6 +527,10 @@ export function setRemoteControlHostEnabled(enabled: boolean): Promise<RemoteCon
 
 export function setRemoteControlPcName(name: string): Promise<RemoteControlStatus> {
   return invoke<RemoteControlStatus>(REMOTE_CONTROL_SET_PC_NAME_COMMAND, { name });
+}
+
+export function setRemoteControlKeepAwakeEnabled(enabled: boolean): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>(REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND, { enabled });
 }
 
 export function startRemoteControlPairing(): Promise<RemotePairingTicket> {

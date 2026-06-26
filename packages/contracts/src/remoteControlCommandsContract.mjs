@@ -6,6 +6,7 @@ export const REMOTE_CONTROL_COMMANDS_CONTRACT = manifest;
 export const REMOTE_CONTROL_STATUS_COMMAND = manifest.commands.status;
 export const REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND = manifest.commands.setHostEnabled;
 export const REMOTE_CONTROL_SET_PC_NAME_COMMAND = manifest.commands.setPcName;
+export const REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND = manifest.commands.setKeepAwakeEnabled;
 export const REMOTE_CONTROL_START_PAIRING_COMMAND = manifest.commands.startPairing;
 export const REMOTE_CONTROL_CANCEL_PAIRING_COMMAND = manifest.commands.cancelPairing;
 export const REMOTE_CONTROL_REVOKE_DEVICE_COMMAND = manifest.commands.revokeDevice;

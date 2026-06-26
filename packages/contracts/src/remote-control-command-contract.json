@@ -3,6 +3,7 @@
     "status": "remote_control_status",
     "setHostEnabled": "remote_control_set_host_enabled",
     "setPcName": "remote_control_set_pc_name",
+    "setKeepAwakeEnabled": "remote_control_set_keep_awake_enabled",
     "startPairing": "remote_control_start_pairing",
     "cancelPairing": "remote_control_cancel_pairing",
     "revokeDevice": "remote_control_revoke_device",

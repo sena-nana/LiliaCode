@@ -113,6 +113,7 @@ import {
   REMOTE_CONTROL_CANCEL_PAIRING_COMMAND,
   REMOTE_CONTROL_PAIR_DEVICE_COMMAND,
   REMOTE_CONTROL_REVOKE_DEVICE_COMMAND,
+  REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_PC_NAME_COMMAND,
   REMOTE_CONTROL_START_PAIRING_COMMAND,
@@ -640,6 +641,7 @@ let nodeAvailable = true;
 const remoteControlBridgeUrl = "http://127.0.0.1:41478";
 const remoteControlRecentSeenMs = 2 * 60 * 1000;
 let remoteControlEnabled = false;
+let remoteControlKeepAwakeEnabled = true;
 let remoteControlPcName = "Lilia Test PC";
 let remoteControlTicket: Record<string, unknown> | null = null;
 let remoteControlDevices: Record<string, unknown>[] = [];
@@ -663,6 +665,7 @@ function mockRemoteControlStatus() {
     hostEnabled: remoteControlEnabled,
     state: mockRemoteControlState(),
     pcName: remoteControlPcName,
+    keepAwakeEnabled: remoteControlKeepAwakeEnabled,
     endpoint: remoteControlEnabled
       ? { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] }
       : null,
@@ -1859,6 +1862,7 @@ export function resetTauriMockData() {
   };
   nodeAvailable = true;
   remoteControlEnabled = false;
+  remoteControlKeepAwakeEnabled = true;
   remoteControlPcName = "Lilia Test PC";
   remoteControlTicket = null;
   remoteControlDevices = [];
@@ -2720,6 +2724,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       }
       return mockRemoteControlStatus();
     }
+
+    case REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND:
+      remoteControlKeepAwakeEnabled = args.enabled === true;
+      return mockRemoteControlStatus();
 
     case REMOTE_CONTROL_START_PAIRING_COMMAND:
       remoteControlEnabled = true;

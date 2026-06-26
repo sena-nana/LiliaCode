@@ -111,6 +111,7 @@ import {
   REMOTE_CONTROL_CANCEL_PAIRING_COMMAND,
   REMOTE_CONTROL_PAIR_DEVICE_COMMAND,
   REMOTE_CONTROL_REVOKE_DEVICE_COMMAND,
+  REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND,
   REMOTE_CONTROL_SET_PC_NAME_COMMAND,
   REMOTE_CONTROL_START_PAIRING_COMMAND,
@@ -314,6 +315,7 @@ let agentInteractionSubagents = [{
 
 let agentInteractionSettings = normalizeAgentInteractionSettings(null);
 let remoteControlEnabled = false;
+let remoteControlKeepAwakeEnabled = true;
 let remoteControlTicket: Record<string, unknown> | null = null;
 let remoteControlDevices: Record<string, unknown>[] = [];
 const remoteControlBridgeUrl = "http://127.0.0.1:41478";
@@ -323,6 +325,7 @@ function remoteControlStatus() {
     hostEnabled: remoteControlEnabled,
     state: remoteControlEnabled ? (remoteControlTicket ? "pairing" : "listening") : "disabled",
     pcName: "Lilia Dev PC",
+    keepAwakeEnabled: remoteControlKeepAwakeEnabled,
     endpoint: remoteControlEnabled
       ? { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] }
       : null,
@@ -488,6 +491,9 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       remoteControlEnabled = bool(args, "enabled");
       return clone(remoteControlStatus()) as T;
     case REMOTE_CONTROL_SET_PC_NAME_COMMAND:
+      return clone(remoteControlStatus()) as T;
+    case REMOTE_CONTROL_SET_KEEP_AWAKE_ENABLED_COMMAND:
+      remoteControlKeepAwakeEnabled = bool(args, "enabled", true);
       return clone(remoteControlStatus()) as T;
     case REMOTE_CONTROL_START_PAIRING_COMMAND:
       remoteControlEnabled = true;

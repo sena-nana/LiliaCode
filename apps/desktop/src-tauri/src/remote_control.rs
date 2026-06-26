@@ -4,8 +4,9 @@ use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -21,17 +22,71 @@ const REMOTE_ALPN: &str = "lilia.remote-control.v1";
 const HOST_ENABLED_KEY: &str = "host_enabled";
 const PC_NAME_KEY: &str = "pc_name";
 const ENDPOINT_ID_KEY: &str = "endpoint_id";
+const KEEP_AWAKE_ENABLED_KEY: &str = "keep_awake_enabled";
 const PAIRING_TTL_MS: i64 = 10 * 60 * 1000;
 const RECENT_ANDROID_SEEN_MS: i64 = 2 * 60 * 1000;
 const DEFAULT_HTTP_BRIDGE_PORT: u16 = 41478;
+const REMOTE_WAKE_MONITOR_IDLE_MS: u64 = 30_000;
 
 static HTTP_BRIDGE: OnceLock<Mutex<Option<RemoteHttpBridge>>> = OnceLock::new();
 static PENDING_INTERACTIONS: OnceLock<Mutex<HashMap<String, RemotePendingInteraction>>> =
     OnceLock::new();
+static REMOTE_WAKE: OnceLock<Arc<RemoteWakeController>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 struct RemoteHttpBridge {
     port: u16,
+}
+
+#[derive(Debug)]
+struct RemoteWakeController {
+    state: Mutex<RemoteWakeRuntime>,
+    changed: Condvar,
+}
+
+#[derive(Debug, Clone)]
+struct RemoteWakeRuntime {
+    configured: bool,
+    active_until_ms: Option<i64>,
+    platform_active: bool,
+}
+
+impl RemoteWakeRuntime {
+    fn new(configured: bool) -> Self {
+        Self {
+            configured,
+            active_until_ms: None,
+            platform_active: false,
+        }
+    }
+
+    fn set_target(&mut self, configured: bool, active_until_ms: Option<i64>) {
+        self.configured = configured;
+        self.active_until_ms = configured.then_some(active_until_ms).flatten();
+    }
+
+    fn expire(&mut self, now: i64) {
+        if self
+            .active_until_ms
+            .is_some_and(|active_until| active_until <= now)
+        {
+            self.active_until_ms = None;
+        }
+    }
+
+    fn should_keep_awake(&self, now: i64) -> bool {
+        self.configured
+            && self
+                .active_until_ms
+                .is_some_and(|active_until| active_until > now)
+    }
+
+    fn next_wait(&self, now: i64) -> Duration {
+        self.active_until_ms
+            .filter(|active_until| *active_until > now)
+            .map(|active_until| Duration::from_millis((active_until - now) as u64))
+            .unwrap_or_else(|| Duration::from_millis(REMOTE_WAKE_MONITOR_IDLE_MS))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,6 +158,7 @@ pub struct RemoteControlStatus {
     pub host_enabled: bool,
     pub state: String,
     pub pc_name: String,
+    pub keep_awake_enabled: bool,
     pub endpoint: Option<RemoteEndpointAddress>,
     pub active_ticket: Option<RemotePairingTicket>,
     pub trusted_devices: Vec<RemotePeerSummary>,
@@ -148,6 +204,49 @@ fn capabilities() -> RemoteCapabilitySet {
     }
 }
 
+fn remote_wake_controller() -> &'static Arc<RemoteWakeController> {
+    REMOTE_WAKE.get_or_init(|| {
+        let controller = Arc::new(RemoteWakeController {
+            state: Mutex::new(RemoteWakeRuntime::new(false)),
+            changed: Condvar::new(),
+        });
+        let monitor = controller.clone();
+        thread::spawn(move || remote_wake_monitor(monitor));
+        controller
+    })
+}
+
+fn remote_wake_monitor(controller: Arc<RemoteWakeController>) {
+    loop {
+        let mut state = match controller.state.lock() {
+            Ok(state) => state,
+            Err(_) => return,
+        };
+        let now = now_millis();
+        state.expire(now);
+        let should_keep_awake = state.should_keep_awake(now);
+        if state.platform_active != should_keep_awake {
+            match crate::system_wake::set_system_awake(should_keep_awake) {
+                Ok(()) => state.platform_active = should_keep_awake,
+                Err(err) => eprintln!("[remote-control] update system wake state failed: {err}"),
+            }
+        }
+        let wait = state.next_wait(now);
+        match controller.changed.wait_timeout(state, wait) {
+            Ok((_state, _timeout)) => {}
+            Err(_) => return,
+        }
+    }
+}
+
+fn set_remote_wake(configured: bool, active_until_ms: Option<i64>) {
+    let controller = remote_wake_controller();
+    if let Ok(mut state) = controller.state.lock() {
+        state.set_target(configured, active_until_ms);
+        controller.changed.notify_one();
+    }
+}
+
 fn setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
     conn.query_row(
         "SELECT value FROM remote_control_settings WHERE key = ?1",
@@ -173,6 +272,36 @@ fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> 
 
 fn host_enabled(conn: &Connection) -> Result<bool, String> {
     Ok(setting(conn, HOST_ENABLED_KEY)?.as_deref() == Some("true"))
+}
+
+fn keep_awake_enabled(conn: &Connection) -> Result<bool, String> {
+    Ok(setting(conn, KEEP_AWAKE_ENABLED_KEY)?.as_deref() != Some("false"))
+}
+
+fn remote_wake_configured(conn: &Connection) -> Result<bool, String> {
+    Ok(host_enabled(conn)? && keep_awake_enabled(conn)?)
+}
+
+fn sync_remote_wake_from_db(conn: &Connection) -> Result<(), String> {
+    let configured = remote_wake_configured(conn)?;
+    let active_until_ms = if configured && has_recent_connected_device(conn)? {
+        Some(now_millis() + RECENT_ANDROID_SEEN_MS)
+    } else {
+        None
+    };
+    set_remote_wake(configured, active_until_ms);
+    Ok(())
+}
+
+fn record_remote_activity_from_db(conn: &Connection) -> Result<(), String> {
+    let configured = remote_wake_configured(conn)?;
+    let active_until_ms = if configured {
+        Some(now_millis() + RECENT_ANDROID_SEEN_MS)
+    } else {
+        None
+    };
+    set_remote_wake(configured, active_until_ms);
+    Ok(())
 }
 
 fn pc_name(conn: &Connection) -> Result<String, String> {
@@ -318,6 +447,7 @@ fn remote_status_with_bridge(
         host_enabled: enabled,
         state: state.to_string(),
         pc_name: pc_name(conn)?,
+        keep_awake_enabled: keep_awake_enabled(conn)?,
         endpoint,
         active_ticket,
         trusted_devices: trusted_devices(conn)?,
@@ -381,10 +511,12 @@ pub fn remote_control_set_host_enabled(
         let bridge_url = ensure_http_bridge(app)?;
         set_setting(&conn, HOST_ENABLED_KEY, "true")?;
         let _ = endpoint_id(&conn)?;
+        sync_remote_wake_from_db(&conn)?;
         remote_status_with_bridge(&conn, Some(&bridge_url))
     } else {
         disable_host(&conn)?;
         let _ = endpoint_id(&conn)?;
+        sync_remote_wake_from_db(&conn)?;
         remote_status_with_bridge(&conn, None)
     }
 }
@@ -410,6 +542,21 @@ pub fn remote_control_set_pc_name(
             normalized
         },
     )?;
+    remote_status(&conn)
+}
+
+#[tauri::command]
+pub fn remote_control_set_keep_awake_enabled(
+    enabled: bool,
+    store: State<'_, LiliaStore>,
+) -> Result<RemoteControlStatus, String> {
+    let conn = store.conn()?;
+    set_setting(
+        &conn,
+        KEEP_AWAKE_ENABLED_KEY,
+        if enabled { "true" } else { "false" },
+    )?;
+    sync_remote_wake_from_db(&conn)?;
     remote_status(&conn)
 }
 
@@ -539,8 +686,10 @@ fn pair_device(
         params![now, input.ticket_id],
     )
     .map_err(|e| format!("remote_control: 标记配对票据失败：{e}"))?;
-    peer_for_endpoint(&conn, &input.android_endpoint.endpoint_id)?
-        .ok_or_else(|| "remote_control: 配对后读取设备失败".to_string())
+    let peer = peer_for_endpoint(&conn, &input.android_endpoint.endpoint_id)?
+        .ok_or_else(|| "remote_control: 配对后读取设备失败".to_string())?;
+    record_remote_activity_from_db(conn)?;
+    Ok(peer)
 }
 
 #[tauri::command]
@@ -556,6 +705,7 @@ pub fn remote_control_revoke_device(
         params![now_millis(), device_id],
     )
     .map_err(|e| format!("remote_control: 撤销设备失败：{e}"))?;
+    sync_remote_wake_from_db(&conn)?;
     remote_status(&conn)
 }
 
@@ -589,7 +739,9 @@ fn dispatch_request(
         .and_then(JsonValue::as_str)
         .ok_or_else(|| RemoteDispatchError::invalid("request.type 缺失"))?;
     ensure_host_accepts_request(&conn, request_type)?;
-    authorize_envelope(&conn, &envelope)?;
+    if authorize_envelope(&conn, &envelope)? {
+        record_remote_activity_from_db(&conn).map_err(RemoteDispatchError::internal)?;
+    }
     match request_type {
         "connection.capabilities.read" => Ok(json!({
             "type": "connection.capabilities",
@@ -598,6 +750,11 @@ fn dispatch_request(
         "connection.resume" => {
             let peer = refresh_trusted_peer_seen(&conn, &envelope.device_id)
                 .map_err(RemoteDispatchError::internal)?;
+            if peer.is_some() {
+                record_remote_activity_from_db(&conn).map_err(RemoteDispatchError::internal)?;
+            } else {
+                sync_remote_wake_from_db(&conn).map_err(RemoteDispatchError::internal)?;
+            }
             Ok(json!({
                 "type": "connection.resume",
                 "accepted": peer.is_some(),
@@ -708,7 +865,7 @@ fn dispatch_request(
                 Some(event_id) => retry_context_for_timeline_event_id(&events, event_id),
                 None => latest_retry_context(&events),
             }
-                .ok_or_else(|| RemoteDispatchError::conflict("没有可重试的远控消息"))?;
+            .ok_or_else(|| RemoteDispatchError::conflict("没有可重试的远控消息"))?;
             let project_cwd = load_task_project_cwd(&conn, &task_id).unwrap_or_default();
             let chat_store = app.state::<chat::state::ChatStore>();
             let composer = {
@@ -838,14 +995,14 @@ fn pending_interactions_for_task(task_id: Option<&str>) -> Vec<RemotePendingInte
 fn authorize_envelope(
     conn: &Connection,
     envelope: &RemoteRequestEnvelope,
-) -> Result<(), RemoteDispatchError> {
+) -> Result<bool, RemoteDispatchError> {
     if envelope
         .request
         .get("type")
         .and_then(JsonValue::as_str)
         .is_some_and(|ty| ty.starts_with("connection."))
     {
-        return Ok(());
+        return Ok(false);
     }
     let trusted = conn
         .query_row(
@@ -862,7 +1019,7 @@ fn authorize_envelope(
             params![now_millis(), envelope.device_id.as_str()],
         )
         .map_err(|e| RemoteDispatchError::internal(format!("更新设备时间失败：{e}")))?;
-        Ok(())
+        Ok(true)
     } else {
         Err(RemoteDispatchError {
             code: "unauthorized",
@@ -1299,8 +1456,11 @@ pub(crate) fn restore_http_bridge_if_enabled(app: &AppHandle) {
             if let Err(err) = ensure_http_bridge(app.clone()) {
                 eprintln!("[remote-control] restore HTTP bridge failed: {err}");
             }
+            if let Err(err) = sync_remote_wake_from_db(&conn) {
+                eprintln!("[remote-control] restore wake state failed: {err}");
+            }
         }
-        Ok(false) => {}
+        Ok(false) => set_remote_wake(false, None),
         Err(err) => eprintln!("[remote-control] read host enabled failed: {err}"),
     }
 }
@@ -1649,6 +1809,71 @@ mod tests {
     }
 
     #[test]
+    fn keep_awake_enabled_defaults_to_true_and_persists_false() {
+        let conn = conn();
+
+        assert!(keep_awake_enabled(&conn).unwrap());
+
+        set_setting(&conn, KEEP_AWAKE_ENABLED_KEY, "false").unwrap();
+        assert!(!keep_awake_enabled(&conn).unwrap());
+
+        set_setting(&conn, KEEP_AWAKE_ENABLED_KEY, "true").unwrap();
+        assert!(keep_awake_enabled(&conn).unwrap());
+    }
+
+    #[test]
+    fn remote_wake_config_requires_host_and_keep_awake_setting() {
+        let conn = conn();
+
+        assert!(!remote_wake_configured(&conn).unwrap());
+
+        enable_host(&conn);
+        assert!(remote_wake_configured(&conn).unwrap());
+
+        set_setting(&conn, KEEP_AWAKE_ENABLED_KEY, "false").unwrap();
+        assert!(!remote_wake_configured(&conn).unwrap());
+    }
+
+    #[test]
+    fn remote_wake_runtime_activity_enters_active_window() {
+        let mut runtime = RemoteWakeRuntime::new(true);
+
+        runtime.set_target(true, Some(1_000 + RECENT_ANDROID_SEEN_MS));
+
+        assert!(runtime.should_keep_awake(1_000));
+        assert!(runtime.should_keep_awake(1_000 + RECENT_ANDROID_SEEN_MS - 1));
+        assert!(!runtime.should_keep_awake(1_000 + RECENT_ANDROID_SEEN_MS));
+    }
+
+    #[test]
+    fn remote_wake_runtime_repeated_activity_extends_window() {
+        let mut runtime = RemoteWakeRuntime::new(true);
+
+        runtime.set_target(true, Some(1_000 + RECENT_ANDROID_SEEN_MS));
+        runtime.set_target(true, Some(5_000 + RECENT_ANDROID_SEEN_MS));
+
+        assert!(runtime.should_keep_awake(5_000 + RECENT_ANDROID_SEEN_MS - 1));
+        assert!(!runtime.should_keep_awake(5_000 + RECENT_ANDROID_SEEN_MS));
+    }
+
+    #[test]
+    fn remote_wake_runtime_expire_and_disable_release_activity() {
+        let mut runtime = RemoteWakeRuntime::new(true);
+        runtime.set_target(true, Some(1_000 + RECENT_ANDROID_SEEN_MS));
+
+        runtime.expire(1_000 + RECENT_ANDROID_SEEN_MS);
+
+        assert!(runtime.active_until_ms.is_none());
+        assert!(!runtime.should_keep_awake(1_000 + RECENT_ANDROID_SEEN_MS));
+
+        runtime.set_target(true, Some(5_000 + RECENT_ANDROID_SEEN_MS));
+        runtime.set_target(false, Some(5_000 + RECENT_ANDROID_SEEN_MS));
+
+        assert!(runtime.active_until_ms.is_none());
+        assert!(!runtime.should_keep_awake(5_001));
+    }
+
+    #[test]
     fn http_error_payload_is_structured_for_android() {
         let payload = http_error_payload("invalidRequest", "bad JSON", false);
 
@@ -1884,7 +2109,17 @@ mod tests {
             params![now_millis()],
         )
         .unwrap();
-        authorize_envelope(&conn, &envelope).unwrap();
+        assert!(authorize_envelope(&conn, &envelope).unwrap());
+        assert!(!authorize_envelope(
+            &conn,
+            &RemoteRequestEnvelope {
+                id: "request-2".to_string(),
+                protocol_version: 1,
+                device_id: "unknown-endpoint".to_string(),
+                request: json!({ "type": "connection.resume" }),
+            },
+        )
+        .unwrap());
     }
 
     #[test]
@@ -1962,6 +2197,7 @@ mod tests {
         assert_eq!(wire["hostEnabled"], true);
         assert_eq!(wire["state"], "listening");
         assert_eq!(wire["pcName"], "Lilia PC");
+        assert_eq!(wire["keepAwakeEnabled"], true);
         assert!(wire["endpoint"]["endpointId"]
             .as_str()
             .unwrap()
@@ -1977,6 +2213,7 @@ mod tests {
         assert_eq!(wire["capabilities"]["supportsInteractionResponse"], true);
         assert_eq!(wire["capabilities"]["supportsInterrupt"], true);
         assert!(wire.get("host_enabled").is_none());
+        assert!(wire.get("keep_awake_enabled").is_none());
         assert!(wire["capabilities"].get("supports_task_inbox").is_none());
     }
 
