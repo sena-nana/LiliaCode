@@ -98,6 +98,8 @@ fn public_status(
         update_available: false,
         release_notes: Vec::new(),
         update_error: None,
+        update_state: "idle".to_string(),
+        prepared_version: None,
     }
 }
 

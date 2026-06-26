@@ -192,15 +192,17 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       version: "codex-cli 0.136.0",
       latestVersion: "0.141.0",
       updateAvailable: true,
+      updateState: "ready",
+      preparedVersion: "0.141.0",
       releaseNotes: ["App-server clients can list immediate child threads."],
     });
 
     const view = await renderFooter();
 
-    const updateButton = await view.findByRole("button", { name: /更新 Codex app-server/ });
+    const updateButton = await view.findByRole("button", { name: /切换 Codex app-server/ });
     expect(updateButton).toHaveAttribute(
       "title",
-      "更新 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
+      "切换 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
     );
 
     await fireEvent.mouseEnter(updateButton);
@@ -217,8 +219,25 @@ describe("SidebarConnectionFooter provider quota badge", () => {
         {},
         undefined,
       );
-      expect(view.queryByRole("button", { name: /更新 Codex app-server/ })).not.toBeInTheDocument();
+      expect(view.queryByRole("button", { name: /切换 Codex app-server/ })).not.toBeInTheDocument();
     });
+  });
+
+  it("shows Codex app-server background download state without applying", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      updateState: "downloading",
+      preparedVersion: "0.141.0",
+    });
+
+    const view = await renderFooter();
+
+    const updateButton = await view.findByRole("button", { name: /下载 Codex app-server/ });
+    expect(updateButton).toBeDisabled();
   });
 
   it("keeps long Codex app-server update errors inside the update popover", async () => {
@@ -236,6 +255,8 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       version: "codex-cli 0.142.0",
       latestVersion: "0.142.2",
       updateAvailable: true,
+      updateState: "ready",
+      preparedVersion: "0.142.2",
       releaseNotes: [longReleaseNote],
       updateError: longUpdateError,
     });
@@ -243,7 +264,7 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     const view = await renderFooter();
     await useConnectionStatus({ probe: false, loadBackend: false }).checkCodexAppServerUpdate();
 
-    const updateButton = await view.findByRole("button", { name: /更新 Codex app-server/ });
+    const updateButton = await view.findByRole("button", { name: /切换 Codex app-server/ });
     await fireEvent.mouseEnter(updateButton);
 
     const tooltip = await view.findByRole("tooltip");

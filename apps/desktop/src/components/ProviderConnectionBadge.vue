@@ -185,12 +185,32 @@ const shouldShowQuotaRings = computed(() =>
 const shouldShowCodexUpdate = computed(() =>
   activeBackend.value === "codex" &&
   connectionModeUsesCodexAccount(activeStatus.value?.connectionMode) &&
-  Boolean(codexAppServer.value?.updateAvailable),
+  (
+    Boolean(codexAppServer.value?.updateAvailable) ||
+    codexAppServer.value?.updateState === "downloading" ||
+    codexAppServerUpdating.value
+  ),
 );
-const codexUpdateTarget = computed(() => codexAppServer.value?.latestVersion ?? "最新版本");
+const codexUpdateState = computed(() => codexAppServer.value?.updateState ?? "idle");
+const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
+const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
+const codexUpdateTarget = computed(() =>
+  codexAppServer.value?.preparedVersion ??
+  codexAppServer.value?.latestVersion ??
+  "最新版本",
+);
 const codexUpdateTitle = computed(() => {
   const current = codexAppServer.value?.version ?? "未安装";
-  return `更新 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+  if (codexAppServerUpdating.value || codexUpdateState.value === "switching") {
+    return `切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+  }
+  if (codexUpdateDownloading.value || codexAppServerUpdateChecking.value) {
+    return `下载 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+  }
+  if (codexUpdateReady.value) {
+    return `切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+  }
+  return `准备 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
 });
 const codexReleaseNotes = computed(() => codexAppServer.value?.releaseNotes ?? []);
 
@@ -496,7 +516,7 @@ onBeforeUnmount(() => {
       type="button"
       class="sb-conn-update"
       data-agent-id="provider-connection.codex-update"
-      :disabled="codexAppServerUpdating"
+      :disabled="codexAppServerUpdating || codexUpdateDownloading || !codexUpdateReady"
       :title="codexUpdateTitle"
       :aria-label="codexUpdateTitle"
       :aria-describedby="updateTooltipOpen ? `${popoverId}-update` : undefined"
@@ -507,7 +527,7 @@ onBeforeUnmount(() => {
       @click.stop.prevent="installUpdate"
     >
       <Loader2
-        v-if="codexAppServerUpdating || codexAppServerUpdateChecking"
+        v-if="codexAppServerUpdating || codexAppServerUpdateChecking || codexUpdateDownloading"
         :size="12"
         class="is-spinning"
         aria-hidden="true"

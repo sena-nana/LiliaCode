@@ -1262,6 +1262,8 @@ mod agent_event_sink_tests {
             update_available: false,
             release_notes: Vec::new(),
             update_error: None,
+            update_state: "idle".to_string(),
+            prepared_version: None,
         })
         .unwrap();
 
@@ -1281,6 +1283,8 @@ mod agent_event_sink_tests {
             update_available: false,
             release_notes: Vec::new(),
             update_error: None,
+            update_state: "idle".to_string(),
+            prepared_version: None,
         })
         .unwrap();
         assert!(reason.contains("OpenAI Responses API"));
@@ -1297,6 +1301,8 @@ mod agent_event_sink_tests {
             update_available: false,
             release_notes: Vec::new(),
             update_error: None,
+            update_state: "idle".to_string(),
+            prepared_version: None,
         })
         .is_none());
     }

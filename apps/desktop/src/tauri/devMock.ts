@@ -739,6 +739,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
           updateAvailable: false,
           releaseNotes: [],
           updateError: null,
+          updateState: "idle",
+          preparedVersion: null,
         },
         routerModes: defaultDevRouterModes(),
         backends: defaultDevBackendEnvStatuses(),
@@ -757,6 +759,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         updateAvailable: false,
         releaseNotes: [],
         updateError: null,
+        updateState: "idle",
+        preparedVersion: null,
       } as T;
     case PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND:
       return undefined as T;
