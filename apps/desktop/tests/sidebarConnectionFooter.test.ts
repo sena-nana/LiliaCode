@@ -221,6 +221,39 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     });
   });
 
+  it("keeps long Codex app-server update errors inside the update popover", async () => {
+    const longReleaseNote =
+      "LongStandaloneReleaseNoteWithNoNaturalBreaksForWindowsInstallersAndPowerShellErrorOutput";
+    const longUpdateError =
+      "Codex 安装器退出失败：Move-Item : Access to the path " +
+      "'C:\\Users\\wangjunxue\\.codex\\packages\\standalone\\releases\\staging_0.142.2-x86_64-pc-windows-msvc.58144' " +
+      "is denied. At line:845 char:13 + Move-Item -LiteralPath StagingDir-Destination ReleaseD ... " +
+      "CategoryInfo : WriteError: (C:\\Users\\wangjunxue\\Downloads\\msvc.58144:DirectoryInfo) [Move-Item], IOException + FullyQualifiedErrorId : " +
+      "MoveDirectoryItemIOError,Microsoft.PowerShell.Commands.MoveItemCommand";
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.142.0",
+      latestVersion: "0.142.2",
+      updateAvailable: true,
+      releaseNotes: [longReleaseNote],
+      updateError: longUpdateError,
+    });
+
+    const view = await renderFooter();
+    await useConnectionStatus({ probe: false, loadBackend: false }).checkCodexAppServerUpdate();
+
+    const updateButton = await view.findByRole("button", { name: /更新 Codex app-server/ });
+    await fireEvent.mouseEnter(updateButton);
+
+    const tooltip = await view.findByRole("tooltip");
+    const error = view.getByText(longUpdateError);
+    const releaseNote = view.getByText(longReleaseNote);
+    expect(tooltip).toHaveClass("sb-conn-popover--update");
+    expect(error).toHaveClass("sb-conn-popover__error");
+    expect(releaseNote.parentElement).toHaveClass("sb-conn-popover__update-list");
+  });
+
   it("shows Codex official account quota rings and hover details", async () => {
     setMockActiveBackend("codex");
     setMockRouterMode("codex", "codex-account");
