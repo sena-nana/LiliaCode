@@ -55,6 +55,13 @@ pub(crate) fn managed_codex_install_dir() -> PathBuf {
         .join("bin")
 }
 
+pub(crate) fn managed_codex_home_dir() -> PathBuf {
+    resolve_lilia_home()
+        .join("runtime")
+        .join("codex")
+        .join("home")
+}
+
 pub(crate) fn managed_codex_paths() -> Vec<String> {
     let bin = managed_codex_install_dir();
     codex_candidate_filenames()
