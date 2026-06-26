@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { AlertTriangle, Download, Loader2, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, Download, Loader2, RefreshCw, Sparkles } from "lucide-vue-next";
 import {
   chatBackendLabel,
   codexAccountQuotaWindowRemainingLine as quotaRemainingLine,
@@ -194,6 +194,10 @@ const shouldShowCodexUpdate = computed(() =>
 const codexUpdateState = computed(() => codexAppServer.value?.updateState ?? "idle");
 const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
 const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
+const codexUpdateProgressPercent = computed(() => codexAppServer.value?.updateProgressPercent ?? null);
+const codexUpdateProgressStyle = computed(() => ({
+  "--quota-progress": String(codexUpdateProgressPercent.value ?? 0),
+}));
 const codexUpdateTarget = computed(() =>
   codexAppServer.value?.preparedVersion ??
   codexAppServer.value?.latestVersion ??
@@ -205,6 +209,9 @@ const codexUpdateTitle = computed(() => {
     return `切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
   }
   if (codexUpdateDownloading.value || codexAppServerUpdateChecking.value) {
+    if (codexUpdateDownloading.value && codexUpdateProgressPercent.value !== null) {
+      return `下载 Codex app-server（${codexUpdateProgressPercent.value}%）：${current} -> ${codexUpdateTarget.value}`;
+    }
     return `下载 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
   }
   if (codexUpdateReady.value) {
@@ -527,11 +534,24 @@ onBeforeUnmount(() => {
       @click.stop.prevent="installUpdate"
     >
       <Loader2
-        v-if="codexAppServerUpdating || codexAppServerUpdateChecking || codexUpdateDownloading"
+        v-if="codexAppServerUpdating || codexAppServerUpdateChecking"
         :size="12"
         class="is-spinning"
         aria-hidden="true"
       />
+      <span
+        v-else-if="codexUpdateDownloading"
+        class="sb-quota-ring"
+        :class="{ 'sb-quota-ring--empty': codexUpdateProgressPercent === null }"
+        :style="codexUpdateProgressStyle"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+          <circle class="sb-quota-ring__track" cx="8" cy="8" r="6" pathLength="100" />
+          <circle class="sb-quota-ring__value" cx="8" cy="8" r="6" pathLength="100" />
+        </svg>
+      </span>
+      <RefreshCw v-else-if="codexUpdateReady" :size="12" aria-hidden="true" />
       <Download v-else :size="12" aria-hidden="true" />
     </button>
   </span>

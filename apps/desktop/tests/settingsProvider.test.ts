@@ -579,7 +579,10 @@ describe("Settings provider switch", () => {
       expect(view.queryByText(/路径：/)).not.toBeInTheDocument();
       expect(view.queryByText("将安装到 Lilia 管理目录")).not.toBeInTheDocument();
       expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
-      expect(view.getByRole("button", { name: /切换到 0.141.0/ })).toBeEnabled();
+      const updateButton = view.getByRole("button", { name: /切换到 0.141.0/ });
+      expect(updateButton).toBeEnabled();
+      expect(updateButton.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
+      expect(updateButton.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
     });
 
     await fireEvent.click(view.getByRole("button", { name: /切换到 0.141.0/ }));
@@ -599,12 +602,16 @@ describe("Settings provider switch", () => {
       updateAvailable: true,
       updateState: "downloading",
       preparedVersion: "0.141.0",
+      updateProgressPercent: 42,
     });
 
     const view = await renderSettings("/settings?tab=providers");
 
-    const button = await view.findByRole("button", { name: /下载中/ });
+    const button = await view.findByRole("button", { name: /下载中 42%/ });
     expect(button).toBeDisabled();
+    const ring = button.querySelector<HTMLElement>(".sb-quota-ring");
+    expect(ring).toBeInTheDocument();
+    expect(ring).toHaveStyle({ "--quota-progress": "42" });
   });
 
   it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {

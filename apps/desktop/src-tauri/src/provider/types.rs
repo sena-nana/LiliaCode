@@ -255,6 +255,7 @@ pub(crate) struct CodexAppServerStatus {
     pub(crate) update_error: Option<String>,
     pub(crate) update_state: String,
     pub(crate) prepared_version: Option<String>,
+    pub(crate) update_progress_percent: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
