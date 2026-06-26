@@ -10,7 +10,23 @@ import {
   createAgentDebugDevServerPlan,
 } from "./dev-server.mjs";
 
-const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+function resolveRepoRoot() {
+  try {
+    return path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+  } catch {
+    let cursor = process.cwd();
+    while (true) {
+      if (existsSync(path.join(cursor, "package.json")) && existsSync(path.join(cursor, "apps", "desktop"))) {
+        return cursor;
+      }
+      const next = path.dirname(cursor);
+      if (next === cursor) return process.cwd();
+      cursor = next;
+    }
+  }
+}
+
+const repoRoot = resolveRepoRoot();
 const runsRoot = path.join(repoRoot, "agent-debug-runs");
 const runId = new Date().toISOString().replace(/[:.]/g, "-");
 const runDir = path.join(runsRoot, runId);
@@ -20,8 +36,7 @@ const appBinary = process.env.LILIA_AGENT_DEBUG_APP ??
   path.join(repoRoot, "apps", "desktop", "src-tauri", "target", "debug", process.platform === "win32" ? "lilia.exe" : "lilia");
 const toolDir = process.env.LILIA_AGENT_DEBUG_TOOL_DIR ??
   path.join(os.homedir(), ".lilia", "agent-debug", "bin");
-const replay = [];
-const scenarioResults = [];
+const DEFAULT_NEXT_STEP = "Fix the preflight error, build the debug desktop binary, or set LILIA_AGENT_DEBUG_APP.";
 let restoreAgentInteractionSettings = null;
 
 const CHAT_SEND_MESSAGE_COMMAND = "chat_send_message";
@@ -84,6 +99,79 @@ class SmokeBlockedError extends Error {
     this.details = details;
   }
 }
+
+class AgentDebugRunArtifacts {
+  constructor({ runDir, runId }) {
+    this.runDir = runDir;
+    this.runId = runId;
+    this.replay = [];
+    this.scenarioResults = [];
+    this.activeScenario = null;
+  }
+
+  path(name) {
+    return path.join(this.runDir, name);
+  }
+
+  async writeJson(name, value) {
+    const target = this.path(name);
+    await writeFile(target, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    return target;
+  }
+
+  async writeText(name, value) {
+    const target = this.path(name);
+    await writeFile(target, value, "utf8");
+    return target;
+  }
+
+  beginScenario(scenario) {
+    this.activeScenario = scenario;
+  }
+
+  appendScenarioResult(scenario, status, details = {}) {
+    const result = {
+      id: scenario.id,
+      label: scenario.label,
+      status,
+      ...details,
+    };
+    this.scenarioResults.push(result);
+    if (this.activeScenario?.id === scenario.id) {
+      this.activeScenario = null;
+    }
+    return result;
+  }
+
+  ensureActiveScenarioResult(status, details = {}) {
+    const scenario = this.activeScenario;
+    if (!scenario) return null;
+    if (this.scenarioResults.some((item) => item.id === scenario.id)) {
+      this.activeScenario = null;
+      return null;
+    }
+    return this.appendScenarioResult(scenario, status, details);
+  }
+
+  async writeRunArtifacts({ logs = [], driverOutput = [], devServerOutput = [] } = {}) {
+    const logsPath = await this.writeJson("logs.json", logs);
+    const replayPath = await this.writeJson("replay.json", this.replay);
+    const scenarioResultsPath = await this.writeJson("scenario-results.json", this.scenarioResults);
+    const driverLogPath = await this.writeText("tauri-driver.log", driverOutput.join(""));
+    const devServerLogPath = await this.writeText("dev-server.log", devServerOutput.join(""));
+    return {
+      logsPath,
+      replayPath,
+      scenarioResultsPath,
+      driverLogPath,
+      devServerLogPath,
+    };
+  }
+}
+
+const artifacts = new AgentDebugRunArtifacts({ runDir, runId });
+const replay = artifacts.replay;
+const scenarioResults = artifacts.scenarioResults;
 
 function commandExists(command, args = ["--version"]) {
   const result = spawnSync(command, args, { stdio: "ignore" });
@@ -213,9 +301,59 @@ async function ensureAgentDebugTools() {
 }
 
 async function writeJson(name, value) {
-  const target = path.join(runDir, name);
-  await writeFile(target, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  return target;
+  return await artifacts.writeJson(name, value);
+}
+
+async function writeRunSummary(
+  runArtifacts,
+  {
+    status,
+    preflight,
+    driverOutput = [],
+    devServerOutput = [],
+    logs = [],
+    reason,
+    message,
+    details,
+    nextStep,
+    beforeScreenshotPath = null,
+    afterScreenshotPath = null,
+    failureScreenshotPath = null,
+    failureDiagnosticsPath = null,
+    observePath,
+    slowInvokes = [],
+  },
+) {
+  const paths = await runArtifacts.writeRunArtifacts({
+    logs,
+    driverOutput,
+    devServerOutput,
+  });
+  const summary = {
+    status,
+    runId: runArtifacts.runId,
+    preflight,
+    ...(reason === undefined ? {} : { reason }),
+    ...(message === undefined ? {} : { message }),
+    ...(details === undefined ? {} : { details }),
+    ...(nextStep === undefined ? {} : { nextStep }),
+    ...(beforeScreenshotPath ? { beforeScreenshotPath } : {}),
+    ...(afterScreenshotPath ? { afterScreenshotPath } : {}),
+    ...(observePath ? { observePath } : {}),
+    ...paths,
+    failureScreenshotPath,
+    failureDiagnosticsPath,
+    slowInvokes,
+    screenshots: {
+      before: beforeScreenshotPath,
+      after: afterScreenshotPath,
+      failure: failureScreenshotPath,
+    },
+    replay: runArtifacts.replay,
+    scenarios: runArtifacts.scenarioResults,
+  };
+  await runArtifacts.writeJson("summary.json", summary);
+  return summary;
 }
 
 function request(method, pathname, body) {
@@ -740,6 +878,7 @@ async function typeAgent(sessionId, target, text, scenarioId, clear = true) {
 }
 
 async function markScenario(sessionId, scenario) {
+  artifacts.beginScenario(scenario);
   await act(
     sessionId,
     { type: "mark", label: `scenario:${scenario.id}:start`, data: { label: scenario.label } },
@@ -750,15 +889,11 @@ async function markScenario(sessionId, scenario) {
 async function recordScenarioResult(sessionId, scenario, status, details = {}) {
   const screenshotPath = await screenshot(sessionId, scenario.artifact);
   const snapshot = await observe(sessionId);
-  const result = {
-    id: scenario.id,
-    label: scenario.label,
-    status,
+  const result = artifacts.appendScenarioResult(scenario, status, {
     route: snapshot?.route ?? null,
     screenshotPath,
     ...details,
-  };
-  scenarioResults.push(result);
+  });
   replay.push({ scenario: scenario.id, type: "assert", status, details });
   await act(
     sessionId,
@@ -953,6 +1088,8 @@ async function runCoreConversationScenarios(sessionId) {
 async function main() {
   await mkdir(runDir, { recursive: true });
   const devServerPlan = await createAgentDebugDevServerPlan(process.env);
+  const devServerOutput = [];
+  const driverOutput = [];
   let setupInfo = null;
   let setupError = null;
   try {
@@ -977,20 +1114,20 @@ async function main() {
   };
   await writeJson("preflight.json", preflight);
   if (!preflight.tauriDriver || !preflight.edgeDriver || !preflight.appBinaryExists) {
-    await writeJson("summary.json", {
+    await writeRunSummary(artifacts, {
       status: "blocked",
-      reason: setupError ?? "Missing tauri-driver, EdgeDriver, or debug app binary.",
       preflight,
-      nextStep: "Fix the preflight error, build the debug desktop binary, or set LILIA_AGENT_DEBUG_APP.",
+      reason: setupError ?? "Missing tauri-driver, EdgeDriver, or debug app binary.",
+      nextStep: DEFAULT_NEXT_STEP,
+      driverOutput,
+      devServerOutput,
     });
     process.exitCode = 2;
     return;
   }
 
   let devServer = null;
-  const devServerOutput = [];
   let driver = null;
-  const driverOutput = [];
   let sessionId = null;
   try {
     const childEnv = createAgentDebugChildEnv(
@@ -1069,37 +1206,29 @@ async function main() {
     const logs = await collectInvokeLogs(sessionId);
     const slowInvokes = summarizeSlowInvokes(logs);
     const afterScreenshotPath = await screenshot(sessionId, "after.png");
-    await writeJson("logs.json", logs);
-    await writeJson("replay.json", replay);
-    const scenarioResultsPath = await writeJson("scenario-results.json", scenarioResults);
-    await writeJson("summary.json", {
+    await writeRunSummary(artifacts, {
       status: "passed",
-      runId,
       preflight,
-      scenarios: scenarioResults,
+      logs,
+      driverOutput,
+      devServerOutput,
       beforeScreenshotPath,
       afterScreenshotPath,
       observePath: path.join(runDir, "observe.json"),
-      logsPath: path.join(runDir, "logs.json"),
       slowInvokes,
-      replayPath: path.join(runDir, "replay.json"),
-      scenarioResultsPath,
     });
   } catch (error) {
     const blocked = error instanceof SmokeBlockedError;
     let failureDiagnosticsPath = null;
     let failureScreenshotPath = null;
-    let logsPath = null;
-    let replayPath = null;
-    let scenarioResultsPath = null;
+    let failureSnapshot = null;
+    let logs = [];
     let slowInvokes = [];
     if (sessionId) {
       failureScreenshotPath = await screenshot(sessionId, "failure.png").catch(() => null);
-      const logs = await collectInvokeLogs(sessionId).catch(() => []);
+      failureSnapshot = await observe(sessionId).catch(() => null);
+      logs = await collectInvokeLogs(sessionId).catch(() => []);
       slowInvokes = summarizeSlowInvokes(logs);
-      logsPath = await writeJson("logs.json", logs).catch(() => null);
-      replayPath = await writeJson("replay.json", replay).catch(() => null);
-      scenarioResultsPath = await writeJson("scenario-results.json", scenarioResults).catch(() => null);
       const diagnostics = await execute(
         sessionId,
         `return {
@@ -1112,23 +1241,24 @@ async function main() {
       ).catch((diagnosticError) => ({ diagnosticError: String(diagnosticError?.message ?? diagnosticError) }));
       failureDiagnosticsPath = await writeJson("failure-diagnostics.json", diagnostics).catch(() => null);
     }
-    await writeJson("summary.json", {
+    artifacts.ensureActiveScenarioResult(blocked ? "blocked" : "failed", {
+      route: failureSnapshot?.route ?? null,
+      screenshotPath: failureScreenshotPath,
+      reason: blocked ? error.message : undefined,
+      message: error?.message ?? String(error),
+    });
+    await writeRunSummary(artifacts, {
       status: blocked ? "blocked" : "failed",
-      runId,
       preflight,
       reason: blocked ? error.message : undefined,
       message: error?.message ?? String(error),
       details: blocked ? error.details : undefined,
       driverOutput,
       devServerOutput,
+      logs,
       failureScreenshotPath,
       failureDiagnosticsPath,
-      logsPath,
       slowInvokes,
-      replayPath,
-      scenarioResultsPath,
-      replay,
-      scenarios: scenarioResults,
     });
     process.exitCode = blocked ? 2 : 1;
   } finally {
@@ -1145,9 +1275,22 @@ async function main() {
     }
     driver?.kill();
     stopProcessTree(devServer);
-    await writeFile(path.join(runDir, "tauri-driver.log"), driverOutput.join(""), "utf8");
-    await writeFile(path.join(runDir, "dev-server.log"), devServerOutput.join(""), "utf8");
+    await artifacts.writeText("tauri-driver.log", driverOutput.join(""));
+    await artifacts.writeText("dev-server.log", devServerOutput.join(""));
   }
 }
 
-await main();
+function isDirectRun() {
+  return process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
+
+export {
+  AgentDebugRunArtifacts,
+  SmokeBlockedError,
+  main,
+  writeRunSummary,
+};
+
+if (isDirectRun()) {
+  await main();
+}
