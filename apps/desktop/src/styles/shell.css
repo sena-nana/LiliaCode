@@ -1187,7 +1187,9 @@
   left: 0;
   top: 0;
   z-index: 1150;
+  box-sizing: border-box;
   width: 292px;
+  max-width: calc(100vw - 16px);
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1198,6 +1200,12 @@
   gap: 8px;
   cursor: default;
   white-space: normal;
+}
+
+.sb-conn-popover > span,
+.sb-conn-popover__update-list > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .sb-conn-popover__quota-foot,
