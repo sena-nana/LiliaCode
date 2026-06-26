@@ -253,6 +253,8 @@ pub(crate) struct CodexAppServerStatus {
     pub(crate) update_available: bool,
     pub(crate) release_notes: Vec<String>,
     pub(crate) update_error: Option<String>,
+    pub(crate) update_state: String,
+    pub(crate) prepared_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

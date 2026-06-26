@@ -283,6 +283,8 @@ export interface CodexAppServerStatus {
   updateAvailable: boolean;
   releaseNotes: string[];
   updateError: string | null;
+  updateState: "idle" | "available" | "downloading" | "ready" | "switching" | "failed";
+  preparedVersion: string | null;
 }
 
 export interface EnvStatusReport {

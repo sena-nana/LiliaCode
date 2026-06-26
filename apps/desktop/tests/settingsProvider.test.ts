@@ -566,6 +566,8 @@ describe("Settings provider switch", () => {
       managed: false,
       latestVersion: "0.141.0",
       updateAvailable: true,
+      updateState: "ready",
+      preparedVersion: "0.141.0",
       releaseNotes: ["App-server update"],
     });
 
@@ -577,15 +579,32 @@ describe("Settings provider switch", () => {
       expect(view.queryByText(/路径：/)).not.toBeInTheDocument();
       expect(view.queryByText("将安装到 Lilia 管理目录")).not.toBeInTheDocument();
       expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
-      expect(view.getByRole("button", { name: /更新到 0.141.0/ })).toBeEnabled();
+      expect(view.getByRole("button", { name: /切换到 0.141.0/ })).toBeEnabled();
     });
 
-    await fireEvent.click(view.getByRole("button", { name: /更新到 0.141.0/ }));
+    await fireEvent.click(view.getByRole("button", { name: /切换到 0.141.0/ }));
 
     await waitFor(() => {
       expect(lastInvokeInput("provider_codex_app_server_install_update")).toEqual({});
-      expect(view.queryByRole("button", { name: /更新到 0.141.0/ })).not.toBeInTheDocument();
+      expect(view.queryByRole("button", { name: /切换到 0.141.0/ })).not.toBeInTheDocument();
     });
+  });
+
+  it("Codex app-server 后台下载中时设置页禁用切换按钮", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      updateState: "downloading",
+      preparedVersion: "0.141.0",
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    const button = await view.findByRole("button", { name: /下载中/ });
+    expect(button).toBeDisabled();
   });
 
   it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {

@@ -113,16 +113,29 @@ const apiKeyEnv = computed(() => API_KEY_ENV_BY_BACKEND[selectedBackend.value]);
 const apiDescription = computed(() => apiDescriptionForBackend(selectedBackend.value));
 const showApiConfig = computed(() => routerModeUsesApiConfig(selectedRouterMode.value));
 const codexAppServerStatus = computed(() => report.value?.codexAppServer ?? null);
+const codexUpdateState = computed(() => codexAppServerStatus.value?.updateState ?? "idle");
+const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
+const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
 const showCodexUpdateAction = computed(() =>
   selectedBackend.value === "codex" &&
   selectedRouterMode.value === "codex-account" &&
-  Boolean(codexAppServerStatus.value?.updateAvailable),
+  (
+    Boolean(codexAppServerStatus.value?.updateAvailable) ||
+    codexUpdateDownloading.value ||
+    codexAppServerUpdating.value
+  ),
 );
-const codexUpdateLabel = computed(() =>
-  codexAppServerStatus.value?.latestVersion
-    ? `更新到 ${codexAppServerStatus.value.latestVersion}`
-    : "安装更新",
+const codexUpdateTarget = computed(() =>
+  codexAppServerStatus.value?.preparedVersion ??
+  codexAppServerStatus.value?.latestVersion ??
+  null,
 );
+const codexUpdateLabel = computed(() => {
+  if (codexAppServerUpdating.value || codexUpdateState.value === "switching") return "切换中...";
+  if (codexUpdateDownloading.value || codexAppServerUpdateChecking.value) return "下载中...";
+  if (codexUpdateReady.value && codexUpdateTarget.value) return `切换到 ${codexUpdateTarget.value}`;
+  return codexUpdateTarget.value ? `准备 ${codexUpdateTarget.value}` : "准备更新";
+});
 const codexVersionText = computed(() => {
   const current = codexAppServerStatus.value?.version ?? "未安装";
   const latest = codexAppServerStatus.value?.latestVersion;
@@ -452,11 +465,11 @@ watch(showCodexRuntimeStatus, (enabled) => {
             type="button"
             class="ui-button ui-button--ghost"
             data-agent-id="settings.provider.codex-update"
-            :disabled="codexAppServerUpdating"
+            :disabled="codexAppServerUpdating || codexUpdateDownloading || !codexUpdateReady"
             @click="installCodexUpdate"
           >
             <Loader2
-              v-if="codexAppServerUpdating || codexAppServerUpdateChecking"
+              v-if="codexAppServerUpdating || codexAppServerUpdateChecking || codexUpdateDownloading"
               :size="12"
               class="is-spinning"
               aria-hidden="true"

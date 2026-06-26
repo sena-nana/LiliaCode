@@ -1392,6 +1392,8 @@ describe("contracts normalization helpers", () => {
       updateAvailable: false,
       releaseNotes: [],
       updateError: null,
+      updateState: "idle",
+      preparedVersion: null,
     })).toBe("模型不可用 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。");
     expect(runtimeDiagnostic("codex", {
       nodeAvailable: true,
@@ -1408,6 +1410,8 @@ describe("contracts normalization helpers", () => {
         updateAvailable: false,
         releaseNotes: [],
         updateError: null,
+        updateState: "idle",
+        preparedVersion: null,
       },
       routerModes: { claude: "api", codex: "codex-account" },
       backends: {

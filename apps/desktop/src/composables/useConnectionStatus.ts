@@ -27,11 +27,13 @@ const probing = ref(false);
 const codexAppServerUpdateChecking = ref(false);
 const codexAppServerUpdating = ref(false);
 const codexAppServerUpdateError = ref<string | null>(null);
+const CODEX_UPDATE_POLL_MS = 1_200;
 let inflight: Promise<void> | null = null;
 let backendInflight: Promise<ChatBackendKind> | null = null;
 let codexUpdateCheckInflight: Promise<void> | null = null;
 let codexUpdateInstallInflight: Promise<void> | null = null;
 let activeBackendLoaded = false;
+let codexUpdatePollTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function probeOnce(forceRefresh = false) {
   if (inflight) return inflight;
@@ -82,6 +84,24 @@ function mergeCodexAppServerStatus(status: CodexAppServerStatus) {
   };
 }
 
+function clearCodexUpdatePoll() {
+  if (codexUpdatePollTimer === null) return;
+  clearTimeout(codexUpdatePollTimer);
+  codexUpdatePollTimer = null;
+}
+
+function scheduleCodexUpdatePoll(status: CodexAppServerStatus) {
+  if (status.updateState !== "downloading") {
+    clearCodexUpdatePoll();
+    return;
+  }
+  if (codexUpdatePollTimer !== null) return;
+  codexUpdatePollTimer = setTimeout(() => {
+    codexUpdatePollTimer = null;
+    void checkCodexAppServerUpdate();
+  }, CODEX_UPDATE_POLL_MS);
+}
+
 async function checkCodexAppServerUpdate() {
   if (codexUpdateCheckInflight) return codexUpdateCheckInflight;
   codexAppServerUpdateChecking.value = true;
@@ -90,8 +110,10 @@ async function checkCodexAppServerUpdate() {
       const status = await requestCodexAppServerUpdate();
       mergeCodexAppServerStatus(status);
       codexAppServerUpdateError.value = status.updateError;
+      scheduleCodexUpdatePoll(status);
     } catch (err) {
       codexAppServerUpdateError.value = String(err);
+      clearCodexUpdatePoll();
     } finally {
       codexAppServerUpdateChecking.value = false;
       codexUpdateCheckInflight = null;
@@ -106,7 +128,8 @@ async function installCodexAppServerUpdate() {
   codexAppServerUpdateError.value = null;
   codexUpdateInstallInflight = (async () => {
     try {
-      await requestCodexAppServerInstall();
+      const status = await requestCodexAppServerInstall();
+      mergeCodexAppServerStatus(status);
       await refreshAll(true);
       await checkCodexAppServerUpdate();
     } catch (err) {
