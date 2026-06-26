@@ -742,6 +742,7 @@ let codexAppServerStatus = {
   updateError: null as string | null,
   updateState: "idle" as "idle" | "available" | "downloading" | "ready" | "switching" | "failed",
   preparedVersion: null as string | null,
+  updateProgressPercent: null as number | null,
 };
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 type MockHookTrustState = "unknown" | "required" | "managed" | "n_a";
@@ -1882,6 +1883,7 @@ export function resetTauriMockData() {
     updateError: null,
     updateState: "idle",
     preparedVersion: null,
+    updateProgressPercent: null,
   };
   composerStateHandler = null;
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
@@ -3474,6 +3476,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         updateAvailable: false,
         updateState: "idle",
         preparedVersion: null,
+        updateProgressPercent: null,
         installPath: codexAppServerStatus.installPath ?? "C:/Users/me/.lilia/runtime/codex/bin/codex.exe",
         issues: [...codexAppServerStatus.issues],
         releaseNotes: [...codexAppServerStatus.releaseNotes],

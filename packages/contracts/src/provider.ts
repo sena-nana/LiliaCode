@@ -285,6 +285,7 @@ export interface CodexAppServerStatus {
   updateError: string | null;
   updateState: "idle" | "available" | "downloading" | "ready" | "switching" | "failed";
   preparedVersion: string | null;
+  updateProgressPercent: number | null;
 }
 
 export interface EnvStatusReport {

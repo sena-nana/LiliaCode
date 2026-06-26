@@ -204,6 +204,8 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       "title",
       "切换 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
     );
+    expect(updateButton.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
+    expect(updateButton.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
 
     await fireEvent.mouseEnter(updateButton);
 
@@ -232,12 +234,20 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       updateAvailable: true,
       updateState: "downloading",
       preparedVersion: "0.141.0",
+      updateProgressPercent: 42,
     });
 
     const view = await renderFooter();
 
     const updateButton = await view.findByRole("button", { name: /下载 Codex app-server/ });
     expect(updateButton).toBeDisabled();
+    expect(updateButton).toHaveAttribute(
+      "title",
+      "下载 Codex app-server（42%）：codex-cli 0.136.0 -> 0.141.0",
+    );
+    const ring = updateButton.querySelector<HTMLElement>(".sb-quota-ring");
+    expect(ring).toBeInTheDocument();
+    expect(ring).toHaveStyle({ "--quota-progress": "42" });
   });
 
   it("keeps long Codex app-server update errors inside the update popover", async () => {

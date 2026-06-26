@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -93,9 +93,15 @@ struct CodexReleaseAssetSelection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CodexUpdateManagerState {
     Idle,
-    Downloading(String),
+    Downloading {
+        version: String,
+        progress_percent: Option<u8>,
+    },
     Ready(String),
-    Failed { version: String, error: String },
+    Failed {
+        version: String,
+        error: String,
+    },
 }
 
 fn codex_update_manager() -> &'static Mutex<CodexUpdateManagerState> {
@@ -263,6 +269,7 @@ fn apply_update_state(mut status: CodexAppServerStatus) -> CodexAppServerStatus 
         CODEX_UPDATE_STATE_IDLE.to_string()
     };
     status.prepared_version = None;
+    status.update_progress_percent = None;
 
     let latest = status.latest_version.clone();
     let state = codex_update_manager()
@@ -270,9 +277,16 @@ fn apply_update_state(mut status: CodexAppServerStatus) -> CodexAppServerStatus 
         .map(|state| state.clone())
         .unwrap_or(CodexUpdateManagerState::Idle);
     match (latest.as_deref(), state) {
-        (Some(latest), CodexUpdateManagerState::Downloading(version)) if version == latest => {
+        (
+            Some(latest),
+            CodexUpdateManagerState::Downloading {
+                version,
+                progress_percent,
+            },
+        ) if version == latest => {
             status.update_state = CODEX_UPDATE_STATE_DOWNLOADING.to_string();
             status.prepared_version = Some(version);
+            status.update_progress_percent = progress_percent;
         }
         (Some(latest), CodexUpdateManagerState::Ready(version)) if version == latest => {
             status.update_state = CODEX_UPDATE_STATE_READY.to_string();
@@ -290,7 +304,9 @@ fn apply_update_state(mut status: CodexAppServerStatus) -> CodexAppServerStatus 
 
 fn should_start_download_for(version: &str, state: &CodexUpdateManagerState) -> bool {
     match state {
-        CodexUpdateManagerState::Downloading(active)
+        CodexUpdateManagerState::Downloading {
+            version: active, ..
+        }
         | CodexUpdateManagerState::Ready(active)
         | CodexUpdateManagerState::Failed {
             version: active, ..
@@ -314,7 +330,10 @@ fn maybe_start_codex_update_download(status: &CodexAppServerStatus) {
         if !should_start_download_for(&version, &state) {
             return;
         }
-        *state = CodexUpdateManagerState::Downloading(version.clone());
+        *state = CodexUpdateManagerState::Downloading {
+            version: version.clone(),
+            progress_percent: None,
+        };
     }
 
     thread::spawn(move || {
@@ -326,6 +345,20 @@ fn maybe_start_codex_update_download(status: &CodexAppServerStatus) {
             };
         }
     });
+}
+
+fn set_codex_update_download_progress(version: &str, progress_percent: Option<u8>) {
+    if let Ok(mut state) = codex_update_manager().lock() {
+        if let CodexUpdateManagerState::Downloading {
+            version: active,
+            progress_percent: active_progress,
+        } = &mut *state
+        {
+            if active == version {
+                *active_progress = progress_percent;
+            }
+        }
+    }
 }
 
 fn powershell_single_quoted(value: &str) -> String {
@@ -454,15 +487,44 @@ fn fetch_github_release_with(
 fn fetch_asset_bytes(
     client: &reqwest::blocking::Client,
     asset: &GithubReleaseAsset,
+    progress_version: Option<&str>,
 ) -> Result<Vec<u8>, String> {
-    client
+    let mut response = client
         .get(&asset.browser_download_url)
         .send()
         .and_then(|response| response.error_for_status())
-        .map_err(|err| format!("下载 Codex release asset {} 失败：{err}", asset.name))?
-        .bytes()
-        .map(|bytes| bytes.to_vec())
-        .map_err(|err| format!("读取 Codex release asset {} 失败：{err}", asset.name))
+        .map_err(|err| format!("下载 Codex release asset {} 失败：{err}", asset.name))?;
+    let total = response.content_length();
+    let progress_target = progress_version.zip(total.filter(|value| *value > 0));
+    if let Some((version, _)) = progress_target {
+        set_codex_update_download_progress(version, Some(0));
+    }
+
+    let mut bytes = Vec::with_capacity(total.unwrap_or(0).min(64 * 1024 * 1024) as usize);
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut downloaded = 0_u64;
+    let mut last_progress = 0_u8;
+    loop {
+        let read = response
+            .read(&mut buffer)
+            .map_err(|err| format!("读取 Codex release asset {} 失败：{err}", asset.name))?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        downloaded += read as u64;
+        if let Some((version, total)) = progress_target {
+            let progress = ((downloaded.saturating_mul(100)) / total).min(100) as u8;
+            if progress != last_progress {
+                set_codex_update_download_progress(version, Some(progress));
+                last_progress = progress;
+            }
+        }
+    }
+    if let Some((version, _)) = progress_target {
+        set_codex_update_download_progress(version, Some(100));
+    }
+    Ok(bytes)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -657,6 +719,7 @@ fn download_release_to_staging(
     client: &reqwest::blocking::Client,
     selection: &CodexReleaseAssetSelection,
     target: CodexTarget,
+    version: &str,
     release_root: &Path,
 ) -> Result<CodexInstallLayout, String> {
     fs::create_dir_all(release_root).map_err(|err| {
@@ -666,14 +729,14 @@ fn download_release_to_staging(
         )
     })?;
 
-    let package_bytes = fetch_asset_bytes(client, &selection.package)?;
+    let package_bytes = fetch_asset_bytes(client, &selection.package, Some(version))?;
     match selection.layout {
         CodexInstallLayout::Package => {
             let checksum = selection
                 .checksum
                 .as_ref()
                 .ok_or_else(|| "Codex package release 缺少 checksum asset。".to_string())?;
-            let checksum_bytes = fetch_asset_bytes(client, checksum)?;
+            let checksum_bytes = fetch_asset_bytes(client, checksum, None)?;
             test_archive_digest(
                 &checksum_bytes,
                 &release_asset_sha256(checksum)?,
@@ -789,7 +852,8 @@ fn prepare_codex_update(version: &str) -> Result<(), String> {
 
     let result = (|| {
         let release_root = prepared_release_root(&staging_root);
-        let layout = download_release_to_staging(&client, &selection, target, &release_root)?;
+        let layout =
+            download_release_to_staging(&client, &selection, target, version, &release_root)?;
         let staged = PreparedCodexUpdate {
             version: version.to_string(),
             install_dir: install_dir_for_layout(&release_root, layout),
@@ -929,7 +993,7 @@ pub(crate) fn install_or_update_codex_app_server() -> Result<CodexAppServerStatu
                 *state = CodexUpdateManagerState::Idle;
                 version
             }
-            CodexUpdateManagerState::Downloading(_) => {
+            CodexUpdateManagerState::Downloading { .. } => {
                 return Err("Codex app-server 更新仍在后台下载。".to_string());
             }
             CodexUpdateManagerState::Failed { error, .. } => return Err(error),
@@ -990,6 +1054,7 @@ mod tests {
             update_error: None,
             update_state: CODEX_UPDATE_STATE_IDLE.to_string(),
             prepared_version: None,
+            update_progress_percent: None,
         }
     }
 
@@ -1098,17 +1163,61 @@ mod tests {
 
         assert_eq!(updated.update_state, CODEX_UPDATE_STATE_READY);
         assert_eq!(updated.prepared_version.as_deref(), Some("0.141.0"));
+        assert_eq!(updated.update_progress_percent, None);
+    }
+
+    #[test]
+    fn update_state_reports_download_progress() {
+        let mut base = status(Some("codex 0.140.0"), true);
+        base.latest_version = Some("0.141.0".to_string());
+        base.update_available = true;
+
+        let updated = with_update_manager_state(
+            CodexUpdateManagerState::Downloading {
+                version: "0.141.0".to_string(),
+                progress_percent: Some(42),
+            },
+            || apply_update_state(base),
+        );
+
+        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_DOWNLOADING);
+        assert_eq!(updated.prepared_version.as_deref(), Some("0.141.0"));
+        assert_eq!(updated.update_progress_percent, Some(42));
+    }
+
+    #[test]
+    fn update_state_keeps_unknown_download_progress_empty() {
+        let mut base = status(Some("codex 0.140.0"), true);
+        base.latest_version = Some("0.141.0".to_string());
+        base.update_available = true;
+
+        let updated = with_update_manager_state(
+            CodexUpdateManagerState::Downloading {
+                version: "0.141.0".to_string(),
+                progress_percent: None,
+            },
+            || apply_update_state(base),
+        );
+
+        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_DOWNLOADING);
+        assert_eq!(updated.update_progress_percent, None);
     }
 
     #[test]
     fn same_version_download_is_not_started_twice() {
         assert!(!should_start_download_for(
             "0.141.0",
-            &CodexUpdateManagerState::Downloading("0.141.0".to_string())
+            &CodexUpdateManagerState::Downloading {
+                version: "0.141.0".to_string(),
+                progress_percent: Some(10),
+            }
         ));
         assert!(should_start_download_for(
             "0.142.0",
-            &CodexUpdateManagerState::Downloading("0.141.0".to_string())
+            &CodexUpdateManagerState::Downloading {
+                version: "0.141.0".to_string(),
+                progress_percent: Some(10),
+            }
         ));
     }
 

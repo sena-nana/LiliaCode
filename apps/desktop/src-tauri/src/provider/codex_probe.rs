@@ -100,6 +100,7 @@ fn public_status(
         update_error: None,
         update_state: "idle".to_string(),
         prepared_version: None,
+        update_progress_percent: None,
     }
 }
 
