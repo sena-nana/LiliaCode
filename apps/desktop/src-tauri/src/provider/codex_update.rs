@@ -7,7 +7,8 @@ use serde::Deserialize;
 use crate::process_command::hide_console_window;
 
 use super::codex_probe::{
-    build_codex_app_server_probe_status_cached, managed_codex_install_dir, parse_codex_cli_version,
+    build_codex_app_server_probe_status_cached, managed_codex_home_dir, managed_codex_install_dir,
+    parse_codex_cli_version,
 };
 use super::types::CodexAppServerStatus;
 
@@ -129,15 +130,93 @@ fn powershell_single_quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-pub(crate) fn codex_install_command_spec(install_dir: &Path) -> CodexInstallCommandSpec {
+fn comparable_path(path: &Path) -> String {
+    let mut text = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_string();
+    if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        text = stripped.to_string();
+    }
+    if cfg!(windows) {
+        text.to_ascii_lowercase()
+    } else {
+        text
+    }
+}
+
+fn path_starts_with(candidate: &Path, root: &Path) -> bool {
+    let candidate = comparable_path(candidate);
+    let root = comparable_path(root);
+    candidate == root || candidate.starts_with(&format!("{root}\\"))
+}
+
+#[cfg(windows)]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
+fn prepare_managed_codex_install_dir(install_dir: &Path, codex_home: &Path) -> Result<(), String> {
+    if let Some(metadata) = fs::symlink_metadata(install_dir).map(Some).or_else(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            Ok(None)
+        } else {
+            Err(format!(
+                "检查旧 Codex 安装链接 {} 失败：{err}",
+                install_dir.display()
+            ))
+        }
+    })? {
+        let standalone_root = codex_home.join("packages").join("standalone");
+        if is_reparse_point(&metadata)
+            && !path_starts_with(
+                &fs::read_link(install_dir).map_err(|err| {
+                    format!(
+                        "读取旧 Codex 安装链接 {} 失败：{err}",
+                        install_dir.display()
+                    )
+                })?,
+                &standalone_root,
+            )
+        {
+            fs::remove_dir(install_dir).map_err(|err| {
+                format!(
+                    "移除旧 Codex 安装链接 {} 失败：{err}",
+                    install_dir.display()
+                )
+            })?;
+        }
+    }
+    fs::create_dir_all(codex_home)
+        .map_err(|err| format!("创建 Codex home 目录 {} 失败：{err}", codex_home.display()))?;
+    fs::create_dir_all(install_dir)
+        .map_err(|err| format!("创建 Codex 安装目录 {} 失败：{err}", install_dir.display()))
+}
+
+pub(crate) fn codex_install_command_spec(
+    install_dir: &Path,
+    codex_home: &Path,
+) -> CodexInstallCommandSpec {
     let install_dir = install_dir.to_string_lossy().to_string();
+    let codex_home = codex_home.to_string_lossy().to_string();
     let env = vec![
         ("CODEX_NON_INTERACTIVE".to_string(), "1".to_string()),
+        ("CODEX_HOME".to_string(), codex_home.clone()),
         ("CODEX_INSTALL_DIR".to_string(), install_dir.clone()),
     ];
     if cfg!(windows) {
         let script = format!(
-            "$ErrorActionPreference='Stop'; $env:CODEX_NON_INTERACTIVE='1'; $env:CODEX_INSTALL_DIR={}; irm {} | iex",
+            "$ErrorActionPreference='Stop'; $env:CODEX_NON_INTERACTIVE='1'; $env:CODEX_HOME={}; $env:CODEX_INSTALL_DIR={}; irm {} | iex",
+            powershell_single_quoted(&codex_home),
             powershell_single_quoted(&install_dir),
             CODEX_INSTALL_SCRIPT_PS1,
         );
@@ -192,9 +271,9 @@ fn run_install_command(spec: &CodexInstallCommandSpec) -> Result<(), String> {
 
 pub(crate) fn install_or_update_codex_app_server() -> Result<CodexAppServerStatus, String> {
     let install_dir = managed_codex_install_dir();
-    fs::create_dir_all(&install_dir)
-        .map_err(|err| format!("创建 Codex 安装目录 {} 失败：{err}", install_dir.display()))?;
-    let spec = codex_install_command_spec(&install_dir);
+    let codex_home = managed_codex_home_dir();
+    prepare_managed_codex_install_dir(&install_dir, &codex_home)?;
+    let spec = codex_install_command_spec(&install_dir, &codex_home);
     run_install_command(&spec)?;
     let status = build_codex_app_server_probe_status_cached(true).public;
     Ok(check_codex_app_server_update_status_for(status))
@@ -295,13 +374,54 @@ mod tests {
 
     #[test]
     fn install_command_uses_non_interactive_managed_directory() {
-        let spec = codex_install_command_spec(Path::new("C:/Users/me/.lilia/runtime/codex/bin"));
+        let spec = codex_install_command_spec(
+            Path::new("C:/Users/me/.lilia/runtime/codex/bin"),
+            Path::new("C:/Users/me/.lilia/runtime/codex/home"),
+        );
 
         assert!(spec
             .env
             .contains(&("CODEX_NON_INTERACTIVE".to_string(), "1".to_string())));
+        assert!(spec
+            .env
+            .iter()
+            .any(|(key, value)| key == "CODEX_HOME" && value.contains("runtime/codex/home")));
         assert!(spec.env.iter().any(|(key, value)| {
             key == "CODEX_INSTALL_DIR" && value.contains("runtime/codex/bin")
         }));
+    }
+
+    #[test]
+    fn windows_install_command_writes_codex_home_and_install_dir() {
+        let spec = codex_install_command_spec(
+            Path::new("C:/Users/me/.lilia/runtime/codex/bin"),
+            Path::new("C:/Users/me/.lilia/runtime/codex/home"),
+        );
+        if !cfg!(windows) {
+            return;
+        }
+
+        let script = spec.args.last().expect("PowerShell command should exist");
+        assert!(script.contains("$env:CODEX_HOME='C:/Users/me/.lilia/runtime/codex/home'"));
+        assert!(script.contains("$env:CODEX_INSTALL_DIR='C:/Users/me/.lilia/runtime/codex/bin'"));
+    }
+
+    #[test]
+    fn old_managed_bin_link_target_outside_lilia_standalone_root_is_removed() {
+        let standalone_root =
+            Path::new("C:/Users/me/.lilia/runtime/codex/home/packages/standalone");
+
+        assert!(!path_starts_with(
+            Path::new("C:/Users/me/.codex/packages/standalone/current/bin"),
+            standalone_root,
+        ));
+        assert!(path_starts_with(
+            Path::new("C:/Users/me/.lilia/runtime/codex/home/packages/standalone/current/bin"),
+            standalone_root,
+        ));
+        assert!(!path_starts_with(
+            Path::new("C:/Users/me/.lilia/runtime/codex/home/packages/standalone-old/current/bin"),
+            standalone_root,
+        ));
     }
 }
