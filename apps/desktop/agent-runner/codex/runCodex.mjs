@@ -67,7 +67,7 @@ import {
   PLAN_APPROVAL_INTERACTION_KIND,
 } from "@lilia/contracts/agentInteractionContract.mjs";
 import { RUNNER_DONE_EVENT_TYPE } from "@lilia/contracts/runnerProtocolContract.mjs";
-import { normalizeCodexProfileSettings } from "@lilia/contracts/provider.mjs";
+import { normalizeCodexProfileSettings } from "@lilia/contracts/liliaCodeCore.mjs";
 import {
   REMOTE_ENVIRONMENT_ACTIONS,
   REMOTE_ENVIRONMENT_COMMAND_TYPE,

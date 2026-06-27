@@ -5,6 +5,7 @@ export * from "./todo";
 export * from "./provider";
 export * from "./chat";
 export * from "./lilia-iab";
+export * from "./lilia-code-core";
 export * from "./providerDiagnostics";
 export * from "./plugins";
 export * from "./hooks";
