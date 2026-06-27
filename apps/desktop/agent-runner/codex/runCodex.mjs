@@ -42,7 +42,7 @@ import {
 } from "../providerOptions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
-import { createCodexAppServer } from "./appServer.mjs";
+import { createCodexAppServer, initializeCodexAppServer } from "./appServer.mjs";
 import {
   codexLegacyPermissionRuntimeParams,
   codexPermissionRuntimeParams,
@@ -90,18 +90,6 @@ import {
   normalizeLiliaReviewWorkflow,
   normalizeLiliaTaskWorkflow,
 } from "@lilia/contracts/liliaWorkflowContract.mjs";
-
-export async function initializeCodexAppServer(server) {
-  await server.request("initialize", {
-    clientInfo: {
-      name: "lilia",
-      title: "LiliaCode",
-      version: "0.1.0",
-    },
-    capabilities: { experimentalApi: true },
-  });
-  server.notify("initialized", {});
-}
 
 function codexThreadIdFromResult(result, fallback = null) {
   if (!isRecord(result)) return fallback;

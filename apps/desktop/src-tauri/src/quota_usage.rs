@@ -1,15 +1,16 @@
 use std::collections::BTreeMap;
+use std::env;
+use std::path::PathBuf;
 use std::process::Command;
 
 use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::agent_interaction_contract;
 use crate::agent_timeline::AgentTimelineEvent;
 use crate::agent_timeline_contract;
-use crate::chat::runner::locate_agent_runner;
 use crate::chat::state::try_normalize_backend;
 use crate::process_command::hide_console_window;
 use crate::provider::{resolve_connection_for, validate_backend_ready_for_send, ConnectionMode};
@@ -320,12 +321,30 @@ fn codex_account_quota_unavailable(
     }
 }
 
-fn locate_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
-    let runner = locate_agent_runner(app);
-    runner
-        .parent()
-        .map(|dir| dir.join("codex-account-quota.mjs"))
-        .unwrap_or_else(|| std::path::PathBuf::from("codex-account-quota.mjs"))
+fn locate_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("codex-account-quota.mjs"));
+            candidates.push(dir.join("../../../codex-account-quota.mjs"));
+        }
+    }
+
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("codex-account-quota.mjs"));
+    }
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return candidate.clone();
+        }
+    }
+
+    candidates
+        .into_iter()
+        .last()
+        .unwrap_or_else(|| PathBuf::from("codex-account-quota.mjs"))
 }
 
 fn run_codex_account_quota_utility_output<R: Runtime>(

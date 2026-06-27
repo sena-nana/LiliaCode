@@ -7,6 +7,11 @@ import { spawn, spawnSync } from "node:child_process";
 const repoRoot = process.cwd();
 const processName = "LiliaCode.exe";
 const defaultTimeoutMs = 45_000;
+const bundledRuntimeFiles = [
+  "codex-account-quota.mjs",
+  path.join("agent-runner", "codex", "accountQuota.mjs"),
+  path.join("agent-runner", "codex", "appServer.mjs"),
+];
 
 function getArgValue(name) {
   const index = process.argv.indexOf(name);
@@ -220,6 +225,10 @@ function main() {
     installed = true;
     waitUntil("installed LiliaCode.exe", () => fs.existsSync(installedExe));
     waitUntil("installed liliacode.cmd", () => fs.existsSync(cliCmd));
+    for (const filename of bundledRuntimeFiles) {
+      const resourcePath = path.join(installDir, filename);
+      waitUntil(`installed runtime resource ${filename}`, () => fs.existsSync(resourcePath));
+    }
 
     const runtimeEnv = freshWindowsEnv({ LILIA_HOME: liliaHome });
     const installedCli = resolveLiliacode(runtimeEnv);
