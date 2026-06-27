@@ -24,6 +24,7 @@
     "./hooksContract.mjs": "./src/hooksContract.mjs",
     "./liliaAgentProtocol.mjs": "./src/liliaAgentProtocol.mjs",
     "./liliaWorkflowContract.mjs": "./src/liliaWorkflowContract.mjs",
+    "./liliaCodeCore.mjs": "./src/liliaCodeCore.mjs",
     "./liliaTools.mjs": "./src/liliaTools.mjs",
     "./memoryCommandsContract.mjs": "./src/memoryCommandsContract.mjs",
     "./milestoneCommandsContract.mjs": "./src/milestoneCommandsContract.mjs",

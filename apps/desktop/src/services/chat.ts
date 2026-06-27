@@ -6,7 +6,10 @@
 
 import { invoke } from "../tauri/runtime";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { normalizeAgentInteractionRequest } from "@lilia/contracts";
+import {
+  normalizeAgentInteractionRequest,
+  normalizeLiliaCodeCoreCodexQuotaStatus,
+} from "@lilia/contracts";
 import {
   AGENT_TIMELINE_BATCH_EVENT_NAME,
   AGENT_TIMELINE_EVENT_NAME,
@@ -504,17 +507,22 @@ export function getQuotaUsageStats(
   return invoke<QuotaUsageStats>(QUOTA_USAGE_GET_STATS_COMMAND, { input });
 }
 
-export function getCodexAccountQuotaStatus(): Promise<CodexAccountQuotaStatus> {
-  return invoke<CodexAccountQuotaStatus>(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND);
+export async function getCodexAccountQuotaStatus(): Promise<CodexAccountQuotaStatus> {
+  const result = await invoke<unknown>(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND);
+  return normalizeLiliaCodeCoreCodexQuotaStatus(result);
 }
 
-export function consumeCodexRateLimitResetCredit(
+export async function consumeCodexRateLimitResetCredit(
   input: CodexRateLimitResetCreditConsumeInput,
 ): Promise<CodexRateLimitResetCreditConsumeResult> {
-  return invoke<CodexRateLimitResetCreditConsumeResult>(
+  const result = await invoke<CodexRateLimitResetCreditConsumeResult>(
     QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
     { input },
   );
+  return {
+    ...result,
+    status: normalizeLiliaCodeCoreCodexQuotaStatus(result.status),
+  };
 }
 
 export function getRemoteControlStatus(): Promise<RemoteControlStatus> {

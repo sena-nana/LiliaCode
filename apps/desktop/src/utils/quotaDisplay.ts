@@ -2,6 +2,7 @@ import {
   clampPercent,
   codexAccountQuotaPercentLabel,
   codexAccountQuotaWindowRemainingLabel,
+  createLiliaCodeCoreCodexQuotaUnavailableStatus,
   type ConnectionMode,
   type CodexAccountQuotaStatus,
 } from "@lilia/contracts";
@@ -48,23 +49,5 @@ export function codexQuotaUnavailableStatus(
   error: unknown,
   connectionMode: ConnectionMode = "codex-account",
 ): CodexAccountQuotaStatus {
-  return {
-    available: false,
-    connectionMode,
-    limitId: null,
-    limitName: null,
-    planType: null,
-    rateLimitReachedType: null,
-    fiveHour: null,
-    weekly: null,
-    sparkFiveHour: null,
-    sparkWeekly: null,
-    credits: null,
-    sparkCredits: null,
-    rateLimitResetCredits: null,
-    accountUsage: null,
-    usageError: null,
-    fetchedAt: Date.now(),
-    error: error === null ? null : String(error),
-  };
+  return createLiliaCodeCoreCodexQuotaUnavailableStatus({ error, connectionMode });
 }

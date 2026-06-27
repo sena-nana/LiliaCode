@@ -473,6 +473,7 @@ import {
   codexAccountQuotaWindowRemainingPercent,
   codexAccountQuotaWindowShortLabel,
   codexRateLimitResetCreditConsumeOutcomeLabel,
+  createLiliaCodeCoreCodexQuotaUnavailableStatus,
   codexRuntimeIssue,
   connectionDiagnostic,
   connectionModeUsesApiKey,
@@ -597,6 +598,8 @@ import {
   normalizeChatBackendKind,
   normalizeChatSlashCommandWorkflow,
   normalizeCodexProfileSettings,
+  normalizeLiliaCodeCoreCodexProfileSettings,
+  normalizeLiliaCodeCoreCodexQuotaStatus,
   normalizeLiliaConfigDiagnosticsWorkflow,
   normalizeLiliaBatchApplyWorkflow,
   normalizeLiliaFixSuggestionMode,
@@ -1166,6 +1169,70 @@ describe("contracts normalization helpers", () => {
       usedPercent: 92,
       windowDurationMins: 10080,
     }, "Plus")).toBe("7d · 剩余 8% · Plus");
+    expect(normalizeLiliaCodeCoreCodexQuotaStatus({
+      available: true,
+      connectionMode: "codex-account",
+      limitId: " codex ",
+      fiveHour: {
+        usedPercent: 142,
+        windowDurationMins: 300.8,
+        resetsAt: -1,
+      },
+      credits: {
+        hasCredits: true,
+        unlimited: false,
+        balance: "  $5  ",
+      },
+      rateLimitResetCredits: {
+        availableCount: 2.8,
+      },
+      accountUsage: {
+        summary: {
+          lifetimeTokens: 12.8,
+          peakDailyTokens: -1,
+        },
+        dailyUsageBuckets: [
+          { startDate: "2026-06-27", tokens: 5.9 },
+          { startDate: "", tokens: 8 },
+        ],
+      },
+      fetchedAt: 42,
+    })).toMatchObject({
+      available: true,
+      connectionMode: "codex-account",
+      limitId: "codex",
+      fiveHour: {
+        usedPercent: 100,
+        windowDurationMins: 300,
+        resetsAt: null,
+      },
+      credits: {
+        hasCredits: true,
+        unlimited: false,
+        balance: "$5",
+      },
+      rateLimitResetCredits: {
+        availableCount: 2,
+      },
+      accountUsage: {
+        summary: {
+          lifetimeTokens: 12,
+          peakDailyTokens: null,
+        },
+        dailyUsageBuckets: [{ startDate: "2026-06-27", tokens: 5 }],
+      },
+      fetchedAt: 42,
+      error: null,
+    });
+    expect(createLiliaCodeCoreCodexQuotaUnavailableStatus({
+      error: new Error("offline"),
+      fetchedAt: 7,
+    })).toMatchObject({
+      available: false,
+      connectionMode: "codex-account",
+      fetchedAt: 7,
+      error: "Error: offline",
+    });
     expect(CODEX_RATE_LIMIT_RESET_CREDIT_CONSUME_OUTCOMES).toEqual([
       "reset",
       "alreadyRedeemed",
@@ -3651,6 +3718,13 @@ describe("contracts normalization helpers", () => {
       persistExtendedHistory: true,
       initialTurnsPage: null,
       excludeTurns: ["turn-1"],
+    });
+    expect(normalizeLiliaCodeCoreCodexProfileSettings({
+      profile: "custom" as never,
+      runtimeWorkspaceRoots: [" C:/repo ", "C:/repo"],
+    })).toMatchObject({
+      profile: "default",
+      runtimeWorkspaceRoots: ["C:/repo"],
     });
   });
 
