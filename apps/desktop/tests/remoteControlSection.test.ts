@@ -20,6 +20,8 @@ describe("RemoteControlSection", () => {
       expect(view.getByRole("heading", { level: 2, name: "Android 远控" })).toBeInTheDocument();
       expect(view.getByText("未启用")).toBeInTheDocument();
     });
+    expect(view.getByRole("switch", { name: "远控服务" })).not.toBeChecked();
+    expect(view.getByRole("switch", { name: "远控期间保持电脑唤醒" })).toBeChecked();
 
     await fireEvent.click(view.getByRole("button", { name: "生成二维码" }));
 
@@ -84,8 +86,9 @@ describe("RemoteControlSection", () => {
     await waitFor(() => {
       expect(view.getByAltText("Lilia Android pairing QR code")).toBeInTheDocument();
     });
+    expect(view.getByRole("switch", { name: "远控服务" })).toBeChecked();
 
-    await fireEvent.click(view.getByRole("button", { name: "关闭远控" }));
+    await fireEvent.click(view.getByRole("switch", { name: "远控服务" }));
 
     await waitFor(() => {
       expect(view.getByText("未启用")).toBeInTheDocument();

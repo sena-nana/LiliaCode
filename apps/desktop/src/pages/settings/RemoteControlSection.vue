@@ -4,7 +4,6 @@ import {
   MonitorSmartphone,
   QrCode,
   RotateCw,
-  ShieldCheck,
   Smartphone,
   Trash2,
 } from "lucide-vue-next";
@@ -120,13 +119,15 @@ watch(
   { immediate: true },
 );
 
-async function toggleHost() {
-  const next = !hostEnabled.value;
+async function toggleHost(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const next = input.checked;
   loading.value = true;
   errorText.value = "";
   try {
     applyRemoteControlStatus(await setRemoteControlHostEnabled(next));
   } catch (err) {
+    input.checked = hostEnabled.value;
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
@@ -219,17 +220,17 @@ onBeforeUnmount(stopRemoteControlPolling);
     <div class="settings-row">
       <div class="settings-row__label">主机</div>
       <div class="settings-row__control">
-        <button
-          type="button"
-          class="ui-button"
-          data-agent-id="settings.remote-control.host.toggle"
-          :class="{ 'ui-button--ghost': hostEnabled }"
-          :disabled="loading"
-          @click="toggleHost"
-        >
-          <ShieldCheck :size="12" aria-hidden="true" />
-          {{ hostEnabled ? "关闭远控" : "启用远控" }}
-        </button>
+        <label class="ui-switch">
+          <input
+            type="checkbox"
+            role="switch"
+            data-agent-id="settings.remote-control.host.toggle"
+            :checked="hostEnabled"
+            :disabled="loading"
+            @change="toggleHost"
+          />
+          <span>远控服务</span>
+        </label>
         <span class="settings-row__status-text muted">{{ connectionLabel }}</span>
         <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.remote-control.refresh" :disabled="loading" @click="handleRefreshClick">
           <RotateCw :size="11" aria-hidden="true" />
@@ -244,6 +245,7 @@ onBeforeUnmount(stopRemoteControlPolling);
         <label class="ui-switch remote-control-wake">
           <input
             type="checkbox"
+            role="switch"
             data-agent-id="settings.remote-control.keep-awake"
             :checked="keepAwakeEnabled"
             :disabled="savingKeepAwake"
