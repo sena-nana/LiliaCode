@@ -32,14 +32,13 @@ r2d2_sqlite = "0.34.0"
 dirs = "6.0.0"
 uuid = { version = "1.23.4", features = ["v4"] }
 ignore = "0.4.26"
-# 辅助模型连通性测试（GET {baseUrl}/models）的极简同步 HTTP 客户端。
-# rustls-tls：避免依赖 OpenSSL；blocking：用在 Tauri command 同步上下文里，无需引入 tokio。
-reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+# Tauri command 中的同步 HTTP 客户端，用于模型连通性测试和 GitHub API。
+# rustls：避免依赖 OpenSSL；form/query：GitHub OAuth 与分页请求需要。
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "form", "json", "query", "rustls"] }
 flate2 = "1.1.9"
 sha2 = "0.11.0"
 tar = "0.4.44"
 keyring = "4.1.2"
-keyring-core = "1.0.0"
 
 [target.'cfg(windows)'.dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
