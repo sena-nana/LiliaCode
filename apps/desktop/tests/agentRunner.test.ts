@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -117,6 +118,7 @@ import {
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
 const packageManifest = readFileSync(join(testsDir, "..", "package.json"), "utf8");
+const codexAccountQuotaUtility = join(testsDir, "..", "codex-account-quota.mjs");
 
 function captureProtocol() {
   const lines: string[] = [];
@@ -3260,6 +3262,37 @@ describe("Codex app-server mapping", () => {
     expect(status.credits).toEqual({ hasCredits: true, unlimited: false, balance: "3" });
     expect(status.sparkCredits).toEqual({ hasCredits: true, unlimited: true, balance: null });
     expect(status.accountUsage?.summary.currentStreakDays).toBe(8);
+  });
+
+  it("Codex account quota utility returns structured JSON when Codex CLI is missing", async () => {
+    const liliaHome = join(tmpdir(), `lilia-quota-utility-${process.pid}-${Date.now()}`);
+    await mkdir(liliaHome, { recursive: true });
+    try {
+      const result = spawnSync(process.execPath, [codexAccountQuotaUtility], {
+        cwd: join(testsDir, ".."),
+        env: {
+          ...process.env,
+          LILIA_HOME: liliaHome,
+          OPENAI_BASE_URL: "",
+          OPENAI_API_KEY: "",
+          CODEX_API_KEY: "",
+        },
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      expect(result.stdout.trim()).not.toBe("");
+      expect(result.stderr).not.toContain("MODULE_NOT_FOUND");
+      const payload = JSON.parse(result.stdout.trim().split(/\r?\n/)[0]);
+      expect(payload).toMatchObject({
+        available: false,
+        connectionMode: "codex-account",
+        fiveHour: null,
+        weekly: null,
+      });
+      expect(payload.error).toContain("Codex app-server");
+    } finally {
+      await rm(liliaHome, { recursive: true, force: true });
+    }
   });
 
   it("Codex account quota retries transient wham usage fetch failures", async () => {

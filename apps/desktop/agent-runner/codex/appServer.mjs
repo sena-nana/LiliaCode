@@ -130,6 +130,18 @@ export function codexAppServerClosedError() {
   return new Error("Codex app-server request was cancelled because Lilia closed the app-server.");
 }
 
+export async function initializeCodexAppServer(server) {
+  await server.request("initialize", {
+    clientInfo: {
+      name: "lilia",
+      title: "LiliaCode",
+      version: "0.1.0",
+    },
+    capabilities: { experimentalApi: true },
+  });
+  server.notify("initialized", {});
+}
+
 export function createCodexAppServer({
   env = process.env,
   resolveBinary = codexAppServerBinary,
