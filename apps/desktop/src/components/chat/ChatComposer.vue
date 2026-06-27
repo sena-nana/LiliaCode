@@ -59,7 +59,7 @@ import type {
   ToolConsentRequest,
   ToolConsentUpdatedInput,
 } from "../../services/chat";
-import { getModelFeatureSettings } from "../../services/chat";
+import { getModelFeatureSettings, onModelFeatureSettingsChanged } from "../../services/chat";
 import { previewAutoModelSelection } from "../../services/modelSelection";
 import ComposerRichInput from "./ComposerRichInput.vue";
 import { textPart } from "./composerParts";
@@ -384,6 +384,7 @@ const contextSearchController = shallowRef<ContextSearchController | null>(null)
 const slashCommandsController = shallowRef<SlashCommandsController | null>(null);
 let composerPasteLoad: Promise<ComposerPasteHandler> | null = null;
 let composerPasteHandler: ComposerPasteHandler | null = null;
+let unlistenModelFeatureSettings: (() => void) | null = null;
 
 let clearComposerContextState = () => {};
 
@@ -713,6 +714,28 @@ const autoModelPreview = computed(() =>
   }),
 );
 
+function syncAutoModelPreviewToComposer() {
+  if (props.state.modelSelectionMode === "manual") return;
+  if ((props.modelOptions?.length ?? 0) === 0) return;
+  const preview = autoModelPreview.value;
+  if (!preview.model) return;
+  if (
+    props.state.model === preview.model &&
+    props.state.modelSelectionMode === "auto" &&
+    props.state.reasoningEffort == null
+  ) return;
+  patch({
+    model: preview.model,
+    modelSelectionMode: "auto",
+    reasoningEffort: null,
+  });
+}
+
+function applyModelFeatureSettings(settings: ModelFeatureSettings) {
+  modelFeatureSettings.value = settings;
+  void nextTick(syncAutoModelPreviewToComposer);
+}
+
 function invalidateSpecialInputControllerLoad(kind: SpecialInputControllerKind) {
   specialInputControllerIntentSeq[kind] += 1;
 }
@@ -923,9 +946,10 @@ onMounted(() => {
   if (hasPendingComposerUi.value) {
     void ensureComposerPendingEntryActionsLoaded();
   }
+  unlistenModelFeatureSettings = onModelFeatureSettingsChanged(applyModelFeatureSettings);
   void getModelFeatureSettings()
     .then((settings) => {
-      if (composerLifecycle.assertAlive()) modelFeatureSettings.value = settings;
+      if (composerLifecycle.assertAlive()) applyModelFeatureSettings(settings);
     })
     .catch((err) => console.error("[chat-composer] load model feature settings failed", err));
   scheduleToolbarWarmup();
@@ -1442,6 +1466,8 @@ watch(
 
 onBeforeUnmount(() => {
   composerChromeRequested = false;
+  unlistenModelFeatureSettings?.();
+  unlistenModelFeatureSettings = null;
   cancelSpecialInputControllerRefresh();
   cancelToolbarWarmup();
   conversationSearchScope?.stop();

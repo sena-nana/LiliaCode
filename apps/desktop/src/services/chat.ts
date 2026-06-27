@@ -453,8 +453,20 @@ export function getModelFeatureSettings(): Promise<ModelFeatureSettings> {
   return invoke<ModelFeatureSettings>(MODEL_FEATURE_GET_SETTINGS_COMMAND);
 }
 
-export function setModelFeatureSettings(settings: ModelFeatureSettings): Promise<void> {
-  return invoke<void>(MODEL_FEATURE_SET_SETTINGS_COMMAND, { settings });
+type ModelFeatureSettingsListener = (settings: ModelFeatureSettings) => void;
+
+const modelFeatureSettingsListeners = new Set<ModelFeatureSettingsListener>();
+
+export function onModelFeatureSettingsChanged(listener: ModelFeatureSettingsListener): () => void {
+  modelFeatureSettingsListeners.add(listener);
+  return () => modelFeatureSettingsListeners.delete(listener);
+}
+
+export async function setModelFeatureSettings(settings: ModelFeatureSettings): Promise<void> {
+  await invoke<void>(MODEL_FEATURE_SET_SETTINGS_COMMAND, { settings });
+  for (const listener of modelFeatureSettingsListeners) {
+    listener(settings);
+  }
 }
 
 export function testAssistantAIConnection(

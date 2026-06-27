@@ -3,7 +3,7 @@ import {
   AGENT_TIMELINE_BATCH_EVENT_NAME,
   AGENT_TIMELINE_EVENT_NAME,
 } from "@lilia/contracts";
-import { onAgentTimelineEvents } from "../src/services/chat";
+import { onAgentTimelineEvents, onModelFeatureSettingsChanged, setModelFeatureSettings } from "../src/services/chat";
 import {
   emitMockTimelineBatchEvent,
   emitMockTimelineEvent,
@@ -48,5 +48,35 @@ describe("chat service timeline events", () => {
 
     expect(mockListenerCount(AGENT_TIMELINE_EVENT_NAME)).toBe(0);
     expect(mockListenerCount(AGENT_TIMELINE_BATCH_EVENT_NAME)).toBe(0);
+  });
+
+  it("notifies mounted consumers after model feature settings are saved", async () => {
+    const seen: string[] = [];
+    const unlisten = onModelFeatureSettingsChanged((settings) => {
+      seen.push(settings.chat.light ?? "");
+    });
+
+    await setModelFeatureSettings({
+      chat: { light: "gpt-5.4-mini", normal: null, deep: null },
+      title: null,
+      suggestion: null,
+      promptRouter: null,
+      promptOptimize: null,
+      autoTurnDecision: null,
+    });
+
+    expect(seen).toEqual(["gpt-5.4-mini"]);
+
+    unlisten();
+    await setModelFeatureSettings({
+      chat: { light: "gpt-5.4", normal: null, deep: null },
+      title: null,
+      suggestion: null,
+      promptRouter: null,
+      promptOptimize: null,
+      autoTurnDecision: null,
+    });
+
+    expect(seen).toEqual(["gpt-5.4-mini"]);
   });
 });

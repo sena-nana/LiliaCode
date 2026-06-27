@@ -8,9 +8,12 @@ import {
   type AskUserSpec,
   type ChatAttachment,
   type ChatComposerState,
+  type ChatModelOption,
+  type ModelFeatureSettings,
 } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
+import { setModelFeatureSettings } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
 import { mockInvoke, setMockClipboardFilePaths } from "./tauriMock";
 import { domRect, placeEditableCaret } from "./domTestHelpers";
@@ -28,6 +31,21 @@ const codexState: ChatComposerState = {
   ...baseState,
   backend: "codex",
   model: "gpt-5.5",
+};
+
+const codexModelOptions: ChatModelOption[] = [
+  { id: "gpt-5.5", label: "GPT 5.5", backend: "codex" },
+  { id: "gpt-5.4", label: "GPT 5.4", backend: "codex" },
+  { id: "gpt-5.4-mini", label: "GPT 5.4 Mini", backend: "codex" },
+];
+
+const defaultModelFeatureSettings: ModelFeatureSettings = {
+  chat: { light: null, normal: null, deep: null },
+  title: null,
+  suggestion: null,
+  promptRouter: null,
+  promptOptimize: null,
+  autoTurnDecision: null,
 };
 
 function pendingAsk(
@@ -283,6 +301,36 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
+  it("模型分配保存后刷新已挂载 Composer 的自动模型 state", async () => {
+    await setModelFeatureSettings(defaultModelFeatureSettings);
+    const view = renderComposer({
+      state: {
+        ...codexState,
+        modelSelectionMode: "auto",
+        reasoningEffort: null,
+      },
+      modelOptions: codexModelOptions,
+    });
+    await flushDeferredComposerWork();
+    const emittedBefore = view.emitted("update:state")?.length ?? 0;
+
+    await setModelFeatureSettings({
+      ...defaultModelFeatureSettings,
+      chat: { ...defaultModelFeatureSettings.chat, light: "gpt-5.4" },
+    });
+    await flushDeferredComposerWork();
+
+    await waitFor(() => {
+      const updates = view.emitted("update:state") ?? [];
+      expect(updates.length).toBeGreaterThan(emittedBefore);
+      expect(updates.at(-1)?.[0]).toMatchObject({
+        model: "gpt-5.4",
+        modelSelectionMode: "auto",
+        reasoningEffort: null,
+      });
+    });
+  });
+
   it("卸载时取消特殊输入刷新 paint 调度", async () => {
     const frameIds: number[] = [];
     const cancelAnimationFrame = vi.fn();
