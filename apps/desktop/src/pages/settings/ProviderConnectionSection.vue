@@ -117,13 +117,21 @@ const codexAppServerStatus = computed(() => report.value?.codexAppServer ?? null
 const codexUpdateState = computed(() => codexAppServerStatus.value?.updateState ?? "idle");
 const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
 const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
-const codexUpdateFailed = computed(() => codexUpdateState.value === "failed");
 const codexUpdateProgressPercent = computed(() =>
   codexAppServerStatus.value?.updateProgressPercent ?? null
 );
 const codexUpdateProgressStyle = computed(() => ({
   "--quota-progress": String(codexUpdateProgressPercent.value ?? 0),
 }));
+const codexUpdateTarget = computed(() =>
+  codexAppServerStatus.value?.preparedVersion ??
+  codexAppServerStatus.value?.latestVersion ??
+  null,
+);
+const codexUpdateRetryMode = computed<"prepare" | "switch" | null>(() => {
+  if (codexUpdateState.value !== "failed") return null;
+  return codexAppServerStatus.value?.preparedVersion ? "switch" : codexUpdateTarget.value ? "prepare" : null;
+});
 const showCodexUpdateAction = computed(() =>
   selectedBackend.value === "codex" &&
   selectedRouterMode.value === "codex-account" &&
@@ -131,28 +139,16 @@ const showCodexUpdateAction = computed(() =>
     Boolean(codexAppServerStatus.value?.updateAvailable) ||
     codexUpdateDownloading.value ||
     codexUpdateReady.value ||
-    codexUpdateFailed.value ||
+    codexUpdateRetryMode.value !== null ||
     codexAppServerUpdating.value
   ),
-);
-const codexUpdateTarget = computed(() =>
-  codexAppServerStatus.value?.preparedVersion ??
-  codexAppServerStatus.value?.latestVersion ??
-  null,
 );
 const codexUpdateErrorText = computed(() =>
   codexAppServerStatus.value?.updateError ?? codexAppServerUpdateError.value ?? null
 );
-const codexUpdateCanRetrySwitch = computed(() =>
-  codexUpdateFailed.value && Boolean(codexAppServerStatus.value?.preparedVersion)
-);
-const codexUpdateCanRetryPrepare = computed(() =>
-  codexUpdateFailed.value && !codexUpdateCanRetrySwitch.value && Boolean(codexUpdateTarget.value)
-);
 const codexUpdateActionEnabled = computed(() =>
   codexUpdateReady.value ||
-  codexUpdateCanRetrySwitch.value ||
-  codexUpdateCanRetryPrepare.value
+  codexUpdateRetryMode.value !== null
 );
 const codexUpdateLabel = computed(() => {
   if (codexAppServerUpdating.value || codexUpdateState.value === "switching") return "切换中...";
@@ -162,10 +158,10 @@ const codexUpdateLabel = computed(() => {
       : `下载中 ${codexUpdateProgressPercent.value}%`;
   }
   if (codexAppServerUpdateChecking.value) return "下载中...";
-  if (codexUpdateCanRetrySwitch.value && codexUpdateTarget.value) {
+  if (codexUpdateRetryMode.value === "switch" && codexUpdateTarget.value) {
     return `重试切换到 ${codexUpdateTarget.value}`;
   }
-  if (codexUpdateCanRetryPrepare.value && codexUpdateTarget.value) {
+  if (codexUpdateRetryMode.value === "prepare" && codexUpdateTarget.value) {
     return `重新准备 ${codexUpdateTarget.value}`;
   }
   if (codexUpdateReady.value && codexUpdateTarget.value) return `切换到 ${codexUpdateTarget.value}`;
@@ -337,7 +333,7 @@ async function probe() {
 
 async function installCodexUpdate() {
   if (disposed) return;
-  if (codexUpdateCanRetryPrepare.value) {
+  if (codexUpdateRetryMode.value === "prepare") {
     await checkCodexAppServerUpdate();
     return;
   }
@@ -531,8 +527,8 @@ watch(showCodexRuntimeStatus, (enabled) => {
               </svg>
             </span>
             <RefreshCw v-else-if="codexUpdateReady" :size="12" aria-hidden="true" />
-            <RefreshCw v-else-if="codexUpdateCanRetrySwitch" :size="12" aria-hidden="true" />
-            <RotateCw v-else-if="codexUpdateCanRetryPrepare" :size="12" aria-hidden="true" />
+            <RefreshCw v-else-if="codexUpdateRetryMode === 'switch'" :size="12" aria-hidden="true" />
+            <RotateCw v-else-if="codexUpdateRetryMode === 'prepare'" :size="12" aria-hidden="true" />
             <Download v-else :size="12" aria-hidden="true" />
             {{ codexAppServerUpdating ? "更新中..." : codexUpdateLabel }}
           </button>
