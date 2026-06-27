@@ -652,6 +652,47 @@ describe("Settings provider switch", () => {
     });
   });
 
+  it("Codex app-server 切换失败时设置页保留重试切换入口", async () => {
+    const preparedVersion = "0.141.0";
+    const updateError = "创建 Codex 切换链接失败";
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      latestVersion: preparedVersion,
+      updateAvailable: true,
+      updateState: "failed",
+      preparedVersion,
+      updateError,
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+    const updateButton = () =>
+      view.container.querySelector<HTMLButtonElement>("[data-agent-id='settings.provider.codex-update']");
+
+    await waitFor(() => {
+      expect(updateButton()).toBeEnabled();
+    });
+    expect(updateButton()?.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
+    expect(view.getByText(updateError)).toBeInTheDocument();
+
+    mockInvoke.mockClear();
+    await fireEvent.click(updateButton() as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+        {},
+        undefined,
+      );
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
+        {},
+        undefined,
+      );
+    });
+  });
+
   it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {
     setMockActiveBackend("codex");
     setMockRouterMode("codex", "codex-account");
