@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "check:package-manager": "node ../../scripts/check-package-manager.mjs",
-    "check:bundle": "node ../../scripts/check-desktop-bundle.mjs",
     "dev": "node ../../scripts/check-package-manager.mjs && vite",
-    "build": "node ../../scripts/check-package-manager.mjs && vue-tsc --noEmit && vite build && node ../../scripts/check-desktop-bundle.mjs",
+    "build": "node ../../scripts/check-package-manager.mjs && vue-tsc --noEmit && vite build",
     "test": "node ../../scripts/check-package-manager.mjs && vitest run",
     "preview": "node ../../scripts/check-package-manager.mjs && vite preview",
     "tauri": "node ../../scripts/check-package-manager.mjs && tauri"

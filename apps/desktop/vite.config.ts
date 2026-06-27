@@ -128,7 +128,6 @@ export default defineConfig(async ({ command, mode }) => ({
     setupFiles: ["./tests/setupTests.ts"],
   },
   build: {
-    chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
         chunkFileNames,
