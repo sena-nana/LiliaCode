@@ -3,6 +3,7 @@ import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CHAT_CHECK_ENV_COMMAND,
+  PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
   PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
@@ -395,11 +396,64 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(await view.findByRole("tooltip")).toHaveTextContent(
       "Codex 官方额度接口未返回可识别的额度数据。",
     );
+    expect(view.queryByRole("button", { name: "登录" })).not.toBeInTheDocument();
     expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
     expect(mockInvoke).toHaveBeenCalledWith(
       QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
       {},
       undefined,
     );
+  });
+
+  it("shows a login action when the Codex official account is logged out", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAccountQuotaStatus(officialQuota({
+      available: false,
+      fiveHour: null,
+      weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
+      rateLimitResetCredits: null,
+      accountUsage: null,
+      usageError: null,
+      error: "Codex 未登录",
+    }));
+
+    const view = await renderFooter();
+    const provider = providerBadge(view.container);
+
+    await fireEvent.mouseEnter(provider);
+
+    const tooltip = await view.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Codex 未登录");
+    const loginButton = view.getByRole("button", { name: "登录" });
+    let resolveLogin!: () => void;
+    mockInvoke.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        resolveLogin = resolve;
+      });
+    });
+
+    const clickPromise = fireEvent.click(loginButton);
+
+    await waitFor(() => {
+      expect(loginButton).toBeDisabled();
+      expect(loginButton).toHaveTextContent("启动中...");
+    });
+    expect(mockInvoke).toHaveBeenCalledWith(
+      PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
+      {},
+      undefined,
+    );
+
+    resolveLogin?.();
+    await clickPromise;
+    await waitFor(() => {
+      expect(loginButton).toBeEnabled();
+      expect(loginButton).toHaveTextContent("登录");
+    });
   });
 });

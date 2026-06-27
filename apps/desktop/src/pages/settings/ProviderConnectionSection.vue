@@ -42,7 +42,7 @@ import {
   setRouterMode,
   startCodexAccountLogin,
 } from "../../services/chat";
-import { codexQuotaUnavailableStatus } from "../../utils/quotaDisplay";
+import { codexAccountNeedsLogin, codexQuotaUnavailableStatus } from "../../utils/quotaDisplay";
 
 const {
   report,
@@ -185,15 +185,9 @@ const codexRuntimeStatusText = computed(() =>
     : "app-server 不可用",
 );
 const codexLoginNeedsAction = computed(() => {
-  const status = codexAccountStatus.value;
-  if (!status || status.available) return false;
-  const text = (status.error ?? "").toLowerCase();
-  if (!text.trim()) return codexAppServerStatus.value?.supportsRequiredProtocol ?? false;
-  return (
-    text.includes("未登录") ||
-    text.includes("not logged") ||
-    text.includes("login") ||
-    text.includes("auth")
+  return codexAccountNeedsLogin(
+    codexAccountStatus.value,
+    codexAppServerStatus.value?.supportsRequiredProtocol ?? false,
   );
 });
 const codexLoginStatusText = computed(() => {
