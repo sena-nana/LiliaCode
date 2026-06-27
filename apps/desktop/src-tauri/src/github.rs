@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use keyring_core::{Entry, Error as KeyringError};
+use keyring::{Entry, Error as KeyringError};
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, LINK, USER_AGENT};
 use serde::{Deserialize, Serialize};
@@ -122,14 +122,6 @@ struct NormalizedGitHubRepo {
     clone_url: String,
 }
 
-struct KeyringGuard;
-
-impl Drop for KeyringGuard {
-    fn drop(&mut self) {
-        keyring::release_store();
-    }
-}
-
 fn client_id() -> Option<&'static str> {
     let trimmed = GITHUB_CLIENT_ID.trim();
     if trimmed.is_empty() {
@@ -167,17 +159,11 @@ pub(crate) fn build_client() -> Result<Client, String> {
         .map_err(|e| format!("构造 GitHub HTTP 客户端失败：{e}"))
 }
 
-fn init_keyring() -> Result<KeyringGuard, String> {
-    keyring::use_native_store(true).map_err(|e| format!("系统钥匙串不可用：{e}"))?;
-    Ok(KeyringGuard)
-}
-
 fn keyring_entry(login: &str) -> Result<Entry, String> {
     Entry::new(GITHUB_SERVICE, login).map_err(|e| format!("创建 GitHub 凭证项失败：{e}"))
 }
 
 fn read_token(login: &str) -> Result<Option<String>, String> {
-    let _guard = init_keyring()?;
     let entry = keyring_entry(login)?;
     match entry.get_password() {
         Ok(token) => Ok(Some(token)),
@@ -187,7 +173,6 @@ fn read_token(login: &str) -> Result<Option<String>, String> {
 }
 
 fn write_token(login: &str, token: &str) -> Result<(), String> {
-    let _guard = init_keyring()?;
     let entry = keyring_entry(login)?;
     entry
         .set_password(token)
@@ -195,7 +180,6 @@ fn write_token(login: &str, token: &str) -> Result<(), String> {
 }
 
 fn delete_token(login: &str) -> Result<(), String> {
-    let _guard = init_keyring()?;
     let entry = keyring_entry(login)?;
     match entry.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => Ok(()),

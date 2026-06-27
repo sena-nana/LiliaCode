@@ -1,22 +1,9 @@
-use keyring_core::{Entry, Error as KeyringError};
+use keyring::{Entry, Error as KeyringError};
 
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
 const AI_CREDENTIAL_SERVICE: &str = "com.lilia.desktop.ai";
 const ASSISTANT_AI_ACCOUNT: &str = "assistant-ai";
-
-struct KeyringGuard;
-
-impl Drop for KeyringGuard {
-    fn drop(&mut self) {
-        keyring::release_store();
-    }
-}
-
-fn init_keyring() -> Result<KeyringGuard, String> {
-    keyring::use_native_store(true).map_err(|e| format!("系统钥匙串不可用：{e}"))?;
-    Ok(KeyringGuard)
-}
 
 fn entry(account: &str) -> Result<Entry, String> {
     Entry::new(AI_CREDENTIAL_SERVICE, account).map_err(|e| format!("创建 AI 凭证项失败：{e}"))
@@ -34,7 +21,6 @@ pub(crate) fn assistant_ai_account() -> &'static str {
 }
 
 pub(crate) fn read_secret(account: &str) -> Result<Option<String>, String> {
-    let _guard = init_keyring()?;
     let entry = entry(account)?;
     match entry.get_password() {
         Ok(secret) => Ok(Some(secret)),
@@ -47,7 +33,6 @@ pub(crate) fn write_secret(account: &str, secret: &str) -> Result<(), String> {
     let Some(trimmed) = normalize_secret(secret) else {
         return Ok(());
     };
-    let _guard = init_keyring()?;
     let entry = entry(account)?;
     entry
         .set_password(trimmed)
@@ -55,7 +40,6 @@ pub(crate) fn write_secret(account: &str, secret: &str) -> Result<(), String> {
 }
 
 pub(crate) fn delete_secret(account: &str) -> Result<(), String> {
-    let _guard = init_keyring()?;
     let entry = entry(account)?;
     match entry.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
