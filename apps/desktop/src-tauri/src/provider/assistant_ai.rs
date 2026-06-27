@@ -7,9 +7,12 @@ use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime};
 
 use super::codex_spark::{codex_account_spark_enabled, request_codex_account_spark};
-use super::config::{assistant_ai_secret, load_assistant_ai_config};
+use super::config::{assistant_ai_secret, load_assistant_ai_config, load_model_feature_settings};
 use super::credentials::normalize_secret;
-use super::types::{AssistantAIConfig, AssistantAITestResult};
+use super::types::{
+    AssistantAIConfig, AssistantAIModelPoolItem, AssistantAIModelsResult, AssistantAITestResult,
+};
+use crate::BACKEND_CODEX;
 use crate::chat::types::{ChatAttachment, ChatConversationReference, ChatWorkflow};
 use crate::prompt_contract;
 
@@ -133,6 +136,83 @@ pub(crate) fn test_connection(mut config: AssistantAIConfig) -> AssistantAITestR
     }
 }
 
+pub(crate) fn fetch_models(mut config: AssistantAIConfig) -> AssistantAIModelsResult {
+    if config
+        .api_key
+        .as_deref()
+        .and_then(normalize_secret)
+        .is_none()
+    {
+        config.api_key = assistant_ai_secret().ok().flatten();
+    }
+    let base = config
+        .base_url
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/');
+    let key = config.api_key.as_deref().unwrap_or("").trim();
+    if base.is_empty() || key.is_empty() {
+        return AssistantAIModelsResult {
+            ok: false,
+            error: Some("baseUrl / apiKey 必须填写".into()),
+            models: Vec::new(),
+        };
+    }
+    let url = format!("{base}/models");
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return AssistantAIModelsResult {
+                ok: false,
+                error: Some(format!("HTTP 客户端构造失败：{e}")),
+                models: Vec::new(),
+            }
+        }
+    };
+    match client.get(&url).bearer_auth(key).send() {
+        Ok(resp) if resp.status().is_success() => {
+            let models = resp
+                .json::<JsonValue>()
+                .ok()
+                .and_then(|v| v.get("data").cloned())
+                .and_then(|d| d.as_array().cloned())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|m| m.get("id").and_then(|i| i.as_str()))
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                        .map(|id| AssistantAIModelPoolItem {
+                            id: id.to_string(),
+                            label: id.to_string(),
+                            source: "remote".to_string(),
+                            backend: BACKEND_CODEX.to_string(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            AssistantAIModelsResult {
+                ok: true,
+                error: None,
+                models,
+            }
+        }
+        Ok(resp) => AssistantAIModelsResult {
+            ok: false,
+            error: Some(format!("HTTP {} from {url}", resp.status())),
+            models: Vec::new(),
+        },
+        Err(e) => AssistantAIModelsResult {
+            ok: false,
+            error: Some(format!("请求失败：{e}")),
+            models: Vec::new(),
+        },
+    }
+}
+
 pub(crate) fn optimize_prompt<R: Runtime>(
     app: AppHandle<R>,
     input: PromptOptimizeInput,
@@ -141,6 +221,7 @@ pub(crate) fn optimize_prompt<R: Runtime>(
     if prompt.is_empty() {
         return Err("提示词为空".to_string());
     }
+    let model_features = load_model_feature_settings(&app);
     let route_request = build_prompt_route_request(prompt, &input);
     let route_text = request_assistant_text(
         &app,
@@ -148,6 +229,7 @@ pub(crate) fn optimize_prompt<R: Runtime>(
         prompt_contract::prompt_router_system_instruction(),
         700,
         "Prompt Router",
+        model_features.prompt_router.clone(),
     )?;
     let route = normalize_prompt_route(&route_text)?;
 
@@ -158,6 +240,7 @@ pub(crate) fn optimize_prompt<R: Runtime>(
         prompt_contract::prompt_optimize_system_instruction(),
         900,
         "提示词优化",
+        model_features.prompt_optimize,
     )?;
     Ok(PromptOptimizeResult {
         optimized_prompt: normalize_optimized_prompt(&optimized_text)?,
@@ -165,16 +248,20 @@ pub(crate) fn optimize_prompt<R: Runtime>(
     })
 }
 
-fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Result<AssistantAIConfig, String> {
+fn assistant_ai_model_request<R: Runtime>(
+    app: &AppHandle<R>,
+    override_model: Option<String>,
+) -> Result<AssistantAIConfig, String> {
     let mut cfg = load_assistant_ai_config(app);
     cfg.base_url = cfg
         .base_url
         .map(|value| value.trim().trim_end_matches('/').to_string())
         .filter(|value| !value.is_empty());
-    cfg.model = cfg
-        .model
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+    cfg.model = override_model.or_else(|| {
+        cfg.model
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
     cfg.api_key = assistant_ai_secret()?;
     if cfg.base_url.is_none() || cfg.model.is_none() || cfg.api_key.is_none() {
         return Err("辅助模型未配置 Base URL、API key 或模型".to_string());
@@ -188,12 +275,13 @@ fn request_assistant_text<R: Runtime>(
     system_instruction: &str,
     max_tokens: u32,
     label: &str,
+    override_model: Option<String>,
 ) -> Result<String, String> {
     if codex_account_spark_enabled(app) {
         return request_codex_account_spark(app, prompt, system_instruction)
             .map_err(|err| format!("{label}失败：{err}"));
     }
-    let model = assistant_ai_model_request(app)?;
+    let model = assistant_ai_model_request(app, override_model)?;
     request_openai_compatible(&model, prompt, system_instruction, max_tokens)
 }
 
@@ -409,6 +497,7 @@ mod tests {
             base_url: Some("https://example.com/v1".to_string()),
             api_key: None,
             model: Some("model".to_string()),
+            model_pool: Vec::new(),
             codex_account_spark_enabled: false,
             has_api_key: false,
             clear_api_key: false,

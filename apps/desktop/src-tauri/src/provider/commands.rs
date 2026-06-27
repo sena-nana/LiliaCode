@@ -14,9 +14,10 @@ use super::codex_update::{
 };
 use super::config::{
     known_provider_key_for_backend, load_active_backend, load_agent_interaction_settings,
-    load_router_mode, normalize_agent_interaction_settings, public_assistant_ai_config,
-    public_provider_config, router_key_for_backend, router_mode_supported_for_backend,
-    save_assistant_ai_config_metadata, save_provider_config_metadata, AGENT_INTERACTION_KEY,
+    load_model_feature_settings, load_router_mode, normalize_agent_interaction_settings,
+    public_assistant_ai_config, public_provider_config, router_key_for_backend,
+    router_mode_supported_for_backend, save_assistant_ai_config_metadata,
+    save_model_feature_settings, save_provider_config_metadata, AGENT_INTERACTION_KEY,
     PROVIDER_ACTIVE_BACKEND_KEY,
 };
 use super::connection::build_backend_env_status;
@@ -26,8 +27,9 @@ use super::subagents::{
     CustomSubagentUpsertInput,
 };
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, AssistantAITestResult, CodexAppServerStatus,
-    CustomSubagentDefinition, EnvStatusReport, ProviderConfig,
+    AgentInteractionSettings, AssistantAIConfig, AssistantAIModelsResult, AssistantAITestResult,
+    CodexAppServerStatus, CustomSubagentDefinition, EnvStatusReport, ModelFeatureSettings,
+    ProviderConfig,
 };
 
 fn powershell_single_quoted(value: &str) -> String {
@@ -169,8 +171,27 @@ pub fn assistant_ai_set_config(app: AppHandle, config: AssistantAIConfig) -> Res
         &app,
         config.base_url,
         config.model,
+        config.model_pool,
         config.codex_account_spark_enabled,
     )
+}
+
+#[tauri::command]
+pub fn assistant_ai_fetch_models(config: AssistantAIConfig) -> AssistantAIModelsResult {
+    assistant_ai::fetch_models(config)
+}
+
+#[tauri::command]
+pub fn model_feature_get_settings(app: AppHandle) -> ModelFeatureSettings {
+    load_model_feature_settings(&app)
+}
+
+#[tauri::command]
+pub fn model_feature_set_settings(
+    app: AppHandle,
+    settings: ModelFeatureSettings,
+) -> Result<(), String> {
+    save_model_feature_settings(&app, settings)
 }
 
 #[tauri::command]

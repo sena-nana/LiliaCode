@@ -20,6 +20,7 @@ import {
   type ChatModelOption,
   type ChatRuntimeCommand,
   type ChatWorkflow,
+  type ModelFeatureSettings,
   type ModelSelectionContextScale,
   type ModelSelectionExplanation,
   type ModelTier,
@@ -40,6 +41,7 @@ export interface ModelSelectionInput {
   workflow?: ChatWorkflow | null;
   runtimeCommand?: ChatRuntimeCommand | null;
   runtimeOptions?: ProviderRuntimeOptions | null;
+  modelFeatureSettings?: ModelFeatureSettings | null;
 }
 
 export interface ModelSelectionResult {
@@ -142,8 +144,9 @@ function pickAvailableModel(
   tier: ModelTier,
   modelOptions: ChatModelOption[],
   signals: string[],
+  modelFeatureSettings?: ModelFeatureSettings | null,
 ): string {
-  const desired = autoModelForBackendTier(backend, tier);
+  const desired = modelFeatureSettings?.chat?.[tier]?.trim() || autoModelForBackendTier(backend, tier);
   if (modelExists(modelOptions, desired)) return desired;
   const fallback = modelOptions.find((option) => option.backend === backend)?.id ?? desired;
   if (fallback !== desired) signals.push(`模型 ${desired} 不可用，已使用 ${fallback}`);
@@ -182,7 +185,13 @@ export function selectModelForTurn(input: ModelSelectionInput): ModelSelectionRe
   const signals: string[] = [];
   const backend = input.backend;
   const tier = selectAutoTier(input, signals);
-  const autoModel = pickAvailableModel(backend, tier, input.modelOptions, signals);
+  const autoModel = pickAvailableModel(
+    backend,
+    tier,
+    input.modelOptions,
+    signals,
+    input.modelFeatureSettings,
+  );
   const autoEffort = autoReasoningEffortForTier(tier);
   const runtimeModel = runtimeOptionsModelForBackend(backend, input.runtimeOptions);
   const runtimeEffort = runtimeOptionsReasoningEffortForBackend(backend, input.runtimeOptions);

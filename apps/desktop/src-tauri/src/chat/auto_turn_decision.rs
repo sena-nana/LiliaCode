@@ -19,7 +19,8 @@ use crate::chat::workflow::{runtime_command_kind, workflow_kind};
 use crate::prompt_contract;
 use crate::provider::{
     assistant_ai_secret, codex_account_spark_enabled, load_agent_interaction_settings,
-    load_assistant_ai_config, request_codex_account_spark, AssistantAIConfig,
+    load_assistant_ai_config, load_model_feature_settings, request_codex_account_spark,
+    AssistantAIConfig,
     AutoTurnDecisionSettings,
 };
 use crate::store::LiliaStore;
@@ -149,7 +150,8 @@ pub(crate) fn prepare_turn_for_start<R: Runtime>(
         workflow,
         runtime_command,
     )?;
-    apply_auto_turn_decision(
+    apply_auto_turn_decision_for_app(
+        app,
         &backend,
         composer,
         runtime_options,
@@ -308,7 +310,48 @@ fn merge_runtime_selection(
     next
 }
 
+fn apply_auto_turn_decision_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    backend: &str,
+    composer: ChatComposerState,
+    runtime_options: Option<ProviderRuntimeOptions>,
+    settings: &AutoTurnDecisionSettings,
+    raw: RawAutoTurnDecision,
+    resume_session_id: Option<&str>,
+) -> Result<PreparedTurn, String> {
+    apply_auto_turn_decision_with_model_features(
+        &load_model_feature_settings(app),
+        backend,
+        composer,
+        runtime_options,
+        settings,
+        raw,
+        resume_session_id,
+    )
+}
+
+#[cfg(test)]
 fn apply_auto_turn_decision(
+    backend: &str,
+    composer: ChatComposerState,
+    runtime_options: Option<ProviderRuntimeOptions>,
+    settings: &AutoTurnDecisionSettings,
+    raw: RawAutoTurnDecision,
+    resume_session_id: Option<&str>,
+) -> Result<PreparedTurn, String> {
+    apply_auto_turn_decision_with_model_features(
+        &crate::provider::ModelFeatureSettings::default(),
+        backend,
+        composer,
+        runtime_options,
+        settings,
+        raw,
+        resume_session_id,
+    )
+}
+
+fn apply_auto_turn_decision_with_model_features(
+    feature_settings: &crate::provider::ModelFeatureSettings,
     backend: &str,
     composer: ChatComposerState,
     runtime_options: Option<ProviderRuntimeOptions>,
@@ -333,7 +376,7 @@ fn apply_auto_turn_decision(
         tier_for_model(backend, &composer.model)
     };
     let selected_model = if settings.allow_model_tier {
-        model_for_tier(backend, selected_tier)
+        model_for_tier_from_features(feature_settings, backend, selected_tier)
     } else {
         normalize_model_for_backend(&composer.model, backend)
     };
@@ -441,7 +484,10 @@ fn request_auto_turn_decision<R: Runtime>(
         )
         .map_err(|err| format!("辅助模型决策失败：{err}"))?
     } else {
-        let model = assistant_ai_model_request(app)?;
+        let model = assistant_ai_model_request(
+            app,
+            load_model_feature_settings(app).auto_turn_decision,
+        )?;
         request_openai_compatible(&model, &prompt)?
     };
     let json_text = extract_json_object(&text)?;
@@ -449,16 +495,20 @@ fn request_auto_turn_decision<R: Runtime>(
         .map_err(|err| format!("辅助模型决策 JSON 解析失败：{err}"))
 }
 
-fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Result<AssistantAIConfig, String> {
+fn assistant_ai_model_request<R: Runtime>(
+    app: &AppHandle<R>,
+    override_model: Option<String>,
+) -> Result<AssistantAIConfig, String> {
     let mut cfg = load_assistant_ai_config(app);
     cfg.base_url = cfg
         .base_url
         .map(|value| value.trim().trim_end_matches('/').to_string())
         .filter(|value| !value.is_empty());
-    cfg.model = cfg
-        .model
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+    cfg.model = override_model.or_else(|| {
+        cfg.model
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
     cfg.api_key = assistant_ai_secret()?;
     if cfg.base_url.is_none() || cfg.model.is_none() || cfg.api_key.is_none() {
         return Err("辅助模型未配置 Base URL、API key 或模型".to_string());
@@ -609,9 +659,29 @@ fn parse_reasoning_effort(value: Option<&str>, backend: &str) -> Result<Option<S
         .map(Some)
 }
 
+fn model_for_tier_from_features(
+    feature_settings: &crate::provider::ModelFeatureSettings,
+    backend: &str,
+    tier: ModelTier,
+) -> String {
+    let configured = match tier {
+        ModelTier::Light => feature_settings.chat.light.as_deref(),
+        ModelTier::Normal => feature_settings.chat.normal.as_deref(),
+        ModelTier::Deep => feature_settings.chat.deep.as_deref(),
+    };
+    model_for_tier_with_override(backend, tier, configured)
+}
+
+#[cfg(test)]
 fn model_for_tier(backend: &str, tier: ModelTier) -> String {
-    let desired = model_selection_contract::auto_model_for_tier(backend, tier.as_str())
-        .unwrap_or_else(|| default_model_for_backend(backend));
+    model_for_tier_from_features(&crate::provider::ModelFeatureSettings::default(), backend, tier)
+}
+
+fn model_for_tier_with_override(backend: &str, tier: ModelTier, configured: Option<&str>) -> String {
+    let desired = configured.unwrap_or_else(|| {
+        model_selection_contract::auto_model_for_tier(backend, tier.as_str())
+            .unwrap_or_else(|| default_model_for_backend(backend))
+    });
     if model_options_for_backend(backend)
         .iter()
         .any(|option| option.id == desired)

@@ -12,6 +12,7 @@ import {
   CHAT_GET_COMPOSER_STATE_COMMAND,
   CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
   CHAT_INTERRUPT_TURN_COMMAND,
+  CHAT_LIST_MODELS_COMMAND,
   CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND,
   CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
   CHAT_RESPOND_TITLE_UPDATE_COMMAND,
@@ -20,7 +21,9 @@ import {
   CHAT_SEND_MESSAGE_COMMAND,
   CHAT_SET_COMPOSER_STATE_COMMAND,
   DEFAULT_MODEL_BY_BACKEND,
+  MODEL_OPTIONS_BY_BACKEND,
   DEFAULT_MEMORY_SETTINGS,
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
@@ -37,6 +40,8 @@ import {
   CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND,
   CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
   CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
+  MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   GIT_CLONE_REPO_COMMAND,
   GITHUB_CLONE_REPO_COMMAND,
   GITHUB_GET_BINDING_STATUS_COMMAND,
@@ -779,9 +784,30 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         baseUrl: null,
         apiKey: null,
         model: null,
+        modelPool: [],
         codexAccountSparkEnabled: false,
         hasApiKey: false,
       } as T;
+    case ASSISTANT_AI_FETCH_MODELS_COMMAND:
+      return {
+        ok: true,
+        error: null,
+        models: [
+          { id: "mock-assistant", label: "mock-assistant", source: "remote", backend: "codex" },
+          { id: "mock-assistant-pro", label: "mock-assistant-pro", source: "remote", backend: "codex" },
+        ],
+      } as T;
+    case MODEL_FEATURE_GET_SETTINGS_COMMAND:
+      return {
+        chat: { light: null, normal: null, deep: null },
+        title: null,
+        suggestion: null,
+        promptRouter: null,
+        promptOptimize: null,
+        autoTurnDecision: null,
+      } as T;
+    case MODEL_FEATURE_SET_SETTINGS_COMMAND:
+      return undefined as T;
     case ASSISTANT_AI_TEST_CONNECTION_COMMAND:
       return { ok: true, error: null, models: ["mock-assistant"], modelMatched: true } as T;
     case ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND:
@@ -795,6 +821,12 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return { enabled: false, maxItems: 5 } as T;
     case CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND:
       return { sources: [], localGit: null } as T;
+    case CHAT_LIST_MODELS_COMMAND: {
+      const backend = providerBackends.includes(text(args, "backend") as ChatBackendKind)
+        ? text(args, "backend") as ChatBackendKind
+        : "codex";
+      return MODEL_OPTIONS_BY_BACKEND[backend].map((option) => ({ ...option, backend })) as T;
+    }
     case CHAT_GET_COMPOSER_STATE_COMMAND:
       return {
         taskId: text(args, "taskId"),

@@ -29,14 +29,18 @@ vi.mock("@tauri-apps/api/path", () => ({
   homeDir: vi.fn(async () => "C:\\Users\\mock"),
 }));
 
-Object.defineProperty(window, "__TAURI_INTERNALS__", {
-  configurable: true,
-  value: {
-    invoke: mockInvoke,
-    transformCallback: vi.fn(() => 1),
-    convertFileSrc: vi.fn((path: string) => `asset://${path.replace(/\\/g, "/")}`),
-  },
-});
+function installTauriInternalsMock() {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {
+      invoke: mockInvoke,
+      transformCallback: vi.fn(() => 1),
+      convertFileSrc: vi.fn((path: string) => `asset://${path.replace(/\\/g, "/")}`),
+    },
+  });
+}
+
+installTauriInternalsMock();
 
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
   configurable: true,
@@ -75,6 +79,7 @@ Object.defineProperty(window, "ResizeObserver", {
 });
 
 beforeEach(async () => {
+  installTauriInternalsMock();
   resetTauriMockData();
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,

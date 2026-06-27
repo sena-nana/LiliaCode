@@ -42,6 +42,7 @@ import {
   AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND,
   AGENT_INTERACTION_SET_SETTINGS_COMMAND,
   AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND,
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
@@ -50,6 +51,8 @@ import {
   CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND,
   CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
   CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
+  MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   GIT_CLONE_REPO_COMMAND,
   GITHUB_CLONE_REPO_COMMAND,
   GITHUB_GET_BINDING_STATUS_COMMAND,
@@ -1198,7 +1201,17 @@ let assistantAIConfig = {
   baseUrl: null as string | null,
   apiKey: null as string | null,
   model: null as string | null,
+  modelPool: [] as Array<{ id: string; label: string; source: "remote" | "legacy"; backend: "codex" | "claude" }>,
+  codexAccountSparkEnabled: false,
   hasApiKey: true,
+};
+let modelFeatureSettings = {
+  chat: { light: null as string | null, normal: null as string | null, deep: null as string | null },
+  title: null as string | null,
+  suggestion: null as string | null,
+  promptRouter: null as string | null,
+  promptOptimize: null as string | null,
+  autoTurnDecision: null as string | null,
 };
 let conversationSuggestionSettings = {
   enabled: true,
@@ -1912,7 +1925,17 @@ export function resetTauriMockData() {
     baseUrl: null,
     apiKey: null,
     model: null,
+    modelPool: [],
+    codexAccountSparkEnabled: false,
     hasApiKey: true,
+  };
+  modelFeatureSettings = {
+    chat: { light: null, normal: null, deep: null },
+    title: null,
+    suggestion: null,
+    promptRouter: null,
+    promptOptimize: null,
+    autoTurnDecision: null,
   };
   conversationSuggestionSettings = { enabled: true, source: "assistant-ai" };
   conversationSuggestionsOverride = null;
@@ -3537,11 +3560,58 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         baseUrl: typeof config.baseUrl === "string" && config.baseUrl.trim() ? config.baseUrl.trim() : null,
         apiKey: null,
         model: typeof config.model === "string" && config.model.trim() ? config.model.trim() : null,
+        modelPool: Array.isArray(config.modelPool)
+          ? config.modelPool
+            .filter((item): item is Record<string, unknown> => item && typeof item === "object" && !Array.isArray(item))
+            .map((item) => ({
+              id: String(item.id ?? "").trim(),
+              label: String(item.label ?? item.id ?? "").trim(),
+              source: item.source === "legacy" ? "legacy" as const : "remote" as const,
+              backend: item.backend === "claude" ? "claude" as const : "codex" as const,
+            }))
+            .filter((item) => item.id)
+          : assistantAIConfig.modelPool,
+        codexAccountSparkEnabled: config.codexAccountSparkEnabled === true,
         hasApiKey: config.clearApiKey === true
           ? false
           : typeof config.apiKey === "string" && config.apiKey.trim()
             ? true
             : assistantAIConfig.hasApiKey,
+      };
+      return undefined;
+    }
+
+    case ASSISTANT_AI_FETCH_MODELS_COMMAND:
+      return {
+        ok: true,
+        error: null,
+        models: [
+          { id: "remote-mini", label: "remote-mini", source: "remote", backend: "codex" },
+          { id: "remote-pro", label: "remote-pro", source: "remote", backend: "codex" },
+        ],
+      };
+
+    case MODEL_FEATURE_GET_SETTINGS_COMMAND:
+      return {
+        ...modelFeatureSettings,
+        chat: { ...modelFeatureSettings.chat },
+      };
+
+    case MODEL_FEATURE_SET_SETTINGS_COMMAND: {
+      const settings = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
+        ? args.settings as typeof modelFeatureSettings
+        : modelFeatureSettings;
+      modelFeatureSettings = {
+        chat: {
+          light: settings.chat?.light ?? null,
+          normal: settings.chat?.normal ?? null,
+          deep: settings.chat?.deep ?? null,
+        },
+        title: settings.title ?? null,
+        suggestion: settings.suggestion ?? null,
+        promptRouter: settings.promptRouter ?? null,
+        promptOptimize: settings.promptOptimize ?? null,
+        autoTurnDecision: settings.autoTurnDecision ?? null,
       };
       return undefined;
     }
@@ -4076,7 +4146,15 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case CHAT_LIST_MODELS_COMMAND: {
       const backend = normalizeBackend(args.backend);
-      return MODEL_OPTIONS_BY_BACKEND[backend].map((option) => ({ ...option, backend }));
+      const options = MODEL_OPTIONS_BY_BACKEND[backend].map((option) => ({ ...option, backend }));
+      if (backend !== "codex") return options;
+      const seen = new Set(options.map((option) => option.id));
+      return [
+        ...options,
+        ...assistantAIConfig.modelPool
+          .filter((item) => item.backend === "codex" && !seen.has(item.id))
+          .map((item) => ({ id: item.id, label: item.label, backend })),
+      ];
     }
 
     case CHAT_RESPOND_AGENT_INTERACTION_COMMAND:

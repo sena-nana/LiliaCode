@@ -1,4 +1,4 @@
-import type { ChatBackendKind } from "./chat";
+import type { ChatBackendKind, ModelTier } from "./chat";
 import {
   API_DESCRIPTION_BY_BACKEND,
   API_KEY_ENV_BY_BACKEND,
@@ -19,11 +19,14 @@ import {
   UNCONFIGURED_CONNECTION_MODES,
 } from "./chatBackendsContract.mjs";
 import {
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
   ASSISTANT_AI_TEST_CONNECTION_COMMAND,
   CHAT_CHECK_ENV_COMMAND,
+  MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
@@ -63,6 +66,7 @@ export type CodexSettingsProfile = CodexSettingsProfileTuple[number];
 export type CodexJsonObject = Record<string, unknown>;
 
 export {
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
@@ -78,6 +82,8 @@ export {
   CONNECTION_MODES_USING_DEFAULT_API,
   DEFAULT_ROUTER_MODE_BY_BACKEND,
   DIRECT_DEFAULT_URLS,
+  MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   PROVIDER_STORE_KEY_BY_BACKEND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
@@ -247,9 +253,17 @@ export interface AssistantAIConfig {
   baseUrl: string | null;
   apiKey: string | null;
   model: string | null;
+  modelPool?: AssistantAIModelPoolItem[];
   codexAccountSparkEnabled: boolean;
   hasApiKey: boolean;
   clearApiKey?: boolean;
+}
+
+export interface AssistantAIModelPoolItem {
+  id: string;
+  label: string;
+  source: "remote" | "legacy";
+  backend: ChatBackendKind;
 }
 
 export interface AssistantAITestResult {
@@ -257,6 +271,21 @@ export interface AssistantAITestResult {
   error: string | null;
   models: string[] | null;
   modelMatched: boolean | null;
+}
+
+export interface AssistantAIModelsResult {
+  ok: boolean;
+  error: string | null;
+  models: AssistantAIModelPoolItem[];
+}
+
+export interface ModelFeatureSettings {
+  chat: Record<ModelTier, string | null>;
+  title: string | null;
+  suggestion: string | null;
+  promptRouter: string | null;
+  promptOptimize: string | null;
+  autoTurnDecision: string | null;
 }
 
 export interface BackendEnvStatus {

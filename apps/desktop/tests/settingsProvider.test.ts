@@ -3,7 +3,9 @@ import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ASSISTANT_AI_GET_CONFIG_COMMAND,
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   GITHUB_POLL_DEVICE_FLOW_COMMAND,
   GITHUB_START_DEVICE_FLOW_COMMAND,
@@ -19,6 +21,7 @@ import {
   SYSTEM_OPEN_URL_COMMAND,
 } from "@lilia/contracts";
 import Settings from "../src/pages/Settings.vue";
+import { SETTINGS_TABS } from "../src/pages/settings/settingsTabs";
 import { createLiliaRouter } from "../src/router";
 import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../src/tauri/pluginCommands";
 import {
@@ -1132,16 +1135,23 @@ describe("Settings provider switch", () => {
     }
   });
 
-  it("新对话建议生成来源可切换到当前 Provider", async () => {
+  it("设置侧边栏将辅助能力改为 Provider 配置并新增模型配置", async () => {
     const view = await renderSettings("/settings?tab=assistant");
 
-    await fireEvent.click(view.getByRole("radio", { name: "当前 Provider" }));
+    expect(SETTINGS_TABS).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "assistant", label: "Provider 配置" }),
+      expect.objectContaining({ key: "model-config", label: "模型配置" }),
+    ]));
+    expect(view.getByRole("heading", { level: 2, name: "模型池配置" })).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(lastInvokeInput("conversation_suggestions_set_settings")).toMatchObject({
-        settings: { source: "provider" },
-      });
-    });
+  it("Provider 配置页移除说明文本、清除按钮和 Codex 官方账号行", async () => {
+    const view = await renderSettings("/settings?tab=assistant");
+
+    expect(view.queryByText(/OpenAI 兼容的低成本模型/)).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "清除" })).not.toBeInTheDocument();
+    expect(view.queryByText("Codex 官方账号")).not.toBeInTheDocument();
+    expect(view.queryByText("使用 Spark")).not.toBeInTheDocument();
   });
 
   it("辅助模型密钥不回显，空值保存保留已有密钥", async () => {
@@ -1164,26 +1174,53 @@ describe("Settings provider switch", () => {
     expect(view.getByText("密钥已保存")).toBeInTheDocument();
   });
 
-  it("辅助模型可保存新密钥并显式清除", async () => {
+  it("模型池配置可获取远端模型并配置显示名", async () => {
     const view = await renderSettings("/settings?tab=assistant");
     const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
 
     await fireEvent.update(apiKeyInput, "sk-new");
-    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+    await fireEvent.click(view.getByRole("button", { name: "获取模型" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
+      expect(lastInvokeInput(ASSISTANT_AI_FETCH_MODELS_COMMAND)).toMatchObject({
         config: { apiKey: "sk-new" },
       });
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "清除" }));
+    const labelInput = await view.findByLabelText("remote-mini 显示名") as HTMLInputElement;
+    expect(labelInput.value).toBe("remote-mini");
+    await fireEvent.update(labelInput, "Remote Mini");
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
-        config: { clearApiKey: true },
+        config: {
+          modelPool: expect.arrayContaining([
+            expect.objectContaining({ id: "remote-mini", label: "Remote Mini" }),
+          ]),
+        },
       });
-      expect(view.getByText("未保存密钥")).toBeInTheDocument();
+    });
+  });
+
+  it("新对话建议迁移到模型配置页并可保存功能模型分配", async () => {
+    const view = await renderSettings("/settings?tab=model-config");
+
+    expect(view.getByRole("heading", { level: 2, name: "新对话建议" })).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("radio", { name: "关闭" }));
+    await waitFor(() => {
+      expect(lastInvokeInput("conversation_suggestions_set_settings")).toMatchObject({
+        settings: { enabled: false },
+      });
+    });
+
+    const titleSelect = await view.findByLabelText("标题生成") as HTMLSelectElement;
+    await fireEvent.update(titleSelect, "gpt-5.5");
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(lastInvokeInput(MODEL_FEATURE_SET_SETTINGS_COMMAND)).toMatchObject({
+        settings: { title: "gpt-5.5" },
+      });
     });
   });
 

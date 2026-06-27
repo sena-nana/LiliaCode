@@ -44,6 +44,7 @@ import {
   type ChatWorkflow,
   type LiliaReviewTarget,
   type LiliaTaskWorkflowKind,
+  type ModelFeatureSettings,
   type PermissionMode,
 } from "@lilia/contracts";
 import {
@@ -58,6 +59,7 @@ import type {
   ToolConsentRequest,
   ToolConsentUpdatedInput,
 } from "../../services/chat";
+import { getModelFeatureSettings } from "../../services/chat";
 import { previewAutoModelSelection } from "../../services/modelSelection";
 import ComposerRichInput from "./ComposerRichInput.vue";
 import { textPart } from "./composerParts";
@@ -695,6 +697,7 @@ async function ensureComposerPasteLoaded() {
 }
 
 const previewAttachments = computed(() => attachmentsForView.value.filter(isImageAttachment));
+const modelFeatureSettings = ref<ModelFeatureSettings | null>(null);
 const autoModelPreview = computed(() =>
   previewAutoModelSelection({
     backend: props.state.backend,
@@ -706,6 +709,7 @@ const autoModelPreview = computed(() =>
     contextUsage: contextUsageForToolbar.value,
     workflow: null,
     runtimeCommand: null,
+    modelFeatureSettings: modelFeatureSettings.value,
   }),
 );
 
@@ -919,6 +923,11 @@ onMounted(() => {
   if (hasPendingComposerUi.value) {
     void ensureComposerPendingEntryActionsLoaded();
   }
+  void getModelFeatureSettings()
+    .then((settings) => {
+      if (composerLifecycle.assertAlive()) modelFeatureSettings.value = settings;
+    })
+    .catch((err) => console.error("[chat-composer] load model feature settings failed", err));
   scheduleToolbarWarmup();
 });
 

@@ -11,6 +11,9 @@
   "routerSetModeCommand": "router_set_mode",
   "assistantAiGetConfigCommand": "assistant_ai_get_config",
   "assistantAiSetConfigCommand": "assistant_ai_set_config",
+  "assistantAiFetchModelsCommand": "assistant_ai_fetch_models",
+  "modelFeatureGetSettingsCommand": "model_feature_get_settings",
+  "modelFeatureSetSettingsCommand": "model_feature_set_settings",
   "assistantAiTestConnectionCommand": "assistant_ai_test_connection",
   "assistantAiOptimizePromptCommand": "assistant_ai_optimize_prompt"
 }

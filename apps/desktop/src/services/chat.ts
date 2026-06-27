@@ -20,6 +20,7 @@ import {
   AGENT_INTERACTION_SET_SETTINGS_COMMAND,
   AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND,
   AGENT_TIMELINE_LIST_COMMAND,
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
@@ -52,6 +53,8 @@ import {
   HISTORY_IMPORT_PREVIEW_COMMAND,
   HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
   HISTORY_IMPORT_SEARCH_COMMAND,
+  MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
   PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
@@ -86,6 +89,7 @@ import type {
   AgentInteractionResponse,
   AgentTimelineBatchEvent,
   AssistantAIConfig,
+  AssistantAIModelsResult,
   AssistantAITestResult,
   BackendEnvStatus,
   ChatBackendKind,
@@ -112,6 +116,7 @@ import type {
   ChatSendResult,
   ConnectionMode,
   EnvStatusReport,
+  ModelFeatureSettings,
   ProviderConfig,
   RouterMode,
   SuggestionItem,
@@ -155,6 +160,7 @@ export type {
   AgentInteractionResponse,
   AgentTimelineBatchEvent,
   AssistantAIConfig,
+  AssistantAIModelsResult,
   AssistantAITestResult,
   ChatAttachment,
   ChatInterruptResult,
@@ -167,6 +173,7 @@ export type {
   ChatRuntimeCommand,
   ChatRuntimeSnapshot,
   ProviderRuntimeOptions,
+  ModelFeatureSettings,
   HistoryImportAttachInput,
   HistoryImportAttachResult,
   HistoryImportPreviewInput,
@@ -428,6 +435,20 @@ export function getAssistantAIConfig(): Promise<AssistantAIConfig> {
 
 export function setAssistantAIConfig(config: AssistantAIConfig): Promise<void> {
   return invoke<void>(ASSISTANT_AI_SET_CONFIG_COMMAND, { config });
+}
+
+export function fetchAssistantAIModels(
+  config: AssistantAIConfig,
+): Promise<AssistantAIModelsResult> {
+  return invoke<AssistantAIModelsResult>(ASSISTANT_AI_FETCH_MODELS_COMMAND, { config });
+}
+
+export function getModelFeatureSettings(): Promise<ModelFeatureSettings> {
+  return invoke<ModelFeatureSettings>(MODEL_FEATURE_GET_SETTINGS_COMMAND);
+}
+
+export function setModelFeatureSettings(settings: ModelFeatureSettings): Promise<void> {
+  return invoke<void>(MODEL_FEATURE_SET_SETTINGS_COMMAND, { settings });
 }
 
 export function testAssistantAIConnection(
