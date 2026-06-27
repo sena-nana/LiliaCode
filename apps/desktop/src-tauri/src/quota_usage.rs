@@ -322,6 +322,12 @@ fn codex_account_quota_unavailable(
 }
 
 fn locate_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    if cfg!(debug_assertions) {
+        if let Some(path) = env::var_os("LILIA_CODEX_ACCOUNT_QUOTA_UTILITY") {
+            return PathBuf::from(path);
+        }
+    }
+
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     if let Ok(exe) = env::current_exe() {
