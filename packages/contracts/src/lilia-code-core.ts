@@ -28,7 +28,7 @@ export const normalizeLiliaCodeCoreCodexProfileSettings =
 
 export const normalizeLiliaCodeCoreCodexQuotaStatus =
   normalizeCodexAccountQuotaStatusImpl as (
-    input: Partial<CodexAccountQuotaStatus> | null | undefined,
+    input: unknown,
   ) => CodexAccountQuotaStatus;
 
 export const createLiliaCodeCoreCodexQuotaUnavailableStatus =
