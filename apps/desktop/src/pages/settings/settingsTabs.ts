@@ -1,5 +1,6 @@
 import {
   Bot,
+  Brain,
   Download,
   FolderCog,
   Gauge,
@@ -18,6 +19,7 @@ export type SettingsTabKey =
   | "providers"
   | "remote-control"
   | "assistant"
+  | "model-config"
   | "agent"
   | "quota"
   | "plugins"
@@ -54,8 +56,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
   },
   {
     key: "assistant",
-    label: "辅助能力",
+    label: "Provider 配置",
     icon: Sparkles,
+  },
+  {
+    key: "model-config",
+    label: "模型配置",
+    icon: Brain,
   },
   {
     key: "agent",

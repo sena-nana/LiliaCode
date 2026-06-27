@@ -28,7 +28,9 @@ use crate::chat::types::{
     ChatModelOption, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow,
     ProviderRuntimeOptions,
 };
-use crate::provider::{load_active_backend, validate_backend_ready_for_send};
+use crate::provider::{
+    load_active_backend, load_assistant_ai_config, validate_backend_ready_for_send,
+};
 use crate::store::LiliaStore;
 
 #[cfg(test)]
@@ -394,8 +396,35 @@ pub fn chat_send_process_session_command(
 }
 
 #[tauri::command]
-pub fn chat_list_models(backend: String) -> Vec<ChatModelOption> {
-    model_options_for_backend(&backend)
+pub fn chat_list_models(app: AppHandle, backend: String) -> Vec<ChatModelOption> {
+    let normalized_backend = crate::chat::state::normalize_backend(&backend).to_string();
+    let mut options = model_options_for_backend(&normalized_backend);
+    if normalized_backend == crate::BACKEND_CODEX {
+        let mut seen = options
+            .iter()
+            .map(|option| option.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        for item in load_assistant_ai_config(&app).model_pool {
+            if item.backend != crate::BACKEND_CODEX {
+                continue;
+            }
+            let id = item.id.trim();
+            if id.is_empty() || !seen.insert(id.to_string()) {
+                continue;
+            }
+            let label = item.label.trim();
+            options.push(ChatModelOption {
+                id: id.to_string(),
+                label: if label.is_empty() {
+                    id.to_string()
+                } else {
+                    label.to_string()
+                },
+                backend: normalized_backend.clone(),
+            });
+        }
+    }
+    options
 }
 
 #[tauri::command]

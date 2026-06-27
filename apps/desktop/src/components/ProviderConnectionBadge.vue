@@ -40,6 +40,7 @@ const props = withDefaults(defineProps<{
 });
 
 const {
+  report,
   activeBackend,
   statusFor,
   routerFor,
@@ -109,6 +110,7 @@ function codexRuntimeIssueText(): string {
 }
 
 const runtimeIssue = computed(() => {
+  if (report.value === null) return null;
   if (!nodeAvailable.value) return "未找到 node（v18+）。点击进入设置。";
   if (activeBackend.value === "codex" && !codexCliAvailable.value) {
     return "未找到 Lilia 内置 Codex app-server。点击进入设置。";
@@ -129,6 +131,7 @@ const hasConnectionIssue = computed(
 );
 
 const connectionTone = computed(() => {
+  if (report.value === null) return "probing";
   if (runtimeIssue.value) return "error";
   if (hasConnectionIssue.value) return "warn";
   return "ok";
@@ -539,7 +542,10 @@ onBeforeUnmount(() => {
       @focus="openQuotaDetails"
       @blur="closeQuotaDetails"
     >
-      <template v-if="connectionTone !== 'ok'">
+      <template v-if="connectionTone === 'probing'">
+        <span class="sb-conn__label sb-conn__label--probing">检测中...</span>
+      </template>
+      <template v-else-if="connectionTone !== 'ok'">
         <AlertTriangle :size="12" aria-hidden="true" />
         <span class="sb-conn__label">{{ connectionTone === "error" ? "异常" : "未连接" }}</span>
       </template>
@@ -560,9 +566,6 @@ onBeforeUnmount(() => {
             </svg>
           </span>
         </span>
-      </template>
-      <template v-else>
-        <span class="sb-conn__label sb-conn__label--probing">检测中...</span>
       </template>
     </component>
     <button

@@ -18,8 +18,9 @@ use crate::prompt_contract;
 use crate::provider::{
     assistant_ai_secret, backend_api_key_env, backend_direct_url, codex_account_spark_enabled,
     is_codex_account_spark_request, load_active_backend, load_assistant_ai_config,
-    request_codex_account_spark, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
-    ConnectionMode, CODEX_SPARK_BASE_URL, CODEX_SPARK_MODEL,
+    load_model_feature_settings, request_codex_account_spark, resolve_connection_for,
+    AssistantAIConfig, BackendConnectionPlan, ConnectionMode, CODEX_SPARK_BASE_URL,
+    CODEX_SPARK_MODEL,
 };
 use crate::store::LiliaStore;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
@@ -332,7 +333,11 @@ fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Option<ModelReq
     let cfg: AssistantAIConfig = load_assistant_ai_config(app);
     let base_url = cfg.base_url?.trim().trim_end_matches('/').to_string();
     let api_key = assistant_ai_secret().ok().flatten()?;
-    let model = cfg.model?.trim().to_string();
+    let model = load_model_feature_settings(app)
+        .title
+        .or(cfg.model)?
+        .trim()
+        .to_string();
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
         return None;
     }

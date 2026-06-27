@@ -214,11 +214,32 @@ pub(crate) struct AssistantAIConfig {
     pub(crate) api_key: Option<String>,
     pub(crate) model: Option<String>,
     #[serde(default)]
+    pub(crate) model_pool: Vec<AssistantAIModelPoolItem>,
+    #[serde(default)]
     pub(crate) codex_account_spark_enabled: bool,
     #[serde(default)]
     pub(crate) has_api_key: bool,
     #[serde(default)]
     pub(crate) clear_api_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AssistantAIModelPoolItem {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    #[serde(default = "default_model_pool_source")]
+    pub(crate) source: String,
+    #[serde(default = "default_model_pool_backend")]
+    pub(crate) backend: String,
+}
+
+fn default_model_pool_source() -> String {
+    "remote".to_string()
+}
+
+fn default_model_pool_backend() -> String {
+    "codex".to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -228,6 +249,65 @@ pub(crate) struct AssistantAITestResult {
     pub(crate) error: Option<String>,
     pub(crate) models: Option<Vec<String>>,
     pub(crate) model_matched: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AssistantAIModelsResult {
+    pub(crate) ok: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) models: Vec<AssistantAIModelPoolItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelFeatureChatSettings {
+    #[serde(default)]
+    pub(crate) light: Option<String>,
+    #[serde(default)]
+    pub(crate) normal: Option<String>,
+    #[serde(default)]
+    pub(crate) deep: Option<String>,
+}
+
+impl Default for ModelFeatureChatSettings {
+    fn default() -> Self {
+        Self {
+            light: None,
+            normal: None,
+            deep: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelFeatureSettings {
+    #[serde(default)]
+    pub(crate) chat: ModelFeatureChatSettings,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) suggestion: Option<String>,
+    #[serde(default)]
+    pub(crate) prompt_router: Option<String>,
+    #[serde(default)]
+    pub(crate) prompt_optimize: Option<String>,
+    #[serde(default)]
+    pub(crate) auto_turn_decision: Option<String>,
+}
+
+impl Default for ModelFeatureSettings {
+    fn default() -> Self {
+        Self {
+            chat: ModelFeatureChatSettings::default(),
+            title: None,
+            suggestion: None,
+            prompt_router: None,
+            prompt_optimize: None,
+            auto_turn_decision: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

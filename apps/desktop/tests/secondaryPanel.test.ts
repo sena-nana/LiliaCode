@@ -279,7 +279,7 @@ describe("SecondaryPanel project tree expansion", () => {
     await waitFor(() => {
       const label = view.container.querySelector(".sb-conn__label");
       expect(label).toHaveTextContent("Codex");
-    });
+    }, { timeout: 2_000 });
   });
 
   it("Codex app-server 环境不满足时左下角 provider 卡片标红", async () => {

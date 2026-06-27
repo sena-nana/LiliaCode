@@ -11,6 +11,9 @@ export const PROVIDER_COMMANDS_CONTRACT: {
   routerSetModeCommand: "router_set_mode";
   assistantAiGetConfigCommand: "assistant_ai_get_config";
   assistantAiSetConfigCommand: "assistant_ai_set_config";
+  assistantAiFetchModelsCommand: "assistant_ai_fetch_models";
+  modelFeatureGetSettingsCommand: "model_feature_get_settings";
+  modelFeatureSetSettingsCommand: "model_feature_set_settings";
   assistantAiTestConnectionCommand: "assistant_ai_test_connection";
   assistantAiOptimizePromptCommand: "assistant_ai_optimize_prompt";
 };
@@ -27,5 +30,8 @@ export const ROUTER_GET_MODE_COMMAND: "router_get_mode";
 export const ROUTER_SET_MODE_COMMAND: "router_set_mode";
 export const ASSISTANT_AI_GET_CONFIG_COMMAND: "assistant_ai_get_config";
 export const ASSISTANT_AI_SET_CONFIG_COMMAND: "assistant_ai_set_config";
+export const ASSISTANT_AI_FETCH_MODELS_COMMAND: "assistant_ai_fetch_models";
+export const MODEL_FEATURE_GET_SETTINGS_COMMAND: "model_feature_get_settings";
+export const MODEL_FEATURE_SET_SETTINGS_COMMAND: "model_feature_set_settings";
 export const ASSISTANT_AI_TEST_CONNECTION_COMMAND: "assistant_ai_test_connection";
 export const ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND: "assistant_ai_optimize_prompt";

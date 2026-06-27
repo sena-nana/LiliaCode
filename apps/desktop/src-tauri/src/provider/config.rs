@@ -13,8 +13,9 @@ use super::credentials::{
 };
 use super::subagents::{claude_managed_subagents, codex_subagent_instructions};
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, CodexProfileSettings, ConnectionMode,
-    ProviderConfig, SubagentModeSettings,
+    AgentInteractionSettings, AssistantAIConfig, AssistantAIModelPoolItem, CodexProfileSettings,
+    ConnectionMode, ModelFeatureChatSettings, ModelFeatureSettings, ProviderConfig,
+    SubagentModeSettings,
 };
 
 fn manifest_contains(values: &[String], value: &str) -> bool {
@@ -24,6 +25,7 @@ fn manifest_contains(values: &[String], value: &str) -> bool {
 pub(crate) const PROVIDER_ACTIVE_BACKEND_KEY: &str = "provider.activeBackend";
 pub(crate) const CC_SWITCH_KEY: &str = "cc-switch.config";
 pub(crate) const ASSISTANT_AI_KEY: &str = "assistant-ai.config";
+pub(crate) const MODEL_FEATURE_KEY: &str = "model-feature.config";
 pub(crate) const AGENT_INTERACTION_KEY: &str = "agent-interaction.config";
 pub(crate) const ROUTER_API: &str = "api";
 pub(crate) const ROUTER_CODEX_ACCOUNT: &str = "codex-account";
@@ -42,6 +44,7 @@ struct ProviderConfigMetadata {
 struct AssistantAIConfigMetadata {
     base_url: Option<String>,
     model: Option<String>,
+    model_pool: Vec<AssistantAIModelPoolItem>,
     codex_account_spark_enabled: bool,
 }
 
@@ -147,6 +150,7 @@ pub(crate) fn public_provider_config<R: Runtime>(
 
 pub(crate) fn public_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> AssistantAIConfig {
     let mut config = load_assistant_ai_config(app);
+    config.model_pool = normalize_model_pool(config.model_pool);
     config.has_api_key = assistant_ai_has_api_key().unwrap_or(false);
     config.api_key = None;
     config.clear_api_key = false;
@@ -197,13 +201,16 @@ pub(crate) fn load_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> Assist
     if let Err(err) = migrate_assistant_ai_config(app) {
         eprintln!("[provider] migrate assistant-ai config secret failed: {err}");
     }
-    load_store_value(app, ASSISTANT_AI_KEY).unwrap_or_default()
+    let mut config: AssistantAIConfig = load_store_value(app, ASSISTANT_AI_KEY).unwrap_or_default();
+    config.model_pool = normalize_model_pool(config.model_pool);
+    config
 }
 
 pub(crate) fn save_assistant_ai_config_metadata<R: Runtime>(
     app: &AppHandle<R>,
     base_url: Option<String>,
     model: Option<String>,
+    model_pool: Vec<AssistantAIModelPoolItem>,
     codex_account_spark_enabled: bool,
 ) -> Result<(), String> {
     save_store_value(
@@ -212,9 +219,69 @@ pub(crate) fn save_assistant_ai_config_metadata<R: Runtime>(
         &AssistantAIConfigMetadata {
             base_url,
             model,
+            model_pool: normalize_model_pool(model_pool),
             codex_account_spark_enabled,
         },
     )
+}
+
+pub(crate) fn load_model_feature_settings<R: Runtime>(
+    app: &AppHandle<R>,
+) -> ModelFeatureSettings {
+    normalize_model_feature_settings(load_store_value(app, MODEL_FEATURE_KEY))
+}
+
+pub(crate) fn save_model_feature_settings<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: ModelFeatureSettings,
+) -> Result<(), String> {
+    save_store_value(app, MODEL_FEATURE_KEY, &normalize_model_feature_settings(Some(settings)))
+}
+
+pub(crate) fn normalize_model_pool(
+    items: Vec<AssistantAIModelPoolItem>,
+) -> Vec<AssistantAIModelPoolItem> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for item in items {
+        let id = item.id.trim().to_string();
+        if id.is_empty() || !seen.insert(id.clone()) {
+            continue;
+        }
+        let label = item.label.trim();
+        out.push(AssistantAIModelPoolItem {
+            id: id.clone(),
+            label: if label.is_empty() {
+                id
+            } else {
+                label.to_string()
+            },
+            source: match item.source.trim() {
+                "legacy" => "legacy".to_string(),
+                _ => "remote".to_string(),
+            },
+            backend: normalize_backend(&item.backend).to_string(),
+        });
+    }
+    out
+}
+
+pub(crate) fn normalize_model_feature_settings(
+    settings: Option<ModelFeatureSettings>,
+) -> ModelFeatureSettings {
+    let settings = settings.unwrap_or_default();
+    ModelFeatureSettings {
+        chat: ModelFeatureChatSettings {
+            light: normalize_optional_string(settings.chat.light),
+            normal: normalize_optional_string(settings.chat.normal),
+            deep: normalize_optional_string(settings.chat.deep),
+        },
+        title: normalize_optional_string(settings.title),
+        suggestion: normalize_optional_string(settings.suggestion),
+        prompt_router: normalize_optional_string(settings.prompt_router),
+        prompt_optimize: normalize_optional_string(settings.prompt_optimize),
+        auto_turn_decision: normalize_optional_string(settings.auto_turn_decision),
+    }
 }
 
 fn migrate_provider_config<R: Runtime>(app: &AppHandle<R>, key: &str) -> Result<(), String> {
@@ -248,6 +315,7 @@ fn migrate_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> Result<(), Str
         app,
         config.base_url,
         config.model,
+        config.model_pool,
         config.codex_account_spark_enabled,
     )
 }
@@ -629,6 +697,12 @@ mod tests {
         let value = serde_json::to_value(AssistantAIConfigMetadata {
             base_url: Some("https://api.example.com/v1".to_string()),
             model: Some("mini".to_string()),
+            model_pool: vec![AssistantAIModelPoolItem {
+                id: "remote-mini".to_string(),
+                label: "Remote Mini".to_string(),
+                source: "remote".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+            }],
             codex_account_spark_enabled: true,
         })
         .unwrap();
@@ -638,6 +712,13 @@ mod tests {
             Some("https://api.example.com/v1")
         );
         assert_eq!(value.get("model").and_then(JsonValue::as_str), Some("mini"));
+        assert_eq!(
+            value
+                .get("modelPool")
+                .and_then(JsonValue::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
         assert_eq!(
             value
                 .get("codexAccountSparkEnabled")

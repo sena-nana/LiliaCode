@@ -36,6 +36,7 @@ const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
   providers: lazySettingsSection("providers", () => import("./settings/ProviderConnectionSection.vue")),
   "remote-control": lazySettingsSection("remote-control", () => import("./settings/RemoteControlSection.vue")),
   assistant: lazySettingsSection("assistant", () => import("./settings/AssistantAISection.vue")),
+  "model-config": lazySettingsSection("model-config", () => import("./settings/ModelConfigurationSection.vue")),
   agent: lazySettingsSection("agent", () => import("./settings/AgentInteractionSection.vue")),
   quota: lazySettingsSection("quota", () => import("./settings/QuotaUsageSection.vue")),
   plugins: lazySettingsSection("plugins", () => import("./Plugins.vue")),
