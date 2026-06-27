@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { AlertTriangle, Download, Loader2, RefreshCw, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, Download, Loader2, RefreshCw, RotateCw, Sparkles } from "lucide-vue-next";
 import {
   chatBackendLabel,
   codexAccountQuotaWindowRemainingLine as quotaRemainingLine,
@@ -188,12 +188,15 @@ const shouldShowCodexUpdate = computed(() =>
   (
     Boolean(codexAppServer.value?.updateAvailable) ||
     codexAppServer.value?.updateState === "downloading" ||
+    codexAppServer.value?.updateState === "ready" ||
+    codexAppServer.value?.updateState === "failed" ||
     codexAppServerUpdating.value
   ),
 );
 const codexUpdateState = computed(() => codexAppServer.value?.updateState ?? "idle");
 const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
 const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
+const codexUpdateFailed = computed(() => codexUpdateState.value === "failed");
 const codexUpdateProgressPercent = computed(() => codexAppServer.value?.updateProgressPercent ?? null);
 const codexUpdateProgressStyle = computed(() => ({
   "--quota-progress": String(codexUpdateProgressPercent.value ?? 0),
@@ -202,6 +205,17 @@ const codexUpdateTarget = computed(() =>
   codexAppServer.value?.preparedVersion ??
   codexAppServer.value?.latestVersion ??
   "最新版本",
+);
+const codexUpdateCanRetrySwitch = computed(() =>
+  codexUpdateFailed.value && Boolean(codexAppServer.value?.preparedVersion)
+);
+const codexUpdateCanRetryPrepare = computed(() =>
+  codexUpdateFailed.value && !codexUpdateCanRetrySwitch.value
+);
+const codexUpdateActionEnabled = computed(() =>
+  codexUpdateReady.value ||
+  codexUpdateCanRetrySwitch.value ||
+  codexUpdateCanRetryPrepare.value
 );
 const codexUpdateTitle = computed(() => {
   const current = codexAppServer.value?.version ?? "未安装";
@@ -217,9 +231,18 @@ const codexUpdateTitle = computed(() => {
   if (codexUpdateReady.value) {
     return `切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
   }
+  if (codexUpdateCanRetrySwitch.value) {
+    return `重试切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+  }
+  if (codexUpdateCanRetryPrepare.value) {
+    return `重新准备 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+  }
   return `准备 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
 });
 const codexReleaseNotes = computed(() => codexAppServer.value?.releaseNotes ?? []);
+const codexUpdateErrorText = computed(() =>
+  codexAppServer.value?.updateError ?? codexAppServerUpdateError.value ?? null
+);
 
 function quotaRingStyle(window: CodexAccountQuotaWindow | null | undefined) {
   const remainingPercent = codexAccountQuotaWindowRemainingPercent(window);
@@ -401,6 +424,10 @@ function closeUpdateDetails() {
 
 async function installUpdate() {
   if (disposed) return;
+  if (codexUpdateCanRetryPrepare.value) {
+    await checkCodexAppServerUpdate();
+    return;
+  }
   await installCodexAppServerUpdate();
 }
 
@@ -444,7 +471,7 @@ watch(
     codexAppServer.value?.latestVersion ?? "",
     codexAppServer.value?.releaseNotes.join("\n") ?? "",
     codexAppServerUpdating.value,
-    codexAppServerUpdateError.value ?? "",
+    codexUpdateErrorText.value ?? "",
   ] as const,
   ([open]) => {
     if (!open) return;
@@ -523,7 +550,12 @@ onBeforeUnmount(() => {
       type="button"
       class="sb-conn-update"
       data-agent-id="provider-connection.codex-update"
-      :disabled="codexAppServerUpdating || codexUpdateDownloading || !codexUpdateReady"
+      :disabled="
+        codexAppServerUpdating ||
+        codexAppServerUpdateChecking ||
+        codexUpdateDownloading ||
+        !codexUpdateActionEnabled
+      "
       :title="codexUpdateTitle"
       :aria-label="codexUpdateTitle"
       :aria-describedby="updateTooltipOpen ? `${popoverId}-update` : undefined"
@@ -552,6 +584,8 @@ onBeforeUnmount(() => {
         </svg>
       </span>
       <RefreshCw v-else-if="codexUpdateReady" :size="12" aria-hidden="true" />
+      <RefreshCw v-else-if="codexUpdateCanRetrySwitch" :size="12" aria-hidden="true" />
+      <RotateCw v-else-if="codexUpdateCanRetryPrepare" :size="12" aria-hidden="true" />
       <Download v-else :size="12" aria-hidden="true" />
     </button>
   </span>
@@ -619,8 +653,8 @@ onBeforeUnmount(() => {
         <span v-for="note in codexReleaseNotes" :key="note">{{ note }}</span>
       </span>
       <span v-else class="sb-conn-popover__warn">暂未获取更新内容。</span>
-      <span v-if="codexAppServerUpdateError" class="sb-conn-popover__error">
-        {{ codexAppServerUpdateError }}
+      <span v-if="codexUpdateErrorText" class="sb-conn-popover__error">
+        {{ codexUpdateErrorText }}
       </span>
     </span>
   </Teleport>
