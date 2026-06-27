@@ -126,6 +126,28 @@ describe("MarkdownBlock", () => {
       .toHaveAttribute("href", "https://example.com");
   });
 
+  it("普通文本和非 mermaid 代码块不会触发 Mermaid 渲染", async () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "普通说明文字。",
+          "",
+          "```ts",
+          "const value = 1;",
+          "```",
+        ].join("\n"),
+      },
+    });
+
+    await vi.dynamicImportSettled();
+
+    expect(mermaidMock.render).not.toHaveBeenCalled();
+    expect(view.container.querySelector(".markdown-block__render-note")).toBeNull();
+    expect(view.container.querySelector(".markdown-block__code")).toHaveTextContent(
+      "const value = 1;",
+    );
+  });
+
   it("Markdown 图片点击会请求打开图片查看器", async () => {
     const view = render(MarkdownBlock, {
       props: {
@@ -172,6 +194,31 @@ describe("MarkdownBlock", () => {
 
     expect(mermaidMock.initialize).toHaveBeenCalledTimes(1);
     expect(view.container.querySelector('[data-testid="mermaid-svg"]')).toBeInTheDocument();
+  });
+
+  it("扩展 Mermaid 图表会等待显式点击后再加载渲染", async () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "```mermaid",
+          "architecture-beta",
+          "  group api(cloud)[API]",
+          "```",
+        ].join("\n"),
+      },
+    });
+
+    await vi.dynamicImportSettled();
+
+    expect(mermaidMock.render).not.toHaveBeenCalled();
+    await fireEvent.click(await view.findByRole("button", { name: "点击渲染图表。" }));
+
+    await waitFor(() => {
+      expect(mermaidMock.render).toHaveBeenCalledWith(
+        expect.stringMatching(/^markdown-mermaid-m\d+-block-0-/),
+        "architecture-beta\n  group api(cloud)[API]",
+      );
+    });
   });
 
   it("较大的 mermaid 图表会等待显式点击后再渲染", async () => {

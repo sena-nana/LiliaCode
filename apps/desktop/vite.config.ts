@@ -31,6 +31,18 @@ const devMockAliases = {
   ),
 };
 
+function isMermaidParserModule(id: string): boolean {
+  const normalized = id.replace(/\\/g, "/");
+  return normalized.includes("/node_modules/@mermaid-js/parser/");
+}
+
+function chunkFileNames(chunk: { moduleIds?: string[] }): string {
+  if (chunk.moduleIds?.some(isMermaidParserModule)) {
+    return "assets/mermaid-parser-[hash].js";
+  }
+  return "assets/[name]-[hash].js";
+}
+
 // https://vite.dev/config/
 export default defineConfig(async ({ command, mode }) => ({
   plugins: [vue()],
@@ -114,5 +126,13 @@ export default defineConfig(async ({ command, mode }) => ({
   test: {
     environment: "jsdom",
     setupFiles: ["./tests/setupTests.ts"],
+  },
+  build: {
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        chunkFileNames,
+      },
+    },
   },
 }));
