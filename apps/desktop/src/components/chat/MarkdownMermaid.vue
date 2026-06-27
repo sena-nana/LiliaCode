@@ -1,17 +1,6 @@
 <script lang="ts">
-import { createLazyLoadState } from "../../utils/lazyLoadState";
-import { measurePerfAsync as measureModulePerfAsync } from "../../utils/perf";
-
-let mermaidConfigured = false;
 let mermaidInstanceSeed = 0;
-const mermaidModuleLoad = createLazyLoadState(() =>
-  measureModulePerfAsync(
-    "markdown.mermaid.module.load",
-    async () => await import("mermaid"),
-  )
-);
-
-type MermaidApi = typeof import("mermaid")["default"];
+const MAX_MERMAID_SOURCE_LENGTH = 20_000;
 </script>
 
 <script setup lang="ts">
@@ -19,11 +8,16 @@ import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   beginPerfStage,
   cancelIdleRun,
-  measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
 import { useDeferredVisibility } from "./markdown/useDeferredVisibility";
+import {
+  MERMAID_EXPLICIT_RENDER_LENGTH,
+  mermaidErrorMessage,
+  needsExplicitMermaidActivation,
+  renderMermaidDiagram,
+} from "./markdown/mermaidRenderer";
 
 const props = defineProps<{
   blockKey: string;
@@ -41,40 +35,16 @@ let cancelPaintRender: (() => void) | null = null;
 let disposed = false;
 
 const instanceId = `m${++mermaidInstanceSeed}`;
-const MAX_MERMAID_SOURCE_LENGTH = 20_000;
-const EXPLICIT_MERMAID_RENDER_LENGTH = 1_200;
 const { activated } = useDeferredVisibility({
   target: () => figure.value,
   perfName: "markdown.mermaid.visible",
   detail: () => `${props.source.length} chars`,
 });
 
-function needsExplicitActivation(source: string): boolean {
-  return source.trim().length >= EXPLICIT_MERMAID_RENDER_LENGTH;
-}
-
-async function getMermaid(): Promise<MermaidApi> {
-  const module = await mermaidModuleLoad.load();
-  return module.default;
-}
-
-function configureMermaid(mermaid: MermaidApi) {
-  if (mermaidConfigured) return;
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: "base",
-    themeVariables: {
-      background: "transparent",
-      mainBkg: "transparent",
-      fontFamily: "var(--font-sans)",
-      primaryColor: "transparent",
-      primaryTextColor: "currentColor",
-      lineColor: "currentColor",
-      textColor: "currentColor",
-    },
-  });
-  mermaidConfigured = true;
+function activationButtonLabel(source: string): string {
+  return source.trim().length >= MERMAID_EXPLICIT_RENDER_LENGTH
+    ? "图表较大，点击渲染。"
+    : "点击渲染图表。";
 }
 
 function cancelScheduledRender() {
@@ -148,18 +118,11 @@ async function renderDiagram(currentRenderId: number) {
   if (disposed || currentRenderId !== renderId || !container.value) return;
 
   try {
-    const mermaid = await getMermaid();
-    if (disposed || currentRenderId !== renderId || !container.value) return;
-    configureMermaid(mermaid);
     const id = `markdown-mermaid-${instanceId}-${props.blockKey}-${currentRenderId}`.replace(
       /[^A-Za-z0-9_-]/g,
       "-",
     );
-    const { svg, bindFunctions } = await measurePerfAsync(
-      "markdown.mermaid.render",
-      async () => await mermaid.render(id, source),
-      { detail: `${source.length} chars` },
-    );
+    const { svg, bindFunctions } = await renderMermaidDiagram(id, source);
     if (disposed || currentRenderId !== renderId || !container.value) return;
     container.value.innerHTML = svg;
     bindFunctions?.(container.value);
@@ -168,16 +131,14 @@ async function renderDiagram(currentRenderId: number) {
     if (disposed || currentRenderId !== renderId || !container.value) return;
     container.value.innerHTML = "";
     state.value = "error";
-    errorText.value = error instanceof Error
-      ? error.message
-      : "Mermaid 渲染失败。";
+    errorText.value = mermaidErrorMessage(error);
   }
 }
 
 watch(
   () => [props.source, props.blockKey, activated.value, activatedByUser.value] as const,
   ([source, _blockKey, visible, activatedExplicitly]) => {
-    const explicitActivationRequired = needsExplicitActivation(source);
+    const explicitActivationRequired = needsExplicitMermaidActivation(source);
     if (!source.trim()) {
       activatedByUser.value = false;
       resetDiagramState();
@@ -215,13 +176,13 @@ onBeforeUnmount(() => {
     <div ref="container" class="markdown-block__mermaid-canvas" />
     <figcaption v-if="state === 'idle'" class="markdown-block__render-note">
       <button
-        v-if="needsExplicitActivation(source) && !activatedByUser"
-    type="button"
-    class="markdown-block__render-activate"
-    :data-agent-id="`markdown.mermaid.activate.${blockKey}`"
-    @click="requestDiagramActivation"
+        v-if="needsExplicitMermaidActivation(source) && !activatedByUser"
+        type="button"
+        class="markdown-block__render-activate"
+        :data-agent-id="`markdown.mermaid.activate.${blockKey}`"
+        @click="requestDiagramActivation"
       >
-        图表较大，点击渲染。
+        {{ activationButtonLabel(source) }}
       </button>
       <span v-else>图表进入可见区域后渲染。</span>
     </figcaption>
