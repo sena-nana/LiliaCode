@@ -242,4 +242,27 @@ describe("model selection", () => {
       reasoningEffort: "high",
     });
   });
+
+  it("uses saved chat tier model assignments for auto selection", () => {
+    const preview = previewAutoModelSelection({
+      backend: "codex",
+      modelOptions: codexModels,
+      composer: composer(),
+      prompt: "short",
+      modelFeatureSettings: {
+        chat: { light: "gpt-5.4", normal: null, deep: null },
+        title: null,
+        suggestion: null,
+        promptRouter: null,
+        promptOptimize: null,
+        autoTurnDecision: null,
+      },
+    });
+
+    expect(preview).toMatchObject({
+      model: "gpt-5.4",
+      reasoningEffort: "low",
+      source: "auto",
+    });
+  });
 });
