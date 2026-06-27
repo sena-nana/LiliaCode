@@ -101,6 +101,7 @@ enum CodexUpdateManagerState {
     Failed {
         version: String,
         error: String,
+        prepared: bool,
     },
 }
 
@@ -292,9 +293,18 @@ fn apply_update_state(mut status: CodexAppServerStatus) -> CodexAppServerStatus 
             status.update_state = CODEX_UPDATE_STATE_READY.to_string();
             status.prepared_version = Some(version);
         }
-        (Some(latest), CodexUpdateManagerState::Failed { version, error }) if version == latest => {
+        (
+            Some(latest),
+            CodexUpdateManagerState::Failed {
+                version,
+                error,
+                prepared,
+            },
+        ) if version == latest => {
             status.update_state = CODEX_UPDATE_STATE_FAILED.to_string();
-            status.prepared_version = Some(version);
+            if prepared {
+                status.prepared_version = Some(version);
+            }
             status.update_error = Some(error);
         }
         _ => {}
@@ -307,12 +317,51 @@ fn should_start_download_for(version: &str, state: &CodexUpdateManagerState) -> 
         CodexUpdateManagerState::Downloading {
             version: active, ..
         }
-        | CodexUpdateManagerState::Ready(active)
-        | CodexUpdateManagerState::Failed {
-            version: active, ..
-        } => active != version,
+        | CodexUpdateManagerState::Ready(active) => active != version,
+        CodexUpdateManagerState::Failed {
+            version: active,
+            prepared,
+            ..
+        } => active != version || !prepared,
         CodexUpdateManagerState::Idle => true,
     }
+}
+
+fn prepared_update_available_with<F>(version: &str, mut verify: F) -> Result<bool, String>
+where
+    F: FnMut(&PreparedCodexUpdate) -> Result<(), String>,
+{
+    let prepared = prepared_codex_update(version);
+    if !prepared.install_dir.exists() {
+        return Ok(false);
+    }
+    verify(&prepared)?;
+    Ok(true)
+}
+
+fn restore_ready_update_from_disk_with<F>(version: &str, verify: F)
+where
+    F: FnMut(&PreparedCodexUpdate) -> Result<(), String>,
+{
+    let should_probe_disk = codex_update_manager()
+        .lock()
+        .map(|state| matches!(*state, CodexUpdateManagerState::Idle))
+        .unwrap_or(false);
+    if !should_probe_disk {
+        return;
+    }
+    if !matches!(prepared_update_available_with(version, verify), Ok(true)) {
+        return;
+    }
+    if let Ok(mut state) = codex_update_manager().lock() {
+        if matches!(*state, CodexUpdateManagerState::Idle) {
+            *state = CodexUpdateManagerState::Ready(version.to_string());
+        }
+    }
+}
+
+fn restore_ready_update_from_disk(version: &str) {
+    restore_ready_update_from_disk_with(version, verify_prepared_codex_update);
 }
 
 fn maybe_start_codex_update_download(status: &CodexAppServerStatus) {
@@ -341,7 +390,11 @@ fn maybe_start_codex_update_download(status: &CodexAppServerStatus) {
         if let Ok(mut state) = codex_update_manager().lock() {
             *state = match result {
                 Ok(()) => CodexUpdateManagerState::Ready(version),
-                Err(error) => CodexUpdateManagerState::Failed { version, error },
+                Err(error) => CodexUpdateManagerState::Failed {
+                    version,
+                    error,
+                    prepared: false,
+                },
             };
         }
     });
@@ -528,7 +581,10 @@ fn fetch_asset_bytes(
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn test_archive_digest(
@@ -993,6 +1049,14 @@ pub(crate) fn install_or_update_codex_app_server() -> Result<CodexAppServerStatu
                 *state = CodexUpdateManagerState::Idle;
                 version
             }
+            CodexUpdateManagerState::Failed {
+                version,
+                prepared: true,
+                ..
+            } => {
+                *state = CodexUpdateManagerState::Idle;
+                version
+            }
             CodexUpdateManagerState::Downloading { .. } => {
                 return Err("Codex app-server 更新仍在后台下载。".to_string());
             }
@@ -1007,6 +1071,7 @@ pub(crate) fn install_or_update_codex_app_server() -> Result<CodexAppServerStatu
             *state = CodexUpdateManagerState::Failed {
                 version,
                 error: err.clone(),
+                prepared: true,
             };
         }
         return Err(err);
@@ -1031,6 +1096,11 @@ fn check_codex_app_server_update_status_for(status: CodexAppServerStatus) -> Cod
         || fetch_latest_version_with(&client),
         |version| fetch_release_notes_with(&client, version),
     );
+    if status.update_available {
+        if let Some(version) = status.latest_version.as_deref() {
+            restore_ready_update_from_disk(version);
+        }
+    }
     maybe_start_codex_update_download(&status);
     apply_update_state(status)
 }
@@ -1090,6 +1160,18 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn with_lilia_home<T>(home: &Path, run: impl FnOnce() -> T) -> T {
+        let previous = std::env::var_os("LILIA_HOME");
+        std::env::set_var("LILIA_HOME", home);
+        let result = run();
+        if let Some(previous) = previous {
+            std::env::set_var("LILIA_HOME", previous);
+        } else {
+            std::env::remove_var("LILIA_HOME");
+        }
+        result
     }
 
     #[test]
@@ -1204,6 +1286,46 @@ mod tests {
     }
 
     #[test]
+    fn update_state_reports_failed_download_without_prepared_version() {
+        let mut base = status(Some("codex 0.140.0"), true);
+        base.latest_version = Some("0.141.0".to_string());
+        base.update_available = true;
+
+        let updated = with_update_manager_state(
+            CodexUpdateManagerState::Failed {
+                version: "0.141.0".to_string(),
+                error: "download failed".to_string(),
+                prepared: false,
+            },
+            || apply_update_state(base),
+        );
+
+        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_FAILED);
+        assert_eq!(updated.prepared_version, None);
+        assert_eq!(updated.update_error.as_deref(), Some("download failed"));
+    }
+
+    #[test]
+    fn update_state_reports_failed_switch_with_prepared_version() {
+        let mut base = status(Some("codex 0.140.0"), true);
+        base.latest_version = Some("0.141.0".to_string());
+        base.update_available = true;
+
+        let updated = with_update_manager_state(
+            CodexUpdateManagerState::Failed {
+                version: "0.141.0".to_string(),
+                error: "switch failed".to_string(),
+                prepared: true,
+            },
+            || apply_update_state(base),
+        );
+
+        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_FAILED);
+        assert_eq!(updated.prepared_version.as_deref(), Some("0.141.0"));
+        assert_eq!(updated.update_error.as_deref(), Some("switch failed"));
+    }
+
+    #[test]
     fn same_version_download_is_not_started_twice() {
         assert!(!should_start_download_for(
             "0.141.0",
@@ -1219,6 +1341,49 @@ mod tests {
                 progress_percent: Some(10),
             }
         ));
+    }
+
+    #[test]
+    fn failed_download_for_same_version_can_start_again() {
+        assert!(should_start_download_for(
+            "0.141.0",
+            &CodexUpdateManagerState::Failed {
+                version: "0.141.0".to_string(),
+                error: "download failed".to_string(),
+                prepared: false,
+            }
+        ));
+        assert!(!should_start_download_for(
+            "0.141.0",
+            &CodexUpdateManagerState::Failed {
+                version: "0.141.0".to_string(),
+                error: "switch failed".to_string(),
+                prepared: true,
+            }
+        ));
+    }
+
+    #[test]
+    fn disk_prepared_update_restores_ready_state() {
+        let root = temp_test_dir("restore-ready");
+        let updated = with_update_manager_state(CodexUpdateManagerState::Idle, || {
+            with_lilia_home(&root, || {
+                let prepared = prepared_codex_update("0.141.0");
+                fs::create_dir_all(&prepared.install_dir).unwrap();
+
+                restore_ready_update_from_disk_with("0.141.0", |_| Ok(()));
+
+                let mut base = status(Some("codex 0.140.0"), true);
+                base.latest_version = Some("0.141.0".to_string());
+                base.update_available = true;
+                apply_update_state(base)
+            })
+        });
+
+        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_READY);
+        assert_eq!(updated.prepared_version.as_deref(), Some("0.141.0"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

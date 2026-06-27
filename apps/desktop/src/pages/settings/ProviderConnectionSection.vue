@@ -117,6 +117,7 @@ const codexAppServerStatus = computed(() => report.value?.codexAppServer ?? null
 const codexUpdateState = computed(() => codexAppServerStatus.value?.updateState ?? "idle");
 const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
 const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
+const codexUpdateFailed = computed(() => codexUpdateState.value === "failed");
 const codexUpdateProgressPercent = computed(() =>
   codexAppServerStatus.value?.updateProgressPercent ?? null
 );
@@ -129,6 +130,8 @@ const showCodexUpdateAction = computed(() =>
   (
     Boolean(codexAppServerStatus.value?.updateAvailable) ||
     codexUpdateDownloading.value ||
+    codexUpdateReady.value ||
+    codexUpdateFailed.value ||
     codexAppServerUpdating.value
   ),
 );
@@ -136,6 +139,20 @@ const codexUpdateTarget = computed(() =>
   codexAppServerStatus.value?.preparedVersion ??
   codexAppServerStatus.value?.latestVersion ??
   null,
+);
+const codexUpdateErrorText = computed(() =>
+  codexAppServerStatus.value?.updateError ?? codexAppServerUpdateError.value ?? null
+);
+const codexUpdateCanRetrySwitch = computed(() =>
+  codexUpdateFailed.value && Boolean(codexAppServerStatus.value?.preparedVersion)
+);
+const codexUpdateCanRetryPrepare = computed(() =>
+  codexUpdateFailed.value && !codexUpdateCanRetrySwitch.value && Boolean(codexUpdateTarget.value)
+);
+const codexUpdateActionEnabled = computed(() =>
+  codexUpdateReady.value ||
+  codexUpdateCanRetrySwitch.value ||
+  codexUpdateCanRetryPrepare.value
 );
 const codexUpdateLabel = computed(() => {
   if (codexAppServerUpdating.value || codexUpdateState.value === "switching") return "切换中...";
@@ -145,6 +162,12 @@ const codexUpdateLabel = computed(() => {
       : `下载中 ${codexUpdateProgressPercent.value}%`;
   }
   if (codexAppServerUpdateChecking.value) return "下载中...";
+  if (codexUpdateCanRetrySwitch.value && codexUpdateTarget.value) {
+    return `重试切换到 ${codexUpdateTarget.value}`;
+  }
+  if (codexUpdateCanRetryPrepare.value && codexUpdateTarget.value) {
+    return `重新准备 ${codexUpdateTarget.value}`;
+  }
   if (codexUpdateReady.value && codexUpdateTarget.value) return `切换到 ${codexUpdateTarget.value}`;
   return codexUpdateTarget.value ? `准备 ${codexUpdateTarget.value}` : "准备更新";
 });
@@ -314,6 +337,10 @@ async function probe() {
 
 async function installCodexUpdate() {
   if (disposed) return;
+  if (codexUpdateCanRetryPrepare.value) {
+    await checkCodexAppServerUpdate();
+    return;
+  }
   await installCodexAppServerUpdate();
 }
 
@@ -477,7 +504,12 @@ watch(showCodexRuntimeStatus, (enabled) => {
             type="button"
             class="ui-button ui-button--ghost"
             data-agent-id="settings.provider.codex-update"
-            :disabled="codexAppServerUpdating || codexUpdateDownloading || !codexUpdateReady"
+            :disabled="
+              codexAppServerUpdating ||
+              codexAppServerUpdateChecking ||
+              codexUpdateDownloading ||
+              !codexUpdateActionEnabled
+            "
             @click="installCodexUpdate"
           >
             <Loader2
@@ -499,18 +531,20 @@ watch(showCodexRuntimeStatus, (enabled) => {
               </svg>
             </span>
             <RefreshCw v-else-if="codexUpdateReady" :size="12" aria-hidden="true" />
+            <RefreshCw v-else-if="codexUpdateCanRetrySwitch" :size="12" aria-hidden="true" />
+            <RotateCw v-else-if="codexUpdateCanRetryPrepare" :size="12" aria-hidden="true" />
             <Download v-else :size="12" aria-hidden="true" />
             {{ codexAppServerUpdating ? "更新中..." : codexUpdateLabel }}
           </button>
         </div>
       </div>
       <div
-        v-if="codexLoginStatusDetail || codexAppServerUpdateError"
+        v-if="codexLoginStatusDetail || codexUpdateErrorText"
         class="settings-row settings-row--stacked"
       >
         <div class="settings-row__status muted">
           <span v-if="codexLoginStatusDetail">{{ codexLoginStatusDetail }}</span>
-          <span v-if="codexAppServerUpdateError">{{ codexAppServerUpdateError }}</span>
+          <span v-if="codexUpdateErrorText">{{ codexUpdateErrorText }}</span>
         </div>
       </div>
     </template>

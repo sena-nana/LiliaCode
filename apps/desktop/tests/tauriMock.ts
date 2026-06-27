@@ -3467,13 +3467,17 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
 
     case PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND:
-      if (codexAppServerStatus.updateState !== "ready") {
+      if (
+        codexAppServerStatus.updateState !== "ready" &&
+        !(codexAppServerStatus.updateState === "failed" && codexAppServerStatus.preparedVersion)
+      ) {
         throw new Error("Codex app-server 更新尚未准备好。");
       }
       codexAppServerStatus = {
         ...codexAppServerStatus,
         managed: true,
         updateAvailable: false,
+        updateError: null,
         updateState: "idle",
         preparedVersion: null,
         updateProgressPercent: null,

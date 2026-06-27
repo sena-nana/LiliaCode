@@ -8,6 +8,8 @@ import {
   GITHUB_POLL_DEVICE_FLOW_COMMAND,
   GITHUB_START_DEVICE_FLOW_COMMAND,
   POPUP_SET_WINDOW_SETTINGS_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
   PROJECT_GET_SETTINGS_COMMAND,
   PROJECT_SET_SETTINGS_COMMAND,
   QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
@@ -612,6 +614,74 @@ describe("Settings provider switch", () => {
     const ring = button.querySelector<HTMLElement>(".sb-quota-ring");
     expect(ring).toBeInTheDocument();
     expect(ring).toHaveStyle({ "--quota-progress": "42" });
+  });
+
+  it("Codex app-server 下载失败时设置页保留重新准备入口", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      updateState: "failed",
+      preparedVersion: null,
+      updateError: "下载 Codex app-server 失败",
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    const button = await view.findByRole("button", { name: /重新准备 0.141.0/ });
+    expect(button).toBeEnabled();
+    expect(button.querySelector(".lucide-rotate-cw")).toBeInTheDocument();
+    expect(view.getByText("下载 Codex app-server 失败")).toBeInTheDocument();
+
+    mockInvoke.mockClear();
+    await fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
+        {},
+        undefined,
+      );
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+        {},
+        undefined,
+      );
+    });
+  });
+
+  it("Codex app-server 切换失败时设置页保留重试切换入口", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      updateState: "failed",
+      preparedVersion: "0.141.0",
+      updateError: "创建 Codex 切换链接失败",
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    const button = await view.findByRole("button", { name: /重试切换到 0.141.0/ });
+    expect(button).toBeEnabled();
+    expect(button.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
+    expect(view.getByText("创建 Codex 切换链接失败")).toBeInTheDocument();
+
+    mockInvoke.mockClear();
+    await fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+        {},
+        undefined,
+      );
+      expect(view.queryByRole("button", { name: /重试切换到 0.141.0/ })).not.toBeInTheDocument();
+    });
   });
 
   it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {
