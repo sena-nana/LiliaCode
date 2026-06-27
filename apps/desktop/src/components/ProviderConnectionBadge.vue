@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { AlertTriangle, Download, Loader2, RefreshCw, RotateCw, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, Download, Loader2, LogIn, RefreshCw, RotateCw, Sparkles } from "lucide-vue-next";
 import {
   chatBackendLabel,
   codexAccountQuotaWindowRemainingLine as quotaRemainingLine,
@@ -15,9 +15,10 @@ import {
 } from "@lilia/contracts";
 import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
-import { getCodexAccountQuotaStatus } from "../services/chat";
+import { getCodexAccountQuotaStatus, startCodexAccountLogin } from "../services/chat";
 import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "../utils/perf";
 import {
+  codexAccountNeedsLogin,
   codexQuotaUnavailableStatus,
   formatCompactNumber,
   formatUnixSeconds,
@@ -57,6 +58,7 @@ const activeStatus = computed(() => statusFor(activeBackend.value));
 const badgeAnchorEl = ref<HTMLElement | null>(null);
 const officialQuota = ref<CodexAccountQuotaStatus | null>(null);
 const quotaLoading = ref(false);
+const codexLoginStarting = ref(false);
 const quotaTooltipOpen = ref(false);
 const updateAnchorEl = ref<HTMLElement | null>(null);
 const updateTooltipOpen = ref(false);
@@ -178,6 +180,12 @@ const accountUsageLine = computed(() => {
   if (summary.currentStreakDays !== null) parts.push(`连续 ${summary.currentStreakDays} 天`);
   return parts.join(" · ") || null;
 });
+const codexLoginNeedsAction = computed(() =>
+  codexAccountNeedsLogin(
+    officialQuota.value,
+    codexAppServer.value?.supportsRequiredProtocol ?? false,
+  ),
+);
 
 const shouldShowQuotaRings = computed(() =>
   isCodexOfficialAccount.value && Boolean(officialQuota.value?.fiveHour || officialQuota.value?.weekly),
@@ -427,6 +435,21 @@ async function installUpdate() {
   await installCodexAppServerUpdate();
 }
 
+async function startCodexLogin() {
+  if (disposed || codexLoginStarting.value) return;
+  codexLoginStarting.value = true;
+  try {
+    await startCodexAccountLogin();
+    if (!disposed && officialQuota.value) {
+      officialQuota.value = { ...officialQuota.value, fetchedAt: 0 };
+    }
+  } catch (err) {
+    if (!disposed) officialQuota.value = codexQuotaUnavailableStatus(err);
+  } finally {
+    if (!disposed) codexLoginStarting.value = false;
+  }
+}
+
 function clearOfficialQuota() {
   cancelCloseTimer();
   quotaOpenIntent = false;
@@ -454,6 +477,7 @@ watch(
     officialQuota.value?.error ?? "",
     quotaDetailRows.value.length,
     quotaLoading.value,
+    codexLoginStarting.value,
   ] as const,
   ([open]) => {
     if (!open) return;
@@ -486,6 +510,7 @@ onBeforeUnmount(() => {
   quotaRequestSeq += 1;
   quotaInflight = null;
   quotaLoading.value = false;
+  codexLoginStarting.value = false;
   cancelStartupRefreshSchedule();
   cancelCloseTimer();
   cancelUpdateCloseTimer();
@@ -629,6 +654,23 @@ onBeforeUnmount(() => {
       <span v-if="officialQuota?.error" class="sb-conn-popover__error">
         {{ officialQuota.error }}
       </span>
+      <button
+        v-if="codexLoginNeedsAction"
+        type="button"
+        class="ui-button ui-button--ghost"
+        data-agent-id="provider-connection.codex-login"
+        :disabled="codexLoginStarting"
+        @click.stop.prevent="startCodexLogin"
+      >
+        <Loader2
+          v-if="codexLoginStarting"
+          :size="12"
+          class="is-spinning"
+          aria-hidden="true"
+        />
+        <LogIn v-else :size="12" aria-hidden="true" />
+        {{ codexLoginStarting ? "启动中..." : "登录" }}
+      </button>
     </span>
   </Teleport>
   <Teleport to="body">

@@ -51,3 +51,13 @@ export function codexQuotaUnavailableStatus(
 ): CodexAccountQuotaStatus {
   return createLiliaCodeCoreCodexQuotaUnavailableStatus({ error, connectionMode });
 }
+
+export function codexAccountNeedsLogin(
+  status: CodexAccountQuotaStatus | null | undefined,
+  supportsRequiredProtocol = false,
+): boolean {
+  if (!status || status.available) return false;
+  const text = (status.error ?? "").toLowerCase();
+  if (!text.trim()) return supportsRequiredProtocol;
+  return /未登录|not logged|login|auth/.test(text);
+}
