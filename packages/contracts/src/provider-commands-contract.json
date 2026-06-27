@@ -12,6 +12,7 @@
   "assistantAiGetConfigCommand": "assistant_ai_get_config",
   "assistantAiSetConfigCommand": "assistant_ai_set_config",
   "assistantAiFetchModelsCommand": "assistant_ai_fetch_models",
+  "modelFeatureListModelOptionsCommand": "model_feature_list_model_options",
   "modelFeatureGetSettingsCommand": "model_feature_get_settings",
   "modelFeatureSetSettingsCommand": "model_feature_set_settings",
   "assistantAiTestConnectionCommand": "assistant_ai_test_connection",

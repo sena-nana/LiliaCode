@@ -52,6 +52,7 @@ import {
   CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
   CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
   MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND,
   MODEL_FEATURE_SET_SETTINGS_COMMAND,
   GIT_CLONE_REPO_COMMAND,
   GITHUB_CLONE_REPO_COMMAND,
@@ -1201,7 +1202,9 @@ let assistantAIConfig = {
   baseUrl: null as string | null,
   apiKey: null as string | null,
   model: null as string | null,
-  modelPool: [] as Array<{ id: string; label: string; source: "remote" | "legacy"; backend: "codex" | "claude" }>,
+  modelPool: [
+    { id: "gpt-5.5", label: "GPT 5.5", source: "remote" as const, backend: "codex" as const },
+  ] as Array<{ id: string; label: string; source: "remote" | "legacy"; backend: "codex" | "claude" }>,
   codexAccountSparkEnabled: false,
   hasApiKey: true,
 };
@@ -1925,7 +1928,9 @@ export function resetTauriMockData() {
     baseUrl: null,
     apiKey: null,
     model: null,
-    modelPool: [],
+    modelPool: [
+      { id: "gpt-5.5", label: "GPT 5.5", source: "remote", backend: "codex" },
+    ],
     codexAccountSparkEnabled: false,
     hasApiKey: true,
   };
@@ -3590,6 +3595,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           { id: "remote-pro", label: "remote-pro", source: "remote", backend: "codex" },
         ],
       };
+
+    case MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND:
+      return assistantAIConfig.modelPool.map((item) => ({ ...item }));
 
     case MODEL_FEATURE_GET_SETTINGS_COMMAND:
       return {

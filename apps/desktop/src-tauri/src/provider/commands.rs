@@ -13,23 +13,22 @@ use super::codex_update::{
     check_codex_app_server_update_status, install_or_update_codex_app_server,
 };
 use super::config::{
-    known_provider_key_for_backend, load_active_backend, load_agent_interaction_settings,
-    load_model_feature_settings, load_router_mode, normalize_agent_interaction_settings,
-    public_assistant_ai_config, public_provider_config, router_key_for_backend,
-    router_mode_supported_for_backend, save_assistant_ai_config_metadata,
-    save_model_feature_settings, save_provider_config_metadata, AGENT_INTERACTION_KEY,
-    PROVIDER_ACTIVE_BACKEND_KEY,
+    AGENT_INTERACTION_KEY, PROVIDER_ACTIVE_BACKEND_KEY, known_provider_key_for_backend,
+    load_active_backend, load_agent_interaction_settings, load_model_feature_settings,
+    load_router_mode, normalize_agent_interaction_settings, public_assistant_ai_config,
+    public_provider_config, router_key_for_backend, router_mode_supported_for_backend,
+    save_assistant_ai_config_metadata, save_model_feature_settings, save_provider_config_metadata,
 };
 use super::connection::build_backend_env_status;
 use super::credentials::{apply_secret_update, assistant_ai_account, provider_account};
 use super::subagents::{
-    delete_custom_subagent, load_custom_subagents, upsert_custom_subagent,
-    CustomSubagentUpsertInput,
+    CustomSubagentUpsertInput, delete_custom_subagent, load_custom_subagents,
+    upsert_custom_subagent,
 };
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, AssistantAIModelsResult, AssistantAITestResult,
-    CodexAppServerStatus, CustomSubagentDefinition, EnvStatusReport, ModelFeatureSettings,
-    ProviderConfig,
+    AgentInteractionSettings, AssistantAIConfig, AssistantAIModelPoolItem, AssistantAIModelsResult,
+    AssistantAITestResult, CodexAppServerStatus, CustomSubagentDefinition, EnvStatusReport,
+    ModelFeatureSettings, ProviderConfig,
 };
 
 fn powershell_single_quoted(value: &str) -> String {
@@ -179,6 +178,11 @@ pub fn assistant_ai_set_config(app: AppHandle, config: AssistantAIConfig) -> Res
 #[tauri::command]
 pub fn assistant_ai_fetch_models(config: AssistantAIConfig) -> AssistantAIModelsResult {
     assistant_ai::fetch_models(config)
+}
+
+#[tauri::command]
+pub fn model_feature_list_model_options(app: AppHandle) -> Vec<AssistantAIModelPoolItem> {
+    public_assistant_ai_config(&app).model_pool
 }
 
 #[tauri::command]

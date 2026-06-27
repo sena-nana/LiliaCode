@@ -41,6 +41,7 @@ import {
   CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
   CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
   MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND,
   MODEL_FEATURE_SET_SETTINGS_COMMAND,
   GIT_CLONE_REPO_COMMAND,
   GITHUB_CLONE_REPO_COMMAND,
@@ -797,6 +798,11 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
           { id: "mock-assistant-pro", label: "mock-assistant-pro", source: "remote", backend: "codex" },
         ],
       } as T;
+    case MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND:
+      return [
+        { id: "mock-assistant", label: "mock-assistant", source: "remote", backend: "codex" },
+        { id: "mock-assistant-pro", label: "mock-assistant-pro", source: "remote", backend: "codex" },
+      ] as T;
     case MODEL_FEATURE_GET_SETTINGS_COMMAND:
       return {
         chat: { light: null, normal: null, deep: null },
