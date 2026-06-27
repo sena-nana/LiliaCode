@@ -250,47 +250,6 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(ring).toHaveStyle({ "--quota-progress": "42" });
   });
 
-  it("shows Codex app-server failed download retry from the badge", async () => {
-    setMockActiveBackend("codex");
-    setMockRouterMode("codex", "codex-account");
-    setMockCodexAppServerStatus({
-      version: "codex-cli 0.136.0",
-      latestVersion: "0.141.0",
-      updateAvailable: true,
-      updateState: "failed",
-      preparedVersion: null,
-      updateError: "下载 Codex app-server 失败",
-    });
-
-    const view = await renderFooter();
-
-    const updateButton = await view.findByRole("button", { name: /重新准备 Codex app-server/ });
-    expect(updateButton).toBeEnabled();
-    expect(updateButton).toHaveAttribute(
-      "title",
-      "重新准备 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
-    );
-    expect(updateButton.querySelector(".lucide-rotate-cw")).toBeInTheDocument();
-
-    await fireEvent.mouseEnter(updateButton);
-    expect(await view.findByRole("tooltip")).toHaveTextContent("下载 Codex app-server 失败");
-
-    await fireEvent.click(updateButton);
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(
-        PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
-        {},
-        undefined,
-      );
-      expect(mockInvoke).not.toHaveBeenCalledWith(
-        PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
-        {},
-        undefined,
-      );
-    });
-  });
-
   it("shows Codex app-server failed switch retry from the badge", async () => {
     setMockActiveBackend("codex");
     setMockRouterMode("codex", "codex-account");

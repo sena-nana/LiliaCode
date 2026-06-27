@@ -182,40 +182,36 @@ const accountUsageLine = computed(() => {
 const shouldShowQuotaRings = computed(() =>
   isCodexOfficialAccount.value && Boolean(officialQuota.value?.fiveHour || officialQuota.value?.weekly),
 );
-const shouldShowCodexUpdate = computed(() =>
-  activeBackend.value === "codex" &&
-  connectionModeUsesCodexAccount(activeStatus.value?.connectionMode) &&
-  (
-    Boolean(codexAppServer.value?.updateAvailable) ||
-    codexAppServer.value?.updateState === "downloading" ||
-    codexAppServer.value?.updateState === "ready" ||
-    codexAppServer.value?.updateState === "failed" ||
-    codexAppServerUpdating.value
-  ),
-);
 const codexUpdateState = computed(() => codexAppServer.value?.updateState ?? "idle");
 const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
 const codexUpdateReady = computed(() => codexUpdateState.value === "ready");
-const codexUpdateFailed = computed(() => codexUpdateState.value === "failed");
-const codexUpdateProgressPercent = computed(() => codexAppServer.value?.updateProgressPercent ?? null);
-const codexUpdateProgressStyle = computed(() => ({
-  "--quota-progress": String(codexUpdateProgressPercent.value ?? 0),
-}));
 const codexUpdateTarget = computed(() =>
   codexAppServer.value?.preparedVersion ??
   codexAppServer.value?.latestVersion ??
   "最新版本",
 );
-const codexUpdateCanRetrySwitch = computed(() =>
-  codexUpdateFailed.value && Boolean(codexAppServer.value?.preparedVersion)
+const codexUpdateRetryMode = computed<"prepare" | "switch" | null>(() => {
+  if (codexUpdateState.value !== "failed") return null;
+  return codexAppServer.value?.preparedVersion ? "switch" : "prepare";
+});
+const shouldShowCodexUpdate = computed(() =>
+  activeBackend.value === "codex" &&
+  connectionModeUsesCodexAccount(activeStatus.value?.connectionMode) &&
+  (
+    Boolean(codexAppServer.value?.updateAvailable) ||
+    codexUpdateDownloading.value ||
+    codexUpdateReady.value ||
+    codexUpdateRetryMode.value !== null ||
+    codexAppServerUpdating.value
+  ),
 );
-const codexUpdateCanRetryPrepare = computed(() =>
-  codexUpdateFailed.value && !codexUpdateCanRetrySwitch.value
-);
+const codexUpdateProgressPercent = computed(() => codexAppServer.value?.updateProgressPercent ?? null);
+const codexUpdateProgressStyle = computed(() => ({
+  "--quota-progress": String(codexUpdateProgressPercent.value ?? 0),
+}));
 const codexUpdateActionEnabled = computed(() =>
   codexUpdateReady.value ||
-  codexUpdateCanRetrySwitch.value ||
-  codexUpdateCanRetryPrepare.value
+  codexUpdateRetryMode.value !== null
 );
 const codexUpdateTitle = computed(() => {
   const current = codexAppServer.value?.version ?? "未安装";
@@ -231,10 +227,10 @@ const codexUpdateTitle = computed(() => {
   if (codexUpdateReady.value) {
     return `切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
   }
-  if (codexUpdateCanRetrySwitch.value) {
+  if (codexUpdateRetryMode.value === "switch") {
     return `重试切换 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
   }
-  if (codexUpdateCanRetryPrepare.value) {
+  if (codexUpdateRetryMode.value === "prepare") {
     return `重新准备 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
   }
   return `准备 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
@@ -424,7 +420,7 @@ function closeUpdateDetails() {
 
 async function installUpdate() {
   if (disposed) return;
-  if (codexUpdateCanRetryPrepare.value) {
+  if (codexUpdateRetryMode.value === "prepare") {
     await checkCodexAppServerUpdate();
     return;
   }
@@ -584,8 +580,8 @@ onBeforeUnmount(() => {
         </svg>
       </span>
       <RefreshCw v-else-if="codexUpdateReady" :size="12" aria-hidden="true" />
-      <RefreshCw v-else-if="codexUpdateCanRetrySwitch" :size="12" aria-hidden="true" />
-      <RotateCw v-else-if="codexUpdateCanRetryPrepare" :size="12" aria-hidden="true" />
+      <RefreshCw v-else-if="codexUpdateRetryMode === 'switch'" :size="12" aria-hidden="true" />
+      <RotateCw v-else-if="codexUpdateRetryMode === 'prepare'" :size="12" aria-hidden="true" />
       <Download v-else :size="12" aria-hidden="true" />
     </button>
   </span>

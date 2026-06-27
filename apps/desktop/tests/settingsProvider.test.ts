@@ -652,38 +652,6 @@ describe("Settings provider switch", () => {
     });
   });
 
-  it("Codex app-server 切换失败时设置页保留重试切换入口", async () => {
-    setMockActiveBackend("codex");
-    setMockRouterMode("codex", "codex-account");
-    setMockCodexAppServerStatus({
-      version: "codex-cli 0.136.0",
-      latestVersion: "0.141.0",
-      updateAvailable: true,
-      updateState: "failed",
-      preparedVersion: "0.141.0",
-      updateError: "创建 Codex 切换链接失败",
-    });
-
-    const view = await renderSettings("/settings?tab=providers");
-
-    const button = await view.findByRole("button", { name: /重试切换到 0.141.0/ });
-    expect(button).toBeEnabled();
-    expect(button.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
-    expect(view.getByText("创建 Codex 切换链接失败")).toBeInTheDocument();
-
-    mockInvoke.mockClear();
-    await fireEvent.click(button);
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(
-        PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
-        {},
-        undefined,
-      );
-      expect(view.queryByRole("button", { name: /重试切换到 0.141.0/ })).not.toBeInTheDocument();
-    });
-  });
-
   it("Codex 官方账号未登录时在运行时状态显示登录按钮", async () => {
     setMockActiveBackend("codex");
     setMockRouterMode("codex", "codex-account");

@@ -1286,43 +1286,28 @@ mod tests {
     }
 
     #[test]
-    fn update_state_reports_failed_download_without_prepared_version() {
-        let mut base = status(Some("codex 0.140.0"), true);
-        base.latest_version = Some("0.141.0".to_string());
-        base.update_available = true;
+    fn update_state_reports_failed_prepared_version_only_when_switch_can_retry() {
+        for (prepared, error, expected_prepared) in [
+            (false, "download failed", None),
+            (true, "switch failed", Some("0.141.0")),
+        ] {
+            let mut base = status(Some("codex 0.140.0"), true);
+            base.latest_version = Some("0.141.0".to_string());
+            base.update_available = true;
 
-        let updated = with_update_manager_state(
-            CodexUpdateManagerState::Failed {
-                version: "0.141.0".to_string(),
-                error: "download failed".to_string(),
-                prepared: false,
-            },
-            || apply_update_state(base),
-        );
+            let updated = with_update_manager_state(
+                CodexUpdateManagerState::Failed {
+                    version: "0.141.0".to_string(),
+                    error: error.to_string(),
+                    prepared,
+                },
+                || apply_update_state(base),
+            );
 
-        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_FAILED);
-        assert_eq!(updated.prepared_version, None);
-        assert_eq!(updated.update_error.as_deref(), Some("download failed"));
-    }
-
-    #[test]
-    fn update_state_reports_failed_switch_with_prepared_version() {
-        let mut base = status(Some("codex 0.140.0"), true);
-        base.latest_version = Some("0.141.0".to_string());
-        base.update_available = true;
-
-        let updated = with_update_manager_state(
-            CodexUpdateManagerState::Failed {
-                version: "0.141.0".to_string(),
-                error: "switch failed".to_string(),
-                prepared: true,
-            },
-            || apply_update_state(base),
-        );
-
-        assert_eq!(updated.update_state, CODEX_UPDATE_STATE_FAILED);
-        assert_eq!(updated.prepared_version.as_deref(), Some("0.141.0"));
-        assert_eq!(updated.update_error.as_deref(), Some("switch failed"));
+            assert_eq!(updated.update_state, CODEX_UPDATE_STATE_FAILED);
+            assert_eq!(updated.prepared_version.as_deref(), expected_prepared);
+            assert_eq!(updated.update_error.as_deref(), Some(error));
+        }
     }
 
     #[test]
