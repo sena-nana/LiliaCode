@@ -5,6 +5,8 @@ import {
   ASSISTANT_AI_GET_CONFIG_COMMAND,
   ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
+  CHAT_LIST_MODELS_COMMAND,
+  MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND,
   MODEL_FEATURE_SET_SETTINGS_COMMAND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   GITHUB_POLL_DEVICE_FLOW_COMMAND,
@@ -1199,6 +1201,30 @@ describe("Settings provider switch", () => {
             expect.objectContaining({ id: "remote-mini", label: "Remote Mini" }),
           ]),
         },
+      });
+    });
+
+    view.unmount();
+    mockInvoke.mockClear();
+
+    const modelConfigView = await renderSettings("/settings?tab=model-config");
+    const titleSelect = await modelConfigView.findByLabelText("标题生成") as HTMLSelectElement;
+    expect(Array.from(titleSelect.options).map((option) => ({
+      value: option.value,
+      text: option.textContent?.trim(),
+    }))).toEqual(expect.arrayContaining([
+      { value: "remote-mini", text: "Remote Mini (remote-mini)" },
+    ]));
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND))
+      .toBe(true);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_LIST_MODELS_COMMAND))
+      .toBe(false);
+
+    await fireEvent.update(titleSelect, "remote-mini");
+    await fireEvent.click(modelConfigView.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(lastInvokeInput(MODEL_FEATURE_SET_SETTINGS_COMMAND)).toMatchObject({
+        settings: { title: "remote-mini" },
       });
     });
   });

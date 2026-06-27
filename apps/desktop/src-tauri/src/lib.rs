@@ -280,6 +280,7 @@ pub fn run() {
             provider::assistant_ai_get_config,
             provider::assistant_ai_set_config,
             provider::assistant_ai_fetch_models,
+            provider::model_feature_list_model_options,
             provider::model_feature_get_settings,
             provider::model_feature_set_settings,
             provider::assistant_ai_test_connection,

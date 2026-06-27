@@ -22,6 +22,8 @@ export const ASSISTANT_AI_GET_CONFIG_COMMAND = manifest.assistantAiGetConfigComm
 export const ASSISTANT_AI_SET_CONFIG_COMMAND = manifest.assistantAiSetConfigCommand;
 export const ASSISTANT_AI_FETCH_MODELS_COMMAND =
   manifest.assistantAiFetchModelsCommand;
+export const MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND =
+  manifest.modelFeatureListModelOptionsCommand;
 export const MODEL_FEATURE_GET_SETTINGS_COMMAND =
   manifest.modelFeatureGetSettingsCommand;
 export const MODEL_FEATURE_SET_SETTINGS_COMMAND =

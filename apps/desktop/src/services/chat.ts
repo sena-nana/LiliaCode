@@ -54,6 +54,7 @@ import {
   HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
   HISTORY_IMPORT_SEARCH_COMMAND,
   MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND,
   MODEL_FEATURE_SET_SETTINGS_COMMAND,
   PROVIDER_CODEX_ACCOUNT_START_LOGIN_COMMAND,
   PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
@@ -113,6 +114,7 @@ import type {
   HistoryImportSearchResult,
   ChatInterruptResult,
   AgentTimelineEvent,
+  AssistantAIModelPoolItem,
   ChatSendResult,
   ConnectionMode,
   EnvStatusReport,
@@ -441,6 +443,10 @@ export function fetchAssistantAIModels(
   config: AssistantAIConfig,
 ): Promise<AssistantAIModelsResult> {
   return invoke<AssistantAIModelsResult>(ASSISTANT_AI_FETCH_MODELS_COMMAND, { config });
+}
+
+export function listModelFeatureOptions(): Promise<AssistantAIModelPoolItem[]> {
+  return invoke<AssistantAIModelPoolItem[]>(MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND);
 }
 
 export function getModelFeatureSettings(): Promise<ModelFeatureSettings> {

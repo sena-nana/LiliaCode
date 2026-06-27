@@ -23,6 +23,7 @@ struct ProviderCommandsContract {
     assistant_ai_get_config_command: String,
     assistant_ai_set_config_command: String,
     assistant_ai_fetch_models_command: String,
+    model_feature_list_model_options_command: String,
     model_feature_get_settings_command: String,
     model_feature_set_settings_command: String,
     assistant_ai_test_connection_command: String,
@@ -44,11 +45,10 @@ mod tests {
     use crate::provider::commands::{
         assistant_ai_fetch_models, assistant_ai_get_config, assistant_ai_optimize_prompt,
         assistant_ai_set_config, assistant_ai_test_connection, chat_check_env,
-        model_feature_get_settings, model_feature_set_settings,
+        model_feature_get_settings, model_feature_list_model_options, model_feature_set_settings,
         provider_codex_account_start_login, provider_codex_app_server_check_update,
-        provider_codex_app_server_install_update, provider_get_active_backend,
-        provider_get_config, provider_set_active_backend, provider_set_config, router_get_mode,
-        router_set_mode,
+        provider_codex_app_server_install_update, provider_get_active_backend, provider_get_config,
+        provider_set_active_backend, provider_set_config, router_get_mode, router_set_mode,
     };
 
     #[test]
@@ -67,6 +67,7 @@ mod tests {
         let _ = assistant_ai_get_config;
         let _ = assistant_ai_set_config;
         let _ = assistant_ai_fetch_models;
+        let _ = model_feature_list_model_options;
         let _ = model_feature_get_settings;
         let _ = model_feature_set_settings;
         let _ = assistant_ai_test_connection;
@@ -120,6 +121,10 @@ mod tests {
         assert_eq!(
             contract.assistant_ai_fetch_models_command,
             stringify!(assistant_ai_fetch_models)
+        );
+        assert_eq!(
+            contract.model_feature_list_model_options_command,
+            stringify!(model_feature_list_model_options)
         );
         assert_eq!(
             contract.model_feature_get_settings_command,

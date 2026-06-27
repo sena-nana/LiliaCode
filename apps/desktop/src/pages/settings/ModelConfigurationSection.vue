@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Brain, MessageSquarePlus, Save } from "lucide-vue-next";
 import type {
-  ChatModelOption,
+  AssistantAIModelPoolItem,
   ModelFeatureSettings,
   ModelTier,
   SuggestionSettings,
@@ -11,7 +11,7 @@ import { DEFAULT_SUGGESTION_SOURCE } from "@lilia/contracts";
 import {
   getConversationSuggestionSettings,
   getModelFeatureSettings,
-  listModels,
+  listModelFeatureOptions,
   setConversationSuggestionSettings,
   setModelFeatureSettings,
 } from "../../services/chat";
@@ -30,7 +30,7 @@ const modelFeatureSettings = ref<ModelFeatureSettings>({
   promptOptimize: null,
   autoTurnDecision: null,
 });
-const modelOptions = ref<ChatModelOption[]>([]);
+const modelOptions = ref<AssistantAIModelPoolItem[]>([]);
 const savingSuggestions = ref(false);
 const savingModelFeatures = ref(false);
 let disposed = false;
@@ -55,7 +55,7 @@ async function loadAll() {
     const [suggestions, featureSettings, models] = await Promise.all([
       getConversationSuggestionSettings(),
       getModelFeatureSettings(),
-      listModels("codex"),
+      listModelFeatureOptions(),
     ]);
     if (disposed) return;
     suggestionSettings.value = suggestions;

@@ -95,7 +95,11 @@ import {
   AUTO_RUNTIME_COMMAND_SIGNAL_LABELS,
   AUTO_RUNTIME_COMMAND_TYPES_BY_TIER,
   AUTO_WORKFLOW_TYPES_BY_TIER,
+  ASSISTANT_AI_FETCH_MODELS_COMMAND,
   ASSISTANT_AI_GET_CONFIG_COMMAND,
+  MODEL_FEATURE_GET_SETTINGS_COMMAND,
+  MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND,
+  MODEL_FEATURE_SET_SETTINGS_COMMAND,
   ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
   ASSISTANT_AI_SET_CONFIG_COMMAND,
   ASSISTANT_AI_TEST_CONNECTION_COMMAND,
@@ -1355,6 +1359,10 @@ describe("contracts normalization helpers", () => {
     expect(ROUTER_SET_MODE_COMMAND).toBe("router_set_mode");
     expect(ASSISTANT_AI_GET_CONFIG_COMMAND).toBe("assistant_ai_get_config");
     expect(ASSISTANT_AI_SET_CONFIG_COMMAND).toBe("assistant_ai_set_config");
+    expect(ASSISTANT_AI_FETCH_MODELS_COMMAND).toBe("assistant_ai_fetch_models");
+    expect(MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND).toBe("model_feature_list_model_options");
+    expect(MODEL_FEATURE_GET_SETTINGS_COMMAND).toBe("model_feature_get_settings");
+    expect(MODEL_FEATURE_SET_SETTINGS_COMMAND).toBe("model_feature_set_settings");
     expect(ASSISTANT_AI_TEST_CONNECTION_COMMAND).toBe("assistant_ai_test_connection");
     expect(ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND).toBe("assistant_ai_optimize_prompt");
   });
