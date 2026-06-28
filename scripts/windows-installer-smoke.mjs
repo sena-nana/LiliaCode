@@ -144,8 +144,15 @@ function fileContainsText(filePath, needles) {
 function storeContainsProjectPath(liliaHome, projectPath) {
   const dbDir = path.join(liliaHome, "db");
   const dbFiles = ["lilia.db", "lilia.db-wal"].map((name) => path.join(dbDir, name));
-  const canonical = displayPath(fs.realpathSync.native(projectPath));
-  const needles = Array.from(new Set([canonical, canonical.replaceAll("/", "\\")]));
+  const candidates = [path.resolve(projectPath)];
+  try {
+    candidates.push(fs.realpathSync.native(projectPath));
+  } catch {
+  }
+  const needles = Array.from(new Set(candidates.flatMap((candidate) => {
+    const normalized = displayPath(candidate);
+    return [normalized, normalized.replaceAll("/", "\\")];
+  })));
   return dbFiles.some((filePath) => fileContainsText(filePath, needles));
 }
 
