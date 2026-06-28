@@ -46,3 +46,4 @@ describe("data loading single-flight", () => {
     expect(projectGets).toHaveLength(1);
   });
 });
+

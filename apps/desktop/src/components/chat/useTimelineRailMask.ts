@@ -132,3 +132,4 @@ function mergeRailGaps(gaps: RailGap[]): RailGap[] {
   }
   return merged;
 }
+

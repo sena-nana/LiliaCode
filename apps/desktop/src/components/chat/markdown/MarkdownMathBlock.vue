@@ -28,3 +28,4 @@ const { renderedHtml } = useDeferredMathRender({
     <pre v-else class="markdown-block__code"><code>{{ source }}</code></pre>
   </div>
 </template>
+

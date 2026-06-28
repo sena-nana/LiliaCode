@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Bot, Pencil, Plus, Trash2 } from "lucide-vue-next";
+import { Bot, Pencil, Plus, Trash2 } from "@lucide/vue";
 import type { CustomSubagentDefinition } from "@lilia/contracts";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 
@@ -278,3 +278,4 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 </style>
+

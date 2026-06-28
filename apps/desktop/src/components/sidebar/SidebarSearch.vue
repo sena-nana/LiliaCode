@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { FileText, Search, X } from "lucide-vue-next";
+import { FileText, Search, X } from "@lucide/vue";
 import {
   ensureSessionSearchCorpusLoaded,
   searchSessions,
@@ -183,3 +183,4 @@ onBeforeUnmount(() => {
     </SearchDropdown>
   </template>
 </template>
+

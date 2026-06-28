@@ -1,4 +1,4 @@
-import { Network } from "lucide-vue-next";
+import { Network } from "@lucide/vue";
 import { registerChatSidebarPanel } from "./useChatSidebar";
 
 export function registerArchitectureChatSidebarPanel(): () => void {
@@ -10,3 +10,4 @@ export function registerArchitectureChatSidebarPanel(): () => void {
     loader: async () => (await import("../components/chat/ArchitectureSidebarPanel.vue")).default,
   });
 }
+

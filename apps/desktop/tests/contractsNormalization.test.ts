@@ -4269,3 +4269,4 @@ describe("contracts normalization helpers", () => {
     expect(pluginMcpTransportLabel("streamable-http")).toBe("未知");
   });
 });
+

@@ -345,3 +345,4 @@ function selectedToolUsesField(field: AutomationToolConfigField) {
   </template>
   <div v-else class="automations-page__notice">选择一个节点</div>
 </template>
+

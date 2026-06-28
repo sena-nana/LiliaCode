@@ -107,3 +107,4 @@ describe("taskDetailDeferredUi", () => {
     expect(restoreDraft).not.toHaveBeenCalled();
   });
 });
+

@@ -197,3 +197,4 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
     </template>
   </div>
 </template>
+

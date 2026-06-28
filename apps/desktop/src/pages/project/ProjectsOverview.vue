@@ -2,7 +2,7 @@
 import "../../styles/pages/project.css";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { Pin } from "lucide-vue-next";
+import { Pin } from "@lucide/vue";
 import {
   PROJECT_DASHBOARD_STATUS_ORDER,
   taskStatusLabel,
@@ -194,3 +194,4 @@ onBeforeUnmount(() => {
     <div v-else class="projects-overview__empty">暂无项目</div>
   </section>
 </template>
+

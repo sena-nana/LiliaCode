@@ -60,3 +60,4 @@ export function useInlineRename(options: InlineRenameOptions) {
     bindEditingInput,
   };
 }
+

@@ -444,3 +444,4 @@ export function installGlobalScrollbarVisibility() {
   ];
   return uninstallGlobalScrollbarVisibility;
 }
+

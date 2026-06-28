@@ -99,3 +99,4 @@ describe("claudePlan helpers", () => {
     expect(isReadonlyDeniedClaudeTool("TodoWrite")).toBe(false);
   });
 });
+

@@ -12,7 +12,7 @@ import {
   Save,
   Trash2,
   UserRound,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   API_KEY_ENV_BY_BACKEND,
   CHAT_BACKENDS,
@@ -634,3 +634,4 @@ watch(showCodexRuntimeStatus, (enabled) => {
     </div>
   </div>
 </template>
+

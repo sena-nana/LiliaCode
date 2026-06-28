@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Loader2, Square } from "lucide-vue-next";
+import { Loader2, Square } from "@lucide/vue";
 import type { SidebarRunningProcessItem } from "./sidebarTypes";
 
 defineProps<{
@@ -62,3 +62,4 @@ function openFromKey(item: SidebarRunningProcessItem, event: KeyboardEvent) {
     </div>
   </section>
 </template>
+

@@ -11,7 +11,7 @@ import {
   Link2,
   LoaderCircle,
   Unplug,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type {
   GitHubBindingStatus,
   GitHubDeviceFlowStart,
@@ -511,3 +511,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+

@@ -218,3 +218,4 @@ describe("Plugins page", () => {
     expect(view.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
   });
 });
+

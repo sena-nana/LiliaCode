@@ -34,3 +34,4 @@ export function getMemorySettings(): Promise<MemorySettings> {
 export function setMemorySettings(settings: MemorySettings): Promise<void> {
   return invoke<void>(MEMORY_SET_SETTINGS_COMMAND, { settings });
 }
+

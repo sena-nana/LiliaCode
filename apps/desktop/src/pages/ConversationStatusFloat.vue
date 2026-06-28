@@ -10,7 +10,7 @@ import {
   MessageSquarePlus,
   Pin,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   openPopupNewChat,
@@ -469,3 +469,4 @@ onUnmounted(() => {
     />
   </section>
 </template>
+

@@ -180,3 +180,4 @@ describe("useAgentInteractionSettings", () => {
     expect(store.subagents.value.map((item) => item.name)).toEqual(["Reviewer"]);
   });
 });
+

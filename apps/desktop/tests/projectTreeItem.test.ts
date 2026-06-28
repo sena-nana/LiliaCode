@@ -304,3 +304,4 @@ describe("ProjectTreeItem", () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(29);
   });
 });
+

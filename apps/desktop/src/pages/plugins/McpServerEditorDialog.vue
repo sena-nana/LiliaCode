@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Server, Trash2 } from "lucide-vue-next";
+import { Plus, Server, Trash2 } from "@lucide/vue";
 import type { EnvDraftRow, EditableMcpServer } from "./useMcpServerEditor";
 
 defineProps<{
@@ -129,3 +129,4 @@ const emit = defineEmits<{
     </Transition>
   </Teleport>
 </template>
+

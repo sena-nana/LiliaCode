@@ -339,3 +339,4 @@ export function searchSessions(query: string): SearchResult[] {
 export async function ensureSessionSearchCorpusLoaded(force = false): Promise<void> {
   await ensureSidebarConversationsLoaded(force);
 }
+

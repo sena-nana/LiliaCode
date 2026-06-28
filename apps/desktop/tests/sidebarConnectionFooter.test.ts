@@ -457,3 +457,4 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     });
   });
 });
+

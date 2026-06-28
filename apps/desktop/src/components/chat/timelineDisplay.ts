@@ -253,3 +253,4 @@ export function truncateTimelineText(
 function toSingleLineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
+

@@ -179,3 +179,4 @@ describe("ArchitectureSidebarPanel", () => {
     await Promise.resolve();
   });
 });
+

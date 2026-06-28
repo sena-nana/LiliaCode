@@ -18,7 +18,7 @@ import {
   Trash2,
   Wrench,
   Zap,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type {
   AutomationNodeKind,
   AutomationWorkflow,
@@ -653,3 +653,4 @@ onBeforeUnmount(() => {
     </aside>
   </section>
 </template>
+

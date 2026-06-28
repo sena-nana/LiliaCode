@@ -16,7 +16,7 @@ import {
   Sparkles,
   Trash2,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   deleteTodo,
   listTodos,
@@ -306,3 +306,4 @@ onUnmounted(() => {
     </p>
   </div>
 </template>
+

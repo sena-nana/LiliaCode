@@ -135,3 +135,4 @@ export async function moveTaskDetailDraftToProject(options: {
   if (!isTargetCurrent(draft.id)) return;
   restoreDraft(snapshot.content, nextAttachments);
 }
+

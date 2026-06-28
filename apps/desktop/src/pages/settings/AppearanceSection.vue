@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { List, Moon, PanelsTopLeft, Radius, SquareRoundCorner, Sun } from "lucide-vue-next";
+import { List, Moon, PanelsTopLeft, Radius, SquareRoundCorner, Sun } from "@lucide/vue";
 import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
@@ -123,3 +123,4 @@ function onCornerRadiusInput(event: Event) {
     </div>
   </div>
 </template>
+

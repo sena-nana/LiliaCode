@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { FolderOpen, Github, Lock, Sparkles } from "lucide-vue-next";
+import { FolderOpen, Github, Lock, Sparkles } from "@lucide/vue";
 import type {
   GitHubBindingStatus,
   GitHubRepoSummary,
@@ -465,3 +465,4 @@ onBeforeUnmount(() => {
     </Transition>
   </Teleport>
 </template>
+

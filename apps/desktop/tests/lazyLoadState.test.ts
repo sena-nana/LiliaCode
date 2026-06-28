@@ -47,3 +47,4 @@ describe("lazy load state", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 });
+

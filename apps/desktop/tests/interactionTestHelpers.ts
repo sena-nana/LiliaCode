@@ -19,3 +19,4 @@ export function toolConsentRequestFixture(
     ...overrides,
   };
 }
+

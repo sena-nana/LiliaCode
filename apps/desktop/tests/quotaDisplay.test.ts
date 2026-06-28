@@ -34,3 +34,4 @@ describe("quota display helpers", () => {
     })).toBe("剩余 10%");
   });
 });
+

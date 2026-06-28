@@ -225,3 +225,4 @@ watch(() => props.projectId, loadArchitecture);
     </div>
   </div>
 </template>
+

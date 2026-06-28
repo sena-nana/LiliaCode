@@ -18,7 +18,7 @@ import {
   Terminal,
   TextCursorInput,
   Wrench,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 const props = defineProps<{
   icon?: string | null;
@@ -67,3 +67,4 @@ function resolveLucideIcon(name: string | null | undefined): Component | null {
     />
   </span>
 </template>
+

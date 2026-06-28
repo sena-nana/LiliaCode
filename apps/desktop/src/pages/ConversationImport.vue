@@ -11,7 +11,7 @@ import {
   Loader2,
   Search,
   TerminalSquare,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type {
   AgentTimelineEvent,
   HistoryImportItem,
@@ -732,3 +732,4 @@ watch(
     </div>
   </section>
 </template>
+

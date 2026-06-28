@@ -54,3 +54,4 @@ describe("SidebarProjectAddMenu", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 });
+

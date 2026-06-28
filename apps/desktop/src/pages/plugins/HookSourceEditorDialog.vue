@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, Workflow } from "lucide-vue-next";
+import { Plus, Trash2, Workflow } from "@lucide/vue";
 import type { HookHandlerDraftRow } from "./useHookSourceEditor";
 
 defineProps<{
@@ -140,3 +140,4 @@ const emit = defineEmits<{
     </Transition>
   </Teleport>
 </template>
+

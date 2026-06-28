@@ -31,3 +31,4 @@ describe("dev Tauri mock", () => {
     expect(getCurrentWindow().label).toBe("main");
   });
 });
+

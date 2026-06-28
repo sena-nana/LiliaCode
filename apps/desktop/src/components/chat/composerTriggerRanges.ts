@@ -54,3 +54,4 @@ export function readSlashCommandRange(text: string, cursor: number): MentionRang
   if (beforeLine.length > 160 || /\s/.test(beforeLine)) return null;
   return { start: lineStart, end, query: beforeLine.slice(1) };
 }
+

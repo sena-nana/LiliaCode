@@ -65,3 +65,4 @@ export function scrollOffsetForThumbDrag(
     scrollRange,
   );
 }
+

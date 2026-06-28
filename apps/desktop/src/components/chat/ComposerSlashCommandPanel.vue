@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CodeXml, FileQuestion, GitBranch, GitCommit, TerminalSquare } from "lucide-vue-next";
+import { CodeXml, FileQuestion, GitBranch, GitCommit, TerminalSquare } from "@lucide/vue";
 import { chatSlashCommandSourceLabel, chatWorkflowSlashKindLabel } from "@lilia/contracts";
 import type {
   ComposerSlashCommandItem,
@@ -107,3 +107,4 @@ function commandIcon(result: ComposerSlashCommandItem) {
     </p>
   </div>
 </template>
+

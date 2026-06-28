@@ -10,7 +10,7 @@ import {
   PanelTop,
   Palette,
   Sparkles,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Component } from "vue";
 
 export type SettingsTabKey =
@@ -104,3 +104,4 @@ export function normalizeSettingsTab(value: unknown): SettingsTabKey {
     ? (candidate as SettingsTabKey)
     : DEFAULT_SETTINGS_TAB;
 }
+

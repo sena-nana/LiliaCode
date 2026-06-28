@@ -693,3 +693,4 @@ export function respondTitleUpdate(
 ): Promise<void> {
   return invoke<void>(CHAT_RESPOND_TITLE_UPDATE_COMMAND, { taskId, requestId, decision });
 }
+

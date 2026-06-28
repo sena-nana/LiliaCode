@@ -115,3 +115,4 @@ export async function setMilestoneTasks(
   await invoke(MILESTONE_SET_TASKS_COMMAND, { milestoneId, taskIds });
   await ensureProjectRoadmapLoaded(projectId, true);
 }
+

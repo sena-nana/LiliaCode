@@ -367,3 +367,4 @@ describe("Popup shell", () => {
     });
   });
 });
+

@@ -58,3 +58,4 @@ function resultScope(result: SearchResult): string {
     </p>
   </div>
 </template>
+

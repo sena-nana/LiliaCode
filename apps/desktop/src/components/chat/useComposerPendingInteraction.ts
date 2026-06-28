@@ -448,3 +448,4 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
 }
 
 export type ComposerPendingInteractionController = ReturnType<typeof useComposerPendingInteraction>;
+

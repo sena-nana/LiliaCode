@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { CornerDownRight, GitFork, WandSparkles } from "lucide-vue-next";
+import { CornerDownRight, GitFork, WandSparkles } from "@lucide/vue";
 import {
   timelineFinalReplyBatchApplyInput,
   type AgentTimelineEvent,
@@ -141,3 +141,4 @@ function startBranchAnchor(mode: SessionForkMode) {
     </div>
   </section>
 </template>
+

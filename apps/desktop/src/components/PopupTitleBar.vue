@@ -7,7 +7,7 @@ import {
   MessageSquarePlus,
   RefreshCw,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invalidateConversationContextSnapshot } from "../services/conversationContextInvalidation";
 import { focusMainWindow } from "../services/popupWindows";
@@ -281,3 +281,4 @@ onBeforeUnmount(() => {
     </div>
   </header>
 </template>
+

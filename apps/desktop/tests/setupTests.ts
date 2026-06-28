@@ -127,3 +127,4 @@ afterEach(() => {
   bindMockProjectPinUpdater(null);
   cleanup();
 });
+

@@ -13,3 +13,4 @@ export function singleFlight<T>(
   loads.set(key, pending);
   return pending;
 }
+

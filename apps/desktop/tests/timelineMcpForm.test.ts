@@ -171,3 +171,4 @@ describe("timeline MCP form helpers", () => {
     expect(timelineMcpFieldInputType("string")).toBe("text");
   });
 });
+

@@ -149,3 +149,4 @@ describe("ChatBubble", () => {
     expect(fourth.segments).toEqual([{ type: "text", text: "内容更新" }]);
   });
 });
+

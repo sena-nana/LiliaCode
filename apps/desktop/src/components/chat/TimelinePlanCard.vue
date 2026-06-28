@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { ChevronDown, ChevronRight } from "lucide-vue-next";
+import { ChevronDown, ChevronRight } from "@lucide/vue";
 import {
   agentTimelinePlanAllowedPromptRows,
   agentTimelinePlanArchitectureImpactRows,
@@ -266,3 +266,4 @@ function stringPayload(value: unknown): string {
     </section>
   </article>
 </template>
+

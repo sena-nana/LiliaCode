@@ -1080,3 +1080,4 @@ export class PhysicalPosition {
 export class PhysicalSize {
   constructor(public width: number, public height: number) {}
 }
+

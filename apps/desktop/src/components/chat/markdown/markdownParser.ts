@@ -17,3 +17,4 @@ export function normalizeMarkdownSource(content: string | null | undefined): str
 export function toSingleLineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
+

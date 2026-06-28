@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { ExternalLink, Globe } from "lucide-vue-next";
+import { ExternalLink, Globe } from "@lucide/vue";
 import type { ChatSidebarContext } from "../../composables/useChatSidebar";
 
 defineProps<ChatSidebarContext>();
@@ -41,3 +41,4 @@ function openIab() {
     />
   </div>
 </template>
+

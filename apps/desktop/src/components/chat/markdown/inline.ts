@@ -153,3 +153,4 @@ function normalizeImageSrc(src: string): string | null {
   }
   return null;
 }
+

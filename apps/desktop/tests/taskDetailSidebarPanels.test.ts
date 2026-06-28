@@ -158,3 +158,4 @@ describe("TaskDetail sidebar panel activation", () => {
     expect(view.container.querySelector(".chat-sidebar")).toBeInstanceOf(HTMLElement);
   });
 });
+

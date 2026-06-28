@@ -45,3 +45,4 @@ describe("useTimelineRailMask", () => {
     expect(railStyle?.value.maskImage).toBeUndefined();
   });
 });
+

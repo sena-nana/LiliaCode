@@ -14,7 +14,7 @@ import {
   Square,
   WandSparkles,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { clampPercent } from "@lilia/contracts";
 import type {
   ChatAttachment,
@@ -512,3 +512,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+

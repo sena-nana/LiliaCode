@@ -6,7 +6,7 @@ import {
   Check,
   CircleHelp,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   ASK_USER_MULTI_SELECT_MODE,
   ASK_USER_SINGLE_SELECT_MODE,
@@ -297,3 +297,4 @@ const emit = defineEmits<{
     </footer>
   </section>
 </template>
+

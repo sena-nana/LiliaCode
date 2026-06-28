@@ -361,3 +361,4 @@ export async function installConversationActivityBridge(): Promise<() => void> {
     installed = false;
   };
 }
+

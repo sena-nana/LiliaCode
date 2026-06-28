@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { FolderPlus } from "lucide-vue-next";
+import { FolderPlus } from "@lucide/vue";
 
 const emit = defineEmits<{
   close: [];
@@ -90,3 +90,4 @@ onBeforeUnmount(() => {
     </Transition>
   </Teleport>
 </template>
+

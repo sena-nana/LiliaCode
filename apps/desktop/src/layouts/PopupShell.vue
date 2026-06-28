@@ -15,3 +15,4 @@ const isStatusFloat = computed(() => route.path === "/popup/status");
     </main>
   </div>
 </template>
+

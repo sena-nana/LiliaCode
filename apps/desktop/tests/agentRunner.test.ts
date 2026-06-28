@@ -7279,3 +7279,4 @@ describe("Claude history utility", () => {
     });
   });
 });
+

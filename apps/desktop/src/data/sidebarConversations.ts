@@ -118,3 +118,4 @@ export function ensureSidebarConversationsLoaded(force = false): Promise<Sidebar
   });
   return loadPromise;
 }
+

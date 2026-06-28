@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Brain, Check, Sparkles } from "lucide-vue-next";
+import { Brain, Check, Sparkles } from "@lucide/vue";
 import {
   reasoningEffortsForBackend,
   type ChatComposerState,
@@ -302,3 +302,4 @@ onBeforeUnmount(() => {
   background: var(--bg-hover);
 }
 </style>
+

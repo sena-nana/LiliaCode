@@ -31,3 +31,4 @@ export function timelinePendingActionState(
 export function hasTimelinePendingActionState(state: TimelinePendingActionState): boolean {
   return state.action !== null || state.expired;
 }
+

@@ -461,3 +461,4 @@ describe("ChatTranscript agent selection toolbar", () => {
     expect(view.emitted("insert-draft-text")).toEqual([["> 可操作文本\n\n"]]);
   });
 });
+

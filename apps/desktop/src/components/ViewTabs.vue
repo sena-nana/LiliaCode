@@ -6,7 +6,7 @@
  * 进入聊天时 ViewTabs 不渲染——这是有意的（守"打开就能聊"的轻量感）。
  */
 import { RouterLink } from "vue-router";
-import { MessagesSquare, Milestone, Brain } from "lucide-vue-next";
+import { MessagesSquare, Milestone, Brain } from "@lucide/vue";
 
 type ViewKey = "sessions" | "roadmap" | "memory";
 
@@ -41,3 +41,4 @@ const tabs: Array<{ key: ViewKey; label: string; icon: any; path: (pid: string) 
     </RouterLink>
   </nav>
 </template>
+

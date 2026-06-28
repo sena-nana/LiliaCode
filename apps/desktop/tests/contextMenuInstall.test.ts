@@ -24,3 +24,4 @@ describe("context menu global installer", () => {
     expect(removeSpy).toHaveBeenCalledTimes(6);
   });
 });
+

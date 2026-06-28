@@ -217,3 +217,4 @@ describe("AppShell left sidebar collapse", () => {
     expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("220");
   });
 });
+

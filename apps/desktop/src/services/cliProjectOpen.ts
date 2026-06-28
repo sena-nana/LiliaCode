@@ -21,3 +21,4 @@ export async function openCliProject(payload: CliProjectOpenPayload, router: Rou
   }
   await router.push(`/projects/${encodeURIComponent(project.id)}`);
 }
+
