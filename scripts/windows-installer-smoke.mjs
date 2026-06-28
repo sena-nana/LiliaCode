@@ -6,7 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 
 const repoRoot = process.cwd();
 const processName = "LiliaCode.exe";
-const defaultTimeoutMs = 120_000;
+const defaultTimeoutMs = 300_000;
 const bundledRuntimeFiles = [
   "codex-account-quota.mjs",
   path.join("agent-runner", "codex", "accountQuota.mjs"),
