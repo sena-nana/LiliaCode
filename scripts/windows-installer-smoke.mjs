@@ -5,7 +5,7 @@ import process from "node:process";
 import { spawn, spawnSync } from "node:child_process";
 
 const repoRoot = process.cwd();
-const processName = "LiliaCode.exe";
+const processName = "lilia.exe";
 const defaultTimeoutMs = 300_000;
 const bundledRuntimeFiles = [
   "codex-account-quota.mjs",
@@ -223,7 +223,7 @@ function main() {
     log("Installing silently");
     run(installer, ["/S", `/D=${installDir}`]);
     installed = true;
-    waitUntil("installed LiliaCode.exe", () => fs.existsSync(installedExe));
+    waitUntil("installed lilia.exe", () => fs.existsSync(installedExe));
     waitUntil("installed liliacode.cmd", () => fs.existsSync(cliCmd));
     for (const filename of bundledRuntimeFiles) {
       const resourcePath = path.join(installDir, filename);
