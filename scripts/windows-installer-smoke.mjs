@@ -28,10 +28,12 @@ function fail(message) {
 }
 
 function run(command, args, options = {}) {
+  const shell = options.shell ?? false;
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repoRoot,
     env: options.env ?? process.env,
     encoding: "utf8",
+    shell,
     stdio: options.stdio ?? "pipe",
     windowsHide: true,
   });
@@ -95,10 +97,6 @@ function stopAppIfRunning() {
     windowsHide: true,
   });
   waitUntil(`${processName} to exit`, () => !isProcessRunning(), 15_000);
-}
-
-function quoteCmdArg(value) {
-  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function displayPath(value) {
@@ -225,7 +223,7 @@ function main() {
     log("Installed app process started");
 
     log("Opening test project through liliacode");
-    run("cmd.exe", ["/d", "/s", "/c", `${quoteCmdArg(cliCmd)} ${quoteCmdArg(testProject)}`], { env: runtimeEnv });
+    run(cliCmd, [testProject], { env: runtimeEnv, shell: true });
     waitUntil("CLI project path in the Lilia store", () => storeContainsProjectPath(liliaHome, testProject));
     log("CLI project path reached the Lilia store");
 
