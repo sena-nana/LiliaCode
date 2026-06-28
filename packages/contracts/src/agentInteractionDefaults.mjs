@@ -4,6 +4,9 @@ import {
   normalizeCodexProfileSettings,
 } from "./providerRuntime.mjs";
 import {
+  DEFAULT_PERMISSION_MODE,
+  PERMISSION_MODE_DISPLAY_ORDER,
+  PERMISSION_MODES,
   isRuntimePermissionMode,
   normalizeRuntimePermissionMode,
 } from "./permissionModes.mjs";
@@ -18,6 +21,11 @@ export const AUTO_TURN_DECISION_PERMISSION_OPTIONS = Object.freeze([
 
 export const AUTO_TURN_DECISION_PERMISSION_KEYS = Object.freeze(
   AUTO_TURN_DECISION_PERMISSION_OPTIONS.map((option) => option.key),
+);
+export const LOCKED_PERMISSION_MODES = Object.freeze(["ask", "readonly"]);
+const LOCKED_PERMISSION_MODE_SET = new Set(LOCKED_PERMISSION_MODES);
+export const DEFAULT_PERMISSION_MODE_AVAILABILITY = Object.freeze(
+  Object.fromEntries(PERMISSION_MODES.map((mode) => [mode, true])),
 );
 
 const MAIN_AGENT_PROMPT_MODES = Object.freeze(["conservative", "aggressive", "custom"]);
@@ -81,16 +89,58 @@ export function normalizeAutoTurnDecisionSettings(
   return normalized;
 }
 
+export function normalizePermissionModeAvailability(
+  input,
+  base = DEFAULT_PERMISSION_MODE_AVAILABILITY,
+) {
+  const normalized = {};
+  for (const mode of PERMISSION_MODES) {
+    normalized[mode] = LOCKED_PERMISSION_MODE_SET.has(mode)
+      ? true
+      : typeof input?.[mode] === "boolean"
+        ? input[mode]
+        : base[mode] !== false;
+  }
+  return normalized;
+}
+
+export function enabledPermissionModes(availability) {
+  const normalized = normalizePermissionModeAvailability(availability);
+  return PERMISSION_MODE_DISPLAY_ORDER.filter((mode) => normalized[mode]);
+}
+
+export function normalizeAvailablePermissionMode(
+  value,
+  availability,
+  fallback = DEFAULT_PERMISSION_MODE,
+) {
+  const normalizedAvailability = normalizePermissionModeAvailability(availability);
+  const normalized = normalizeRuntimePermissionMode(value, fallback);
+  if (normalizedAvailability[normalized]) return normalized;
+  const normalizedFallback = normalizeRuntimePermissionMode(fallback, DEFAULT_PERMISSION_MODE);
+  if (normalizedAvailability[normalizedFallback]) return normalizedFallback;
+  return DEFAULT_PERMISSION_MODE;
+}
+
 export function normalizeAgentInteractionSettings(
   input,
   base = DEFAULT_AGENT_INTERACTION_SETTINGS,
 ) {
+  const permissionModeAvailability = normalizePermissionModeAvailability(
+    input?.permissionModeAvailability,
+    base.permissionModeAvailability,
+  );
   return {
     nonInterruptMode: typeof input?.nonInterruptMode === "boolean"
       ? input.nonInterruptMode
       : base.nonInterruptMode,
     debug: typeof input?.debug === "boolean" ? input.debug : base.debug,
-    permissionMode: normalizeRuntimePermissionMode(input?.permissionMode, base.permissionMode),
+    permissionMode: normalizeAvailablePermissionMode(
+      input?.permissionMode,
+      permissionModeAvailability,
+      base.permissionMode,
+    ),
+    permissionModeAvailability,
     mainAgentPromptMode: normalizeMainAgentPromptMode(
       input?.mainAgentPromptMode,
       base.mainAgentPromptMode,
@@ -117,6 +167,10 @@ function readAgentInteractionDefaultsManifest(value) {
     row.codexProfile,
     "agent-interaction-defaults.json.codexProfile",
   );
+  const permissionModeAvailability = requireManifestRecord(
+    row.permissionModeAvailability,
+    "agent-interaction-defaults.json.permissionModeAvailability",
+  );
   const subagentMode = requireManifestRecord(
     row.subagentMode,
     "agent-interaction-defaults.json.subagentMode",
@@ -133,6 +187,9 @@ function readAgentInteractionDefaultsManifest(value) {
     ),
     debug: booleanManifestField(row, "debug", "agent-interaction-defaults.json"),
     permissionMode: row.permissionMode,
+    permissionModeAvailability: readPermissionModeAvailabilityDefaults(
+      permissionModeAvailability,
+    ),
     mainAgentPromptMode: normalizeMainAgentPromptMode(row.mainAgentPromptMode),
     mainAgentCustomPrompt: normalizeMainAgentCustomPrompt(row.mainAgentCustomPrompt),
     codexProfile: normalizeCodexProfileSettings(
@@ -142,6 +199,18 @@ function readAgentInteractionDefaultsManifest(value) {
     subagentMode: readAgentSubagentModeDefaults(subagentMode),
     autoTurnDecision: readAutoTurnDecisionDefaults(autoTurnDecision),
   };
+}
+
+function readPermissionModeAvailabilityDefaults(row) {
+  const defaults = {};
+  for (const mode of PERMISSION_MODES) {
+    defaults[mode] = booleanManifestField(
+      row,
+      mode,
+      "agent-interaction-defaults.json.permissionModeAvailability",
+    );
+  }
+  return normalizePermissionModeAvailability(defaults);
 }
 
 function readAgentSubagentModeDefaults(row) {
@@ -222,6 +291,7 @@ function freezeAgentInteractionSettings(value) {
     nonInterruptMode: value.nonInterruptMode,
     debug: value.debug,
     permissionMode: value.permissionMode,
+    permissionModeAvailability: Object.freeze({ ...value.permissionModeAvailability }),
     mainAgentPromptMode: value.mainAgentPromptMode,
     mainAgentCustomPrompt: value.mainAgentCustomPrompt,
     codexProfile: Object.freeze({ ...value.codexProfile }),

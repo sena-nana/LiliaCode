@@ -26,6 +26,12 @@ describe("useAgentInteractionSettings", () => {
       },
     });
     expect(store.settings.value.permissionMode).toBe("ask");
+    expect(store.settings.value.permissionModeAvailability).toEqual({
+      full: true,
+      ask: true,
+      readonly: true,
+      free: true,
+    });
     expect(store.settings.value.mainAgentPromptMode).toBe("conservative");
     expect(store.settings.value.mainAgentCustomPrompt).toBe("");
     expect(store.settings.value.autoTurnDecision).toEqual({
@@ -51,6 +57,30 @@ describe("useAgentInteractionSettings", () => {
 
     await store.update({ permissionMode: "free" });
     expect(store.settings.value.permissionMode).toBe("free");
+  });
+
+  it("saves permission mode availability and falls back from disabled current mode", async () => {
+    const { useAgentInteractionSettings } = await loadStoreModule();
+    const store = useAgentInteractionSettings();
+    await store.load();
+
+    await store.update({
+      permissionMode: "free",
+      permissionModeAvailability: {
+        ask: false,
+        readonly: false,
+        full: true,
+        free: false,
+      },
+    });
+
+    expect(store.settings.value.permissionMode).toBe("ask");
+    expect(store.settings.value.permissionModeAvailability).toEqual({
+      ask: true,
+      readonly: true,
+      full: true,
+      free: false,
+    });
   });
 
   it("saves supported main agent prompt modes", async () => {
@@ -115,6 +145,30 @@ describe("useAgentInteractionSettings", () => {
     })).rejects.toThrow("save failed");
 
     expect(store.settings.value.subagentMode).toEqual(previous);
+  });
+
+  it("rolls back permission availability when saving fails", async () => {
+    const { useAgentInteractionSettings } = await loadStoreModule();
+    const store = useAgentInteractionSettings();
+    await store.load();
+
+    const previous = JSON.parse(JSON.stringify(store.settings.value.permissionModeAvailability));
+    const invokeImpl = mockInvoke.getMockImplementation();
+    mockInvoke.mockImplementationOnce(async (cmd: string, args: Record<string, unknown> = {}) => {
+      if (cmd === "agent_interaction_set_settings") throw new Error("save failed");
+      return invokeImpl?.(cmd, args);
+    });
+
+    await expect(store.update({
+      permissionModeAvailability: {
+        ask: true,
+        readonly: true,
+        full: false,
+        free: false,
+      },
+    })).rejects.toThrow("save failed");
+
+    expect(store.settings.value.permissionModeAvailability).toEqual(previous);
   });
 
   it("normalizes and saves auto turn decision settings", async () => {

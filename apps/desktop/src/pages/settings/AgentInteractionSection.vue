@@ -6,9 +6,14 @@ import {
   ChevronRight,
   Sparkles,
 } from "@lucide/vue";
-import type { AgentInteractionSettings, MainAgentPromptMode, PermissionMode } from "@lilia/contracts";
+import type {
+  AgentInteractionSettings,
+  MainAgentPromptMode,
+  PermissionMode,
+} from "@lilia/contracts";
 import {
   AUTO_TURN_DECISION_PERMISSION_OPTIONS,
+  LOCKED_PERMISSION_MODES,
   PERMISSION_MODE_DISPLAY,
   PERMISSION_MODE_DISPLAY_ORDER,
   PROMPT_MAIN_AGENT,
@@ -50,11 +55,18 @@ let cancelSubagentCatalogPaint: (() => void) | null = null;
 let subagentCatalogMountSeq = 0;
 let disposed = false;
 
-const permissionModeOptions: Array<{ value: PermissionMode; label: string; description: string }> =
+const lockedPermissionModes = new Set<PermissionMode>(LOCKED_PERMISSION_MODES);
+const permissionAvailabilityOptions: Array<{
+  value: PermissionMode;
+  label: string;
+  description: string;
+  locked: boolean;
+}> =
   PERMISSION_MODE_DISPLAY_ORDER.map((value) => ({
     value,
     label: PERMISSION_MODE_DISPLAY[value].label,
     description: PERMISSION_MODE_DISPLAY[value].description,
+    locked: lockedPermissionModes.has(value),
   }));
 
 type SubagentModePatch = Partial<Omit<AgentInteractionSettings["subagentMode"], "codex" | "claude">> & {
@@ -133,11 +145,6 @@ const mainAgentPromptPreview = computed(() =>
   )
 );
 
-function activePermissionDescription(): string {
-  return permissionModeOptions.find((option) => option.value === agentInteraction.value.permissionMode)
-    ?.description ?? permissionModeOptions[0].description;
-}
-
 async function loadAgentInteraction() {
   try {
     await agentInteractionStore.load();
@@ -155,8 +162,14 @@ async function setDebugMode(debug: boolean) {
   await setAgentInteraction({ debug });
 }
 
-async function setPermissionMode(permissionMode: PermissionMode) {
-  await setAgentInteraction({ permissionMode });
+async function setPermissionModeAvailable(permissionMode: PermissionMode, enabled: boolean) {
+  if (lockedPermissionModes.has(permissionMode)) return;
+  await setAgentInteraction({
+    permissionModeAvailability: {
+      ...agentInteraction.value.permissionModeAvailability,
+      [permissionMode]: enabled,
+    },
+  });
 }
 
 async function setMainAgentPromptMode(mainAgentPromptMode: MainAgentPromptMode) {
@@ -313,49 +326,74 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card" data-agent-id="settings.agent">
-    <h2>
-      <span class="card-h2__title">
-        <Sparkles :size="14" aria-hidden="true" />
-        Agent 交互
-      </span>
-    </h2>
-
-    <section class="permission-mode-panel" aria-label="权限行为">
-      <div class="permission-mode-panel__head">
-        <div>
-          <div class="settings-row__label">权限行为</div>
-          <p class="permission-mode-panel__hint">{{ activePermissionDescription() }}</p>
-        </div>
-        <div class="ui-segmented permission-mode-panel__switch" role="radiogroup" aria-label="权限行为">
-          <button
-            v-for="option in permissionModeOptions"
-            :key="option.value"
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.permissionMode === option.value"
-            :data-agent-id="`settings.agent.permission-mode.${option.value}`"
-            :class="{ 'is-active': agentInteraction.permissionMode === option.value }"
-            :disabled="savingAgentInteraction"
-            @click="setPermissionMode(option.value)"
-          >
-            {{ option.label }}
-          </button>
-        </div>
-      </div>
-      <div class="permission-mode-panel__descriptions">
-        <span
-          v-for="option in permissionModeOptions"
-          :key="`${option.value}-desc`"
-          class="permission-mode-panel__description"
-        >
-          <strong>{{ option.label }}</strong>{{ option.description }}
+  <div class="agent-settings-stack" data-agent-id="settings.agent">
+    <section class="card agent-settings-card" aria-label="权限行为">
+      <h2>
+        <span class="card-h2__title">
+          <Sparkles :size="14" aria-hidden="true" />
+          权限行为
         </span>
+      </h2>
+      <div class="permission-toggle-list">
+        <div
+          v-for="option in permissionAvailabilityOptions"
+          :key="option.value"
+          class="permission-toggle-item"
+          :data-agent-id="`settings.agent.permission-availability.${option.value}`"
+        >
+          <div class="permission-toggle-item__content">
+            <div class="settings-row__label">
+              {{ option.label }}
+              <span
+                v-if="agentInteraction.permissionMode === option.value"
+                class="permission-toggle-item__badge"
+              >
+                当前默认
+              </span>
+            </div>
+            <p class="permission-toggle-item__hint">{{ option.description }}</p>
+          </div>
+          <button
+            v-if="option.locked"
+            type="button"
+            class="ui-button ui-button--ghost permission-toggle-item__locked"
+            :data-agent-id="`settings.agent.permission-availability.${option.value}.locked`"
+            disabled
+          >
+            固定启用
+          </button>
+          <div v-else class="ui-segmented" role="radiogroup" :aria-label="`${option.label}权限可用性`">
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="!agentInteraction.permissionModeAvailability[option.value]"
+              :data-agent-id="`settings.agent.permission-availability.${option.value}.off`"
+              :class="{ 'is-active': !agentInteraction.permissionModeAvailability[option.value] }"
+              :disabled="savingAgentInteraction"
+              @click="setPermissionModeAvailable(option.value, false)"
+            >
+              关闭
+            </button>
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="agentInteraction.permissionModeAvailability[option.value]"
+              :data-agent-id="`settings.agent.permission-availability.${option.value}.on`"
+              :class="{ 'is-active': agentInteraction.permissionModeAvailability[option.value] }"
+              :disabled="savingAgentInteraction"
+              @click="setPermissionModeAvailable(option.value, true)"
+            >
+              启用
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 
-    <div class="settings-row">
-      <div class="settings-row__label">主 Agent 策略</div>
+    <section class="card agent-settings-card" aria-label="主 Agent 策略">
+      <h2>主 Agent 策略</h2>
+      <div class="settings-row">
+      <div class="settings-row__label">策略模式</div>
       <div class="settings-row__control settings-row__control--loose">
         <div class="ui-segmented" role="radiogroup" aria-label="主 Agent 策略">
           <button
@@ -376,9 +414,9 @@ onBeforeUnmount(() => {
           {{ activeMainAgentPromptDescription() }}
         </span>
       </div>
-    </div>
+      </div>
 
-    <section class="main-agent-prompt-panel" aria-label="主 Agent 工作流提示">
+      <section class="main-agent-prompt-panel" aria-label="主 Agent 工作流提示">
       <div class="main-agent-prompt-panel__head">
         <div class="settings-row__label">主 Agent 工作流提示预览</div>
         <span class="main-agent-prompt-panel__meta">
@@ -411,9 +449,12 @@ onBeforeUnmount(() => {
           应用自定义提示词
         </button>
       </div>
+      </section>
     </section>
 
-    <div class="settings-row">
+    <section class="card agent-settings-card" aria-label="运行配置">
+      <h2>运行配置</h2>
+      <div class="settings-row">
       <div class="settings-row__label">非打断模式</div>
       <div class="ui-segmented" role="radiogroup" aria-label="非打断模式">
         <button
@@ -439,9 +480,9 @@ onBeforeUnmount(() => {
           开启
         </button>
       </div>
-    </div>
+      </div>
 
-    <div class="settings-row">
+      <div class="settings-row">
       <div class="settings-row__label">Debug 面板</div>
       <div class="ui-segmented" role="radiogroup" aria-label="Debug 面板">
         <button
@@ -467,12 +508,13 @@ onBeforeUnmount(() => {
           开启
         </button>
       </div>
-    </div>
+      </div>
+    </section>
 
-    <section class="auto-turn-card" aria-label="自动轮次策略">
+    <section class="card auto-turn-card" aria-label="自动轮次策略">
       <div class="auto-turn-card__head">
         <div>
-          <div class="settings-row__label">自动轮次策略</div>
+          <h2>自动轮次策略</h2>
           <p class="auto-turn-card__hint">Auto 模式下，由辅助模型在轮次启动前决定本轮执行策略。</p>
         </div>
         <div class="ui-segmented" role="radiogroup" aria-label="自动轮次策略">
@@ -537,7 +579,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
-      class="subagent-mode-card"
+      class="card subagent-mode-card"
     >
       <div
         class="subagent-mode-card__header"
@@ -713,7 +755,7 @@ onBeforeUnmount(() => {
     <Suspense v-if="subagentCatalogReady">
       <SubagentCatalogSection />
     </Suspense>
-    <section v-else class="subagent-section subagent-section--placeholder" aria-busy="true">
+    <section v-else class="card subagent-section subagent-section--placeholder" aria-busy="true">
       <div class="subagent-section__header">
         <div class="subagent-section__title">
           <span>自定义 Agent</span>
@@ -733,19 +775,23 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.agent-settings-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-settings-card {
+  display: grid;
+  gap: 12px;
+}
+
 .subagent-mode-card {
-  margin-top: 4px;
-  border: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
-  border-radius: 14px;
-  background: var(--bg-elev-2, rgba(255, 255, 255, 0.02));
+  overflow: hidden;
 }
 
 .auto-turn-card {
   display: grid;
   gap: 12px;
-  margin: 10px 0 12px;
-  padding: 12px 0;
-  border-block: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
 }
 
 .auto-turn-card__head {
@@ -766,52 +812,51 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
-.permission-mode-panel {
+.permission-toggle-list {
   display: grid;
-  gap: 10px;
-  margin: 2px 0 12px;
-  padding: 12px 0;
-  border-block: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
+  gap: 8px;
 }
 
-.permission-mode-panel__head {
+.permission-toggle-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 14px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
 }
 
-.permission-mode-panel__hint {
+.permission-toggle-item:first-child {
+  border-top: 0;
+}
+
+.permission-toggle-item__content {
+  min-width: 0;
+}
+
+.permission-toggle-item__hint {
   margin: 4px 0 0;
   color: var(--text-secondary, rgba(255, 255, 255, 0.6));
   font-size: 13px;
 }
 
-.permission-mode-panel__switch {
-  justify-self: end;
-}
-
-.permission-mode-panel__descriptions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
+.permission-toggle-item__badge {
+  margin-left: 8px;
   color: var(--text-secondary, rgba(255, 255, 255, 0.6));
   font-size: 12px;
-  line-height: 1.5;
+  font-weight: 500;
 }
 
-.permission-mode-panel__description strong {
-  margin-right: 4px;
-  color: var(--text-primary, rgba(255, 255, 255, 0.82));
-  font-weight: 600;
+.permission-toggle-item__locked {
+  min-width: 74px;
+  justify-content: center;
 }
 
 .main-agent-prompt-panel {
   display: grid;
   gap: 10px;
-  margin: 6px 0 12px;
-  padding: 12px 0;
-  border-block: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
+  padding-top: 12px;
+  border-top: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
 }
 
 .main-agent-prompt-panel__head {
@@ -863,7 +908,7 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 0;
   cursor: pointer;
 }
 
@@ -896,7 +941,8 @@ onBeforeUnmount(() => {
 }
 
 .subagent-mode-card__details {
-  padding: 0 16px 12px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
 }
 

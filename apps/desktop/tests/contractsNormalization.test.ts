@@ -149,6 +149,7 @@ import {
   CODEX_SETTINGS_PROFILES,
   DIRECT_DEFAULT_URLS,
   DEFAULT_AGENT_INTERACTION_SETTINGS,
+  DEFAULT_PERMISSION_MODE_AVAILABILITY,
   DEFAULT_ASK_USER_MODE,
   DEFAULT_ASK_USER_MODE_WITH_OPTIONS,
   DEFAULT_AUTOMATION_AGENT_PROMPT,
@@ -253,9 +254,11 @@ import {
   MEMORY_UPSERT_COMMAND,
   MEMORY_SCOPE_DISPLAY_SPECS,
   MODEL_OPTIONS_BY_BACKEND,
+  enabledPermissionModes,
   PERMISSION_MODE_DISPLAY,
   PERMISSION_MODE_DISPLAY_ORDER,
   PERMISSION_MODES,
+  LOCKED_PERMISSION_MODES,
   PENDING_AUTO_DECISION_KINDS,
   PENDING_AUTO_DECISION_LABELS,
   PLAN_APPROVAL_INTERACTION_KIND,
@@ -623,6 +626,8 @@ import {
   normalizeMilestoneStatus,
   normalizePermissionApprovalPayload,
   normalizePermissionApprovalResult,
+  normalizeAvailablePermissionMode,
+  normalizePermissionModeAvailability,
   normalizePermissionMode,
   normalizeQuotaUsageQueryScope,
   normalizeReasoningEffort,
@@ -1265,6 +1270,13 @@ describe("contracts normalization helpers", () => {
     expect(normalizeReasoningEffortForBackend("claude", "max")).toBe("max");
     expect(PERMISSION_MODES).toEqual(["full", "ask", "readonly", "free"]);
     expect(PERMISSION_MODE_DISPLAY_ORDER).toEqual(["ask", "readonly", "full", "free"]);
+    expect(LOCKED_PERMISSION_MODES).toEqual(["ask", "readonly"]);
+    expect(DEFAULT_PERMISSION_MODE_AVAILABILITY).toEqual({
+      full: true,
+      ask: true,
+      readonly: true,
+      free: true,
+    });
     expect(PERMISSION_MODE_DISPLAY.ask).toEqual({
       label: "询问",
       description: "敏感操作前等待用户确认。",
@@ -3742,6 +3754,12 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
+      permissionModeAvailability: {
+        ask: false,
+        readonly: false,
+        full: true,
+        free: true,
+      },
       mainAgentPromptMode: "custom",
       mainAgentCustomPrompt: "  custom strategy\nwith details  ",
       codexProfile: {
@@ -3776,6 +3794,12 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
+      permissionModeAvailability: {
+        ask: true,
+        readonly: true,
+        full: true,
+        free: true,
+      },
       mainAgentPromptMode: "custom",
       mainAgentCustomPrompt: "custom strategy\nwith details",
       codexProfile: {
@@ -3806,6 +3830,46 @@ describe("contracts normalization helpers", () => {
         allowSessionFork: false,
       },
     });
+    expect(normalizeAgentInteractionSettings({
+      permissionMode: "free",
+      permissionModeAvailability: {
+        ask: false,
+        readonly: false,
+        full: false,
+        free: false,
+      },
+    })).toMatchObject({
+      permissionMode: "ask",
+      permissionModeAvailability: {
+        ask: true,
+        readonly: true,
+        full: false,
+        free: false,
+      },
+    });
+    expect(normalizePermissionModeAvailability({
+      ask: false,
+      readonly: false,
+      full: false,
+      free: true,
+    })).toEqual({
+      ask: true,
+      readonly: true,
+      full: false,
+      free: true,
+    });
+    expect(enabledPermissionModes({
+      ask: true,
+      readonly: true,
+      full: false,
+      free: true,
+    })).toEqual(["ask", "readonly", "free"]);
+    expect(normalizeAvailablePermissionMode("free", {
+      ask: true,
+      readonly: true,
+      full: true,
+      free: false,
+    })).toBe("ask");
     expect(normalizeAgentInteractionSettings({
       nonInterruptMode: "yes" as never,
       debug: 1 as never,
