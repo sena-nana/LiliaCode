@@ -28,7 +28,7 @@
 !macro NSIS_HOOK_POSTINSTALL
   FileOpen $0 "$INSTDIR\liliacode.cmd" w
   FileWrite $0 "@echo off$\r$\n"
-  FileWrite $0 "$\"%~dp0LiliaCode.exe$\" %*$\r$\n"
+  FileWrite $0 "$\"%~dp0lilia.exe$\" %*$\r$\n"
   FileClose $0
   !insertmacro LILIA_RUN_PATH_SCRIPT "install"
 !macroend
