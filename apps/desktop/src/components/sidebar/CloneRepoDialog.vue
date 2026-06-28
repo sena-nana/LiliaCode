@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { FolderOpen, Github, Lock, Sparkles } from "@lucide/vue";
+import { FolderOpen, GitBranch, Lock, Sparkles } from "@lucide/vue";
 import type {
   GitHubBindingStatus,
   GitHubRepoSummary,
@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
       >
         <div class="search-palette__card dialog__card dialog__card--repo-dropdown">
           <div class="dialog__header">
-            <Github :size="14" aria-hidden="true" />
+            <GitBranch :size="14" aria-hidden="true" />
             <span>从 Git 仓库克隆</span>
           </div>
           <div class="dialog__body">
