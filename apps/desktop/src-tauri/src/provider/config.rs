@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use tauri::{AppHandle, Runtime};
@@ -330,10 +332,16 @@ pub(crate) fn normalize_agent_interaction_settings(
     settings: Option<AgentInteractionSettings>,
 ) -> AgentInteractionSettings {
     let settings = settings.unwrap_or_default();
+    let permission_mode_availability =
+        normalize_permission_mode_availability(settings.permission_mode_availability);
     AgentInteractionSettings {
         non_interrupt_mode: settings.non_interrupt_mode,
         debug: settings.debug,
-        permission_mode: normalize_permission_mode(&settings.permission_mode),
+        permission_mode: normalize_available_permission_mode(
+            &settings.permission_mode,
+            &permission_mode_availability,
+        ),
+        permission_mode_availability,
         main_agent_prompt_mode: normalize_main_agent_prompt_mode(&settings.main_agent_prompt_mode),
         main_agent_custom_prompt: normalize_optional_string(Some(
             settings.main_agent_custom_prompt,
@@ -359,6 +367,31 @@ pub(crate) fn normalize_permission_mode(value: &str) -> String {
     } else {
         config_contract::default_permission_mode().to_string()
     }
+}
+
+pub(crate) fn normalize_permission_mode_availability(
+    settings: HashMap<String, bool>,
+) -> HashMap<String, bool> {
+    let mut normalized = HashMap::new();
+    for mode in config_contract::permission_modes() {
+        let enabled = match mode.as_str() {
+            "ask" | "readonly" => true,
+            _ => settings.get(mode).copied().unwrap_or(true),
+        };
+        normalized.insert(mode.clone(), enabled);
+    }
+    normalized
+}
+
+pub(crate) fn normalize_available_permission_mode(
+    value: &str,
+    availability: &HashMap<String, bool>,
+) -> String {
+    let normalized = normalize_permission_mode(value);
+    if availability.get(&normalized).copied().unwrap_or(false) {
+        return normalized;
+    }
+    config_contract::default_permission_mode().to_string()
 }
 
 pub(crate) fn normalize_subagent_mode_settings(

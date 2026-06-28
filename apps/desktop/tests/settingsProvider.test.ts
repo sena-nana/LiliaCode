@@ -843,22 +843,26 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
 
-    expect(view.queryByText("Agent 交互")).toBeInTheDocument();
-    expect(view.queryByText("权限行为")).toBeInTheDocument();
-    expect(view.queryByText("主 Agent 策略")).toBeInTheDocument();
+    expect(view.getByRole("heading", { level: 2, name: "权限行为" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { level: 2, name: "主 Agent 策略" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { level: 2, name: "运行配置" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { level: 2, name: "自动轮次策略" })).toBeInTheDocument();
+    expect(view.getByText("Subagent 模式")).toBeInTheDocument();
+    expect(view.queryByText("自定义 Agent")).toBeInTheDocument();
     expect(view.queryByText("主 Agent 工作流提示预览")).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();
     expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
-    expect(view.getByRole("radio", { name: "询问" })).toHaveAttribute("aria-checked", "true");
-    expect(view.getByRole("radio", { name: "只读" })).toBeInTheDocument();
-    expect(view.getByRole("radio", { name: "完全访问" })).toBeInTheDocument();
-    expect(view.getByRole("radio", { name: "自由实现" })).toBeInTheDocument();
+    expect(view.getByText("询问")).toBeInTheDocument();
+    expect(view.getByText("只读")).toBeInTheDocument();
+    expect(view.getAllByRole("button", { name: "固定启用" })).toHaveLength(2);
+    expect(view.getByRole("radiogroup", { name: "完全访问权限可用性" })).toBeInTheDocument();
+    expect(view.getByRole("radiogroup", { name: "自由实现权限可用性" })).toBeInTheDocument();
     expect(view.getByText("完全访问，并在 8 秒后按建议项处理交互。")).toBeInTheDocument();
   });
 
-  it("Agent 设置页可以保存自由实现权限行为", async () => {
+  it("Agent 设置页可以关闭自由实现权限行为", async () => {
     const view = await renderSettings("/settings?tab=agent");
 
     await waitFor(() => {
@@ -867,12 +871,18 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
 
-    await fireEvent.click(view.getByRole("radio", { name: "自由实现" }));
+    const freeAvailability = view.getByRole("radiogroup", { name: "自由实现权限可用性" });
+    await fireEvent.click(within(freeAvailability).getByRole("radio", { name: "关闭" }));
 
     await waitFor(() => {
       expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
         settings: expect.objectContaining({
-          permissionMode: "free",
+          permissionModeAvailability: expect.objectContaining({
+            ask: true,
+            readonly: true,
+            full: true,
+            free: false,
+          }),
         }),
       });
     });

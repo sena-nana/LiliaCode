@@ -955,6 +955,12 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
       nonInterruptMode: false;
       debug: true;
       permissionMode: "free";
+      permissionModeAvailability: {
+        ask: true;
+        readonly: true;
+        full: true;
+        free: true;
+      };
       mainAgentPromptMode: "aggressive";
       mainAgentCustomPrompt: "Prefer direct implementation.";
       codexProfile: CodexProfileSettings;

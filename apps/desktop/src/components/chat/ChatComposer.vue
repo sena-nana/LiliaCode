@@ -45,7 +45,8 @@ import {
   type LiliaReviewTarget,
   type LiliaTaskWorkflowKind,
   type ModelFeatureSettings,
-  type PermissionMode,
+  enabledPermissionModes,
+  PERMISSION_MODE_DISPLAY,
 } from "@lilia/contracts";
 import {
   pendingAskInteractionKey,
@@ -61,6 +62,7 @@ import type {
 } from "../../services/chat";
 import { getModelFeatureSettings, onModelFeatureSettingsChanged } from "../../services/chat";
 import { previewAutoModelSelection } from "../../services/modelSelection";
+import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 import ComposerRichInput from "./ComposerRichInput.vue";
 import { textPart } from "./composerParts";
 import {
@@ -699,6 +701,7 @@ async function ensureComposerPasteLoaded() {
 
 const previewAttachments = computed(() => attachmentsForView.value.filter(isImageAttachment));
 const modelFeatureSettings = ref<ModelFeatureSettings | null>(null);
+const agentInteractionSettings = useAgentInteractionSettings();
 const autoModelPreview = computed(() =>
   previewAutoModelSelection({
     backend: props.state.backend,
@@ -995,12 +998,13 @@ const submitLabels = computed(() => composerSubmitLabels({
 const sendTitle = computed(() => submitLabels.value.title);
 const sendAriaLabel = computed(() => submitLabels.value.ariaLabel);
 
-const permissionOptions = [
-  { value: "ask" as PermissionMode, label: "询问", hint: "敏感操作前询问" },
-  { value: "readonly" as PermissionMode, label: "只读", hint: "禁止写操作" },
-  { value: "full" as PermissionMode, label: "完全访问", hint: "无需逐条确认" },
-  { value: "free" as PermissionMode, label: "自由实现", hint: "完全访问，交互倒计时按建议执行" },
-];
+const permissionOptions = computed(() =>
+  enabledPermissionModes(agentInteractionSettings.permissionModeAvailability.value).map((value) => ({
+    value,
+    label: PERMISSION_MODE_DISPLAY[value].label,
+    hint: PERMISSION_MODE_DISPLAY[value].description,
+  }))
+);
 
 function updateInputSelection() {
   if (hasPending.value) {

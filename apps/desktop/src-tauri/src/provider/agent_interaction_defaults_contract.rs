@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -20,6 +21,7 @@ struct RawAgentInteractionSettings {
     non_interrupt_mode: bool,
     debug: bool,
     permission_mode: String,
+    permission_mode_availability: HashMap<String, bool>,
     main_agent_prompt_mode: String,
     main_agent_custom_prompt: String,
     codex_profile: CodexProfileSettings,
@@ -44,6 +46,7 @@ pub(super) fn agent_interaction_settings() -> AgentInteractionSettings {
                 non_interrupt_mode: raw.non_interrupt_mode,
                 debug: raw.debug,
                 permission_mode: raw.permission_mode.clone(),
+                permission_mode_availability: raw.permission_mode_availability.clone(),
                 main_agent_prompt_mode: raw.main_agent_prompt_mode.clone(),
                 main_agent_custom_prompt: raw.main_agent_custom_prompt.clone(),
                 codex_profile: raw.codex_profile.clone(),
@@ -135,6 +138,12 @@ pub(super) fn auto_turn_decision_allow_session_fork() -> bool {
 pub(super) fn permission_mode() -> String {
     DEFAULT_PERMISSION_MODE
         .get_or_init(|| raw_agent_interaction_defaults().permission_mode.clone())
+        .clone()
+}
+
+pub(super) fn permission_mode_availability() -> HashMap<String, bool> {
+    raw_agent_interaction_defaults()
+        .permission_mode_availability
         .clone()
 }
 

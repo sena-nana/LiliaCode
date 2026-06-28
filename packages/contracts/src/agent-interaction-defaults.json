@@ -2,6 +2,12 @@
   "nonInterruptMode": false,
   "debug": false,
   "permissionMode": "ask",
+  "permissionModeAvailability": {
+    "full": true,
+    "ask": true,
+    "readonly": true,
+    "free": true
+  },
   "mainAgentPromptMode": "conservative",
   "mainAgentCustomPrompt": "",
   "codexProfile": {

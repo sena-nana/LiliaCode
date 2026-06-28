@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="subagent-section" data-agent-id="settings.subagents">
+  <section class="card subagent-section" data-agent-id="settings.subagents">
     <div class="subagent-section__header">
       <div class="subagent-section__title">
         <Bot :size="14" aria-hidden="true" />

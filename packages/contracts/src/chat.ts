@@ -198,9 +198,13 @@ import {
   DEFAULT_AGENT_INTERACTION_SETTINGS,
   DEFAULT_AGENT_SUBAGENT_MODE_SETTINGS,
   DEFAULT_AUTO_TURN_DECISION_SETTINGS,
+  DEFAULT_PERMISSION_MODE_AVAILABILITY,
+  LOCKED_PERMISSION_MODES,
+  enabledPermissionModes as enabledPermissionModesImpl,
   normalizeAgentInteractionSettings as normalizeAgentInteractionSettingsImpl,
   normalizeAgentSubagentModeSettings as normalizeAgentSubagentModeSettingsImpl,
   normalizeAutoTurnDecisionSettings as normalizeAutoTurnDecisionSettingsImpl,
+  normalizeAvailablePermissionMode as normalizeAvailablePermissionModeImpl,
   type AgentInteractionSettings as ContractAgentInteractionSettings,
   type AgentSubagentBackendSettings as ContractAgentSubagentBackendSettings,
   type AgentSubagentModeSettings as ContractAgentSubagentModeSettings,
@@ -209,6 +213,8 @@ import {
   type AutoTurnDecisionSettings as ContractAutoTurnDecisionSettings,
   type ClaudeSubagentModeSettings as ContractClaudeSubagentModeSettings,
   type MainAgentPromptMode as ContractMainAgentPromptMode,
+  type PermissionModeAvailability as ContractPermissionModeAvailability,
+  normalizePermissionModeAvailability as normalizePermissionModeAvailabilityImpl,
 } from "./agentInteractionDefaults.mjs";
 
 export type ChatBackendKind = (typeof CHAT_BACKENDS)[number];
@@ -1690,9 +1696,12 @@ export interface ChatRuntimeSnapshot {
 
 export type PermissionMode = ContractPermissionMode;
 export type PermissionModeDisplay = ContractPermissionModeDisplay;
+export type PermissionModeAvailability = ContractPermissionModeAvailability;
 
 export {
   DEFAULT_PERMISSION_MODE,
+  DEFAULT_PERMISSION_MODE_AVAILABILITY,
+  LOCKED_PERMISSION_MODES,
   PERMISSION_MODE_DISPLAY,
   PERMISSION_MODE_DISPLAY_ORDER,
   PERMISSION_MODES,
@@ -1704,6 +1713,21 @@ export const isPermissionMode = isPermissionModeImpl as (
 
 export const normalizePermissionMode = normalizePermissionModeImpl as (
   value: unknown,
+  fallback?: PermissionMode,
+) => PermissionMode;
+
+export const normalizePermissionModeAvailability = normalizePermissionModeAvailabilityImpl as (
+  input: Partial<PermissionModeAvailability> | null | undefined,
+  base?: PermissionModeAvailability,
+) => PermissionModeAvailability;
+
+export const enabledPermissionModes = enabledPermissionModesImpl as (
+  availability?: Partial<PermissionModeAvailability> | null,
+) => PermissionMode[];
+
+export const normalizeAvailablePermissionMode = normalizeAvailablePermissionModeImpl as (
+  value: unknown,
+  availability?: Partial<PermissionModeAvailability> | null,
   fallback?: PermissionMode,
 ) => PermissionMode;
 

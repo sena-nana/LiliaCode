@@ -1,6 +1,8 @@
 import type { CodexProfileSettings } from "./providerRuntime.mjs";
 import type { RuntimePermissionMode } from "./permissionModes.mjs";
 
+export type PermissionModeAvailability = Record<RuntimePermissionMode, boolean>;
+
 export interface AgentSubagentBackendSettings {
   enabled: boolean;
 }
@@ -42,6 +44,7 @@ export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
   permissionMode: RuntimePermissionMode;
+  permissionModeAvailability: PermissionModeAvailability;
   mainAgentPromptMode: MainAgentPromptMode;
   mainAgentCustomPrompt: string;
   codexProfile: CodexProfileSettings;
@@ -51,6 +54,8 @@ export interface AgentInteractionSettings {
 
 export const AUTO_TURN_DECISION_PERMISSION_OPTIONS: readonly AutoTurnDecisionPermissionOption[];
 export const AUTO_TURN_DECISION_PERMISSION_KEYS: readonly AutoTurnDecisionPermissionKey[];
+export const LOCKED_PERMISSION_MODES: readonly RuntimePermissionMode[];
+export const DEFAULT_PERMISSION_MODE_AVAILABILITY: Readonly<PermissionModeAvailability>;
 export const DEFAULT_AGENT_SUBAGENT_MODE_SETTINGS: Readonly<AgentSubagentModeSettings>;
 export const DEFAULT_AUTO_TURN_DECISION_SETTINGS: Readonly<AutoTurnDecisionSettings>;
 export const DEFAULT_AGENT_INTERACTION_SETTINGS: Readonly<AgentInteractionSettings>;
@@ -74,6 +79,21 @@ export function normalizeAutoTurnDecisionSettings(
   input: Partial<AutoTurnDecisionSettings> | null | undefined,
   base?: AutoTurnDecisionSettings,
 ): AutoTurnDecisionSettings;
+
+export function normalizePermissionModeAvailability(
+  input: Partial<PermissionModeAvailability> | null | undefined,
+  base?: PermissionModeAvailability,
+): PermissionModeAvailability;
+
+export function enabledPermissionModes(
+  availability?: Partial<PermissionModeAvailability> | null,
+): RuntimePermissionMode[];
+
+export function normalizeAvailablePermissionMode(
+  value: unknown,
+  availability?: Partial<PermissionModeAvailability> | null,
+  fallback?: RuntimePermissionMode,
+): RuntimePermissionMode;
 
 export function normalizeAgentInteractionSettings(
   input: Partial<AgentInteractionSettings> | null | undefined,

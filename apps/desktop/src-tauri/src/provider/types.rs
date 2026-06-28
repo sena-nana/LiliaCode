@@ -14,6 +14,8 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) debug: bool,
     #[serde(default = "default_permission_mode")]
     pub(crate) permission_mode: String,
+    #[serde(default = "default_permission_mode_availability")]
+    pub(crate) permission_mode_availability: HashMap<String, bool>,
     #[serde(default = "default_main_agent_prompt_mode")]
     pub(crate) main_agent_prompt_mode: String,
     #[serde(default)]
@@ -156,6 +158,10 @@ fn default_auto_turn_decision_allow_session_fork() -> bool {
 
 fn default_permission_mode() -> String {
     agent_interaction_defaults_contract::permission_mode()
+}
+
+fn default_permission_mode_availability() -> HashMap<String, bool> {
+    agent_interaction_defaults_contract::permission_mode_availability()
 }
 
 fn default_main_agent_prompt_mode() -> String {

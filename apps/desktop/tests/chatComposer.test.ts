@@ -12,6 +12,7 @@ import {
   type ModelFeatureSettings,
 } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
+import { useAgentInteractionSettings } from "../src/composables/useAgentInteractionSettings";
 import type { ToolConsentRequest } from "../src/services/chat";
 import { setModelFeatureSettings } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
@@ -301,6 +302,41 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
+  it("权限下拉不显示已关闭的权限行为", async () => {
+    const agentInteractionSettings = useAgentInteractionSettings();
+    await agentInteractionSettings.update({
+      permissionMode: "ask",
+      permissionModeAvailability: {
+        ask: true,
+        readonly: true,
+        full: false,
+        free: false,
+      },
+    });
+
+    try {
+      const view = renderComposer({
+        state: { ...baseState, permission: "ask" },
+      });
+      await requestComposerChrome(view);
+      await fireEvent.click(await view.findByRole("button", { name: "询问" }));
+
+      expect(await view.findByRole("option", { name: /询问/ })).toBeInTheDocument();
+      expect(view.getByRole("option", { name: /只读/ })).toBeInTheDocument();
+      expect(view.queryByRole("option", { name: /完全访问/ })).not.toBeInTheDocument();
+      expect(view.queryByRole("option", { name: /自由实现/ })).not.toBeInTheDocument();
+    } finally {
+      await agentInteractionSettings.update({
+        permissionModeAvailability: {
+          ask: true,
+          readonly: true,
+          full: true,
+          free: true,
+        },
+      });
+    }
+  });
+
   it("模型分配保存后刷新已挂载 Composer 的自动模型 state", async () => {
     await setModelFeatureSettings(defaultModelFeatureSettings);
     const view = renderComposer({
