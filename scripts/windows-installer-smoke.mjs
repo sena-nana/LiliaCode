@@ -100,7 +100,12 @@ function stopAppIfRunning() {
 }
 
 function pathKey(value) {
-  return path.resolve(value).replace(/[\\/]+$/, "").toLowerCase();
+  let resolved = path.resolve(value);
+  try {
+    resolved = fs.realpathSync.native(resolved);
+  } catch {
+  }
+  return resolved.replace(/[\\/]+$/, "").toLowerCase();
 }
 
 function quoteCmdArg(value) {
