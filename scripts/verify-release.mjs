@@ -106,7 +106,7 @@ function verifyReleaseTemplate(expectedVersion, productName) {
   const knownLimitations = [
     ["## 已知限制", "include a known limitations section"],
     ["当前只发布 Windows 安装包", "state that only the Windows installer is published"],
-    ["当前安装包没有代码签名", "state that the installer is unsigned"],
+    ["当前安装包使用 `tauri-signing.key` 完成 Tauri 签名", "state that the installer is signed with tauri-signing.key"],
     ["当前不包含 Tauri updater 自动更新能力", "state that Tauri updater auto-update is not included"],
     ["当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包", "state that macOS/Linux packages are not published"],
   ];
@@ -161,7 +161,7 @@ function verifyReleaseDocs() {
     ["Windows 安装验证记录", "keep the draft Release verification record entry"],
     ["liliacode <测试项目路径>", "keep the draft Release CLI verification check"],
     ["当前只发布 Windows 安装包", "keep the draft Release Windows-only limitation"],
-    ["当前安装包没有代码签名", "keep the draft Release unsigned-installer limitation"],
+    ["当前安装包使用 `tauri-signing.key` 完成 Tauri 签名", "keep the draft Release signing key limitation"],
     ["当前不包含 Tauri updater 自动更新能力", "keep the draft Release no-updater limitation"],
     ["当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包", "keep the draft Release non-Windows package limitation"],
   ]);
