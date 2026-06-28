@@ -284,6 +284,7 @@ export function useTaskComposerController(options: {
   let composerStateWriteSeq = 0;
   let activeLoadCycle: TaskLoadCycle | null = null;
   let composerLoad: Promise<ChatComposerState | null> | null = null;
+  let composerBackendLoaded = false;
   let cancelRuntimeSnapshotHydrationPaint: (() => void) | null = null;
   let cancelComposerStateHydrationPaint: (() => void) | null = null;
   const modelOptionsLoads: Partial<Record<ChatBackendKind, Promise<ChatModelOption[]>>> = {};
@@ -974,6 +975,7 @@ export function useTaskComposerController(options: {
     await refreshTaskWorktree(cycle);
     if (!isCurrentLoadCycle(cycle)) return null;
     composer.value = withActiveBackend(comp);
+    composerBackendLoaded = true;
     return composer.value;
   }
 
@@ -985,11 +987,12 @@ export function useTaskComposerController(options: {
     await refreshTaskWorktree(snapshot);
     if (!isCurrentTaskSnapshot(snapshot)) return null;
     composer.value = withActiveBackend(comp);
+    composerBackendLoaded = true;
     return composer.value;
   }
 
   async function ensureComposerLoaded(): Promise<ChatComposerState> {
-    if (composer.value) return composer.value;
+    if (composer.value && composerBackendLoaded) return composer.value;
     const snapshot = captureTaskSnapshot();
     if (!composerLoad) {
       const directLoad = loadComposerForSend(snapshot).catch((err) => {
@@ -1108,6 +1111,7 @@ export function useTaskComposerController(options: {
     }
     composer.value = null;
     composerLoad = null;
+    composerBackendLoaded = false;
     return cycle;
   }
 

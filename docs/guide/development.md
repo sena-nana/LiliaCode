@@ -113,7 +113,7 @@ yarn release:smoke:windows --installer path/to/LiliaCode_1.0.0-beta.1_x64-setup.
 
 正式发布前，仍需要在 Release 正文的 Windows 安装验证记录中写入验证人、验证日期、Windows 环境、安装包文件名和安装 / 启动 / CLI / 卸载结果。
 
-当前发布包没有代码签名，Windows SmartScreen 或安全软件警告属于预期风险；当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
+当前发布包使用 `tauri-signing.key` 完成签名。Windows SmartScreen 或安全软件警告风险已由签名策略降低。当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
 
 GitHub Release 正文可从 `docs/github/release-template.md` 复制后补全。
 

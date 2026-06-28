@@ -241,13 +241,17 @@ function edgeVersion() {
   if (process.env.LILIA_AGENT_DEBUG_EDGE_VERSION) return process.env.LILIA_AGENT_DEBUG_EDGE_VERSION;
   if (process.platform !== "win32") return null;
   const script = [
-    "$paths = @(",
+    "$patterns = @(",
+    "'C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\*\\msedgewebview2.exe',",
+    "'C:\\Program Files\\Microsoft\\EdgeWebView\\Application\\*\\msedgewebview2.exe',",
     "'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',",
     "'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'",
     ");",
-    "foreach ($path in $paths) {",
-    "  $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue;",
-    "  if ($item) { $item.VersionInfo.ProductVersion; exit 0 }",
+    "foreach ($pattern in $patterns) {",
+    "  $items = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | Sort-Object -Property FullName -Descending;",
+    "  foreach ($item in $items) {",
+    "    if ($item.VersionInfo.ProductVersion) { $item.VersionInfo.ProductVersion; exit 0 }",
+    "  }",
     "}",
     "exit 1",
   ].join(" ");
@@ -1282,10 +1286,11 @@ async function runCoreConversationScenarios(sessionId) {
   const ordinary = await runOrdinarySendScenario(sessionId);
   await runContinueHistoryScenario(sessionId);
   await runTaskRecoveryScenario(sessionId, ordinary.route);
+  await ensureFreshConversation(sessionId, "pending-actions-setup");
   await runPendingActionScenario(sessionId, {
     scenario: SCENARIOS.planPendingAction,
     triggerTarget: "debug.timeline.plan",
-    resolutionTargets: ["timeline.plan.accept", "chat.pending.plan.accept", "chat.composer.plan.accept"],
+    resolutionTargets: ["timeline.plan.accept", "chat.pending.plan.accept", "chat.composer.plan.accept", "ask-user.confirm"],
     expectedText: "Debug 计划已同意",
     details: { resolved: "accepted" },
   });

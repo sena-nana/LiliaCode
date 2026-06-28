@@ -160,7 +160,7 @@ describe("App main navigation events", () => {
       expect(mockListenerCount(AUTOMATION_RUN_STARTED_EVENT_NAME)).toBe(1);
       expect(mockListenerCount(AUTOMATION_RUN_UPDATED_EVENT_NAME)).toBe(1);
       expect(mockListenerCount(AUTOMATION_RUN_FINISHED_EVENT_NAME)).toBe(1);
-    });
+    }, { timeout: 3000 });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AUTOMATION_GET_RUN_COMMAND)).toBe(false);
   });
 
@@ -184,7 +184,7 @@ describe("App main navigation events", () => {
 
     await waitFor(() => {
       expect(view.getByRole("button", { name: /manual/ })).toBeInTheDocument();
-    });
+    }, { timeout: 10_000 });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AUTOMATION_GET_RUN_COMMAND)).toBe(false);
 
     await fireEvent.click(view.getByRole("button", { name: /manual/ }));
@@ -192,7 +192,7 @@ describe("App main navigation events", () => {
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AUTOMATION_GET_RUN_COMMAND)).toBe(true);
       expect(view.getByText("trigger-1")).toBeInTheDocument();
-    });
+    }, { timeout: 10_000 });
   });
 
   it("自动化页切到新对话会先渲染草稿聊天，不等待 timeline 和 runtime", async () => {

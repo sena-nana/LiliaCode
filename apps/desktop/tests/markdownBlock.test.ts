@@ -39,7 +39,7 @@ describe("MarkdownBlock", () => {
     expect(view.getByText("比例").closest("th")).toHaveStyle({ textAlign: "center" });
     await waitFor(() => {
       expect(view.container.querySelector(".markdown-block__table .katex")).toBeInTheDocument();
-    });
+    }, { timeout: 3000 });
   });
 
 

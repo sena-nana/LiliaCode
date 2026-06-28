@@ -220,6 +220,7 @@ onBeforeUnmount(() => {
         class="ui-tabs__tab"
         :class="{ 'is-active': selectedModelSource === source.key }"
         :aria-selected="selectedModelSource === source.key"
+        :data-agent-id="`settings.assistant-ai.source.${source.key}`"
         @click="selectedModelSource = source.key"
       >
         {{ source.label }}
@@ -240,6 +241,7 @@ onBeforeUnmount(() => {
             class="ui-input"
             aria-label="模型 ID"
             placeholder="model-id"
+            data-agent-id="settings.assistant-ai.new-model-id"
             :value="newModelId"
             @input="(e) => (newModelId = (e.target as HTMLInputElement).value)"
             @keyup.enter="addModelToPool"
@@ -249,6 +251,7 @@ onBeforeUnmount(() => {
             class="ui-input"
             aria-label="显示名"
             placeholder="显示名"
+            data-agent-id="settings.assistant-ai.new-model-label"
             :value="newModelLabel"
             @input="(e) => (newModelLabel = (e.target as HTMLInputElement).value)"
             @keyup.enter="addModelToPool"
@@ -256,6 +259,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ui-button ui-button--primary"
+            data-agent-id="settings.assistant-ai.confirm-add-model"
             :disabled="!newModelId.trim()"
             @click="addModelToPool"
           >
@@ -265,6 +269,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ui-button ui-button--ghost"
+            data-agent-id="settings.assistant-ai.cancel-add-model"
             @click="cancelAddModel"
           >
             取消
@@ -283,6 +288,7 @@ onBeforeUnmount(() => {
           class="ui-input"
           placeholder="显示名"
           :aria-label="`${item.id} 显示名`"
+          :data-agent-id="`settings.assistant-ai.model-label.${item.id}`"
           :value="item.label"
           @input="(e) => updateModelLabel(item.id, (e.target as HTMLInputElement).value)"
         />

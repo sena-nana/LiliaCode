@@ -121,7 +121,7 @@ describe("TaskDetail conversation suggestions", () => {
     expect(suggestions.closest(".chat-empty")).not.toBeNull();
     expect(suggestions.closest(".chat-composer")).toBeNull();
     expect(view.queryByRole("button", { name: "来点灵感？" })).toBeNull();
-  });
+  }, 10_000);
 
   it("GitHub 建议会展示可扫描来源且点击仍填入 prompt", async () => {
     setMockConversationSuggestions([

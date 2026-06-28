@@ -99,6 +99,28 @@ function stopAppIfRunning() {
   waitUntil(`${processName} to exit`, () => !isProcessRunning(), 15_000);
 }
 
+function pathKey(value) {
+  return path.resolve(value).replace(/[\\/]+$/, "").toLowerCase();
+}
+
+function quoteCmdArg(value) {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function resolveLiliacode(env) {
+  const result = spawnSync("cmd.exe", ["/d", "/s", "/c", "where liliacode"], {
+    env,
+    encoding: "utf8",
+    stdio: "pipe",
+    windowsHide: true,
+  });
+  if (result.status !== 0) return [];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function displayPath(value) {
   if (value.startsWith("\\\\?\\UNC\\")) return `\\\\${value.slice("\\\\?\\UNC\\".length)}`;
   if (value.startsWith("\\\\?\\")) return value.slice("\\\\?\\".length);
@@ -120,6 +142,10 @@ function storeContainsProjectPath(liliaHome, projectPath) {
   const canonical = displayPath(fs.realpathSync.native(projectPath));
   const needles = Array.from(new Set([canonical, canonical.replaceAll("/", "\\")]));
   return dbFiles.some((filePath) => fileContainsText(filePath, needles));
+}
+
+function storeDbPath(liliaHome) {
+  return path.join(liliaHome, "db", "lilia.db");
 }
 
 function ensureInstallerPath() {
@@ -195,6 +221,11 @@ function main() {
   log(`Test project: ${testProject}`);
 
   try {
+    const preInstallCli = resolveLiliacode(freshWindowsEnv());
+    if (preInstallCli.length > 0) {
+      fail(`liliacode already resolves before smoke install, so CLI cleanup cannot be scoped to this run:\n${preInstallCli.join("\n")}`);
+    }
+
     log("Installing silently");
     run(installer, ["/S", `/D=${installDir}`]);
     installed = true;
@@ -206,10 +237,11 @@ function main() {
     }
 
     const runtimeEnv = freshWindowsEnv({ LILIA_HOME: liliaHome });
-    if (!fs.existsSync(cliCmd)) {
-      fail(`Smoke install did not create expected liliacode command:\n${cliCmd}`);
+    const installedCli = resolveLiliacode(runtimeEnv);
+    if (!installedCli.some((candidate) => pathKey(candidate) === pathKey(cliCmd))) {
+      fail(`A fresh cmd environment did not resolve this smoke install's liliacode.cmd:\n${installedCli.join("\n")}`);
     }
-    log("liliacode command file is present in install directory");
+    log("CLI command is available from fresh PATH");
 
     log("Launching installed app");
     const app = spawn(installedExe, [], {
@@ -221,9 +253,11 @@ function main() {
     app.unref();
     waitUntil(`${processName} to start`, () => isProcessRunning());
     log("Installed app process started");
+    waitUntil("Lilia store database initialization", () => fs.existsSync(storeDbPath(liliaHome)));
+    log("Lilia store database initialized");
 
     log("Opening test project through liliacode");
-    run(cliCmd, [testProject], { env: runtimeEnv, shell: true });
+    run("cmd.exe", ["/d", "/s", "/c", `liliacode ${quoteCmdArg(testProject)}`], { env: runtimeEnv });
     waitUntil("CLI project path in the Lilia store", () => storeContainsProjectPath(liliaHome, testProject));
     log("CLI project path reached the Lilia store");
 
@@ -236,10 +270,11 @@ function main() {
     waitUntil("liliacode.cmd removal", () => !fs.existsSync(cliCmd), 30_000);
     installed = false;
 
-    if (fs.existsSync(cliCmd)) {
-      fail(`liliacode.cmd still exists after uninstall:\n${cliCmd}`);
+    const afterUninstallCli = resolveLiliacode(freshWindowsEnv({ LILIA_HOME: liliaHome }));
+    if (afterUninstallCli.length > 0) {
+      fail(`liliacode still resolves after uninstall:\n${afterUninstallCli.join("\n")}`);
     }
-    log("CLI command is removed after uninstall");
+    log("CLI command is cleaned from fresh PATH after uninstall");
     log("Windows installer smoke passed");
   } finally {
     stopAppIfRunning();
