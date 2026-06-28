@@ -1,10 +1,12 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "1.0.0-beta",
+  "version": "1.0.0-beta.1",
   "type": "module",
   "scripts": {
+    "about:licenses": "node scripts/generate-open-source-license-manifest.mjs",
     "check:package-manager": "node ../../scripts/check-package-manager.mjs",
+    "prebuild": "yarn about:licenses",
     "dev": "node ../../scripts/check-package-manager.mjs && vite",
     "build": "node ../../scripts/check-package-manager.mjs && vue-tsc --noEmit && vite build",
     "test": "node ../../scripts/check-package-manager.mjs && vitest run",
@@ -22,6 +24,7 @@
     "@tauri-apps/plugin-global-shortcut": "^2.3.2",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-store": "^2.4.3",
+    "@tauri-apps/plugin-updater": "2.10.1",
     "@vue-flow/core": "^1.48.2",
     "chart.js": "^4.5.1",
     "katex": "^0.17.0",
@@ -45,3 +48,4 @@
     "vue-tsc": "^3.3.5"
   }
 }
+

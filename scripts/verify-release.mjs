@@ -85,7 +85,7 @@ function verifyWindowsCliInstallerHook(tauriConfig) {
   const hookSource = readText(hookRelativePath);
   const requiredSnippets = [
     ['FileOpen $0 "$INSTDIR\\liliacode.cmd" w', "create liliacode.cmd during install"],
-    ['FileWrite $0 "start """" ""$INSTDIR\\LiliaCode.exe"" %*$\\r$\\n"', "forward liliacode arguments to LiliaCode.exe"],
+    ['FileWrite $0 "$\\"%~dp0LiliaCode.exe$\\" %*$\\r$\\n"', "forward liliacode arguments to LiliaCode.exe"],
     ["[Environment]::SetEnvironmentVariable('Path', ($$parts -join ';'), 'User')", "write the user PATH for liliacode"],
     ['!insertmacro LILIA_RUN_PATH_SCRIPT "install"', "add the install directory to PATH after install"],
     ['!insertmacro LILIA_RUN_PATH_SCRIPT "uninstall"', "remove the install directory from PATH before uninstall"],

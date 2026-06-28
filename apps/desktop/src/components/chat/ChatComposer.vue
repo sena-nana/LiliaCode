@@ -44,6 +44,7 @@ import {
   type ChatWorkflow,
   type LiliaReviewTarget,
   type LiliaTaskWorkflowKind,
+  type PermissionMode,
   type ModelFeatureSettings,
   enabledPermissionModes,
   PERMISSION_MODE_DISPLAY,

@@ -1,4 +1,4 @@
-# LiliaCode v1.0.0-beta
+# LiliaCode v1.0.0-beta.1
 
 ## 发布摘要
 
@@ -29,7 +29,7 @@
 - 验证人：
 - 验证日期：
 - Windows 环境：
-- 安装包文件名：LiliaCode_1.0.0-beta_x64-setup.exe
+- 安装包文件名：LiliaCode_1.0.0-beta.1_x64-setup.exe
 - 安装：
 - 启动：
 - CLI 入口：
@@ -45,3 +45,4 @@
 ## 升级说明
 
 首发阶段不承诺应用内自动更新。用户升级时需要手动下载新版 Windows 安装包并安装。
+
