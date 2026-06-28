@@ -450,3 +450,4 @@ describe("pending interaction resolvers", () => {
     expect(resolved).toEqual(result);
   });
 });
+

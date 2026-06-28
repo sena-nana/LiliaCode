@@ -179,3 +179,4 @@ export function useComposerPaste(options: {
     onPaste,
   };
 }
+

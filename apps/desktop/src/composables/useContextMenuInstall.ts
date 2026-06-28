@@ -47,3 +47,4 @@ export function installContextMenu() {
   ];
   return uninstallContextMenu;
 }
+

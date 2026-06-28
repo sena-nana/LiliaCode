@@ -419,3 +419,4 @@ export function installAgentDebugHarness(router: Router): void {
   };
   void markAgentDebug("agent-debug-installed", { route: currentRoute() });
 }
+

@@ -238,3 +238,4 @@ describe("global scrollbar visibility", () => {
     element.remove();
   });
 });
+

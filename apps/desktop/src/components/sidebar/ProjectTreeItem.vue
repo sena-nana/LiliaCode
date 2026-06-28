@@ -13,7 +13,7 @@ import {
   Pin,
   Plus,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Project } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import {
@@ -427,3 +427,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+

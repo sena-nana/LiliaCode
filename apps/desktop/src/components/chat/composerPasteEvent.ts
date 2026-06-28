@@ -23,3 +23,4 @@ export function pastedPlainText(event: ClipboardEvent): string {
   if (!data) return "";
   return data.getData("text/plain") || htmlToPlainText(data.getData("text/html"));
 }
+

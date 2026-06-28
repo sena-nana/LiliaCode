@@ -33,3 +33,4 @@ export function renderMathToHtml(text: string, displayMode: boolean): string | n
 
   return html;
 }
+

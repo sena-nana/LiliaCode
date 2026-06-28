@@ -186,3 +186,4 @@ export function composerPartsHaveConversationReference(
 ): boolean {
   return parts.some((part) => part.type === "conversationReference" && part.reference.taskId === taskId);
 }
+

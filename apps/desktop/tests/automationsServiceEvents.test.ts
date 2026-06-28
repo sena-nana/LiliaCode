@@ -21,3 +21,4 @@ describe("automation service events", () => {
     expect(mockListenerCount(AUTOMATION_RUN_UPDATED_EVENT_NAME)).toBe(0);
   });
 });
+

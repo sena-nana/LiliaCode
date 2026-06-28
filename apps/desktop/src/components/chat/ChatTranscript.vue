@@ -9,7 +9,7 @@ import {
   watch,
   type CSSProperties,
 } from "vue";
-import { Copy, MessageSquarePlus, Quote } from "lucide-vue-next";
+import { Copy, MessageSquarePlus, Quote } from "@lucide/vue";
 import type { AgentTimelineEvent, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,
@@ -569,3 +569,4 @@ watch(
     />
   </div>
 </template>
+

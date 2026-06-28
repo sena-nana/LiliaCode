@@ -117,3 +117,4 @@ describe("agent debug harness", () => {
     expect(document.querySelector<HTMLTextAreaElement>("[data-agent-id='chat.composer.input']")?.value).toBe("hello");
   });
 });
+

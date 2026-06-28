@@ -493,3 +493,4 @@ function readDefaultGeometry(scroller: HTMLElement): ScrollMapGeometry {
 function maxScrollTop(scroller: HTMLElement): number {
   return maxScrollOffset(scroller.scrollHeight, scroller.clientHeight);
 }
+

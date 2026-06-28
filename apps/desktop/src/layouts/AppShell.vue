@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
-import { ArrowLeft } from "lucide-vue-next";
+import { ArrowLeft } from "@lucide/vue";
 import TitleBar from "../components/TitleBar.vue";
 import { useResizablePane } from "../composables/useResizablePane";
 import {
@@ -221,3 +221,4 @@ onBeforeUnmount(() => {
     </main>
   </div>
 </template>
+

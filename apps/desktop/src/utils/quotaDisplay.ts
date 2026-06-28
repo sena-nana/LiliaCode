@@ -61,3 +61,4 @@ export function codexAccountNeedsLogin(
   if (!text.trim()) return supportsRequiredProtocol;
   return /未登录|not logged|login|auth/.test(text);
 }
+

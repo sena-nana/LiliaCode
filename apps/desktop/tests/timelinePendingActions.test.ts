@@ -84,3 +84,4 @@ describe("timeline pending action state", () => {
     expect(hasTimelinePendingActionState(state)).toBe(false);
   });
 });
+

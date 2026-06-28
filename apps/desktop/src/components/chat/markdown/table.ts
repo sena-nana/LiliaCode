@@ -92,3 +92,4 @@ function normalizeTableCells(cells: string[], columnCount: number): string[] {
   while (normalized.length < columnCount) normalized.push("");
   return normalized;
 }
+

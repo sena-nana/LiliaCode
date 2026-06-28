@@ -219,74 +219,74 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-darwin-arm64@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-darwin-arm64@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-darwin-arm64@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-darwin-arm64@npm:0.3.195"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-darwin-x64@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-darwin-x64@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-darwin-x64@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-darwin-x64@npm:0.3.195"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-linux-arm64-musl@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-linux-arm64-musl@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-linux-arm64-musl@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-arm64-musl@npm:0.3.195"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-linux-arm64@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-linux-arm64@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-linux-arm64@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-arm64@npm:0.3.195"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-linux-x64-musl@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-linux-x64-musl@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-linux-x64-musl@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-x64-musl@npm:0.3.195"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-linux-x64@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-linux-x64@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-linux-x64@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-x64@npm:0.3.195"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-win32-arm64@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-win32-arm64@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-win32-arm64@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-win32-arm64@npm:0.3.195"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk-win32-x64@npm:0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk-win32-x64@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk-win32-x64@npm:0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk-win32-x64@npm:0.3.195"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@anthropic-ai/claude-agent-sdk@npm:^0.3.193":
-  version: 0.3.193
-  resolution: "@anthropic-ai/claude-agent-sdk@npm:0.3.193"
+"@anthropic-ai/claude-agent-sdk@npm:^0.3.195":
+  version: 0.3.195
+  resolution: "@anthropic-ai/claude-agent-sdk@npm:0.3.195"
   dependencies:
-    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-darwin-x64": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-linux-arm64": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-linux-x64": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-linux-x64-musl": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-win32-arm64": "npm:0.3.193"
-    "@anthropic-ai/claude-agent-sdk-win32-x64": "npm:0.3.193"
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-darwin-x64": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-linux-arm64": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-linux-x64": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-win32-arm64": "npm:0.3.195"
+    "@anthropic-ai/claude-agent-sdk-win32-x64": "npm:0.3.195"
   peerDependencies:
     "@anthropic-ai/sdk": ">=0.93.0"
     "@modelcontextprotocol/sdk": ^1.29.0
@@ -308,7 +308,7 @@ __metadata:
       optional: true
     "@anthropic-ai/claude-agent-sdk-win32-x64":
       optional: true
-  checksum: 10c0/0ff686493c662770e5d914d563f14f74e5d8ec0e9deba6701d116f5eb86ae9ab56939ed7e3ab8b36eec2541c513dc830030abaf8f22fb60b38e869465810496b
+  checksum: 10c0/ea2811f98681de51c9099dbc8cc8bc9e06b90873907651be188df1bdd04f5a641e2df9d38e5fcf7bff44797c448f17c589929aae934e2d324636eb9b8a3cb2e2
   languageName: node
   linkType: hard
 
@@ -978,6 +978,15 @@ __metadata:
     typescript: "npm:^6.0.3"
   languageName: unknown
   linkType: soft
+
+"@lucide/vue@npm:^1.21.0":
+  version: 1.21.0
+  resolution: "@lucide/vue@npm:1.21.0"
+  peerDependencies:
+    vue: ">=3.0.1"
+  checksum: 10c0/bc57262ea5547d18a0350e59cb9db2edcf1d8d0c66d2212bce1631d80796457e3e9b4215633bd0d20f8f95400906cfab648262d2f4f14679caba1210c161fe75
+  languageName: node
+  linkType: hard
 
 "@mermaid-js/parser@npm:^1.2.0":
   version: 1.2.0
@@ -2250,25 +2259,25 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vitest/expect@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/expect@npm:4.1.7"
+"@vitest/expect@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/expect@npm:4.1.9"
   dependencies:
     "@standard-schema/spec": "npm:^1.1.0"
     "@types/chai": "npm:^5.2.2"
-    "@vitest/spy": "npm:4.1.7"
-    "@vitest/utils": "npm:4.1.7"
+    "@vitest/spy": "npm:4.1.9"
+    "@vitest/utils": "npm:4.1.9"
     chai: "npm:^6.2.2"
     tinyrainbow: "npm:^3.1.0"
-  checksum: 10c0/1a72387c6d3cac1e12cd4df382e666d96560b38001ea0133f1e0a22825f71ccf1640ccce13244296b0054c15cf04442f3adbd67dfc57fe542bd35a46cd805487
+  checksum: 10c0/243bacaed2cba5e0ea4ec7465662fcec465a358a0e06381e337fac49426aa67a73b104fbb9d65d8bccadfba8f70e27f57ffb897aacfa140f579a556367357875
   languageName: node
   linkType: hard
 
-"@vitest/mocker@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/mocker@npm:4.1.7"
+"@vitest/mocker@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/mocker@npm:4.1.9"
   dependencies:
-    "@vitest/spy": "npm:4.1.7"
+    "@vitest/spy": "npm:4.1.9"
     estree-walker: "npm:^3.0.3"
     magic-string: "npm:^0.30.21"
   peerDependencies:
@@ -2279,56 +2288,56 @@ __metadata:
       optional: true
     vite:
       optional: true
-  checksum: 10c0/e03dbbba435543e3cfa5e034ba8ade371de5e398255f75366ebc370ff8dd78d45f7d7cc9daa76eb1d399b31e659e47d3cbb710566e64ceeeba3f99b418e4b955
+  checksum: 10c0/707353b7435bbfd441cc754e4ee7bc5921b70d07b051c6e414b6bbe4ca369154702b0ddeb603389469fe87ca1983e002eb2d55044582661f54a1945dd27e5c82
   languageName: node
   linkType: hard
 
-"@vitest/pretty-format@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/pretty-format@npm:4.1.7"
+"@vitest/pretty-format@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/pretty-format@npm:4.1.9"
   dependencies:
     tinyrainbow: "npm:^3.1.0"
-  checksum: 10c0/49ef801171708e3a92214e8720efbedbd6e0e6baf17971aaf4feb7422e5c9eba82262c24a9e6dd4d41a31fae77bd31d5b37cf140d13e0ac4ce29a7457bdc692f
+  checksum: 10c0/5b96295f25ab885616230ad1355fc82f490bebb39cc707688d7c8969c08270d7e076ed8a10af4e762ed57145193c6061a1f549f136f0ded344f8db0c2b3fb3de
   languageName: node
   linkType: hard
 
-"@vitest/runner@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/runner@npm:4.1.7"
+"@vitest/runner@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/runner@npm:4.1.9"
   dependencies:
-    "@vitest/utils": "npm:4.1.7"
+    "@vitest/utils": "npm:4.1.9"
     pathe: "npm:^2.0.3"
-  checksum: 10c0/63474c6fc088d75b5d7fe735195504f923c694b83a22eb9caa53d6486c923974304c2e3ef4d5bcd808d88082174f38434be320fc4fe649a8cf33f0459a0576e3
+  checksum: 10c0/d206b4891a64b1f55c346f832b0a7b489108094d8ae34438d3b53e78be7b45b139fa95ffa027c98c357bd532268ee573168de1943235b7eed32a9236ed5978bb
   languageName: node
   linkType: hard
 
-"@vitest/snapshot@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/snapshot@npm:4.1.7"
+"@vitest/snapshot@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/snapshot@npm:4.1.9"
   dependencies:
-    "@vitest/pretty-format": "npm:4.1.7"
-    "@vitest/utils": "npm:4.1.7"
+    "@vitest/pretty-format": "npm:4.1.9"
+    "@vitest/utils": "npm:4.1.9"
     magic-string: "npm:^0.30.21"
     pathe: "npm:^2.0.3"
-  checksum: 10c0/6fa49c4242a4acc0557ee6a20552db41f4f4c9d2d4c05993181c3f5f19e66579e08f63d34f792b79400547ab791ef500a9955b77390c381e45c3bb8e33717793
+  checksum: 10c0/c3099df12ad1f9c1e180441856c9eb82f1990f87ff16aafedd6fa19978eaff20bc59220b692a99fcc822daef86eab256ba3dadb49544b7bd625b57c49cd9d995
   languageName: node
   linkType: hard
 
-"@vitest/spy@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/spy@npm:4.1.7"
-  checksum: 10c0/be2a95d5c5c438b57c9b33cef1289fb02659214754b5e946cb4b8183e2b5089e49e3fda6ca05981f3ea9872b207595db109e25072668c0a671203f69fddbbe99
+"@vitest/spy@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/spy@npm:4.1.9"
+  checksum: 10c0/e51f328f55b76e8ba66e5e18f183484a8dc0a092685b101112d3e9fb8e989ddca162c98ddf00254476502c25bc05c4ec1e277fd6ad8bfc702464c08f6b5dd115
   languageName: node
   linkType: hard
 
-"@vitest/utils@npm:4.1.7":
-  version: 4.1.7
-  resolution: "@vitest/utils@npm:4.1.7"
+"@vitest/utils@npm:4.1.9":
+  version: 4.1.9
+  resolution: "@vitest/utils@npm:4.1.9"
   dependencies:
-    "@vitest/pretty-format": "npm:4.1.7"
+    "@vitest/pretty-format": "npm:4.1.9"
     convert-source-map: "npm:^2.0.0"
     tinyrainbow: "npm:^3.1.0"
-  checksum: 10c0/aa0079d8923506300527dc23ff68cf090ffcb2c6a9549e598ae22ba0eb8a6bb4448b10724b38bc6b077f9957333302a857d791ad2f7abd807bb6263c9a218833
+  checksum: 10c0/d55506c077fd72c091eb66f02926f0abf72801c87a085f565698289562f47befa114ae2c680ab8736dfe46abab0cfd6b8031f2ac519bafeb37578aa6e5ad03c5
   languageName: node
   linkType: hard
 
@@ -2603,9 +2612,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vue/language-core@npm:3.3.1":
-  version: 3.3.1
-  resolution: "@vue/language-core@npm:3.3.1"
+"@vue/language-core@npm:3.3.5":
+  version: 3.3.5
+  resolution: "@vue/language-core@npm:3.3.5"
   dependencies:
     "@volar/language-core": "npm:2.4.28"
     "@vue/compiler-dom": "npm:^3.5.0"
@@ -2614,7 +2623,7 @@ __metadata:
     muggle-string: "npm:^0.4.1"
     path-browserify: "npm:^1.0.1"
     picomatch: "npm:^4.0.4"
-  checksum: 10c0/3eed0a818ed6b3c0be5451cf603f90bc4bbaadbfed945c7c9899d735ae3f6ffe3d779df9efe6a2f319bb93e5985188eb853cc271c8d42aba8044779ab1e7abf1
+  checksum: 10c0/9c56201338ac4832eb48f3717e27721cc4e25d23e473fefa067452fa581b1cc8699c4d3c85fa434fc5737aa23eac4c6349fc3bcd0e96b2761373f0b69af9ccf5
   languageName: node
   linkType: hard
 
@@ -3919,9 +3928,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "desktop@workspace:apps/desktop"
   dependencies:
-    "@anthropic-ai/claude-agent-sdk": "npm:^0.3.193"
+    "@anthropic-ai/claude-agent-sdk": "npm:^0.3.195"
     "@anthropic-ai/sdk": "npm:^0.106.0"
     "@lilia/contracts": "workspace:*"
+    "@lucide/vue": "npm:^1.21.0"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@tauri-apps/api": "npm:^2.11.1"
     "@tauri-apps/cli": "npm:^2.11.3"
@@ -3938,15 +3948,14 @@ __metadata:
     chart.js: "npm:^4.5.1"
     jsdom: "npm:^29.1.1"
     katex: "npm:^0.17.0"
-    lucide-vue-next: "npm:^1.0.0"
     mermaid: "npm:^11.16.0"
     qrcode: "npm:^1.5.4"
     typescript: "npm:^6.0.3"
     vite: "npm:^8.1.0"
-    vitest: "npm:^4.1.6"
+    vitest: "npm:^4.1.9"
     vue: "npm:^3.5.39"
     vue-router: "npm:^5.1.0"
-    vue-tsc: "npm:^3.2.9"
+    vue-tsc: "npm:^3.3.5"
     zod: "npm:^4.4.3"
   languageName: unknown
   linkType: soft
@@ -5286,15 +5295,6 @@ __metadata:
   version: 11.5.0
   resolution: "lru-cache@npm:11.5.0"
   checksum: 10c0/b92c2a7518128dec6b244bf3eb9fd79964d316cdeb12865ebfc2cebb4dfe9b24e3767a3923d71e6eb735f56b557fc55f08f150a53097d7805afb628c90158df4
-  languageName: node
-  linkType: hard
-
-"lucide-vue-next@npm:^1.0.0":
-  version: 1.0.0
-  resolution: "lucide-vue-next@npm:1.0.0"
-  peerDependencies:
-    vue: ">=3.0.1"
-  checksum: 10c0/28f6a7d83e5d06db34006214f1ee3fe2c67ba0ca58f6e8af0d9032c495bb419f5c632b2db66e10ba90a6376e9f8aa913bc2e56be7c3aa06089d6ad2a472d93aa
   languageName: node
   linkType: hard
 
@@ -7187,17 +7187,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vitest@npm:^4.1.6":
-  version: 4.1.7
-  resolution: "vitest@npm:4.1.7"
+"vitest@npm:^4.1.9":
+  version: 4.1.9
+  resolution: "vitest@npm:4.1.9"
   dependencies:
-    "@vitest/expect": "npm:4.1.7"
-    "@vitest/mocker": "npm:4.1.7"
-    "@vitest/pretty-format": "npm:4.1.7"
-    "@vitest/runner": "npm:4.1.7"
-    "@vitest/snapshot": "npm:4.1.7"
-    "@vitest/spy": "npm:4.1.7"
-    "@vitest/utils": "npm:4.1.7"
+    "@vitest/expect": "npm:4.1.9"
+    "@vitest/mocker": "npm:4.1.9"
+    "@vitest/pretty-format": "npm:4.1.9"
+    "@vitest/runner": "npm:4.1.9"
+    "@vitest/snapshot": "npm:4.1.9"
+    "@vitest/spy": "npm:4.1.9"
+    "@vitest/utils": "npm:4.1.9"
     es-module-lexer: "npm:^2.0.0"
     expect-type: "npm:^1.3.0"
     magic-string: "npm:^0.30.21"
@@ -7215,12 +7215,12 @@ __metadata:
     "@edge-runtime/vm": "*"
     "@opentelemetry/api": ^1.9.0
     "@types/node": ^20.0.0 || ^22.0.0 || >=24.0.0
-    "@vitest/browser-playwright": 4.1.7
-    "@vitest/browser-preview": 4.1.7
-    "@vitest/browser-webdriverio": 4.1.7
-    "@vitest/coverage-istanbul": 4.1.7
-    "@vitest/coverage-v8": 4.1.7
-    "@vitest/ui": 4.1.7
+    "@vitest/browser-playwright": 4.1.9
+    "@vitest/browser-preview": 4.1.9
+    "@vitest/browser-webdriverio": 4.1.9
+    "@vitest/coverage-istanbul": 4.1.9
+    "@vitest/coverage-v8": 4.1.9
+    "@vitest/ui": 4.1.9
     happy-dom: "*"
     jsdom: "*"
     vite: ^6.0.0 || ^7.0.0 || ^8.0.0
@@ -7250,8 +7250,8 @@ __metadata:
     vite:
       optional: false
   bin:
-    vitest: vitest.mjs
-  checksum: 10c0/5328eab211161bdb854159154b02d7b2beab0cf1e26a1c13f6a64b0f1402029d41f19987cf60684051c09a6925030285195ecbe57271c2033e1d4f7a666590d0
+    vitest: ./vitest.mjs
+  checksum: 10c0/1ac80ef4991be82822a52aea48415f1bc64ddf8fd88ee24c172ec368f1d480fefacbde622c3c951982f7961a1d07313e18deaafc774d29e42ad6f6ffa63334a7
   languageName: node
   linkType: hard
 
@@ -7325,17 +7325,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vue-tsc@npm:^3.2.9":
-  version: 3.3.1
-  resolution: "vue-tsc@npm:3.3.1"
+"vue-tsc@npm:^3.3.5":
+  version: 3.3.5
+  resolution: "vue-tsc@npm:3.3.5"
   dependencies:
     "@volar/typescript": "npm:2.4.28"
-    "@vue/language-core": "npm:3.3.1"
+    "@vue/language-core": "npm:3.3.5"
   peerDependencies:
     typescript: ">=5.0.0"
   bin:
     vue-tsc: bin/vue-tsc.js
-  checksum: 10c0/52fd7d1349dbb217be7e7a2e458d414316481b85a58fcf738a6e1ab3cd6d8e8bb74bbc9d25c04bea900e06d7c974086ce4501956243c7b442cd5009b25ecfd23
+  checksum: 10c0/b3eecae069e2ae37544a7799f59a66b0f892d0a3d2a89f3f8e881c379a45232bb3ef2afc3d6c85fc3a83935f64c9149240db74972a6ee3feb6605b1622fec2d4
   languageName: node
   linkType: hard
 

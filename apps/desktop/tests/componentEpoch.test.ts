@@ -43,3 +43,4 @@ describe("withComponentEpoch", () => {
     expect(epoch?.assertAlive(pending)).toBe(false);
   });
 });
+

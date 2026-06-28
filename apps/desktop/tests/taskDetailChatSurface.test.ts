@@ -249,3 +249,4 @@ describe("TaskDetailChatSurface", () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(41);
   });
 });
+

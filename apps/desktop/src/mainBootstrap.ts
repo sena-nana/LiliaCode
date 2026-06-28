@@ -65,3 +65,4 @@ export function mountLiliaApp(): void {
   installAgentDebugHarness(router);
   scheduleGlobalInstallers();
 }
+

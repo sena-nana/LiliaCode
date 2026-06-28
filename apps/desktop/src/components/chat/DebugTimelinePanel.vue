@@ -9,7 +9,7 @@ import {
   Rows3,
   SquareStack,
   Terminal,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { useDebugTimelineInteractions } from "../../composables/useDebugTimelineInteractions";
 
 const props = defineProps<{
@@ -63,3 +63,4 @@ const groups = [
     </section>
   </div>
 </template>
+

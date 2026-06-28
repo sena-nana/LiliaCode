@@ -5,7 +5,7 @@
  */
 
 import { computed, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from "vue";
-import { ChevronDown } from "lucide-vue-next";
+import { ChevronDown } from "@lucide/vue";
 import { SB_MENU_POP_TRANSITION_MS } from "../composables/menuMotion";
 import { useAnchoredMenuMotion } from "../composables/useAnchoredMenuMotion";
 import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
@@ -168,3 +168,4 @@ onBeforeUnmount(() => {
     </Teleport>
   </div>
 </template>
+

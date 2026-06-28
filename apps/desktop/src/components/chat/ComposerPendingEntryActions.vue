@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ArrowRight, ArrowUp, Square } from "lucide-vue-next";
+import { ArrowLeft, ArrowRight, ArrowUp, Square } from "@lucide/vue";
 import type { ToolConsentDecision } from "../../services/chat";
 import type { ComposerPendingEntryActionsMode } from "./useComposerPendingInteraction";
 
@@ -137,3 +137,4 @@ const emit = defineEmits<{
     </button>
   </div>
 </template>
+

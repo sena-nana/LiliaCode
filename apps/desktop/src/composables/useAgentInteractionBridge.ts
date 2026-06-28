@@ -77,3 +77,4 @@ export async function installAgentInteractionBridge(): Promise<() => void> {
     installed = false;
   };
 }
+

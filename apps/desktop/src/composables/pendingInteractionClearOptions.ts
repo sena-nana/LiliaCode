@@ -21,3 +21,4 @@ export function shouldClearPendingInteraction(
   if (candidate.requestId && options.keepRequestIds?.has(candidate.requestId)) return false;
   return true;
 }
+

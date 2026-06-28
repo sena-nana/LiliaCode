@@ -139,3 +139,4 @@ describe("interaction composables", () => {
     expect(editor.commandDraft.value).toBe("git status");
   });
 });
+

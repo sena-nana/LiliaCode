@@ -330,3 +330,4 @@ function processAnchorIdsForEntry(entry: TimelineEntry): string[] {
     </ol>
   </section>
 </template>
+

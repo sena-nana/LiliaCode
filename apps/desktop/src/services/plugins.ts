@@ -181,3 +181,4 @@ export function deleteHookSource(source: HookSourceSummary): Promise<void> {
 export function openHookConfig(source: HookSourceSummary): Promise<void> {
   return invoke<void>(PLUGINS_OPEN_HOOK_CONFIG_COMMAND, { source });
 }
+

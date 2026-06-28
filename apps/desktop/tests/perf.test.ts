@@ -77,3 +77,4 @@ describe("perf utilities", () => {
     expect(message).toContain('seq="3"');
   });
 });
+

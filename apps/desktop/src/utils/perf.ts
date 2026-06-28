@@ -271,3 +271,4 @@ export function installPerfObservers() {
     longTaskObserverInstalled = false;
   }
 }
+

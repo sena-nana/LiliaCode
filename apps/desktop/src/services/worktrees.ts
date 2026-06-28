@@ -43,3 +43,4 @@ export function cleanupArchiveWorktree(taskId: string): Promise<WorktreeMergeRes
 export function mergeDeleteArchiveWorktree(taskId: string): Promise<WorktreeMergeResult> {
   return invoke<WorktreeMergeResult>(WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND, { taskId });
 }
+

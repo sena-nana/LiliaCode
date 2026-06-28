@@ -239,3 +239,4 @@ describe("ImageViewer", () => {
     expect(nextImage.style.cursor).toBe("default");
   });
 });
+

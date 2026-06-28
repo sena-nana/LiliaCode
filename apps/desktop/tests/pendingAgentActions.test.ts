@@ -557,3 +557,4 @@ describe("pending agent actions", () => {
     expect(pendingActionForTimelineEvent(permissionEvent, actions.value)).toBe(actions.value[1]);
   });
 });
+

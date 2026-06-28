@@ -25,3 +25,4 @@ export function domRect(x: number, y: number, width: number, height: number): DO
     toJSON: () => ({}),
   } as DOMRect;
 }
+

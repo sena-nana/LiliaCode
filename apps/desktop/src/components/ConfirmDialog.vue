@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 通用确认弹层。同一时刻只允许一个 confirm 在弹——不做嵌套堆叠管理。 */
-import { AlertTriangle } from "lucide-vue-next";
+import { AlertTriangle } from "@lucide/vue";
 
 defineProps<{
   open: boolean;
@@ -70,3 +70,4 @@ function onKeydown(e: KeyboardEvent) {
     </Transition>
   </Teleport>
 </template>
+

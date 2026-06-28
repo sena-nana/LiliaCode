@@ -5,7 +5,7 @@ export interface ContextMenuItem {
   /** 可选稳定 key，没给就用 index。 */
   id?: string;
   label: string;
-  /** 可选图标组件（lucide-vue-next 之类）。 */
+  /** 可选图标组件（@lucide/vue 之类）。 */
   icon?: Component;
   disabled?: boolean;
   /** 红色危险项（删除之类）。 */
@@ -137,3 +137,5 @@ export function useContextMenu() {
     select: selectContextMenuItem,
   };
 }
+
+

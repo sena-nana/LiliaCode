@@ -1014,3 +1014,4 @@ describe("SecondaryPanel project tree drag", () => {
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_REPARENT_COMMAND)).toBe(false);
   });
 });
+

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FolderPlus } from "lucide-vue-next";
+import { FolderPlus } from "@lucide/vue";
 import type { Project } from "@lilia/contracts";
 import { useSidebarAddMenu } from "../../composables/useSidebarAddMenu";
 import SidebarProjectAddMenu from "../sidebar/SidebarProjectAddMenu.vue";
@@ -68,3 +68,4 @@ function onSelect(event: Event) {
     />
   </div>
 </template>
+

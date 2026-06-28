@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Puzzle, Server, Sparkles, Workflow } from "lucide-vue-next";
+import { Puzzle, Server, Sparkles, Workflow } from "@lucide/vue";
 import type { PluginsTab } from "./usePluginsOverview";
 
 defineProps<{
@@ -87,3 +87,4 @@ const emit = defineEmits<{
     </button>
   </div>
 </template>
+

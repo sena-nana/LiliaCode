@@ -8,7 +8,7 @@ import {
   Gauge,
   RotateCcw,
   RefreshCw,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   type CodexAccountQuotaStatus,
   connectionModeUsesCodexAccount,
@@ -1437,3 +1437,4 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+

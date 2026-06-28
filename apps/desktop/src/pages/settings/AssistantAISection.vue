@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { AlertTriangle, KeyRound, Plug, Save, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, KeyRound, Plug, Save, Sparkles } from "@lucide/vue";
 import type {
   AssistantAIConfig,
   AssistantAIModelPoolItem,
@@ -264,3 +264,4 @@ onBeforeUnmount(() => {
     <p v-else class="muted" style="margin: 8px 0 0;">暂无备选模型</p>
   </div>
 </template>
+

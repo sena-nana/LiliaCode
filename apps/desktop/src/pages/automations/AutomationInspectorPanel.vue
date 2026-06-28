@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { CircleHelp, Play } from "lucide-vue-next";
+import { CircleHelp, Play } from "@lucide/vue";
 import {
   DEFAULT_AUTOMATION_HUMAN_PROMPT,
   AUTOMATION_WAITING_USER_STATUS,
@@ -274,3 +274,4 @@ function formatTime(value: number | null): string {
     </section>
   </div>
 </template>
+

@@ -74,3 +74,4 @@ function createConversationReferenceSignature(conversationReferences: ChatConver
       ].join("\u0001"))
     .join("\u0002");
 }
+

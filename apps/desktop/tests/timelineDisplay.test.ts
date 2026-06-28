@@ -813,3 +813,4 @@ describe("timeline event expansion", () => {
     expect(view.container.querySelector(".agent-timeline__preview")).toHaveTextContent("用户已中断");
   });
 });
+

@@ -145,3 +145,4 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
     saveMcpServer,
   };
 }
+

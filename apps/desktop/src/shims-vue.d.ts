@@ -11,3 +11,4 @@ declare module "vue" {
     vContextMenu: typeof vContextMenu;
   }
 }
+

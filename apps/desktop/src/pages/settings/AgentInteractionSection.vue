@@ -5,7 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Sparkles,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { AgentInteractionSettings, MainAgentPromptMode, PermissionMode } from "@lilia/contracts";
 import {
   AUTO_TURN_DECISION_PERMISSION_OPTIONS,
@@ -912,3 +912,4 @@ onBeforeUnmount(() => {
   opacity: 0.78;
 }
 </style>
+

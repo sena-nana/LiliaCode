@@ -69,3 +69,4 @@ export async function installCombinedUnlisten(installers: UnlistenInstaller[]): 
     runUnlistenFns(unlisteners.splice(0).reverse());
   };
 }
+

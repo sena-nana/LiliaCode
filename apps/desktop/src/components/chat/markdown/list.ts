@@ -103,3 +103,4 @@ export function parseListItem(line: string): ParsedListItem | null {
     taskChecked: task ? (task[1] ?? "").toLowerCase() === "x" : null,
   };
 }
+

@@ -4,7 +4,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { ToolConsentRequest } from "../../services/chat";
 import EditableCommandBlock from "./EditableCommandBlock.vue";
 
@@ -98,3 +98,4 @@ const emit = defineEmits<{
     <slot />
   </section>
 </template>
+

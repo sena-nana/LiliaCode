@@ -11,7 +11,7 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar";
@@ -248,3 +248,4 @@ function onToggleChatSidebar() {
     </div>
   </header>
 </template>
+

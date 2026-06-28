@@ -6,7 +6,7 @@ import {
   LayoutGrid,
   Plus,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Project } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type {
@@ -98,3 +98,4 @@ const emit = defineEmits<{
     </div>
   </div>
 </template>
+

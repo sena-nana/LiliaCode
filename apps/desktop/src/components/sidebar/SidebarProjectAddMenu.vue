@@ -4,7 +4,7 @@ import {
   FolderOpen,
   FolderPlus,
   Github,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Project } from "@lilia/contracts";
 import CategoryDialog from "./CategoryDialog.vue";
 import {
@@ -193,3 +193,4 @@ onBeforeUnmount(() => {
     @confirm="confirmCategory"
   />
 </template>
+

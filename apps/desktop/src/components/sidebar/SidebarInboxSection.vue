@@ -4,7 +4,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Plus,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type { OrphanConversation } from "../../services/tasksStore";
@@ -84,3 +84,4 @@ function isActiveOrphan(taskId: string) {
     </div>
   </div>
 </template>
+

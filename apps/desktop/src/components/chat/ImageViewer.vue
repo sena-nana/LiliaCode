@@ -269,3 +269,4 @@ function formatFileSize(size: number | null | undefined): string {
     </figure>
   </div>
 </template>
+

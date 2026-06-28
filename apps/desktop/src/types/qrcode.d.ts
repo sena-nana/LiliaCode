@@ -13,3 +13,4 @@ declare module "qrcode" {
     options?: QRCodeToDataURLOptions,
   ): Promise<string>;
 }
+

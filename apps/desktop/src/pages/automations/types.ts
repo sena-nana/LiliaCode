@@ -26,3 +26,4 @@ export interface AutomationFlowConnection {
   sourceHandle?: string | null;
   targetHandle?: string | null;
 }
+

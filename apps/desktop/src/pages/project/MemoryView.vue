@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { Check, Pencil, Plus, RotateCcw, Save, Trash2 } from "lucide-vue-next";
+import { Check, Pencil, Plus, RotateCcw, Save, Trash2 } from "@lucide/vue";
 import {
   DEFAULT_MEMORY_SETTINGS,
   MEMORY_SCOPE_DISPLAY_SPECS,
@@ -613,3 +613,4 @@ input:disabled {
   }
 }
 </style>
+

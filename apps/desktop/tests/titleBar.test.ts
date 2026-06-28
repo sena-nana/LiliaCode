@@ -158,3 +158,4 @@ describe("TitleBar breadcrumbs", () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(23);
   });
 });
+

@@ -70,3 +70,4 @@ export async function renderMermaidDiagram(
     { detail: `${source.length} chars` },
   );
 }
+

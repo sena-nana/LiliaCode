@@ -370,3 +370,4 @@ describe("TaskDetail chat sidebar toggle", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe("0");
   });
 });
+

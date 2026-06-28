@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { ChevronDown, ChevronRight, RotateCcw } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, RotateCcw } from "@lucide/vue";
 import type { AgentTimelineEvent, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,
@@ -470,3 +470,4 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
     </article>
   </li>
 </template>
+

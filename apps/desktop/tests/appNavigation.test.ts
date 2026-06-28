@@ -318,3 +318,4 @@ describe("App main navigation events", () => {
     );
   });
 });
+

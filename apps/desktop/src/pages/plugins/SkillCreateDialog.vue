@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Sparkles } from "lucide-vue-next";
+import { Sparkles } from "@lucide/vue";
 
 defineProps<{
   open: boolean;
@@ -72,3 +72,4 @@ const emit = defineEmits<{
     </Transition>
   </Teleport>
 </template>
+

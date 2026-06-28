@@ -906,3 +906,4 @@ watch(
     @draft-project-picker-error="onDraftProjectPickerError"
   />
 </template>
+

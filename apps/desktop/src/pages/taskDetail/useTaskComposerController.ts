@@ -1358,3 +1358,4 @@ function stripRestoredReferences(
   next = stripSerializedConversationReferences(next, conversationReferences);
   return next.replace(/[ \t]{2,}/g, " ").trim();
 }
+

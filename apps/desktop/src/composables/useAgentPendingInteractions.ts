@@ -140,3 +140,4 @@ export async function respondPermissionApproval(
   } satisfies AgentInteractionResponse);
   clearPending(taskId, requestId);
 }
+

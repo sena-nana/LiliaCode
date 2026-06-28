@@ -13,3 +13,4 @@ export function registerTaskDetailDebugSidebarPanel() {
 export function registerTaskDetailIabSidebarPanel() {
   return registerIabChatSidebarPanel();
 }
+

@@ -17,3 +17,4 @@ describe("main bootstrap installers", () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(37);
   });
 });
+

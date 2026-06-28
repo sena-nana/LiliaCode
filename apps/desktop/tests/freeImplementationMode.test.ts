@@ -314,3 +314,4 @@ describe("pending action auto-decision labels", () => {
     expect(pendingAutoDecisionLabel("permission_approval")).toBe("同意权限请求");
   });
 });
+

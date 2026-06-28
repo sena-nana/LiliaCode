@@ -59,3 +59,4 @@ export function openPopupChildQuestion(
 export function focusMainWindow(route: string): Promise<void> {
   return invoke<void>(POPUP_FOCUS_MAIN_COMMAND, { route });
 }
+

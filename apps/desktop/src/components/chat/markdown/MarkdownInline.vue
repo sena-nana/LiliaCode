@@ -78,3 +78,4 @@ function openMarkdownImage(token: InlineToken) {
     <template v-else>{{ token.text }}</template>
   </template>
 </template>
+

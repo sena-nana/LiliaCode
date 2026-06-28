@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, GitMerge, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
+import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, GitMerge, Loader2, MessageSquarePlus, Pin } from "@lucide/vue";
 import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
@@ -345,3 +345,4 @@ watch(() => props.task.id, refreshWorktreeBinding);
     </div>
   </component>
 </template>
+

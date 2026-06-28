@@ -6,7 +6,7 @@ import {
   Search,
   Terminal,
   Wrench,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { ToolConsentRequest } from "../services/chat";
 
 const DANGEROUS_BASH_RE =
@@ -106,3 +106,4 @@ function pickObvious(input: Record<string, unknown> | null | undefined): string 
   }
   return "";
 }
+

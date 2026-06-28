@@ -250,3 +250,4 @@ function compareTimelineEntries(a: TimelineEventEntry, b: TimelineEventEntry): n
     a.createdAt - b.createdAt ||
     a.id.localeCompare(b.id);
 }
+

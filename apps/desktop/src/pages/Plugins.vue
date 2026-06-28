@@ -10,7 +10,7 @@ import {
   Plus,
   Search,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   hookScopeLabel,
   hookSourceEditLabel,
@@ -1100,3 +1100,4 @@ function canOpenConfig(entry: PluginEntry) {
     />
   </section>
 </template>
+

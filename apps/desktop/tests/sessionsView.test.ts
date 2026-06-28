@@ -159,3 +159,4 @@ describe("SessionsView", () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(101);
   });
 });
+

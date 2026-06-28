@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Brain, MessageSquarePlus, Save } from "lucide-vue-next";
+import { Brain, MessageSquarePlus, Save } from "@lucide/vue";
 import type {
   AssistantAIModelPoolItem,
   ModelFeatureSettings,
@@ -208,3 +208,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+

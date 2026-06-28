@@ -35,3 +35,4 @@ export function imageViewerSourceFromAttachment(
     size: attachment.size ?? null,
   };
 }
+

@@ -79,3 +79,4 @@ describe("event listener lifecycle helpers", () => {
     expect(removeSpy).toHaveBeenCalledWith("test-event", listener, undefined);
   });
 });
+

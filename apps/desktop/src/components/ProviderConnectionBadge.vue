@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { AlertTriangle, Download, Loader2, LogIn, RefreshCw, RotateCw, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, Download, Loader2, LogIn, RefreshCw, RotateCw, Sparkles } from "@lucide/vue";
 import {
   chatBackendLabel,
   codexAccountQuotaWindowRemainingLine as quotaRemainingLine,
@@ -700,3 +700,4 @@ onBeforeUnmount(() => {
     </span>
   </Teleport>
 </template>
+

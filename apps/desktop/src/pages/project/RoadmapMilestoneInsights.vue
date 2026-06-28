@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
-import { ArrowDown, ArrowUp, Trash2 } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, Trash2 } from "@lucide/vue";
 import {
   PROJECT_ROADMAP_STATUS_ORDER,
   countProjectTaskStatuses,
@@ -321,3 +321,4 @@ function taskRelationMeta(task: Task): string {
     </div>
   </section>
 </template>
+

@@ -1349,3 +1349,4 @@ describe("Settings provider switch", () => {
     ).toBe(true);
   });
 });
+

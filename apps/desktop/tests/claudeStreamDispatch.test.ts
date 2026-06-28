@@ -243,3 +243,4 @@ describe("finalizeClaudeReasoningBlocks", () => {
     expect(state.streamBlocks.size).toBe(0);
   });
 });
+

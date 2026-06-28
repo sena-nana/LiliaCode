@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { FileText, Folder, Hash, Image, Paperclip } from "lucide-vue-next";
+import { FileText, Folder, Hash, Image, Paperclip } from "@lucide/vue";
 import type { ChatAttachment, ChatConversationReference, ChatMessage } from "@lilia/contracts";
 import {
   attachmentImageSrc,
@@ -115,4 +115,5 @@ function conversationReferenceScope(reference: ChatConversationReference) {
     </div>
   </div>
 </template>
+
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { AlertTriangle, Keyboard, Save, Trash2 } from "lucide-vue-next";
+import { AlertTriangle, Keyboard, Save, Trash2 } from "@lucide/vue";
 import type { PopupWindowSettings } from "@lilia/contracts";
 import {
   getPopupWindowSettings,
@@ -150,3 +150,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+

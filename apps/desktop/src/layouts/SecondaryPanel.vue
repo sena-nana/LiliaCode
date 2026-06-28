@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { AlertTriangle, MessageSquarePlus, X } from "lucide-vue-next";
+import { AlertTriangle, MessageSquarePlus, X } from "@lucide/vue";
 import type { TreeDragKind } from "../composables/useSidebarTreeDrag";
 import {
   createDraftOrphan,
@@ -332,3 +332,4 @@ function prefetchTaskDetailIntent(detail: string) {
     <SidebarConnectionFooter />
   </aside>
 </template>
+

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Plus } from "lucide-vue-next";
+import { Plus } from "@lucide/vue";
 import type {
   AgentTimelineEvent,
   AskUserResult,
@@ -610,3 +610,4 @@ function selectSuggestion(suggestion: SuggestionItem) {
     <div class="empty-state">未找到任务 <code>{{ taskId }}</code></div>
   </section>
 </template>
+

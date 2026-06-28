@@ -78,3 +78,4 @@ describe("global data listener installation", () => {
     errorSpy.mockRestore();
   });
 });
+

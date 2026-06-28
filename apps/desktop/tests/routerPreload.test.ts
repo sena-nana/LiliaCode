@@ -43,3 +43,4 @@ describe("router task detail preload", () => {
     expect(cancelIdleCallback).toHaveBeenCalledWith(29);
   });
 });
+

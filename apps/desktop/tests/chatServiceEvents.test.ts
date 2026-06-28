@@ -80,3 +80,4 @@ describe("chat service timeline events", () => {
     expect(seen).toEqual(["gpt-5.4-mini"]);
   });
 });
+

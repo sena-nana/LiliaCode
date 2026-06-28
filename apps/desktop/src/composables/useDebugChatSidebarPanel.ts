@@ -8,3 +8,4 @@ export function registerDebugChatSidebarPanel(): () => void {
     loader: async () => (await import("../components/chat/DebugTimelinePanel.vue")).default,
   });
 }
+

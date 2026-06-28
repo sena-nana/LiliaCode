@@ -62,3 +62,4 @@ describe("taskTimelineLoadMergePlan", () => {
     expect(plan.liveEventsToReplay).toEqual([]);
   });
 });
+

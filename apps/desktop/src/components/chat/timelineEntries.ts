@@ -98,3 +98,4 @@ export function processGroupEntries(entry: TimelineEventEntry): TimelineEntry[] 
   }));
   return mergeAdjacentTimelineGroups(entries);
 }
+

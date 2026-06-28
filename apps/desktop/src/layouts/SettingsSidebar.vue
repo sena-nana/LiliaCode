@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft } from "lucide-vue-next";
+import { ArrowLeft } from "@lucide/vue";
 import {
   SETTINGS_TABS,
   normalizeSettingsTab,
@@ -67,3 +67,4 @@ function openTab(tab: SettingsTabKey) {
     </nav>
   </aside>
 </template>
+

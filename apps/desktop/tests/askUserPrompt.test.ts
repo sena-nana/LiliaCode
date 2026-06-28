@@ -204,3 +204,4 @@ describe("ChatComposer AskUser pending prompt", () => {
     expect(view.getByRole("button", { name: "同意" })).toBeInTheDocument();
   });
 });
+

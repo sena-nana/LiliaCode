@@ -3,7 +3,7 @@ import { RouterLink } from "vue-router";
 import {
   GitBranch,
   Settings,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import ProviderConnectionBadge from "../ProviderConnectionBadge.vue";
 </script>
 
@@ -38,3 +38,4 @@ import ProviderConnectionBadge from "../ProviderConnectionBadge.vue";
   </div>
 
 </template>
+

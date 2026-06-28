@@ -6,7 +6,7 @@ import {
   RotateCw,
   Smartphone,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { toDataURL } from "qrcode";
 import type { RemoteControlStatus } from "@lilia/contracts";
 import {
@@ -443,3 +443,4 @@ onBeforeUnmount(stopRemoteControlPolling);
   }
 }
 </style>
+

@@ -245,3 +245,4 @@ describe("MarkdownBlock", () => {
     expect(view.container.querySelector('[data-testid="mermaid-svg"]')).toBeInTheDocument();
   });
 });
+

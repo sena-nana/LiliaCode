@@ -24,7 +24,7 @@ import {
   Image,
   Paperclip,
   Square,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   ASK_USER_MULTI_SELECT_MODE,
   ASK_USER_SINGLE_SELECT_MODE,
@@ -1869,3 +1869,4 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
     </Transition>
   </div>
 </template>
+
