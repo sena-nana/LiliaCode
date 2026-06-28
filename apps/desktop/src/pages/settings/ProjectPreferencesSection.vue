@@ -383,15 +383,22 @@ onBeforeUnmount(() => {
             已有工作树
           </button>
         </div>
-        <label class="ui-checkbox">
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">归档时自动清理工作树</div>
+      <div class="settings-row__control">
+        <label class="ui-switch">
           <input
             type="checkbox"
+            role="switch"
+            aria-label="归档时自动清理工作树"
             data-agent-id="settings.project.worktree.cleanup-on-archive"
             :checked="normalizeWorktreeSettings(projectSettings.worktree).cleanupOnArchive"
             :disabled="savingProject"
             @change="setWorktreeCleanup(($event.target as HTMLInputElement).checked)"
           />
-          <span>归档时自动清理工作树</span>
         </label>
       </div>
     </div>
