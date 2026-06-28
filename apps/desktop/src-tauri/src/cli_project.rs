@@ -15,6 +15,7 @@ use crate::{app_events_contract, store::LiliaStore, util::now_millis, MAIN_WINDO
 
 const STORE_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const STORE_READY_POLL: Duration = Duration::from_millis(50);
+const CLI_DEBUG_ENV: &str = "LILIA_CLI_DEBUG";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +60,7 @@ fn handle_cli_project_args<R: Runtime>(
     cwd: PathBuf,
     emit_immediately: bool,
 ) {
+    debug_cli_message(format!("received cwd={} argv={argv:?}", cwd.display()));
     let project_path_arg = match parse_project_path_arg(&argv) {
         Ok(Some(value)) => value,
         Ok(None) => return,
@@ -69,8 +71,23 @@ fn handle_cli_project_args<R: Runtime>(
     };
 
     match resolve_cli_project_open(app, &project_path_arg, &cwd) {
-        Ok(payload) => publish_cli_project_open(app, payload, emit_immediately),
+        Ok(payload) => {
+            debug_cli_message(format!(
+                "resolved project_id={} cwd={}",
+                payload.project_id, payload.cwd
+            ));
+            publish_cli_project_open(app, payload, emit_immediately);
+        }
         Err(err) => eprintln!("[liliacode] {err}"),
+    }
+}
+
+fn debug_cli_message(message: String) {
+    let enabled = env::var(CLI_DEBUG_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    if enabled {
+        eprintln!("[liliacode:debug] {message}");
     }
 }
 
