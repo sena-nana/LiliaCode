@@ -23,6 +23,24 @@ function log(message) {
   console.log(`[release:smoke:windows] ${message}`);
 }
 
+function bufferOutput(buffer, source, chunk) {
+  buffer.push(`[${source}] ${chunk.toString("utf8")}`);
+  if (buffer.length > 200) {
+    buffer.splice(0, buffer.length - 200);
+  }
+}
+
+function logBufferedOutput(label, buffer) {
+  if (buffer.length === 0) {
+    log(`${label}: no output captured`);
+    return;
+  }
+  log(`${label}:`);
+  for (const line of buffer.join("").split(/\r?\n/).filter(Boolean).slice(-80)) {
+    log(`  ${line}`);
+  }
+}
+
 function fail(message) {
   throw new Error(message);
 }
@@ -244,6 +262,7 @@ function main() {
   const cliCmd = path.join(installDir, "liliacode.cmd");
   const uninstaller = path.join(installDir, "uninstall.exe");
   let installed = false;
+  const appOutput = [];
 
   log(`Installer: ${installer}`);
   log(`Install dir: ${installDir}`);
@@ -266,7 +285,7 @@ function main() {
       waitUntil(`installed runtime resource ${filename}`, () => fs.existsSync(resourcePath));
     }
 
-    const runtimeEnv = freshWindowsEnv({ LILIA_HOME: liliaHome });
+    const runtimeEnv = freshWindowsEnv({ LILIA_HOME: liliaHome, LILIA_CLI_DEBUG: "1" });
     const installedCli = resolveLiliacode(runtimeEnv);
     if (!installedCli.some((candidate) => pathKey(candidate) === pathKey(cliCmd))) {
       fail(`A fresh cmd environment did not resolve this smoke install's liliacode.cmd:\n${installedCli.join("\n")}`);
@@ -277,9 +296,11 @@ function main() {
     const app = spawn(installedExe, [], {
       env: runtimeEnv,
       detached: false,
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: false,
     });
+    app.stdout?.on("data", (chunk) => bufferOutput(appOutput, "stdout", chunk));
+    app.stderr?.on("data", (chunk) => bufferOutput(appOutput, "stderr", chunk));
     app.unref();
     waitUntil(`${processName} to start`, () => isProcessRunning());
     log("Installed app process started");
@@ -291,6 +312,7 @@ function main() {
     try {
       waitUntil("CLI project path in the Lilia store", () => storeContainsProjectPath(liliaHome, testProject));
     } catch (err) {
+      logBufferedOutput("Installed app output", appOutput);
       logStoreDiagnostics(liliaHome, testProject);
       throw err;
     }
