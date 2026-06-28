@@ -38,7 +38,7 @@
 ## 已知限制
 
 - 当前只发布 Windows 安装包。
-- 当前安装包没有代码签名，Windows SmartScreen 或安全软件提示属于预期风险。
+- 当前安装包使用 `tauri-signing.key` 完成 Tauri 签名。
 - 当前不包含 Tauri updater 自动更新能力。
 - 当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包。
 
