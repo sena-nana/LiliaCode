@@ -167,6 +167,8 @@ import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "./pluginCommands";
 type Args = Record<string, unknown>;
 type UnlistenFn = () => void;
 
+const SERIALIZE_TO_IPC_FN = "__TAURI_TO_IPC_KEY__";
+let mockChannelId = 0;
 const now = 1_720_000_000_000;
 
 const projects = [
@@ -434,6 +436,7 @@ function architecture(projectId: string) {
 export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
   if (emptyLists.has(cmd)) return [] as T;
   if (noops.has(cmd)) return undefined as T;
+  if (cmd.startsWith("plugin:updater|")) return null as T;
 
   switch (cmd) {
     case AGENT_DEBUG_STATUS_COMMAND:
@@ -1034,6 +1037,33 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       console.warn(`[lilia:dev-mock] Unhandled Tauri command: ${cmd}`, args);
       return undefined as T;
   }
+}
+
+export { SERIALIZE_TO_IPC_FN };
+
+export class Channel {
+  id = `mock-channel-${++mockChannelId}`;
+  onmessage?: (message: unknown) => void;
+
+  [SERIALIZE_TO_IPC_FN](): string {
+    return `__CHANNEL__:${this.id}`;
+  }
+
+  toJSON() {
+    return this[SERIALIZE_TO_IPC_FN]();
+  }
+}
+
+export class Resource {
+  constructor(public rid: number | string) {}
+
+  async close(): Promise<void> {
+    return undefined;
+  }
+}
+
+export function isTauri(): boolean {
+  return false;
 }
 
 export function convertFileSrc(path: string): string {
