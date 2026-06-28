@@ -151,7 +151,8 @@ fn parse_project_path_arg(argv: &[String]) -> Result<Option<String>, String> {
         .skip(1)
         .filter_map(|arg| {
             let trimmed = arg.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
+            let unquoted = trim_surrounding_quotes(trimmed).trim();
+            (!unquoted.is_empty()).then(|| unquoted.to_string())
         })
         .collect::<Vec<_>>();
 
@@ -160,6 +161,13 @@ fn parse_project_path_arg(argv: &[String]) -> Result<Option<String>, String> {
         [path] => Ok(Some(path.clone())),
         _ => Err("用法：liliacode <path>".to_string()),
     }
+}
+
+fn trim_surrounding_quotes(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(value)
 }
 
 fn resolve_project_path(project_path_arg: &str, cwd: &Path) -> Result<PathBuf, String> {
@@ -292,6 +300,18 @@ mod tests {
         assert_eq!(
             parse_project_path_arg(&["LiliaCode.exe".to_string(), "C:\\work\\Lilia".to_string(),])
                 .unwrap(),
+            Some("C:\\work\\Lilia".to_string()),
+        );
+    }
+
+    #[test]
+    fn parse_project_path_arg_trims_cmd_wrapper_quotes() {
+        assert_eq!(
+            parse_project_path_arg(&[
+                "LiliaCode.exe".to_string(),
+                r#""C:\work\Lilia""#.to_string(),
+            ])
+            .unwrap(),
             Some("C:\\work\\Lilia".to_string()),
         );
     }
