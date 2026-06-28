@@ -86,13 +86,13 @@ GitHub Actions 会在 pull request 到 `main`、推送到 `main` 或手动触发
 推送到 `main` 后，文档站会继续由 Pages workflow 自动发布。发布 Windows 桌面安装包前，先同步并检查四处版本号：根 `package.json`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json`。版本号必须与发布 tag 去掉 `v` 后一致。
 
 ```bash
-yarn release:check --tag v1.0.0-beta
+yarn release:check --tag v1.0.0-beta.1
 ```
 
 检查通过后推送 `v*` tag：
 
 ```bash
-git tag v1.0.0-beta && git push origin v1.0.0-beta
+git tag v1.0.0-beta.1 && git push origin v1.0.0-beta.1
 ```
 
 Release workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri NSIS 安装包，并上传到 draft GitHub Release。安装包命名按 `LiliaCode_<version>_x64-setup.*` 检查；release draft 会附带首发检查清单和自动生成的变更记录。
@@ -102,13 +102,13 @@ Release workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`
 `release:smoke:windows` 可重复执行 Windows 安装包 smoke：从本地安装包或 draft Release 安装包出发，覆盖安装、启动、`liliacode <测试项目路径>` 和卸载后的 CLI 清理。CI 会在 draft Release 生成后自动运行：
 
 ```bash
-yarn release:smoke:windows --tag v1.0.0-beta
+yarn release:smoke:windows --tag v1.0.0-beta.1
 ```
 
 本地复核已有安装包时传入安装包路径：
 
 ```bash
-yarn release:smoke:windows --installer path/to/LiliaCode_1.0.0-beta_x64-setup.exe
+yarn release:smoke:windows --installer path/to/LiliaCode_1.0.0-beta.1_x64-setup.exe
 ```
 
 正式发布前，仍需要在 Release 正文的 Windows 安装验证记录中写入验证人、验证日期、Windows 环境、安装包文件名和安装 / 启动 / CLI / 卸载结果。
@@ -130,3 +130,4 @@ yarn icons:generate
 ```bash
 yarn icons:tauri
 ```
+

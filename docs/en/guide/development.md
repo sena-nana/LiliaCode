@@ -74,13 +74,13 @@ GitHub Actions runs CI for pull requests to `main`, pushes to `main`, and manual
 After pushing to `main`, the Pages workflow continues to publish the documentation site automatically. Before publishing a Windows desktop installer, sync and check the four version sources: root `package.json`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json`. They must match the release tag without the leading `v`.
 
 ```bash
-yarn release:check --tag v1.0.0-beta
+yarn release:check --tag v1.0.0-beta.1
 ```
 
 After the check passes, push a `v*` tag:
 
 ```bash
-git tag v1.0.0-beta && git push origin v1.0.0-beta
+git tag v1.0.0-beta.1 && git push origin v1.0.0-beta.1
 ```
 
 The release workflow runs `yarn verify` and `yarn release:check --tag <tag>` first, then builds the Windows Tauri NSIS bundle and uploads it to a draft GitHub Release. Installer asset names are checked against `LiliaCode_<version>_x64-setup.*`; the draft release includes a first-release checklist and generated release notes.
@@ -102,3 +102,4 @@ yarn icons:generate
 ```bash
 yarn icons:tauri
 ```
+
