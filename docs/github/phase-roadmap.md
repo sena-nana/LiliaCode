@@ -32,7 +32,7 @@ labels: release,area: docs
 #### 任务清单
 
 - [ ] 核对版本号、tag、release workflow 和 release notes 模板。
-- [ ] 保留未签名、无自动更新、仅 Windows 安装包等已知限制。
+- [ ] 保留签名链路、无自动更新、仅 Windows 安装包等已知限制。
 - [ ] 完成安装、启动、命令行入口和卸载验证记录。
 
 #### 完成条件

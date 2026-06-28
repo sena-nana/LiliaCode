@@ -8,25 +8,6 @@
           <span>版本</span>
           <span>
             <span class="about-version-value">{{ appVersion }}</span>
-            <button
-              type="button"
-              class="primary about-version-action"
-              data-agent-id="settings.about.updater.check"
-              :disabled="checking || installing"
-              @click="checkForUpdate"
-            >
-              {{ checking ? "检查中" : "检查更新" }}
-            </button>
-            <button
-              v-if="pendingUpdate"
-              type="button"
-              class="primary about-version-action"
-              data-agent-id="settings.about.updater.install"
-              :disabled="installing"
-              @click="installUpdate"
-            >
-              {{ installing ? "安装中" : "下载并安装" }}
-            </button>
           </span>
         </li>
       </ul>
@@ -69,9 +50,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { ChevronRight } from "@lucide/vue";
-import { check, type Update } from "@tauri-apps/plugin-updater";
 import openSourceLicenseManifest from "../../generated/openSourceLicenseManifest.json";
 
 interface OpenSourceLicenseManifestDependency {
@@ -105,33 +85,6 @@ const appName = computed(() => manifest?.app?.name || "LiliaCode");
 const appVersion = computed(() => manifest?.app?.version ?? "1.0.0-beta.1");
 const npmDependencies = computed(() => manifest?.npmDependencies ?? []);
 const rustDependencies = computed(() => manifest?.rustDependencies ?? []);
-const checking = ref(false);
-const installing = ref(false);
-const pendingUpdate = ref<Update | null>(null);
-
-async function checkForUpdate() {
-  checking.value = true;
-  pendingUpdate.value = null;
-  try {
-    const update = await check();
-    pendingUpdate.value = update;
-  } catch {
-  } finally {
-    checking.value = false;
-  }
-}
-
-async function installUpdate() {
-  if (!pendingUpdate.value) return;
-  installing.value = true;
-  try {
-    await pendingUpdate.value.downloadAndInstall(() => {});
-    pendingUpdate.value = null;
-  } catch {
-  } finally {
-    installing.value = false;
-  }
-}
 </script>
 
 <style scoped>
@@ -146,13 +99,6 @@ async function installUpdate() {
   gap: 8px;
   justify-content: flex-end;
   align-items: center;
-}
-
-.about-version-action {
-  height: 22px;
-  padding: 0 8px;
-  font-size: 12px;
-  line-height: 1;
 }
 
 .about-license-fallback {

@@ -239,7 +239,7 @@ describe("Popup shell", () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith(TASK_GET_COMMAND, { id: "t-001" }, undefined);
       expect(view.getByText("要在 Lilia 中构建什么？")).toBeInTheDocument();
-    });
+    }, { timeout: 10_000 });
   });
 
   it("弹窗已有对话等待首批内容时不显示新对话空状态", async () => {

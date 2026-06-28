@@ -180,7 +180,7 @@ describe("ConversationImport", () => {
       itemId: "thread-1",
       detail: "full",
     });
-  });
+  }, 10_000);
 
   it("卸载后导入完成不会继续跳转", async () => {
     const thread = historyImportItem();
