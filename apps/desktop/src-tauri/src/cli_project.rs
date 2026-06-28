@@ -2,6 +2,8 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     sync::Mutex,
+    thread,
+    time::{Duration, Instant},
 };
 
 use rusqlite::{params, Connection};
@@ -10,6 +12,9 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use uuid::Uuid;
 
 use crate::{app_events_contract, store::LiliaStore, util::now_millis, MAIN_WINDOW_LABEL};
+
+const STORE_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const STORE_READY_POLL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,11 +101,17 @@ fn resolve_cli_project_open<R: Runtime>(
 ) -> Result<CliProjectOpenPayload, String> {
     let path = resolve_project_path(project_path_arg, cwd)?;
     let cwd = display_path(&path);
-    let Some(store) = app.try_state::<LiliaStore>() else {
-        return Err("项目存储尚未初始化".to_string());
-    };
-    let conn = store.conn()?;
-    ensure_project_for_cwd(&conn, &cwd)
+    let started = Instant::now();
+    loop {
+        if let Some(store) = app.try_state::<LiliaStore>() {
+            let conn = store.conn()?;
+            return ensure_project_for_cwd(&conn, &cwd);
+        }
+        if started.elapsed() >= STORE_READY_TIMEOUT {
+            return Err("项目存储尚未初始化".to_string());
+        }
+        thread::sleep(STORE_READY_POLL);
+    }
 }
 
 fn parse_project_path_arg(argv: &[String]) -> Result<Option<String>, String> {

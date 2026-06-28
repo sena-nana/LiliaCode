@@ -141,19 +141,37 @@ function fileContainsText(filePath, needles) {
   }
 }
 
-function storeContainsProjectPath(liliaHome, projectPath) {
-  const dbDir = path.join(liliaHome, "db");
-  const dbFiles = ["lilia.db", "lilia.db-wal"].map((name) => path.join(dbDir, name));
+function projectPathNeedles(projectPath) {
   const candidates = [path.resolve(projectPath)];
   try {
     candidates.push(fs.realpathSync.native(projectPath));
   } catch {
   }
-  const needles = Array.from(new Set(candidates.flatMap((candidate) => {
+  return Array.from(new Set(candidates.flatMap((candidate) => {
     const normalized = displayPath(candidate);
     return [normalized, normalized.replaceAll("/", "\\")];
   })));
+}
+
+function storeContainsProjectPath(liliaHome, projectPath) {
+  const dbDir = path.join(liliaHome, "db");
+  const dbFiles = ["lilia.db", "lilia.db-wal"].map((name) => path.join(dbDir, name));
+  const needles = projectPathNeedles(projectPath);
   return dbFiles.some((filePath) => fileContainsText(filePath, needles));
+}
+
+function logStoreDiagnostics(liliaHome, projectPath) {
+  const dbDir = path.join(liliaHome, "db");
+  const dbFiles = ["lilia.db", "lilia.db-wal"].map((name) => path.join(dbDir, name));
+  log(`CLI project path candidates: ${projectPathNeedles(projectPath).join(" | ")}`);
+  for (const filePath of dbFiles) {
+    if (!fs.existsSync(filePath)) {
+      log(`Store file missing: ${filePath}`);
+      continue;
+    }
+    const stat = fs.statSync(filePath);
+    log(`Store file size: ${filePath} (${stat.size} bytes)`);
+  }
 }
 
 function storeDbPath(liliaHome) {
@@ -270,7 +288,12 @@ function main() {
 
     log("Opening test project through liliacode");
     run("cmd.exe", ["/d", "/s", "/c", `liliacode ${quoteCmdArg(testProject)}`], { env: runtimeEnv });
-    waitUntil("CLI project path in the Lilia store", () => storeContainsProjectPath(liliaHome, testProject));
+    try {
+      waitUntil("CLI project path in the Lilia store", () => storeContainsProjectPath(liliaHome, testProject));
+    } catch (err) {
+      logStoreDiagnostics(liliaHome, testProject);
+      throw err;
+    }
     log("CLI project path reached the Lilia store");
 
     log("Stopping installed app before uninstall");
