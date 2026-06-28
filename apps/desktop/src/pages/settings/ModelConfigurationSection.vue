@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Brain, MessageSquarePlus, Save } from "@lucide/vue";
+import { Brain } from "@lucide/vue";
 import type {
   AssistantAIModelPoolItem,
   ModelFeatureSettings,
@@ -80,33 +80,38 @@ async function setSuggestionEnabled(enabled: boolean) {
   }
 }
 
-function setChatTier(tier: ModelTier, value: string) {
-  modelFeatureSettings.value = {
+async function updateModelFeatureSettings(next: ModelFeatureSettings) {
+  if (disposed) return;
+  const previous = modelFeatureSettings.value;
+  modelFeatureSettings.value = next;
+  savingModelFeatures.value = true;
+  try {
+    await setModelFeatureSettings(next);
+  } catch (err) {
+    if (!disposed) {
+      modelFeatureSettings.value = previous;
+      console.error("[settings] save model feature settings failed", err);
+    }
+  } finally {
+    if (!disposed) savingModelFeatures.value = false;
+  }
+}
+
+async function setChatTier(tier: ModelTier, value: string) {
+  await updateModelFeatureSettings({
     ...modelFeatureSettings.value,
     chat: {
       ...modelFeatureSettings.value.chat,
       [tier]: value || null,
     },
-  };
+  });
 }
 
-function setFeature(key: FeatureKey, value: string) {
-  modelFeatureSettings.value = {
+async function setFeature(key: FeatureKey, value: string) {
+  await updateModelFeatureSettings({
     ...modelFeatureSettings.value,
     [key]: value || null,
-  };
-}
-
-async function saveModelFeatures() {
-  if (disposed) return;
-  savingModelFeatures.value = true;
-  try {
-    await setModelFeatureSettings(modelFeatureSettings.value);
-  } catch (err) {
-    console.error("[settings] save model feature settings failed", err);
-  } finally {
-    if (!disposed) savingModelFeatures.value = false;
-  }
+  });
 }
 
 onMounted(() => {
@@ -123,56 +128,9 @@ onBeforeUnmount(() => {
   <div class="card">
     <h2>
       <span class="card-h2__title">
-        <MessageSquarePlus :size="14" aria-hidden="true" />
-        新对话建议
-      </span>
-    </h2>
-
-    <div class="settings-row">
-      <div class="settings-row__label">启用状态</div>
-      <div class="ui-segmented" role="radiogroup" aria-label="新对话建议">
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="suggestionSettings.enabled"
-          data-agent-id="settings.suggestions.enabled.on"
-          :class="{ 'is-active': suggestionSettings.enabled }"
-          :disabled="savingSuggestions"
-          @click="setSuggestionEnabled(true)"
-        >
-          开启
-        </button>
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="!suggestionSettings.enabled"
-          data-agent-id="settings.suggestions.enabled.off"
-          :class="{ 'is-active': !suggestionSettings.enabled }"
-          :disabled="savingSuggestions"
-          @click="setSuggestionEnabled(false)"
-        >
-          关闭
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>
-      <span class="card-h2__title">
         <Brain :size="14" aria-hidden="true" />
         模型分配
       </span>
-      <button
-        type="button"
-        class="ui-button ui-button--ghost"
-        data-agent-id="settings.model-features.save"
-        :disabled="savingModelFeatures"
-        @click="saveModelFeatures"
-      >
-        <Save :size="12" aria-hidden="true" />
-        {{ savingModelFeatures ? "保存中…" : "保存" }}
-      </button>
     </h2>
 
     <div v-for="row in chatRows" :key="row.tier" class="settings-row">
@@ -181,7 +139,7 @@ onBeforeUnmount(() => {
         class="ui-input"
         :aria-label="row.label"
         :value="modelFeatureSettings.chat[row.tier] ?? ''"
-        :disabled="!hasModelOptions"
+        :disabled="!hasModelOptions || savingModelFeatures"
         @change="(e) => setChatTier(row.tier, (e.target as HTMLSelectElement).value)"
       >
         <option value="">默认</option>
@@ -193,19 +151,72 @@ onBeforeUnmount(() => {
 
     <div v-for="row in featureRows" :key="row.key" class="settings-row">
       <div class="settings-row__label">{{ row.label }}</div>
-      <select
-        class="ui-input"
-        :aria-label="row.label"
-        :value="modelFeatureSettings[row.key] ?? ''"
-        :disabled="!hasModelOptions"
-        @change="(e) => setFeature(row.key, (e.target as HTMLSelectElement).value)"
-      >
-        <option value="">默认</option>
-        <option v-for="option in modelOptions" :key="option.id" :value="option.id">
-          {{ option.label }} ({{ option.id }})
-        </option>
-      </select>
+      <div class="settings-row__control model-feature-row__control">
+        <div
+          v-if="row.key === 'suggestion'"
+          class="ui-segmented"
+          role="radiogroup"
+          aria-label="新对话建议启用状态"
+        >
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="suggestionSettings.enabled"
+            data-agent-id="settings.suggestions.enabled.on"
+            :class="{ 'is-active': suggestionSettings.enabled }"
+            :disabled="savingSuggestions"
+            @click="setSuggestionEnabled(true)"
+          >
+            开启
+          </button>
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="!suggestionSettings.enabled"
+            data-agent-id="settings.suggestions.enabled.off"
+            :class="{ 'is-active': !suggestionSettings.enabled }"
+            :disabled="savingSuggestions"
+            @click="setSuggestionEnabled(false)"
+          >
+            关闭
+          </button>
+        </div>
+        <select
+          class="ui-input"
+          :class="{ 'model-feature-row__select': row.key === 'suggestion' }"
+          :aria-label="row.key === 'suggestion' ? '新对话建议模型' : row.label"
+          :value="modelFeatureSettings[row.key] ?? ''"
+          :disabled="!hasModelOptions || savingModelFeatures"
+          @change="(e) => setFeature(row.key, (e.target as HTMLSelectElement).value)"
+        >
+          <option value="">默认</option>
+          <option v-for="option in modelOptions" :key="option.id" :value="option.id">
+            {{ option.label }} ({{ option.id }})
+          </option>
+        </select>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.model-feature-row__control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-row .model-feature-row__select {
+  width: min(320px, 34vw);
+}
+
+@media (max-width: 720px) {
+  .model-feature-row__control {
+    justify-content: flex-start;
+  }
+
+  .settings-row .model-feature-row__select {
+    width: min(360px, 100%);
+  }
+}
+</style>
 
