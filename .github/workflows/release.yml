@@ -150,6 +150,26 @@ jobs:
       - name: Install dependencies
         run: corepack yarn install --immutable
 
+      - name: 配置 Tauri 签名密钥
+        shell: pwsh
+        run: |
+          $localSigningKeyPath = Join-Path $env:GITHUB_WORKSPACE "..\\tauri-signing.key"
+          $hasLocalSigningKey = Test-Path $localSigningKeyPath
+          if ($hasLocalSigningKey) {
+            $signingKey = (Get-Content -Raw $localSigningKeyPath).Trim()
+            if (-not $signingKey) {
+              throw "Signing key file is empty: $localSigningKeyPath"
+            }
+            "TAURI_SIGNING_PRIVATE_KEY=$signingKey" >> $env:GITHUB_ENV
+          } elseif (-not "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}") {
+            throw "No Tauri signing key is configured. Set secret TAURI_SIGNING_PRIVATE_KEY or keep ../tauri-signing.key in workspace parent dir."
+          }
+
+          if (-not "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}") {
+            throw "No Tauri signing key password is configured. Set secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD."
+          }
+          "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> $env:GITHUB_ENV
+
       - name: Build and publish Windows bundle
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
@@ -168,11 +188,12 @@ jobs:
             - [ ] 已确认本 Release 仍是 draft，完成检查前不要正式发布。
             - [ ] 已确认 tag、根 package、desktop package、Cargo 和 Tauri 配置版本一致。
             - [ ] 已确认 Windows 安装包文件名符合 `LiliaCode_<version>_x64-setup.*`。
+            - [ ] 已确认 Release 说明已写明当前安装包使用 `tauri-signing.key` 完成 Tauri 签名，且未走 PFX 流程。
             - [ ] 已确认 `yarn release:smoke:windows --tag <tag>` 或本地 `yarn release:smoke:windows --installer <安装包路径>` 通过。
             - [ ] smoke 已覆盖安装包安装、启动 LiliaCode、通过 `liliacode <测试项目路径>` 打开项目。
             - [ ] 已确认基础窗口操作正常。
             - [ ] smoke 已覆盖卸载流程，并确认卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
-            - [ ] 已在 Release 说明中保留未签名提示：当前安装包没有代码签名，Windows SmartScreen 警告属于预期风险。
+            - [ ] 已在 Release 说明中保留签名提示：当前安装包使用 `tauri-signing.key` 完成 Tauri 签名。
             - [ ] 已在 Release 说明中保留升级提示：当前没有应用内自动更新，升级需要手动下载并安装新版安装包。
 
             ## Windows 安装验证记录
@@ -189,7 +210,7 @@ jobs:
             ## 已知限制
 
             - 当前只发布 Windows 安装包。
-            - 当前安装包没有代码签名，Windows SmartScreen 或安全软件提示属于预期风险。
+            - 当前安装包使用 `tauri-signing.key` 完成 Tauri 签名。
             - 当前不包含 Tauri updater 自动更新能力。
             - 当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包。
 
@@ -239,6 +260,9 @@ jobs:
 
       - name: Enable Corepack
         run: corepack enable
+
+      - name: Install dependencies
+        run: corepack yarn install --immutable
 
       - name: Smoke draft Windows installer
         env:
