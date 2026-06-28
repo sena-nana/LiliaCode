@@ -17,7 +17,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    "baseUrl": ".",
     "paths": {
       "@lilia/contracts": ["../../packages/contracts/src/index.ts"]
     }
