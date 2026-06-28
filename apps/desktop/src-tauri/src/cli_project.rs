@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
     thread,
@@ -11,7 +12,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use uuid::Uuid;
 
-use crate::{app_events_contract, store::LiliaStore, util::now_millis, MAIN_WINDOW_LABEL};
+use crate::{
+    app_events_contract,
+    store::{resolve_lilia_home, LiliaStore},
+    util::now_millis,
+    MAIN_WINDOW_LABEL,
+};
 
 const STORE_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const STORE_READY_POLL: Duration = Duration::from_millis(50);
@@ -88,6 +94,14 @@ fn debug_cli_message(message: String) {
         .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"));
     if enabled {
         eprintln!("[liliacode:debug] {message}");
+        let debug_log = resolve_lilia_home().join("cli-debug.log");
+        if let Ok(mut file) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(debug_log)
+        {
+            let _ = writeln!(file, "{message}");
+        }
     }
 }
 
