@@ -19,9 +19,13 @@ use super::codex_probe::{
 use super::types::CodexAppServerStatus;
 
 const CODEX_NPM_LATEST_URL: &str = "https://registry.npmjs.org/@openai%2Fcodex/latest";
+const CODEX_GITHUB_RELEASES_URL: &str =
+    "https://api.github.com/repos/openai/codex/releases?per_page=20";
 const CODEX_GITHUB_RELEASE_URL_PREFIX: &str =
     "https://api.github.com/repos/openai/codex/releases/tags/rust-v";
 const CODEX_PACKAGE_CHECKSUM_ASSET: &str = "codex-package_SHA256SUMS";
+const CODEX_METADATA_REQUEST_TIMEOUT_SECS: u64 = 20;
+const CODEX_HTTP_CONNECT_TIMEOUT_SECS: u64 = 15;
 const CODEX_UPDATE_STATE_IDLE: &str = "idle";
 const CODEX_UPDATE_STATE_AVAILABLE: &str = "available";
 const CODEX_UPDATE_STATE_DOWNLOADING: &str = "downloading";
@@ -54,6 +58,11 @@ struct NpmLatestPackage {
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
     body: Option<String>,
+    tag_name: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
     #[serde(default)]
     assets: Vec<GithubReleaseAsset>,
 }
@@ -113,23 +122,66 @@ fn codex_update_manager() -> &'static Mutex<CodexUpdateManagerState> {
 fn http_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .user_agent("Lilia Codex app-server updater")
+        .connect_timeout(Duration::from_secs(CODEX_HTTP_CONNECT_TIMEOUT_SECS))
         .build()
         .map_err(|err| format!("创建 HTTP 客户端失败：{err}"))
 }
 
-fn fetch_latest_version_with(client: &reqwest::blocking::Client) -> Result<String, String> {
+fn github_latest_version(releases: &[GithubRelease]) -> Result<String, String> {
+    for release in releases {
+        if release.draft || release.prerelease {
+            continue;
+        }
+        let Some(tag) = release.tag_name.as_deref() else {
+            continue;
+        };
+        let Some(version) = tag.strip_prefix("rust-v") else {
+            continue;
+        };
+        if parse_codex_cli_version(version).is_some() {
+            return Ok(version.to_string());
+        }
+    }
+    Err("GitHub releases 未找到稳定 rust-vX.Y.Z 版本。".to_string())
+}
+
+fn fetch_npm_latest_version_with(client: &reqwest::blocking::Client) -> Result<String, String> {
     let pkg = client
         .get(CODEX_NPM_LATEST_URL)
+        .timeout(Duration::from_secs(CODEX_METADATA_REQUEST_TIMEOUT_SECS))
         .send()
         .and_then(|response| response.error_for_status())
-        .map_err(|err| format!("查询 Codex 最新版本失败：{err}"))?
+        .map_err(|err| format!("npm registry 请求失败：{err}"))?
         .json::<NpmLatestPackage>()
-        .map_err(|err| format!("解析 Codex 最新版本失败：{err}"))?;
+        .map_err(|err| format!("npm registry 响应解析失败：{err}"))?;
     let version = pkg.version.trim();
     if version.is_empty() {
-        Err("Codex 最新版本为空。".to_string())
+        Err("npm registry 最新版本为空。".to_string())
     } else {
         Ok(version.to_string())
+    }
+}
+
+fn fetch_github_latest_version_with(client: &reqwest::blocking::Client) -> Result<String, String> {
+    let releases = client
+        .get(CODEX_GITHUB_RELEASES_URL)
+        .timeout(Duration::from_secs(CODEX_METADATA_REQUEST_TIMEOUT_SECS))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|err| format!("GitHub releases 请求失败：{err}"))?
+        .json::<Vec<GithubRelease>>()
+        .map_err(|err| format!("GitHub releases 响应解析失败：{err}"))?;
+    github_latest_version(&releases)
+}
+
+fn fetch_latest_version_with(client: &reqwest::blocking::Client) -> Result<String, String> {
+    match fetch_npm_latest_version_with(client) {
+        Ok(version) => Ok(version),
+        Err(npm_err) => fetch_github_latest_version_with(client).map_err(|github_err| {
+            format!(
+                "查询 Codex 最新版本失败：npm registry：{npm_err}；GitHub releases：{github_err}"
+            )
+        }),
     }
 }
 
@@ -140,6 +192,7 @@ fn fetch_release_notes_with(
     let url = format!("{CODEX_GITHUB_RELEASE_URL_PREFIX}{version}");
     let release = client
         .get(url)
+        .timeout(Duration::from_secs(CODEX_METADATA_REQUEST_TIMEOUT_SECS))
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(|err| format!("查询 Codex 更新内容失败：{err}"))?
@@ -530,6 +583,7 @@ fn fetch_github_release_with(
     let url = format!("{CODEX_GITHUB_RELEASE_URL_PREFIX}{version}");
     client
         .get(url)
+        .timeout(Duration::from_secs(CODEX_METADATA_REQUEST_TIMEOUT_SECS))
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(|err| format!("查询 Codex release 失败：{err}"))?
@@ -1150,7 +1204,23 @@ mod tests {
     }
 
     fn release_with_assets(assets: Vec<GithubReleaseAsset>) -> GithubRelease {
-        GithubRelease { body: None, assets }
+        GithubRelease {
+            body: None,
+            tag_name: None,
+            draft: false,
+            prerelease: false,
+            assets,
+        }
+    }
+
+    fn release_tag(tag_name: &str, draft: bool, prerelease: bool) -> GithubRelease {
+        GithubRelease {
+            body: None,
+            tag_name: Some(tag_name.to_string()),
+            draft,
+            prerelease,
+            assets: Vec::new(),
+        }
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {
@@ -1221,6 +1291,32 @@ mod tests {
 
         assert!(!updated.update_available);
         assert_eq!(updated.update_error.as_deref(), Some("offline"));
+    }
+
+    #[test]
+    fn github_latest_version_uses_first_stable_rust_tag() {
+        let releases = vec![
+            release_tag("rust-v0.144.0", true, false),
+            release_tag("rust-v0.143.0", false, true),
+            release_tag("codex-v0.142.0", false, false),
+            release_tag("rust-vnot-a-version", false, false),
+            release_tag("rust-v0.141.0", false, false),
+        ];
+
+        assert_eq!(github_latest_version(&releases).unwrap(), "0.141.0");
+    }
+
+    #[test]
+    fn github_latest_version_rejects_missing_stable_rust_tag() {
+        let releases = vec![
+            release_tag("rust-v0.143.0", false, true),
+            release_tag("codex-v0.142.0", false, false),
+            release_tag("rust-vnot-a-version", false, false),
+        ];
+
+        assert!(github_latest_version(&releases)
+            .unwrap_err()
+            .contains("未找到"));
     }
 
     #[test]
