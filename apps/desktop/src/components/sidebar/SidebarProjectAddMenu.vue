@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type Compo
 import {
   FolderOpen,
   FolderPlus,
-  Github,
+  GitBranch,
 } from "@lucide/vue";
 import type { Project } from "@lilia/contracts";
 import CategoryDialog from "./CategoryDialog.vue";
@@ -163,7 +163,7 @@ onBeforeUnmount(() => {
           data-agent-id="sidebar.project-add.clone"
           @click="openClone"
         >
-          <Github :size="13" aria-hidden="true" />
+          <GitBranch :size="13" aria-hidden="true" />
           <span class="sb-menu__label">从 GitHub clone</span>
         </button>
         <button

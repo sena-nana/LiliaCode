@@ -7,7 +7,6 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
-  Github,
   Link2,
   LoaderCircle,
   Unplug,
@@ -425,7 +424,7 @@ onBeforeUnmount(() => {
     <div class="settings-row">
       <div class="settings-row__label">
         <div class="settings-row__label-with-icon">
-          <Github :size="14" aria-hidden="true" />
+          <GitBranch :size="14" aria-hidden="true" />
           GitHub 绑定
         </div>
       </div>
@@ -454,7 +453,7 @@ onBeforeUnmount(() => {
           @click="startBinding"
         >
           <LoaderCircle v-if="bindingBusy && !deviceFlow" :size="12" aria-hidden="true" class="is-spinning" />
-          <Github v-else :size="12" aria-hidden="true" />
+          <GitBranch v-else :size="12" aria-hidden="true" />
           {{ deviceFlow ? "重新开始绑定" : "绑定 GitHub" }}
         </button>
 
