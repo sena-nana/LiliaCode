@@ -1176,9 +1176,12 @@ describe("Settings provider switch", () => {
     expect(view.getByText("密钥已保存")).toBeInTheDocument();
   });
 
-  it("模型池配置可获取远端模型并配置显示名", async () => {
+  it("模型池配置按来源展示，可获取远端模型并添加旧模型", async () => {
     const view = await renderSettings("/settings?tab=assistant");
     const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
+    expect(view.getByRole("tab", { name: /远端\s*1/ })).toHaveAttribute("aria-selected", "true");
+    expect(view.getByRole("tab", { name: /旧模型\s*0/ })).toHaveAttribute("aria-selected", "false");
+    expect(view.getByLabelText("gpt-5.5 显示名")).toBeInTheDocument();
 
     await fireEvent.update(apiKeyInput, "sk-new");
     await fireEvent.click(view.getByRole("button", { name: "获取模型" }));
@@ -1204,6 +1207,26 @@ describe("Settings provider switch", () => {
       });
     });
 
+    await fireEvent.click(view.getByRole("tab", { name: /旧模型\s*0/ }));
+    expect(view.getByText("当前来源暂无模型")).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "添加" }));
+    await fireEvent.update(view.getByLabelText("模型 ID"), "legacy-mini");
+    await fireEvent.update(view.getByLabelText("显示名"), "Legacy Mini");
+    await fireEvent.click(view.getByRole("button", { name: "添加模型" }));
+    expect(view.getByRole("tab", { name: /旧模型\s*1/ })).toHaveAttribute("aria-selected", "true");
+    expect(view.getByLabelText("legacy-mini 显示名")).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
+        config: {
+          modelPool: expect.arrayContaining([
+            expect.objectContaining({ id: "legacy-mini", label: "Legacy Mini", source: "legacy" }),
+          ]),
+        },
+      });
+    });
+
     view.unmount();
     mockInvoke.mockClear();
 
@@ -1214,6 +1237,7 @@ describe("Settings provider switch", () => {
       text: option.textContent?.trim(),
     }))).toEqual(expect.arrayContaining([
       { value: "remote-mini", text: "Remote Mini (remote-mini)" },
+      { value: "legacy-mini", text: "Legacy Mini (legacy-mini)" },
     ]));
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND))
       .toBe(true);
