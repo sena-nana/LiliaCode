@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, type CSSProperties } from "vue";
 import type { ChartData, ChartOptions, ChartType, TooltipItem } from "chart.js";
 import {
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "@lucide/vue";
 import {
+  type CodexAccountUsageDailyBucket,
   type CodexAccountQuotaStatus,
   connectionModeUsesCodexAccount,
   codexAccountQuotaCreditsLabel,
@@ -46,6 +47,10 @@ type QuotaBreakdownItem = {
   meta: string;
   color: string;
 };
+type AccountUsageHeatmapCell = CodexAccountUsageDailyBucket & {
+  level: number;
+  weekStart: string;
+};
 type NumericChartData = ChartData<ChartType, number[], string>;
 
 const backendOptions: BackendOption[] = [
@@ -74,6 +79,14 @@ const breakdownPalette = [
   "var(--text)",
   "var(--text-muted)",
 ];
+const accountUsageHeatmapLayout = {
+  cellSize: 11,
+  gap: 3,
+  minWeeks: 53,
+  weekdayGap: 6,
+  weekdayWidth: 22,
+  weekdays: ["", "Mon", "", "Wed", "", "Fri", ""],
+} as const;
 
 const selectedBackend = ref<QuotaUsageStatsBackendFilter>("all");
 const selectedDays = ref<QuotaUsageStatsDays>(DEFAULT_QUOTA_USAGE_STATS_DAYS);
@@ -137,15 +150,57 @@ const accountUsageSummaryRows = computed(() => {
   const summary = officialQuota.value?.accountUsage?.summary;
   if (!summary) return [];
   return [
-    { key: "lifetime", label: "累计 Token", value: summary.lifetimeTokens, suffix: "tokens" },
-    { key: "peak", label: "单日峰值", value: summary.peakDailyTokens, suffix: "tokens" },
-    { key: "streak", label: "连续活跃", value: summary.currentStreakDays, suffix: "天" },
-    { key: "longest", label: "最长连续", value: summary.longestStreakDays, suffix: "天" },
-  ].filter((row) => row.value !== null);
+    {
+      key: "lifetime",
+      label: "累计 Token 数",
+      value: accountUsageTokenValue(summary.lifetimeTokens),
+    },
+    {
+      key: "peak",
+      label: "峰值 Token 数",
+      value: accountUsageTokenValue(summary.peakDailyTokens),
+    },
+    {
+      key: "longestTurn",
+      label: "最长任务时长",
+      value: accountUsageDurationValue(summary.longestRunningTurnSec),
+    },
+    {
+      key: "currentStreak",
+      label: "当前连续天数",
+      value: accountUsageDaysValue(summary.currentStreakDays),
+    },
+    {
+      key: "longestStreak",
+      label: "最长连续天数",
+      value: accountUsageDaysValue(summary.longestStreakDays),
+    },
+  ];
 });
 const accountUsageBuckets = computed(() =>
-  (officialQuota.value?.accountUsage?.dailyUsageBuckets ?? []).slice(-14),
+  [...(officialQuota.value?.accountUsage?.dailyUsageBuckets ?? [])]
+    .filter((bucket) => isDateOnly(bucket.startDate))
+    .sort((a, b) => a.startDate.localeCompare(b.startDate)),
 );
+const accountUsageWeeks = computed(() => buildAccountUsageWeeks(accountUsageBuckets.value));
+const accountUsageMonthLabels = computed(() =>
+  buildAccountUsageMonthLabels(accountUsageWeeks.value, accountUsageBuckets.value),
+);
+const accountUsageHeatmapStyle = computed<CSSProperties>(() => {
+  const weekCount = Math.max(1, accountUsageWeeks.value.length);
+  const { cellSize, gap, weekdayGap, weekdayWidth } = accountUsageHeatmapLayout;
+  const weekGridWidth =
+    weekCount * cellSize + (weekCount - 1) * gap;
+  const maxWidth = weekdayWidth + weekdayGap + weekGridWidth;
+  return {
+    "--quota-heatmap-week-count": weekCount,
+    "--quota-heatmap-cell-size": `${cellSize}px`,
+    "--quota-heatmap-gap": `${gap}px`,
+    "--quota-heatmap-weekday-gap": `${weekdayGap}px`,
+    "--quota-heatmap-weekday-width": `${weekdayWidth}px`,
+    "--quota-heatmap-max-width": `${maxWidth}px`,
+  };
+});
 const sortedBackends = computed(() =>
   [...(stats.value?.backends ?? [])].sort((a, b) => b.totalTokens - a.totalTokens),
 );
@@ -343,48 +398,6 @@ const breakdownChartOptions = computed<ChartOptions>(() => ({
     },
   },
 }));
-const accountUsageChartData = computed<NumericChartData>(() => ({
-  labels: accountUsageBuckets.value.map((bucket) => bucket.startDate.slice(5)),
-  datasets: [
-    {
-      label: "Token",
-      data: accountUsageBuckets.value.map((bucket) => bucket.tokens),
-      backgroundColor: chartPalette.input,
-      borderColor: chartPalette.input,
-      borderWidth: 0,
-      borderRadius: 3,
-    },
-  ],
-}));
-const accountUsageChartOptions = computed<ChartOptions>(() => ({
-  plugins: {
-    legend: {
-      display: false,
-    },
-    tooltip: {
-      callbacks: {
-        label(context: TooltipItem<ChartType>) {
-          return `${formatNumber(Number(context.raw ?? 0))} tokens`;
-        },
-      },
-    },
-  },
-  scales: {
-    x: {
-      display: false,
-      grid: {
-        display: false,
-      },
-    },
-    y: {
-      display: false,
-      beginAtZero: true,
-      grid: {
-        display: false,
-      },
-    },
-  },
-}));
 const costText = computed(() => {
   const coverage = stats.value?.cost;
   if (!coverage || coverage.totalRecordCount === 0 || coverage.knownCostUsd === null) return "--";
@@ -485,9 +498,98 @@ function resetCreditText(count: number) {
   return count > 0 ? `可用 ${formatNumber(count)} 次` : "暂无可用重置次数";
 }
 
-function accountUsageValue(value: number | null, suffix: string) {
+function accountUsageTokenValue(value: number | null) {
   if (value === null) return "--";
-  return suffix === "tokens" ? `${formatCompactNumber(value)} tokens` : `${formatNumber(value)} ${suffix}`;
+  return formatCompactNumber(value);
+}
+
+function accountUsageDaysValue(value: number | null) {
+  if (value === null) return "--";
+  return `${formatNumber(value)} 天`;
+}
+
+function accountUsageDurationValue(value: number | null) {
+  if (value === null) return "--";
+  const totalMinutes = Math.max(0, Math.round(value / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${formatNumber(hours)} 小时 ${minutes} 分`;
+  if (hours > 0) return `${formatNumber(hours)} 小时`;
+  return `${formatNumber(minutes)} 分钟`;
+}
+
+function buildAccountUsageWeeks(days: readonly CodexAccountUsageDailyBucket[]) {
+  if (!days.length) return [];
+  const maxTokens = Math.max(1, ...days.map((day) => day.tokens));
+  const firstWeekStart = weekStartDate(days[0].startDate);
+  const lastWeekStart = weekStartDate(days[days.length - 1].startDate);
+  const start = new Date(lastWeekStart);
+  start.setUTCDate(start.getUTCDate() - (accountUsageHeatmapLayout.minWeeks - 1) * 7);
+  if (firstWeekStart < start) start.setTime(firstWeekStart.getTime());
+  const end = new Date(lastWeekStart);
+  end.setUTCDate(end.getUTCDate() + 6);
+  const byDate = new Map(days.map((day) => [day.startDate, day]));
+  const weeks: AccountUsageHeatmapCell[][] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 7)) {
+    const week: AccountUsageHeatmapCell[] = [];
+    for (let offset = 0; offset < 7; offset += 1) {
+      const date = new Date(cursor);
+      date.setUTCDate(cursor.getUTCDate() + offset);
+      const key = date.toISOString().slice(0, 10);
+      const day = byDate.get(key) ?? { startDate: key, tokens: 0 };
+      week.push({
+        ...day,
+        level: accountUsageHeatLevel(day.tokens, maxTokens),
+        weekStart: cursor.toISOString().slice(0, 10),
+      });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+function buildAccountUsageMonthLabels(
+  weeks: readonly AccountUsageHeatmapCell[][],
+  days: readonly CodexAccountUsageDailyBucket[],
+) {
+  let lastMonth = "";
+  const start = days[0]?.startDate ?? "";
+  const end = days[days.length - 1]?.startDate ?? "";
+  const isInRange = (date: string) => start !== "" && date >= start && date <= end;
+  return weeks.map((week, index) => {
+    const weekStart = week[0]?.weekStart ?? String(index);
+    const month = week
+      .filter((day) => isInRange(day.startDate))
+      .map((day) => day.startDate.slice(0, 7))
+      .find((value) => value && value !== lastMonth) ?? "";
+    const label = month && month !== lastMonth ? formatAccountUsageMonth(month) : "";
+    if (month) lastMonth = month;
+    return { key: weekStart, label };
+  });
+}
+
+function accountUsageHeatLevel(tokens: number, maxTokens: number) {
+  if (tokens <= 0) return 0;
+  return Math.min(4, Math.max(1, Math.ceil((tokens / maxTokens) * 4)));
+}
+
+function accountUsageHeatTitle(day: CodexAccountUsageDailyBucket) {
+  return `${day.startDate}: ${formatNumber(day.tokens)} tokens`;
+}
+
+function formatAccountUsageMonth(month: string) {
+  const [, rawMonth] = month.split("-");
+  return `${Number(rawMonth)}月`;
+}
+
+function weekStartDate(date: string) {
+  const result = new Date(`${date}T00:00:00Z`);
+  result.setUTCDate(result.getUTCDate() - result.getUTCDay());
+  return result;
+}
+
+function isDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function createIdempotencyKey() {
@@ -632,6 +734,75 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div
+    v-if="showOfficialQuota && (accountUsageSummaryRows.length || accountUsageBuckets.length || officialQuota?.usageError)"
+    class="card quota-panel quota-official-usage"
+  >
+    <div v-if="accountUsageSummaryRows.length" class="quota-official-usage__metrics">
+      <div
+        v-for="row in accountUsageSummaryRows"
+        :key="row.key"
+        class="quota-official-usage__metric"
+      >
+        <strong>{{ row.value }}</strong>
+        <span>{{ row.label }}</span>
+      </div>
+    </div>
+    <div class="quota-official-usage__head">
+      <strong>Token 活动</strong>
+      <span v-if="officialQuota?.usageError">{{ officialQuota.usageError }}</span>
+    </div>
+    <div
+      v-if="accountUsageWeeks.length"
+      class="quota-official-usage__heatmap"
+      aria-label="官方账号每日 Token 活动"
+    >
+      <div class="quota-official-usage__heatmap-window">
+        <div class="quota-official-usage__heatmap-grid" :style="accountUsageHeatmapStyle">
+          <div class="quota-official-usage__months" aria-hidden="true">
+            <span
+              v-for="month in accountUsageMonthLabels"
+              :key="month.key"
+              class="quota-official-usage__month"
+            >
+              {{ month.label }}
+            </span>
+          </div>
+          <div class="quota-official-usage__heatmap-body">
+            <div class="quota-official-usage__weekdays" aria-hidden="true">
+              <span
+                v-for="(label, index) in accountUsageHeatmapLayout.weekdays"
+                :key="index"
+                class="quota-official-usage__weekday"
+              >
+                {{ label }}
+              </span>
+            </div>
+            <div class="quota-official-usage__weeks">
+              <div
+                v-for="week in accountUsageWeeks"
+                :key="week[0]?.weekStart"
+                class="quota-official-usage__week"
+              >
+                <span
+                  v-for="day in week"
+                  :key="day.startDate"
+                  class="quota-official-usage__day"
+                  :class="`quota-official-usage__day--${day.level}`"
+                  :title="accountUsageHeatTitle(day)"
+                  :aria-label="accountUsageHeatTitle(day)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-else-if="!officialQuota?.usageError" class="quota-official-usage__empty">
+      暂无 Token 活动
+    </div>
+  </div>
+
   <div v-if="showOfficialQuota" class="card quota-panel quota-official">
     <div class="quota-official__head">
       <div>
@@ -698,33 +869,6 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="resetCreditError" class="quota-official__error">
       {{ resetCreditError }}
-    </div>
-    <div
-      v-if="accountUsageSummaryRows.length || accountUsageBuckets.length || officialQuota?.usageError"
-      class="quota-official-usage"
-    >
-      <div class="quota-official-usage__head">
-        <strong>官方账号用量</strong>
-        <span v-if="officialQuota?.usageError">{{ officialQuota.usageError }}</span>
-      </div>
-      <div v-if="accountUsageSummaryRows.length" class="quota-official-usage__metrics">
-        <div
-          v-for="row in accountUsageSummaryRows"
-          :key="row.key"
-          class="quota-official-usage__metric"
-        >
-          <span>{{ row.label }}</span>
-          <strong>{{ accountUsageValue(row.value, row.suffix) }}</strong>
-        </div>
-      </div>
-      <QuotaChartCanvas
-        v-if="accountUsageBuckets.length"
-        class="quota-official-usage__chart"
-        type="bar"
-        label="官方账号每日用量"
-        :data="accountUsageChartData"
-        :options="accountUsageChartOptions"
-      />
     </div>
     <div v-if="officialQuota?.error" class="quota-official__error">
       {{ officialQuota.error }}
@@ -1140,10 +1284,9 @@ onBeforeUnmount(() => {
 }
 
 .quota-official-usage {
+  min-width: 0;
   display: grid;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-soft);
+  gap: 12px;
 }
 
 .quota-official-usage__head {
@@ -1151,14 +1294,16 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
 }
 
 .quota-official-usage__head strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.quota-official-usage__head span {
+.quota-official-usage__head span,
+.quota-official-usage__empty {
   overflow: hidden;
   color: var(--warn);
   font-size: 11px;
@@ -1167,24 +1312,33 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.quota-official-usage__empty {
+  color: var(--text-muted);
+}
+
 .quota-official-usage__metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg);
 }
 
 .quota-official-usage__metric {
   min-width: 0;
   display: grid;
   gap: 3px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  background: var(--bg-subtle);
+  justify-items: center;
+  padding: 11px 10px 10px;
+}
+
+.quota-official-usage__metric + .quota-official-usage__metric {
+  border-left: 1px solid var(--border-soft);
 }
 
 .quota-official-usage__metric span,
 .quota-official-usage__metric strong {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1193,16 +1347,114 @@ onBeforeUnmount(() => {
 .quota-official-usage__metric span {
   color: var(--text-muted);
   font-size: 11px;
+  line-height: 1.35;
 }
 
 .quota-official-usage__metric strong {
   color: var(--text);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
-.quota-official-usage__chart {
-  height: 52px;
+.quota-official-usage__heatmap {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.quota-official-usage__heatmap-window {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.quota-official-usage__heatmap-grid {
+  width: min(100%, var(--quota-heatmap-max-width, 100%));
+  margin-left: auto;
+  min-width: 0;
+}
+
+.quota-official-usage__months,
+.quota-official-usage__weeks {
+  display: grid;
+  grid-template-columns: repeat(var(--quota-heatmap-week-count, 1), minmax(0, 1fr));
+  gap: var(--quota-heatmap-gap);
+  min-width: 0;
+}
+
+.quota-official-usage__months {
+  margin-left: calc(var(--quota-heatmap-weekday-width) + var(--quota-heatmap-weekday-gap));
+  margin-bottom: 4px;
+}
+
+.quota-official-usage__month {
+  min-width: 0;
+  height: 14px;
+  overflow: visible;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.quota-official-usage__heatmap-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--quota-heatmap-weekday-gap);
+  min-width: 0;
+}
+
+.quota-official-usage__weekdays {
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: var(--quota-heatmap-gap);
+  align-items: center;
+}
+
+.quota-official-usage__weekday {
+  width: var(--quota-heatmap-weekday-width);
+  overflow: visible;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.quota-official-usage__week {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: repeat(7, auto);
+  gap: var(--quota-heatmap-gap);
+  justify-items: center;
+}
+
+.quota-official-usage__day {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: var(--quota-heatmap-cell-size);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--bg) 22%, transparent);
+  border-radius: 3px;
+  background: var(--bg-subtle);
+}
+
+.quota-official-usage__day--1 {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-subtle));
+}
+
+.quota-official-usage__day--2 {
+  background: color-mix(in srgb, var(--accent) 46%, var(--bg-subtle));
+}
+
+.quota-official-usage__day--3 {
+  background: color-mix(in srgb, var(--accent) 66%, var(--bg-subtle));
+}
+
+.quota-official-usage__day--4 {
+  background: color-mix(in srgb, var(--accent) 86%, var(--text));
 }
 
 .quota-chart-wrap {
@@ -1384,9 +1636,25 @@ onBeforeUnmount(() => {
   }
 
   .quota-official__grid,
-  .quota-official__credits,
-  .quota-official-usage__metrics {
+  .quota-official__credits {
     grid-template-columns: 1fr;
+  }
+
+  .quota-official-usage__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    border: 0;
+    background: transparent;
+  }
+
+  .quota-official-usage__metric {
+    border: 1px solid var(--border-soft);
+    border-radius: 7px;
+    background: var(--bg);
+  }
+
+  .quota-official-usage__metric + .quota-official-usage__metric {
+    border-left: 1px solid var(--border-soft);
   }
 
   .quota-recent__row {
