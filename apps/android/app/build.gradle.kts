@@ -12,7 +12,7 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0-alpha.1"
+        versionName = "1.0.0-beta"
     }
 
     ndkVersion = "28.2.13676358"
