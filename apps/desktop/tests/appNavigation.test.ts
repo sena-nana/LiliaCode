@@ -25,6 +25,7 @@ import {
   emitTauriEvent,
   failNextMockListen,
   mockInvoke,
+  mockListen,
   mockListenerCount,
   seedMockAutomationRun,
   setMockAgentTimelineDelay,
@@ -114,8 +115,13 @@ describe("App main navigation events", () => {
   });
 
   it("主窗口导航 listener 注册失败时会回滚已注册的监听", async () => {
+    const listenAttemptCount = () =>
+      mockListen.mock.calls.filter(([event]) =>
+        event === MAIN_NAVIGATE_EVENT_NAME ||
+        event === CLI_PROJECT_OPEN_EVENT_NAME
+      ).length;
+    const initialListenAttempts = listenAttemptCount();
     failNextMockListen(CLI_PROJECT_OPEN_EVENT_NAME, "cli listener failed");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     setMockCurrentWindowLabel("main");
     const router = createLiliaRouter(createMemoryHistory());
     await router.push("/");
@@ -129,16 +135,12 @@ describe("App main navigation events", () => {
 
     try {
       await waitFor(() => {
-        expect(errorSpy).toHaveBeenCalledWith(
-          "[app] install window navigation listeners failed",
-          expect.any(Error),
-        );
+        expect(listenAttemptCount()).toBeGreaterThan(initialListenAttempts);
+        expect(mockListenerCount(MAIN_NAVIGATE_EVENT_NAME)).toBe(0);
+        expect(mockListenerCount(CLI_PROJECT_OPEN_EVENT_NAME)).toBe(0);
       });
-      expect(mockListenerCount(MAIN_NAVIGATE_EVENT_NAME)).toBe(0);
-      expect(mockListenerCount(CLI_PROJECT_OPEN_EVENT_NAME)).toBe(0);
     } finally {
       view.unmount();
-      errorSpy.mockRestore();
     }
   });
 
@@ -165,12 +167,21 @@ describe("App main navigation events", () => {
   });
 
   it("自动化 listener 注册失败时会回滚已注册的 changed listener", async () => {
+    const automationListenAttemptCount = () =>
+      mockListen.mock.calls.filter(([event]) =>
+        event === AUTOMATION_CHANGED_EVENT_NAME ||
+        event === AUTOMATION_RUN_STARTED_EVENT_NAME ||
+        event === AUTOMATION_RUN_UPDATED_EVENT_NAME ||
+        event === AUTOMATION_RUN_FINISHED_EVENT_NAME
+      ).length;
+    const initialAutomationListenAttempts = automationListenAttemptCount();
     failNextMockListen(AUTOMATION_RUN_STARTED_EVENT_NAME, "automation run listener failed");
     const view = await renderApp("main");
 
     await view.router.push("/automations");
 
     await waitFor(() => {
+      expect(automationListenAttemptCount()).toBeGreaterThan(initialAutomationListenAttempts);
       expect(mockListenerCount(AUTOMATION_CHANGED_EVENT_NAME)).toBe(0);
       expect(mockListenerCount(AUTOMATION_RUN_STARTED_EVENT_NAME)).toBe(0);
       expect(mockListenerCount(AUTOMATION_RUN_UPDATED_EVENT_NAME)).toBe(0);

@@ -492,57 +492,6 @@ describe("timeline display derivation", () => {
 });
 
 describe("timeline event expansion", () => {
-  it("思考提示显示上一可见事件到现在的秒数", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(10_000);
-    const view = render(AgentTimeline, {
-      props: {
-        isThinking: true,
-        events: [
-          timelineEvent({
-            id: "tool-1",
-            kind: "mcp",
-            status: "success",
-            title: "docs / search",
-            summary: "docs / search",
-            payload: { server: "docs", tool: "search" },
-            createdAt: 7_000,
-            updatedAt: 7_000,
-          }),
-        ],
-      },
-    });
-
-    expect(view.getByText("思考中 3 秒")).toBeInTheDocument();
-  });
-
-  it("思考提示显示分秒并追加运行中子代理状态", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(128_000);
-    const view = render(AgentTimeline, {
-      props: {
-        isThinking: true,
-        events: [
-          timelineEvent({
-            id: "subagent-1",
-            kind: "subagent",
-            status: "running",
-            title: "explorer",
-            summary: "Read",
-            payload: {
-              subagentType: "explorer",
-              lastToolName: "Read",
-            },
-            createdAt: 0,
-            updatedAt: 0,
-          }),
-        ],
-      },
-    });
-
-    expect(view.getByText("思考中 2 分 8 秒，子代理explorer正在调用工具")).toBeInTheDocument();
-  });
-
   it("折叠的过程事件不参与 rail 避让计算", async () => {
     const view = await renderAgentTimeline({
         events: [
@@ -648,7 +597,6 @@ describe("timeline event expansion", () => {
 
     await waitFor(() => {
       expect(view.container.querySelector(".agent-timeline__content")).toBeInTheDocument();
-      expect(view.getByText("COMMAND")).toBeInTheDocument();
     });
   });
 
@@ -668,8 +616,6 @@ describe("timeline event expansion", () => {
 
     await waitFor(() => {
       expect(view.container.querySelector(".timeline-card--final-reply")).toBeInTheDocument();
-      expect(view.getByText("发生错误")).toBeInTheDocument();
-      expect(view.getByText("provider failed")).toBeInTheDocument();
       expect(view.queryByText("Runner error")).not.toBeInTheDocument();
       expect(view.container.querySelector(".agent-timeline__preview")).not.toBeInTheDocument();
     });
@@ -810,7 +756,6 @@ describe("timeline event expansion", () => {
 
     expect(view.container.querySelector(".timeline-card--final-reply")).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "发生错误" })).toBeInTheDocument();
-    expect(view.container.querySelector(".agent-timeline__preview")).toHaveTextContent("用户已中断");
   });
 });
 

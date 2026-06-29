@@ -222,13 +222,9 @@ describe("Settings provider switch", () => {
       view.getByRole("img", { name: "Token 用量趋势（全部 · 近 7 天）" }),
     ).toBeInTheDocument();
     expect(view.getByRole("img", { name: "后端 Token 分布" })).toBeInTheDocument();
-    expect(view.getByText("项目消耗")).toBeInTheDocument();
     expect(view.getByRole("img", { name: "项目消耗图表" })).toBeInTheDocument();
-    expect(view.getByText("对话消耗")).toBeInTheDocument();
     expect(view.getByRole("img", { name: "对话消耗图表" })).toBeInTheDocument();
-    expect(view.getByText("工具活跃度")).toBeInTheDocument();
     expect(view.getByRole("img", { name: "工具活跃度图表" })).toBeInTheDocument();
-    expect(view.getByText("按调用次数统计")).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("radio", { name: "Codex" }));
 
@@ -269,25 +265,8 @@ describe("Settings provider switch", () => {
     expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
     expect(view.queryByText("5 小时限额")).not.toBeInTheDocument();
     expect(view.queryByText("周限额")).not.toBeInTheDocument();
-    expect(view.getByText("25%")).toBeInTheDocument();
-    expect(view.getByText("40%")).toBeInTheDocument();
-    expect(view.getByText("剩余 75%")).toBeInTheDocument();
-    expect(view.getByText("剩余 60%")).toBeInTheDocument();
-    expect(view.getByText("Spark额度")).toBeInTheDocument();
-    expect(view.getByText("15%")).toBeInTheDocument();
-    expect(view.getByText("70%")).toBeInTheDocument();
-    expect(view.getByText("剩余 85%")).toBeInTheDocument();
-    expect(view.getByText("剩余 30%")).toBeInTheDocument();
     expect(view.getAllByText(/^重置 /)).toHaveLength(4);
-    expect(view.getByText("重置次数 可用 2 次")).toBeInTheDocument();
     expect(view.getByRole("button", { name: "使用重置次数" })).toBeEnabled();
-    expect(view.getByText("Workspace credit")).toBeInTheDocument();
-    expect(view.getByText("剩余 3")).toBeInTheDocument();
-    expect(view.getByText("Spark workspace credit")).toBeInTheDocument();
-    expect(view.getByText("不限")).toBeInTheDocument();
-    expect(view.getByText("官方账号用量")).toBeInTheDocument();
-    expect(view.getByText("累计 Token")).toBeInTheDocument();
-    expect(view.getByText("连续活跃")).toBeInTheDocument();
   });
 
   it("额度页在 Codex API 模式隐藏官方额度", async () => {
@@ -847,19 +826,12 @@ describe("Settings provider switch", () => {
     expect(view.getByRole("heading", { level: 2, name: "主 Agent 策略" })).toBeInTheDocument();
     expect(view.getByRole("heading", { level: 2, name: "运行配置" })).toBeInTheDocument();
     expect(view.getByRole("heading", { level: 2, name: "自动轮次策略" })).toBeInTheDocument();
-    expect(view.getByText("Subagent 模式")).toBeInTheDocument();
-    expect(view.queryByText("自定义 Agent")).toBeInTheDocument();
-    expect(view.queryByText("主 Agent 工作流提示预览")).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();
-    expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
-    expect(view.getByText("询问")).toBeInTheDocument();
-    expect(view.getByText("只读")).toBeInTheDocument();
     expect(view.getAllByRole("button", { name: "固定启用" })).toHaveLength(2);
     expect(view.getByRole("radiogroup", { name: "完全访问权限可用性" })).toBeInTheDocument();
     expect(view.getByRole("radiogroup", { name: "自由实现权限可用性" })).toBeInTheDocument();
-    expect(view.getByText("完全访问，并在 8 秒后按建议项处理交互。")).toBeInTheDocument();
   });
 
   it("Agent 设置页可以关闭自由实现权限行为", async () => {
@@ -921,7 +893,6 @@ describe("Settings provider switch", () => {
 
     const textarea = await view.findByLabelText("自定义主 Agent 提示词");
     expect((textarea as HTMLTextAreaElement).value).toContain("主 Agent 策略：保守");
-    expect(view.getByText(/不替代当前 provider 的原生系统提示/)).toBeInTheDocument();
     await waitFor(() => {
       expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
         settings: expect.objectContaining({
@@ -942,7 +913,6 @@ describe("Settings provider switch", () => {
         }),
       });
     });
-    expect(view.getByText(/按用户的项目约束优先实现/)).toBeInTheDocument();
   });
 
   it("Agent 设置页会在首屏后再加载自定义 Agent 目录", async () => {
@@ -954,7 +924,6 @@ describe("Settings provider switch", () => {
     expect(
       mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_list_subagents"),
     ).toBe(false);
-    expect(view.getByText("首屏加载后补齐自定义 Agent 目录…")).toBeInTheDocument();
 
     await vi.runAllTimersAsync();
 

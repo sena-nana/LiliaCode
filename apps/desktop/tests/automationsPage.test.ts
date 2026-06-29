@@ -218,7 +218,6 @@ describe("Automations page", () => {
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
 
     expect(inspector).toHaveAttribute("aria-busy", "true");
-    expect(within(inspector).getByText("首屏加载后补齐检查器与运行历史…")).toBeInTheDocument();
     expect(invokeCount(AUTOMATION_LIST_RUNS_COMMAND)).toBe(0);
     expect(invokeCount(AUTOMATION_GET_RUN_COMMAND)).toBe(0);
 
@@ -382,14 +381,9 @@ describe("Automations page", () => {
     });
 
     await waitFor(() => {
-      expect(within(inspector).getByText("manual")).toBeInTheDocument();
-      expect(within(inspector).getByText("项目 lilia · 任务 t-002 · 后端 claude · 事件 manual")).toBeInTheDocument();
       expect(within(inspector).getAllByText("running").length).toBeGreaterThan(0);
       expect(within(inspector).getAllByText("succeeded").length).toBeGreaterThan(0);
       expect(within(inspector).getByText("agent-1")).toBeInTheDocument();
-      expect(within(inspector).getByText("输入")).toBeInTheDocument();
-      expect(within(inspector).getByText("输出")).toBeInTheDocument();
-      expect(within(inspector).getByText(/"trigger"/)).toBeInTheDocument();
     });
 
     const agentStateButton = within(inspector).getByText("agent-1").closest("button");

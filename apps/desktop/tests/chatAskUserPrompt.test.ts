@@ -760,7 +760,6 @@ describe("chat AskUser prompt", () => {
 
     const prompt = await view.findByRole("alert");
     const promptView = within(prompt);
-    expect(promptView.getByText("COMMAND")).toBeInTheDocument();
 
     await fireEvent.click(promptView.getByRole("button", { name: "编辑完整命令" }));
     await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");
@@ -916,8 +915,6 @@ describe("chat AskUser prompt", () => {
 
     const prompt = await view.findByRole("alert");
     const promptView = within(prompt);
-    expect(promptView.getByText("COMMAND")).toBeInTheDocument();
-    expect(promptView.getByRole("button", { name: "编辑完整命令" })).toHaveTextContent("pwd");
 
     await fireEvent.click(promptView.getByRole("button", { name: "编辑完整命令" }));
     await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");

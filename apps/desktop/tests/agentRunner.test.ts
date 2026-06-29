@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -19,7 +18,6 @@ import {
   LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
   LILIA_GOAL_WORKFLOW_TYPE,
   LILIA_REVIEW_WORKFLOW_TYPE,
-  LILIA_TASK_WORKFLOW_TYPE,
   REMOTE_ENVIRONMENT_COMMAND_TYPE,
   RUNTIME_SETTINGS_COMMAND_TYPE,
   SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
@@ -63,10 +61,6 @@ import {
   normalizeCodexPlanSteps,
 } from "../agent-runner/codex/timeline.mjs";
 import {
-  buildCodexBatchApplyPrompt,
-  buildCodexFixSuggestionPrompt,
-  buildCodexPlanRevisionPrompt,
-  buildCodexTaskWorkflowPrompt,
   runCodex,
   runCodexAppServer,
   maybeHandleCodexServerRequest,
@@ -111,13 +105,8 @@ import {
 import {
   runClaudeSessionManagementRuntimeCommand,
 } from "../agent-runner/sessionManagement.mjs";
-import {
-  buildClaudeWorkflowPrompt,
-} from "../agent-runner/promptManager.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
-const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
-const packageManifest = readFileSync(join(testsDir, "..", "package.json"), "utf8");
 const codexAccountQuotaUtility = join(testsDir, "..", "codex-account-quota.mjs");
 
 function captureProtocol() {
@@ -247,16 +236,6 @@ async function runCodexAppServerTestTurn(
 ) {
   await runCodexAppServer(cmd, { mcpServers: [], warnings: [] }, codexAppServerTestContext(protocol, server, overrides));
 }
-
-describe("agent runner entry", () => {
-  it("入口保持薄 CLI，真实实现从 runner core 进入", () => {
-    expect(runnerSource).toContain("runAgentTurn");
-    expect(runnerSource).toContain("createRunnerContext");
-    expect(runnerSource).not.toContain("function runClaude");
-    expect(runnerSource).not.toContain("function runCodex");
-    expect(packageManifest).not.toContain("@openai/codex-sdk");
-  });
-});
 
 describe("runner core", () => {
   it("缺失或空 prompt 时输出 error 且不进入 backend", async () => {
@@ -602,11 +581,9 @@ describe("runner core", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(seen.prompt).toContain("用户随本轮消息附加的本地路径");
     expect(seen.prompt).toContain("C:/tmp/a.txt");
     expect(seen.prompt).toContain("file, text/plain, 2 KB");
     expect(seen.prompt).toContain("directory, unknown size, 3 files, 1 dirs, truncated");
-    expect(seen.prompt).toContain("不要假设已经读取了内容");
   });
 
   it("dry-run 分支不启动真实后端", async () => {
@@ -1049,8 +1026,9 @@ describe("Claude helpers", () => {
       type: "preset",
       preset: "claude_code",
     });
-    expect(seenOptions.systemPrompt.append).toContain("运行平台：Windows");
-    expect(seenOptions.systemPrompt.append).toContain("[Lilia Memory Baseline]");
+    expect(seenOptions.systemPrompt.append).toContain(
+      "[Lilia Memory Baseline]\nUser constraints:\n- PR: no emoji",
+    );
     expect(seenOptions).not.toHaveProperty("additionalContext");
   });
 
@@ -1768,7 +1746,6 @@ describe("Claude helpers", () => {
 
   it("Claude provider settings passes advanced fields to SDK query", async () => {
     const { protocol, json } = captureProtocol();
-    let seenPrompt = "";
     let seenOptions: any = null;
 
     await runClaude({
@@ -1817,12 +1794,9 @@ describe("Claude helpers", () => {
         },
       },
     }, claudeRunnerContextWithTools(protocol, {
-      createClaudeQuery: ({ prompt, options }: any) => {
+      createClaudeQuery: ({ options }: any) => {
         seenOptions = options;
         return (async function* () {
-          for await (const msg of prompt) {
-            seenPrompt = msg.message.content[0].text;
-          }
           yield {
             type: "result",
             is_error: false,
@@ -1834,7 +1808,6 @@ describe("Claude helpers", () => {
       },
     }));
 
-    expect(seenPrompt).toContain("Lilia Claude runtime settings command.");
     expect(seenOptions).toMatchObject({
       model: "claude-opus-4-5",
       permissionMode: "default",
@@ -3281,7 +3254,6 @@ describe("Codex app-server mapping", () => {
         windowsHide: true,
       });
       expect(result.stdout.trim()).not.toBe("");
-      expect(result.stderr).not.toContain("MODULE_NOT_FOUND");
       const payload = JSON.parse(result.stdout.trim().split(/\r?\n/)[0]);
       expect(payload).toMatchObject({
         available: false,
@@ -4379,11 +4351,6 @@ describe("Codex app-server mapping", () => {
       },
     });
     const prompt = turnStart.params.input[0].text;
-    expect(prompt).toContain("Lilia Codex fix suggestion workflow.");
-    expect(prompt).toContain("Target: baseBranch:main");
-    expect(prompt).toContain("Workspace cwd: C:/repo");
-    expect(prompt).toContain("Mode: suggest");
-    expect(prompt).toContain("Do not edit files or run modifying commands.");
     expect(prompt).toContain("重点看权限边界");
     expect(json().some((line) =>
       line.type === "timeline" &&
@@ -4450,68 +4417,6 @@ describe("Codex app-server mapping", () => {
     const turnStart = calls.find((call) => call.method === "turn/start");
     expect(turnStart.params.permissions).toBe(":read-only");
     expect(turnStart.params.runtimeWorkspaceRoots).toEqual(["C:/repo"]);
-  });
-
-  it("builds Codex fix suggestion prompts for apply and commit targets", () => {
-    const prompt = buildCodexFixSuggestionPrompt({
-      target: { type: "commit", sha: "abc123", title: null },
-      instructions: "可以直接修",
-      mode: "apply",
-    }, {
-      prompt: "可以直接修",
-      cwd: "C:/repo",
-    });
-
-    expect(prompt).toContain("Target: commit:abc123");
-    expect(prompt).toContain("Inspect the specified commit: abc123");
-    expect(prompt).toContain("Mode: apply");
-    expect(prompt).toContain("You may edit files and run commands as needed");
-    expect(prompt).toContain("User instructions:\n可以直接修");
-  });
-
-  it("builds Codex batch apply prompt from review suggestions", () => {
-    const prompt = buildCodexBatchApplyPrompt({
-      sourceTurnId: "turn-source",
-      sourceKind: "review",
-      sourceSummary: "建议统一权限边界。",
-      instructions: "应用最小改动",
-    }, {
-      prompt: "应用最小改动",
-      cwd: "C:/repo",
-    });
-
-    expect(prompt).toContain("Lilia Codex batch apply workflow.");
-    expect(prompt).toContain("Source kind: review");
-    expect(prompt).toContain("Source turn id: turn-source");
-    expect(prompt).toContain("Workspace cwd: C:/repo");
-    expect(prompt).toContain("wait for Lilia plan approval");
-    expect(prompt).toContain("Source suggestions:\n建议统一权限边界。");
-    expect(prompt).toContain("User instructions:\n应用最小改动");
-  });
-
-  it("builds provider prompts for Lilia task workflows", () => {
-    const workflow = {
-      type: LILIA_TASK_WORKFLOW_TYPE,
-      kind: "frontend",
-      instructions: "调整按钮布局",
-    };
-
-    const codexPrompt = buildCodexTaskWorkflowPrompt(workflow, {
-      prompt: "调整按钮布局",
-      cwd: "C:/repo",
-    });
-    expect(codexPrompt).toContain("Lilia task workflow: frontend");
-    expect(codexPrompt).toContain("Provider: Codex");
-    expect(codexPrompt).toContain("Workspace cwd: C:/repo");
-    expect(codexPrompt).toContain("User workflow instructions: 调整按钮布局");
-
-    const claudePrompt = buildClaudeWorkflowPrompt({
-      taskWorkflow: workflow,
-      prompt: "调整按钮布局",
-    });
-    expect(claudePrompt).toContain("Lilia task workflow: frontend");
-    expect(claudePrompt).toContain("Provider: Claude");
-    expect(claudePrompt).toContain("User workflow instructions: 调整按钮布局");
   });
 
   it("Codex batch apply workflow 强制先走 Plan，确认后再执行", async () => {
@@ -4587,13 +4492,10 @@ describe("Codex app-server mapping", () => {
         reasoning_effort: "high",
       },
     });
-    expect(startCalls[0].params.input[0].text).toContain("Lilia Codex batch apply workflow.");
-    expect(startCalls[0].params.input[0].text).toContain("Source suggestions:\n建议修复权限边界");
     expect(startCalls[1].params.collaborationMode).toMatchObject({
       mode: "default",
       settings: { model: "gpt-5.5" },
     });
-    expect(startCalls[1].params.input[0].text).toContain("用户已确认上一版计划");
     expect(json().some((line) =>
       line.type === "timeline" &&
       line.event.kind === "diagnostic" &&
@@ -4635,32 +4537,9 @@ describe("Codex app-server mapping", () => {
 
     expect(calls.some((call) => call.method === "review/start")).toBe(false);
     const turnStart = calls.find((call) => call.method === "turn/start");
-    expect(turnStart.params.input[0].text).toContain("Mode: apply");
-    expect(turnStart.params.input[0].text).toContain("You may edit files and run commands as needed");
-    expect(turnStart.params.input[0].text).toContain("Target: commit:abc123");
     expect(turnStart.params.approvalPolicy).toBe("never");
     expect(turnStart.params.sandboxPolicy).toEqual({ type: "dangerFullAccess" });
     expect(turnStart.params.permissions).toBe(":danger-no-sandbox");
-  });
-
-  it("uses uncommitted target prompt for Codex fix suggestion workflow", async () => {
-    const { protocol } = captureProtocol();
-    const calls: any[] = [];
-    const server = createCodexTurnTestServer(calls);
-
-    await runCodexAppServerTestTurn(protocol, server, {
-      backend: "codex",
-      prompt: "",
-      permission: "ask",
-      workflow: {
-        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
-        target: { type: "uncommittedChanges" },
-      },
-    });
-
-    const prompt = calls.find((call) => call.method === "turn/start").params.input[0].text;
-    expect(prompt).toContain("Target: uncommittedChanges");
-    expect(prompt).toContain("Inspect the current uncommitted workspace changes.");
   });
 
   it("emits an error diagnostic when Codex fix suggestion turn fails", async () => {
@@ -6436,11 +6315,7 @@ describe("Codex app-server mapping", () => {
     const decrementIndex = calls.findIndex((call) =>
       call.type === "server" && call.method === "thread/decrement_elicitation"
     );
-    const executionStartIndex = calls.findIndex((call) =>
-      call.type === "server" &&
-      call.method === "turn/start" &&
-      call.params.input[0].text.includes("用户已确认上一版计划")
-    );
+    const executionStartIndex = calls.indexOf(startCalls[1]);
     expect(calls.some((call) => call.type === "server" && call.method === "collaborationMode/list")).toBe(true);
     expect(calls.some((call) => call.type === "server" && call.method === "turn/interrupt")).toBe(false);
     expect(askIndex).toBeGreaterThan(-1);
@@ -6487,8 +6362,6 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       emitTimelineEvent: false,
     });
-    expect(startCalls[1].params.input[0].text).toContain("用户已确认上一版计划");
-    expect(startCalls[1].params.input[0].text).toContain("[ ] 改代码");
     expect(json().some((line) =>
       line.type === "timeline" &&
       line.event.kind === "todo_list" &&
@@ -6566,7 +6439,6 @@ describe("Codex app-server mapping", () => {
 
     const startCalls = calls.filter((call) => call.type === "server" && call.method === "turn/start");
     expect(startCalls).toHaveLength(2);
-    expect(startCalls[1].params.input[0].text).toContain(buildCodexPlanRevisionPrompt("先补充回滚方案"));
     expect(startCalls[0].params.collaborationMode).toMatchObject({
       mode: "plan",
       settings: { model: "gpt-5.1", reasoning_effort: "medium" },

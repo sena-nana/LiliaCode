@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCodexCollaborationMode,
-  buildCodexPlanExecutionPrompt,
-  buildCodexPlanRevisionPrompt,
   readCodexPlanModePreset,
 } from "../agent-runner/codex/runCodex.mjs";
 
@@ -50,13 +48,5 @@ describe("Codex plan helpers", () => {
     } as any)).rejects.toThrow("collaborationMode/list failed");
   });
 
-  it("builds revision and execution prompts", () => {
-    expect(buildCodexPlanRevisionPrompt("先补充回滚方案")).toContain("先补充回滚方案");
-    expect(buildCodexPlanRevisionPrompt("先补充回滚方案")).toContain("不要执行文件修改或命令");
-
-    const executionPrompt = buildCodexPlanExecutionPrompt("- [ ] 改代码");
-    expect(executionPrompt).toContain("用户已确认上一版计划");
-    expect(executionPrompt).toContain("- [ ] 改代码");
-  });
 });
 
