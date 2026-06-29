@@ -23,9 +23,15 @@ const { cornerStyle, cornerRadius, setCornerRadius, setCornerStyle } = useCorner
 const { sidebarDisplayMode, setSidebarDisplayMode } = useSidebarDisplayMode();
 const agentInteractionStore = useAgentInteractionSettings();
 const agentInteraction = agentInteractionStore.settings;
+const runtimeSettings = [
+  { key: "nonInterruptMode", label: "非打断模式", agentId: "non-interrupt" },
+  { key: "debug", label: "Debug 面板", agentId: "debug" },
+] as const;
 const savingAgentInteraction = ref(false);
 const agentInteractionError = ref<string | null>(null);
 let disposed = false;
+
+type RuntimeSettingKey = (typeof runtimeSettings)[number]["key"];
 
 function onCornerRadiusInput(event: Event) {
   setCornerRadius(Number((event.target as HTMLInputElement).value));
@@ -41,7 +47,7 @@ async function loadAgentInteraction() {
 }
 
 async function setAgentInteraction(
-  patch: Partial<typeof agentInteraction.value>,
+  patch: Parameters<typeof agentInteractionStore.update>[0],
 ) {
   if (disposed) return;
   savingAgentInteraction.value = true;
@@ -53,6 +59,14 @@ async function setAgentInteraction(
   } finally {
     if (!disposed) savingAgentInteraction.value = false;
   }
+}
+
+function setRuntimeSetting(key: RuntimeSettingKey, enabled: boolean) {
+  void setAgentInteraction(
+    key === "nonInterruptMode"
+      ? { nonInterruptMode: enabled }
+      : { debug: enabled },
+  );
 }
 
 onMounted(() => {
@@ -169,87 +183,48 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-    <div class="appearance-settings-group" aria-label="运行配置">
-      <h3>运行配置</h3>
-      <div class="settings-row">
-        <div class="settings-row__label">非打断模式</div>
-        <div class="ui-segmented" role="radiogroup" aria-label="非打断模式">
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="!agentInteraction.nonInterruptMode"
-            data-agent-id="settings.appearance.runtime.non-interrupt.off"
-            :class="{ 'is-active': !agentInteraction.nonInterruptMode }"
-            :disabled="savingAgentInteraction"
-            @click="setAgentInteraction({ nonInterruptMode: false })"
-          >
-            关闭
-          </button>
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.nonInterruptMode"
-            data-agent-id="settings.appearance.runtime.non-interrupt.on"
-            :class="{ 'is-active': agentInteraction.nonInterruptMode }"
-            :disabled="savingAgentInteraction"
-            @click="setAgentInteraction({ nonInterruptMode: true })"
-          >
-            开启
-          </button>
-        </div>
+  </div>
+
+  <div class="card">
+    <h2>运行配置</h2>
+    <div
+      v-for="setting in runtimeSettings"
+      :key="setting.key"
+      class="settings-row"
+    >
+      <div class="settings-row__label">{{ setting.label }}</div>
+      <div class="ui-segmented" role="radiogroup" :aria-label="setting.label">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="!agentInteraction[setting.key]"
+          :data-agent-id="`settings.appearance.runtime.${setting.agentId}.off`"
+          :class="{ 'is-active': !agentInteraction[setting.key] }"
+          :disabled="savingAgentInteraction"
+          @click="setRuntimeSetting(setting.key, false)"
+        >
+          关闭
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction[setting.key]"
+          :data-agent-id="`settings.appearance.runtime.${setting.agentId}.on`"
+          :class="{ 'is-active': agentInteraction[setting.key] }"
+          :disabled="savingAgentInteraction"
+          @click="setRuntimeSetting(setting.key, true)"
+        >
+          开启
+        </button>
       </div>
-      <div class="settings-row">
-        <div class="settings-row__label">Debug 面板</div>
-        <div class="ui-segmented" role="radiogroup" aria-label="Debug 面板">
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="!agentInteraction.debug"
-            data-agent-id="settings.appearance.runtime.debug.off"
-            :class="{ 'is-active': !agentInteraction.debug }"
-            :disabled="savingAgentInteraction"
-            @click="setAgentInteraction({ debug: false })"
-          >
-            关闭
-          </button>
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.debug"
-            data-agent-id="settings.appearance.runtime.debug.on"
-            :class="{ 'is-active': agentInteraction.debug }"
-            :disabled="savingAgentInteraction"
-            @click="setAgentInteraction({ debug: true })"
-          >
-            开启
-          </button>
-        </div>
-      </div>
-      <div v-if="agentInteractionError" class="conn-banner conn-banner--err">
-        <AlertTriangle :size="16" aria-hidden="true" />
-        <div>
-          <div class="conn-banner__title">运行配置</div>
-          <div class="conn-banner__hint">{{ agentInteractionError }}</div>
-        </div>
+    </div>
+    <div v-if="agentInteractionError" class="conn-banner conn-banner--err">
+      <AlertTriangle :size="16" aria-hidden="true" />
+      <div>
+        <div class="conn-banner__title">运行配置</div>
+        <div class="conn-banner__hint">{{ agentInteractionError }}</div>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.appearance-settings-group {
-  display: grid;
-  gap: 12px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
-}
-
-.appearance-settings-group h3 {
-  margin: 0;
-  color: var(--text-primary, rgba(255, 255, 255, 0.92));
-  font-size: 14px;
-  font-weight: 650;
-}
-</style>
 
