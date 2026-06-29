@@ -184,7 +184,7 @@ const accountUsageBuckets = computed(() =>
 );
 const accountUsageWeeks = computed(() => buildAccountUsageWeeks(accountUsageBuckets.value));
 const accountUsageMonthLabels = computed(() =>
-  buildAccountUsageMonthLabels(accountUsageWeeks.value, accountUsageBuckets.value),
+  buildAccountUsageMonthLabels(accountUsageWeeks.value),
 );
 const accountUsageHeatmapStyle = computed<CSSProperties>(() => {
   const weekCount = Math.max(1, accountUsageWeeks.value.length);
@@ -548,23 +548,26 @@ function buildAccountUsageWeeks(days: readonly CodexAccountUsageDailyBucket[]) {
   return weeks;
 }
 
-function buildAccountUsageMonthLabels(
-  weeks: readonly AccountUsageHeatmapCell[][],
-  days: readonly CodexAccountUsageDailyBucket[],
-) {
+function buildAccountUsageMonthLabels(weeks: readonly AccountUsageHeatmapCell[][]) {
+  const monthStarts: { index: number; key: string; month: string }[] = [];
   let lastMonth = "";
-  const start = days[0]?.startDate ?? "";
-  const end = days[days.length - 1]?.startDate ?? "";
-  const isInRange = (date: string) => start !== "" && date >= start && date <= end;
-  return weeks.map((week, index) => {
+  weeks.forEach((week, index) => {
     const weekStart = week[0]?.weekStart ?? String(index);
     const month = week
-      .filter((day) => isInRange(day.startDate))
       .map((day) => day.startDate.slice(0, 7))
       .find((value) => value && value !== lastMonth) ?? "";
-    const label = month && month !== lastMonth ? formatAccountUsageMonth(month) : "";
     if (month) lastMonth = month;
-    return { key: weekStart, label };
+    if (month && index > 0 && index < weeks.length - 1) {
+      monthStarts.push({ index, key: weekStart, month });
+    }
+  });
+  return monthStarts.map((start, index) => {
+    const endIndex = Math.min(monthStarts[index + 1]?.index ?? weeks.length, weeks.length - 1);
+    return {
+      key: start.key,
+      label: formatAccountUsageMonth(start.month),
+      style: { gridColumn: `${start.index + 1} / span ${Math.max(1, endIndex - start.index)}` },
+    };
   });
 }
 
@@ -766,6 +769,7 @@ onBeforeUnmount(() => {
               v-for="month in accountUsageMonthLabels"
               :key="month.key"
               class="quota-official-usage__month"
+              :style="month.style"
             >
               {{ month.label }}
             </span>
@@ -1288,7 +1292,7 @@ onBeforeUnmount(() => {
 .quota-official-usage {
   min-width: 0;
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .quota-official-usage__head {
@@ -1386,17 +1390,20 @@ onBeforeUnmount(() => {
 }
 
 .quota-official-usage__months {
-  margin-left: calc(var(--quota-heatmap-weekday-width) + var(--quota-heatmap-weekday-gap));
+  box-sizing: border-box;
+  padding-left: calc(var(--quota-heatmap-weekday-width) + var(--quota-heatmap-weekday-gap));
   margin-bottom: 4px;
 }
 
 .quota-official-usage__month {
   min-width: 0;
   height: 14px;
-  overflow: visible;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 10px;
   line-height: 14px;
+  text-align: center;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
