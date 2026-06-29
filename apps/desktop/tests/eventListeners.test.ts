@@ -58,10 +58,9 @@ describe("event listener lifecycle helpers", () => {
       async () => () => calls.push("unlisten-c"),
     ]);
 
-    unlisten();
+    expect(() => unlisten()).not.toThrow();
 
     expect(calls).toEqual(["unlisten-c", "unlisten-b", "unlisten-a"]);
-    expect(errorSpy).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
   });
 

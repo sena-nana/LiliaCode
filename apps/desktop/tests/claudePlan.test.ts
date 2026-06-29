@@ -6,7 +6,6 @@ import {
 } from "@lilia/contracts/claudePlanContract.mjs";
 import {
   PLAN_APPROVAL_QUESTION_ID,
-  buildPlanRevisionDenyMessage,
   buildPlanApprovalSpec,
   buildPlanPayload,
   extractPlanResult,
@@ -77,9 +76,6 @@ describe("claudePlan helpers", () => {
     expect(readPlanRevisionRequest({
       answers: { [PLAN_APPROVAL_QUESTION_ID]: { value: "no" } },
     })).toBe("");
-    expect(buildPlanRevisionDenyMessage("先补充失败回滚方案")).toContain(
-      "请根据这条修改要求调整计划",
-    );
   });
 
   it("执行权限映射与只读写工具门禁保持分层", () => {

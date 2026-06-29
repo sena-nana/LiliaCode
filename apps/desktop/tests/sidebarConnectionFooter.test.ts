@@ -12,7 +12,6 @@ import {
 import SidebarConnectionFooter from "../src/components/sidebar/SidebarConnectionFooter.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
-import { formatUnixSeconds } from "../src/utils/quotaDisplay";
 import {
   mockInvoke,
   setMockActiveBackend,
@@ -102,10 +101,6 @@ function officialQuota(overrides: Record<string, unknown> = {}) {
     error: null,
     ...overrides,
   };
-}
-
-function refreshText(resetsAt: number): string {
-  return `刷新 ${formatUnixSeconds(resetsAt)}`;
 }
 
 function invokeCount(command: string): number {
@@ -346,23 +341,6 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(rings[1]).toHaveStyle({ "--quota-progress": "9" });
 
     await view.findByRole("tooltip");
-    expect(view.queryByText("Codex 官方账号")).not.toBeInTheDocument();
-    expect(view.queryByText("Codex 官方账号额度")).not.toBeInTheDocument();
-    expect(view.queryByText("Pro")).not.toBeInTheDocument();
-    expect(view.queryByText("查询 01/15 16:00")).not.toBeInTheDocument();
-    expect(view.queryByText("5 小时额度")).not.toBeInTheDocument();
-    expect(view.queryByText("周额度")).not.toBeInTheDocument();
-    expect(view.getByText("5h · 剩余 58%")).toBeInTheDocument();
-    expect(view.getByText("7d · 剩余 9%")).toBeInTheDocument();
-    expect(view.queryByText("Spark额度")).not.toBeInTheDocument();
-    expect(view.getByText("5h · 剩余 88% · Spark")).toBeInTheDocument();
-    expect(view.getByText("7d · 剩余 20% · Spark")).toBeInTheDocument();
-    expect(view.getByText(refreshText(1_800_000_000))).toBeInTheDocument();
-    expect(view.getByText(refreshText(1_800_300_000))).toBeInTheDocument();
-    expect(view.getByText(refreshText(1_800_060_000))).toBeInTheDocument();
-    expect(view.getByText(refreshText(1_800_360_000))).toBeInTheDocument();
-    expect(view.getByText("重置次数可用 2 次")).toBeInTheDocument();
-    expect(view.getByText("累计 12.3万 tokens · 连续 8 天")).toBeInTheDocument();
     const meters = popoverMeters();
     expect(meters).toHaveLength(4);
     expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });

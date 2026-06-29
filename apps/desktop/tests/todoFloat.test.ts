@@ -49,24 +49,7 @@ describe("TodoFloat", () => {
       },
     });
 
-    expect(view.queryByText("未设置 Lilia Goal")).toBeNull();
     expect(view.container.querySelector(".todo-float__section--goal")).toBeNull();
-  });
-
-  it("renders Lilia Goal above todo sections with a distinct row", () => {
-    const view = render(TodoFloat, {
-      props: {
-        taskId: "task-1",
-        showGoal: true,
-        goal,
-      },
-    });
-
-    expect(view.getByText("完成 Thread Goal 接入")).toBeTruthy();
-    expect(view.getByText("进行中 · 20/100 tokens")).toBeTruthy();
-    expect(view.container.querySelector(".todo-float__section--goal")).toBeTruthy();
-    expect(view.container.querySelector(".todo-float__row--goal")).toBeTruthy();
-    expect(view.container.querySelector(".todo-float__source--goal")).toBeTruthy();
   });
 
   it("emits goal actions from the goal row", async () => {

@@ -46,7 +46,8 @@ describe("SubagentCatalogSection", () => {
       });
     });
     await waitFor(() => {
-      expect(view.getByText("Builder").closest(".subagent-item")?.textContent).toContain("已停用");
+      builderItem = view.getByText("Builder").closest(".subagent-item") as HTMLElement;
+      expect(within(builderItem).getByRole("button", { name: "启用" })).toBeInTheDocument();
     });
 
     builderItem = view.getByText("Builder").closest(".subagent-item") as HTMLElement;

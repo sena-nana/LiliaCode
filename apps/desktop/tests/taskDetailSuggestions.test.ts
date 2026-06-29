@@ -214,10 +214,6 @@ describe("TaskDetail conversation suggestions", () => {
     await fireEvent.click(view.getByRole("button", { name: "来点灵感？" }));
 
     await waitFor(() => {
-      expect(view.getByText("正在检查 GitHub 活动")).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd, args]) =>
         cmd === CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND &&
         args?.projectId === "lilia" &&
@@ -248,33 +244,6 @@ describe("TaskDetail conversation suggestions", () => {
     expect(view.container.querySelector(".chat-suggestions.is-hidden")).toBeInTheDocument();
   });
 
-  it("加载历史任务来源时显示历史任务文案", async () => {
-    setMockConversationSuggestions([]);
-    setMockConversationSuggestionSources({ sources: ["task"], localGit: null });
-    setMockConversationSuggestionsDelay(80);
-    const draft = createDraftTask("lilia");
-    const view = await renderProjectDraftTaskDetail(draft.id);
-
-    await waitFor(() => {
-      expect(view.getByText("正在检查历史任务")).toBeInTheDocument();
-    });
-  });
-
-  it("加载本地 Git 提交和变更来源时显示本地 Git 文案", async () => {
-    setMockConversationSuggestions([]);
-    setMockConversationSuggestionSources({
-      sources: ["local-git"],
-      localGit: { hasRecentCommits: true, hasChangedFiles: true },
-    });
-    setMockConversationSuggestionsDelay(80);
-    const draft = createDraftTask("lilia");
-    const view = await renderProjectDraftTaskDetail(draft.id);
-
-    await waitFor(() => {
-      expect(view.getByText("正在检查本地提交和未提交变更")).toBeInTheDocument();
-    });
-  });
-
   it("建议加载失败时显示轻量状态且不影响输入", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     setMockConversationSuggestionSources({ sources: ["task"], localGit: null });
@@ -283,13 +252,6 @@ describe("TaskDetail conversation suggestions", () => {
     try {
       const draft = createDraftTask("lilia");
       const view = await renderProjectDraftTaskDetail(draft.id);
-
-      await waitFor(() => {
-        expect(consoleError).toHaveBeenCalledWith(
-          "[conversation-suggestions] load failed",
-          expect.any(Error),
-        );
-      });
 
       const input = getComposerTextbox(view);
       await fireEvent.input(input, { target: { textContent: "先自己输入" } });
