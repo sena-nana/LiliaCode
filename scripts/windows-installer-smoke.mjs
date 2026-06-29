@@ -181,17 +181,7 @@ function storeContainsProjectPath(liliaHome, projectPath) {
 function logStoreDiagnostics(liliaHome, projectPath) {
   const dbDir = path.join(liliaHome, "db");
   const dbFiles = ["lilia.db", "lilia.db-wal"].map((name) => path.join(dbDir, name));
-  const cliDebugLog = path.join(liliaHome, "cli-debug.log");
   log(`CLI project path candidates: ${projectPathNeedles(projectPath).join(" | ")}`);
-  if (fs.existsSync(cliDebugLog)) {
-    const lines = fs.readFileSync(cliDebugLog, "utf8").split(/\r?\n/).filter(Boolean).slice(-80);
-    log("CLI debug log:");
-    for (const line of lines) {
-      log(`  ${line}`);
-    }
-  } else {
-    log(`CLI debug log missing: ${cliDebugLog}`);
-  }
   for (const filePath of dbFiles) {
     if (!fs.existsSync(filePath)) {
       log(`Store file missing: ${filePath}`);
@@ -295,7 +285,7 @@ function main() {
       waitUntil(`installed runtime resource ${filename}`, () => fs.existsSync(resourcePath));
     }
 
-    const runtimeEnv = freshWindowsEnv({ LILIA_HOME: liliaHome, LILIA_CLI_DEBUG: "1" });
+    const runtimeEnv = freshWindowsEnv({ LILIA_HOME: liliaHome });
     const installedCli = resolveLiliacode(runtimeEnv);
     if (!installedCli.some((candidate) => pathKey(candidate) === pathKey(cliCmd))) {
       fail(`A fresh cmd environment did not resolve this smoke install's liliacode.cmd:\n${installedCli.join("\n")}`);
