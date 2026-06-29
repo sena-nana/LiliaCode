@@ -7,11 +7,13 @@ import {
   LogIn,
   Loader2,
   Network,
+  Pencil,
   RefreshCw,
   RotateCw,
   Save,
   Trash2,
   UserRound,
+  X,
 } from "@lucide/vue";
 import {
   API_KEY_ENV_BY_BACKEND,
@@ -86,6 +88,7 @@ function routerModeMapFromBackends(): Record<ChatBackendKind, RouterMode> {
 const switchingBackend = ref<ChatBackendKind | null>(null);
 const savingProvider = ref(false);
 const savingRouter = ref(false);
+const editingProvider = ref(false);
 const providerForms = ref<Record<ChatBackendKind, ProviderConfig>>(providerConfigMapFromBackends());
 const routerModes = ref<Record<ChatBackendKind, RouterMode>>(routerModeMapFromBackends());
 
@@ -113,6 +116,9 @@ const apiDefaultUrl = computed(() => DIRECT_DEFAULT_URLS[selectedBackend.value])
 const apiKeyEnv = computed(() => API_KEY_ENV_BY_BACKEND[selectedBackend.value]);
 const apiDescription = computed(() => apiDescriptionForBackend(selectedBackend.value));
 const showApiConfig = computed(() => routerModeUsesApiConfig(selectedRouterMode.value));
+const providerConfigState = computed(() =>
+  selectedProviderForm.value.hasApiKey ? "密钥已保存" : "未保存密钥"
+);
 const codexAppServerStatus = computed(() => report.value?.codexAppServer ?? null);
 const codexUpdateState = computed(() => codexAppServerStatus.value?.updateState ?? "idle");
 const codexUpdateDownloading = computed(() => codexUpdateState.value === "downloading");
@@ -256,6 +262,7 @@ async function saveProvider() {
     await loadProvider(backend);
     if (disposed) return;
     await refresh();
+    editingProvider.value = false;
   } catch (err) {
     console.error("[settings] save provider config failed", err);
   } finally {
@@ -279,6 +286,17 @@ async function clearProviderKey() {
   } finally {
     if (!disposed) savingProvider.value = false;
   }
+}
+
+function startProviderEdit() {
+  editingProvider.value = true;
+}
+
+async function cancelProviderEdit() {
+  if (disposed) return;
+  const backend = selectedBackend.value;
+  editingProvider.value = false;
+  await loadProvider(backend);
 }
 
 async function selectRouterMode(mode: RouterMode) {
@@ -374,6 +392,7 @@ async function startCodexLogin() {
 async function selectBackend(backend: ChatBackendKind) {
   if (disposed || switchingBackend.value) return;
   switchingBackend.value = backend;
+  editingProvider.value = false;
   try {
     await setActiveBackend(backend);
     if (disposed) return;
@@ -540,69 +559,101 @@ watch(showCodexRuntimeStatus, (enabled) => {
     </template>
 
     <template v-if="showApiConfig">
-      <div class="settings-row settings-row--stacked">
-        <div class="settings-row__label">API 来源</div>
-        <div class="settings-row__status muted">
-          {{ apiDescription }} 默认 URL：{{ apiDefaultUrl }}
+      <div class="settings-row">
+        <div class="settings-row__label">API 配置</div>
+        <div class="settings-row__control settings-row__control--loose">
+          <span class="provider-config-status muted">
+            <KeyRound :size="12" aria-hidden="true" />
+            {{ providerConfigState }}
+          </span>
+          <button
+            type="button"
+            class="ui-button ui-button--ghost"
+            data-agent-id="settings.provider.edit"
+            :disabled="savingProvider"
+            @click="startProviderEdit"
+          >
+            <Pencil :size="12" aria-hidden="true" />
+            {{ selectedProviderForm.hasApiKey || selectedProviderForm.baseUrl ? "编辑" : "新建配置" }}
+          </button>
         </div>
       </div>
 
-      <div class="settings-row">
-        <div class="settings-row__label">Base URL</div>
-        <input
+      <template v-if="editingProvider">
+        <div class="settings-row settings-row--stacked">
+          <div class="settings-row__label">API 来源</div>
+          <div class="settings-row__status muted">
+            {{ apiDescription }} 默认 URL：{{ apiDefaultUrl }}
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <div class="settings-row__label">Base URL</div>
+          <input
             type="text"
             class="ui-input"
             :placeholder="apiDefaultUrl"
             data-agent-id="settings.provider.base-url"
             :value="selectedProviderForm.baseUrl ?? ''"
-          @input="(e) => (selectedProviderForm.baseUrl = (e.target as HTMLInputElement).value)"
-        />
-      </div>
-
-      <div class="settings-row">
-        <div class="settings-row__label">API key</div>
-        <div class="settings-row__control">
-          <input
-            type="password"
-            class="ui-input"
-            :placeholder="selectedProviderForm.hasApiKey ? '已保存，留空保留现有值' : apiKeyEnv"
-            data-agent-id="settings.provider.api-key"
-            :value="selectedProviderForm.apiKey ?? ''"
-            @input="(e) => (selectedProviderForm.apiKey = (e.target as HTMLInputElement).value)"
+            @input="(e) => (selectedProviderForm.baseUrl = (e.target as HTMLInputElement).value)"
           />
-          <button
-            type="button"
-            class="ui-button ui-button--ghost"
-            data-agent-id="settings.provider.clear-key"
-            :disabled="savingProvider || !selectedProviderForm.hasApiKey"
-            title="清除已保存的 API key"
-            @click="clearProviderKey"
-          >
-            <Trash2 :size="12" aria-hidden="true" />
-            清除
-          </button>
         </div>
-      </div>
 
-      <div class="settings-row">
-        <div class="settings-row__label">密钥状态</div>
-        <div class="settings-row__control">
-          <span class="muted" style="display: inline-flex; gap: 4px; align-items: center;">
-            <KeyRound :size="12" aria-hidden="true" />
-            {{ selectedProviderForm.hasApiKey ? "密钥已保存" : "未保存密钥" }}
-          </span>
-          <button
-            type="button"
-            class="ui-button ui-button--ghost"
-            data-agent-id="settings.provider.save"
-            :disabled="savingProvider"
-            @click="saveProvider"
-          >
-            <Save :size="12" aria-hidden="true" />
-            {{ savingProvider ? "保存中..." : "保存" }}
-          </button>
+        <div class="settings-row">
+          <div class="settings-row__label">API key</div>
+          <div class="settings-row__control">
+            <input
+              type="password"
+              class="ui-input"
+              :placeholder="selectedProviderForm.hasApiKey ? '已保存，留空保留现有值' : apiKeyEnv"
+              data-agent-id="settings.provider.api-key"
+              :value="selectedProviderForm.apiKey ?? ''"
+              @input="(e) => (selectedProviderForm.apiKey = (e.target as HTMLInputElement).value)"
+            />
+            <button
+              type="button"
+              class="ui-button ui-button--ghost"
+              data-agent-id="settings.provider.clear-key"
+              :disabled="savingProvider || !selectedProviderForm.hasApiKey"
+              title="清除已保存的 API key"
+              @click="clearProviderKey"
+            >
+              <Trash2 :size="12" aria-hidden="true" />
+              清除
+            </button>
+          </div>
         </div>
-      </div>
+
+        <div class="settings-row">
+          <div class="settings-row__label">配置操作</div>
+          <div class="settings-row__control">
+            <span class="provider-config-status muted">
+              <KeyRound :size="12" aria-hidden="true" />
+              {{ providerConfigState }}
+            </span>
+            <button
+              type="button"
+              class="ui-button ui-button--ghost"
+              data-agent-id="settings.provider.save"
+              :disabled="savingProvider"
+              @click="saveProvider"
+            >
+              <Save :size="12" aria-hidden="true" />
+              {{ savingProvider ? "保存中..." : "保存" }}
+            </button>
+            <button
+              type="button"
+              class="ui-button ui-button--ghost"
+              data-agent-id="settings.provider.cancel-edit"
+              :disabled="savingProvider"
+              @click="cancelProviderEdit"
+            >
+              <X :size="12" aria-hidden="true" />
+              取消
+            </button>
+          </div>
+        </div>
+      </template>
     </template>
 
     <div
@@ -634,4 +685,12 @@ watch(showCodexRuntimeStatus, (enabled) => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.provider-config-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+</style>
 

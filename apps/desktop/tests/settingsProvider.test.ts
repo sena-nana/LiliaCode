@@ -415,6 +415,12 @@ describe("Settings provider switch", () => {
 
     const view = await renderSettings("/settings?tab=providers");
 
+    await waitFor(() => {
+      expect(view.queryByPlaceholderText("https://api.anthropic.com")).not.toBeInTheDocument();
+      expect(view.getByRole("button", { name: "编辑" })).toBeEnabled();
+    });
+    await fireEvent.click(view.getByRole("button", { name: "编辑" }));
+
     const baseUrlInput = await view.findByPlaceholderText("https://api.anthropic.com") as HTMLInputElement;
     const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
 
@@ -434,11 +440,14 @@ describe("Settings provider switch", () => {
       });
     });
     await waitFor(() => {
-      expect(view.getByRole("button", { name: "保存" })).toBeEnabled();
+      expect(view.queryByPlaceholderText("https://api.anthropic.com")).not.toBeInTheDocument();
+      expect(view.getByRole("button", { name: "编辑" })).toBeEnabled();
     });
-    expect(view.getByText("密钥已保存")).toBeInTheDocument();
+    expect(view.getAllByText("密钥已保存").length).toBeGreaterThan(0);
 
-    await fireEvent.update(apiKeyInput, "sk-new");
+    await fireEvent.click(view.getByRole("button", { name: "编辑" }));
+    const nextApiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
+    await fireEvent.update(nextApiKeyInput, "sk-new");
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
@@ -453,6 +462,7 @@ describe("Settings provider switch", () => {
     setMockProviderConfig("claude", { baseUrl: "https://api.anthropic.com", hasApiKey: true });
     const originalInvoke = vi.mocked(mockInvoke).getMockImplementation();
     const view = await renderSettings("/settings?tab=providers");
+    await fireEvent.click(await view.findByRole("button", { name: "编辑" }));
     const baseUrlInput = await view.findByPlaceholderText("https://api.anthropic.com") as HTMLInputElement;
     let resolveSave: () => void;
     vi.mocked(mockInvoke).mockImplementation((cmd: string, args: Record<string, unknown> = {}) => {
@@ -493,6 +503,11 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=providers");
     await waitFor(() => {
       expect(view.getByText("密钥已保存")).toBeInTheDocument();
+      expect(view.queryByRole("button", { name: "清除" })).not.toBeInTheDocument();
+      expect(view.getByRole("button", { name: "编辑" })).toBeEnabled();
+    });
+    await fireEvent.click(view.getByRole("button", { name: "编辑" }));
+    await waitFor(() => {
       expect(view.getByRole("button", { name: "清除" })).toBeEnabled();
     });
     await fireEvent.click(view.getByRole("button", { name: "清除" }));
@@ -501,7 +516,7 @@ describe("Settings provider switch", () => {
       expect(lastInvokeInput("provider_set_config")).toMatchObject({
         config: { clearApiKey: true },
       });
-      expect(view.getByText("未保存密钥")).toBeInTheDocument();
+      expect(view.getAllByText("未保存密钥").length).toBeGreaterThan(0);
     });
   });
 
@@ -1123,7 +1138,8 @@ describe("Settings provider switch", () => {
       expect.objectContaining({ key: "assistant", label: "Provider 配置" }),
       expect.objectContaining({ key: "model-config", label: "模型配置" }),
     ]));
-    expect(view.getByRole("heading", { level: 2, name: "模型池配置" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { level: 2, name: "Provider 配置" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: /Assistant AI Provider/ })).toBeInTheDocument();
   });
 
   it("Provider 配置页移除说明文本、清除按钮和 Codex 官方账号行", async () => {
@@ -1131,6 +1147,8 @@ describe("Settings provider switch", () => {
 
     expect(view.queryByText(/OpenAI 兼容的低成本模型/)).not.toBeInTheDocument();
     expect(view.queryByRole("button", { name: "清除" })).not.toBeInTheDocument();
+    expect(view.queryByPlaceholderText("https://api.example.com/v1")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "获取模型" })).not.toBeInTheDocument();
     expect(view.queryByText("Codex 官方账号")).not.toBeInTheDocument();
     expect(view.queryByText("使用 Spark")).not.toBeInTheDocument();
   });
@@ -1138,9 +1156,11 @@ describe("Settings provider switch", () => {
   it("辅助模型密钥不回显，空值保存保留已有密钥", async () => {
     const view = await renderSettings("/settings?tab=assistant");
 
+    expect(view.queryByPlaceholderText("已保存，留空保留现有值")).not.toBeInTheDocument();
+    await fireEvent.click(await view.findByRole("button", { name: /Assistant AI Provider/ }));
+
     const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
     expect(apiKeyInput.value).toBe("");
-    expect(view.getByText("密钥已保存")).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
@@ -1152,15 +1172,24 @@ describe("Settings provider switch", () => {
         clearApiKey: true,
       });
     });
-    expect(view.getByText("密钥已保存")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.queryByPlaceholderText("已保存，留空保留现有值")).not.toBeInTheDocument();
+      expect(view.getByRole("button", { name: /Assistant AI Provider/ })).toBeInTheDocument();
+    });
   });
 
-  it("模型池配置按来源展示，可获取远端模型并添加旧模型", async () => {
+  it("模型池配置使用统一模型列表，可获取并手动添加模型", async () => {
     const view = await renderSettings("/settings?tab=assistant");
-    const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
-    expect(view.getByRole("tab", { name: /远端\s*1/ })).toHaveAttribute("aria-selected", "true");
-    expect(view.getByRole("tab", { name: /旧模型\s*0/ })).toHaveAttribute("aria-selected", "false");
+    expect(view.getByRole("button", { name: /Assistant AI Provider/ })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: /1 个模型/ })).toBeInTheDocument();
+    expect(view.queryByRole("tab")).not.toBeInTheDocument();
+    expect(view.queryByLabelText("gpt-5.5 显示名")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "获取模型" })).not.toBeInTheDocument();
+
+    await fireEvent.click(await view.findByRole("button", { name: /Assistant AI Provider/ }));
+    expect(view.queryByRole("tab")).not.toBeInTheDocument();
     expect(view.getByLabelText("gpt-5.5 显示名")).toBeInTheDocument();
+    const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
 
     await fireEvent.update(apiKeyInput, "sk-new");
     await fireEvent.click(view.getByRole("button", { name: "获取模型" }));
@@ -1186,21 +1215,19 @@ describe("Settings provider switch", () => {
       });
     });
 
-    await fireEvent.click(view.getByRole("tab", { name: /旧模型\s*0/ }));
-    expect(view.getByText("当前来源暂无模型")).toBeInTheDocument();
+    await fireEvent.click(await view.findByRole("button", { name: /Assistant AI Provider/ }));
     await fireEvent.click(view.getByRole("button", { name: "添加" }));
-    await fireEvent.update(view.getByLabelText("模型 ID"), "legacy-mini");
-    await fireEvent.update(view.getByLabelText("显示名"), "Legacy Mini");
+    await fireEvent.update(view.getByLabelText("模型 ID"), "manual-mini");
+    await fireEvent.update(view.getByLabelText("显示名"), "Manual Mini");
     await fireEvent.click(view.getByRole("button", { name: "添加模型" }));
-    expect(view.getByRole("tab", { name: /旧模型\s*1/ })).toHaveAttribute("aria-selected", "true");
-    expect(view.getByLabelText("legacy-mini 显示名")).toBeInTheDocument();
+    expect(view.getByLabelText("manual-mini 显示名")).toBeInTheDocument();
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
         config: {
           modelPool: expect.arrayContaining([
-            expect.objectContaining({ id: "legacy-mini", label: "Legacy Mini", source: "legacy" }),
+            expect.objectContaining({ id: "manual-mini", label: "Manual Mini" }),
           ]),
         },
       });
@@ -1216,7 +1243,7 @@ describe("Settings provider switch", () => {
       text: option.textContent?.trim(),
     }))).toEqual(expect.arrayContaining([
       { value: "remote-mini", text: "Remote Mini (remote-mini)" },
-      { value: "legacy-mini", text: "Legacy Mini (legacy-mini)" },
+      { value: "manual-mini", text: "Manual Mini (manual-mini)" },
     ]));
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === MODEL_FEATURE_LIST_MODEL_OPTIONS_COMMAND))
       .toBe(true);
@@ -1265,6 +1292,7 @@ describe("Settings provider switch", () => {
 
     try {
       const view = await renderSettings("/settings?tab=assistant");
+      await fireEvent.click(await view.findByRole("button", { name: /Assistant AI Provider/ }));
       await view.findByPlaceholderText("已保存，留空保留现有值");
       mockInvoke.mockClear();
 
