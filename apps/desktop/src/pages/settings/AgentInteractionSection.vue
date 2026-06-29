@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
-import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Sparkles,
-} from "@lucide/vue";
+import { AlertTriangle, Sparkles } from "@lucide/vue";
 import type {
   AgentInteractionSettings,
   MainAgentPromptMode,
@@ -21,6 +16,7 @@ import {
 import {
   useAgentInteractionSettings,
 } from "../../composables/useAgentInteractionSettings";
+import SettingsCollapsibleCard from "./SettingsCollapsibleCard.vue";
 import {
   beginPerfStage,
   cancelIdleRun,
@@ -47,8 +43,14 @@ const agentInteraction = agentInteractionStore.settings;
 const savingAgentInteraction = ref(false);
 const agentInteractionError = ref<string | null>(null);
 const mainAgentCustomPromptDraft = ref("");
+const mainAgentStrategyExpanded = ref(false);
+const mainAgentPromptExpanded = ref(false);
+const autoTurnCardExpanded = ref(false);
 const subagentCardExpanded = ref(false);
 const subagentCatalogReady = ref(false);
+const mainAgentStrategyDetailsId = "agent-main-strategy-details";
+const mainAgentPromptDetailsId = "agent-main-prompt-details";
+const autoTurnDetailsId = "agent-auto-turn-details";
 const subagentDetailsId = "agent-subagent-mode-details";
 let subagentCatalogIdleHandle: number | null = null;
 let cancelSubagentCatalogPaint: (() => void) | null = null;
@@ -145,6 +147,11 @@ function activeMainAgentPromptDescription(): string {
     ?.description ?? mainAgentPromptModeOptions[0].description;
 }
 
+function activeMainAgentPromptLabel(): string {
+  return mainAgentPromptModeOptions.find((option) => option.value === agentInteraction.value.mainAgentPromptMode)
+    ?.label ?? mainAgentPromptModeOptions[0].label;
+}
+
 function defaultCustomMainAgentPrompt(): string {
   const persisted = agentInteraction.value.mainAgentCustomPrompt.trim();
   if (persisted) return persisted;
@@ -169,14 +176,6 @@ async function loadAgentInteraction() {
     if (disposed) return;
     agentInteractionError.value = `读取 Agent 交互设置失败：${String(err)}`;
   }
-}
-
-async function setNonInterruptMode(nonInterruptMode: boolean) {
-  await setAgentInteraction({ nonInterruptMode });
-}
-
-async function setDebugMode(debug: boolean) {
-  await setAgentInteraction({ debug });
 }
 
 async function setPermissionModeAvailable(permissionMode: PermissionMode, enabled: boolean) {
@@ -291,11 +290,6 @@ async function setAgentInteraction(patch: Partial<AgentInteractionSettings>) {
   } finally {
     if (!disposed) savingAgentInteraction.value = false;
   }
-}
-
-function toggleSubagentCard() {
-  if (!agentInteraction.value.subagentMode.enabled) return;
-  subagentCardExpanded.value = !subagentCardExpanded.value;
 }
 
 function scheduleSubagentCatalogMount() {
@@ -420,158 +414,140 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="card agent-settings-card" aria-label="主 Agent 策略">
-      <h2>主 Agent 策略</h2>
-      <div class="settings-row">
-      <div class="settings-row__label">策略模式</div>
-      <div class="settings-row__control settings-row__control--loose">
-        <div class="ui-segmented" role="radiogroup" aria-label="主 Agent 策略">
-          <button
-            v-for="option in mainAgentPromptModeOptions"
-            :key="option.value"
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.mainAgentPromptMode === option.value"
-            :data-agent-id="`settings.agent.main-prompt-mode.${option.value}`"
-            :class="{ 'is-active': agentInteraction.mainAgentPromptMode === option.value }"
+    <SettingsCollapsibleCard
+      v-model:expanded="mainAgentStrategyExpanded"
+      aria-label="策略模式"
+      :controls-id="mainAgentStrategyDetailsId"
+      toggle-agent-id="settings.agent.main-prompt-mode.toggle"
+      expand-label="展开策略模式"
+      collapse-label="收起策略模式"
+    >
+      <template #summary>
+        <div>
+          <div class="settings-row__label">策略模式</div>
+          <p class="agent-collapsible-hint">
+            {{ activeMainAgentPromptLabel() }}：{{ activeMainAgentPromptDescription() }}
+          </p>
+        </div>
+      </template>
+      <div class="settings-row settings-row--nested">
+        <div class="settings-row__label">主 Agent 策略</div>
+        <div class="settings-row__control settings-row__control--loose">
+          <div class="ui-segmented" role="radiogroup" aria-label="主 Agent 策略">
+            <button
+              v-for="option in mainAgentPromptModeOptions"
+              :key="option.value"
+              type="button"
+              role="radio"
+              :aria-checked="agentInteraction.mainAgentPromptMode === option.value"
+              :data-agent-id="`settings.agent.main-prompt-mode.${option.value}`"
+              :class="{ 'is-active': agentInteraction.mainAgentPromptMode === option.value }"
+              :disabled="savingAgentInteraction"
+              @click="setMainAgentPromptMode(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <span class="settings-row__status muted">
+            {{ activeMainAgentPromptDescription() }}
+          </span>
+        </div>
+      </div>
+    </SettingsCollapsibleCard>
+
+    <SettingsCollapsibleCard
+      v-model:expanded="mainAgentPromptExpanded"
+      aria-label="主 Agent 提示词"
+      :controls-id="mainAgentPromptDetailsId"
+      toggle-agent-id="settings.agent.main-prompt.toggle"
+      expand-label="展开主 Agent 提示词"
+      collapse-label="收起主 Agent 提示词"
+    >
+      <template #summary>
+        <div>
+          <div class="settings-row__label">提示词显示</div>
+          <p class="agent-collapsible-hint">
+            {{ agentInteraction.mainAgentPromptMode === "custom" ? "自定义策略" : "内置策略" }}
+          </p>
+        </div>
+      </template>
+      <section class="main-agent-prompt-panel" aria-label="主 Agent 工作流提示">
+        <div class="main-agent-prompt-panel__head">
+          <div class="settings-row__label">主 Agent 工作流提示预览</div>
+          <span class="main-agent-prompt-panel__meta">
+            {{ agentInteraction.mainAgentPromptMode === "custom" ? "自定义策略" : "内置策略" }}
+          </span>
+        </div>
+        <pre class="main-agent-prompt-panel__preview">{{ mainAgentPromptPreview }}</pre>
+        <div
+          v-if="agentInteraction.mainAgentPromptMode === 'custom'"
+          class="main-agent-prompt-panel__editor"
+        >
+          <label class="settings-row__label" for="main-agent-custom-prompt">
+            自定义主 Agent 提示词
+          </label>
+          <textarea
+            id="main-agent-custom-prompt"
+            v-model="mainAgentCustomPromptDraft"
+            class="ui-textarea main-agent-prompt-panel__textarea"
+            data-agent-id="settings.agent.main-prompt.custom"
+            rows="8"
             :disabled="savingAgentInteraction"
-            @click="setMainAgentPromptMode(option.value)"
+          />
+          <button
+            type="button"
+            class="ui-button ui-button--ghost main-agent-prompt-panel__save"
+            data-agent-id="settings.agent.main-prompt.save"
+            :disabled="savingAgentInteraction"
+            @click="saveMainAgentCustomPrompt"
           >
-            {{ option.label }}
+            应用自定义提示词
           </button>
         </div>
-        <span class="settings-row__status muted">
-          {{ activeMainAgentPromptDescription() }}
-        </span>
-      </div>
-      </div>
-
-      <section class="main-agent-prompt-panel" aria-label="主 Agent 工作流提示">
-      <div class="main-agent-prompt-panel__head">
-        <div class="settings-row__label">主 Agent 工作流提示预览</div>
-        <span class="main-agent-prompt-panel__meta">
-          {{ agentInteraction.mainAgentPromptMode === "custom" ? "自定义策略" : "内置策略" }}
-        </span>
-      </div>
-      <pre class="main-agent-prompt-panel__preview">{{ mainAgentPromptPreview }}</pre>
-      <div
-        v-if="agentInteraction.mainAgentPromptMode === 'custom'"
-        class="main-agent-prompt-panel__editor"
-      >
-        <label class="settings-row__label" for="main-agent-custom-prompt">
-          自定义主 Agent 提示词
-        </label>
-        <textarea
-          id="main-agent-custom-prompt"
-          v-model="mainAgentCustomPromptDraft"
-          class="ui-textarea main-agent-prompt-panel__textarea"
-          data-agent-id="settings.agent.main-prompt.custom"
-          rows="8"
-          :disabled="savingAgentInteraction"
-        />
-        <button
-          type="button"
-          class="ui-button ui-button--ghost main-agent-prompt-panel__save"
-          data-agent-id="settings.agent.main-prompt.save"
-          :disabled="savingAgentInteraction"
-          @click="saveMainAgentCustomPrompt"
-        >
-          应用自定义提示词
-        </button>
-      </div>
       </section>
-    </section>
+    </SettingsCollapsibleCard>
 
-    <section class="card agent-settings-card" aria-label="运行配置">
-      <h2>运行配置</h2>
-      <div class="settings-row">
-      <div class="settings-row__label">非打断模式</div>
-      <div class="ui-segmented" role="radiogroup" aria-label="非打断模式">
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="!agentInteraction.nonInterruptMode"
-          data-agent-id="settings.agent.non-interrupt.off"
-          :class="{ 'is-active': !agentInteraction.nonInterruptMode }"
-          :disabled="savingAgentInteraction"
-          @click="setNonInterruptMode(false)"
-        >
-          关闭
-        </button>
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="agentInteraction.nonInterruptMode"
-          data-agent-id="settings.agent.non-interrupt.on"
-          :class="{ 'is-active': agentInteraction.nonInterruptMode }"
-          :disabled="savingAgentInteraction"
-          @click="setNonInterruptMode(true)"
-        >
-          开启
-        </button>
-      </div>
-      </div>
-
-      <div class="settings-row">
-      <div class="settings-row__label">Debug 面板</div>
-      <div class="ui-segmented" role="radiogroup" aria-label="Debug 面板">
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="!agentInteraction.debug"
-          data-agent-id="settings.agent.debug.off"
-          :class="{ 'is-active': !agentInteraction.debug }"
-          :disabled="savingAgentInteraction"
-          @click="setDebugMode(false)"
-        >
-          关闭
-        </button>
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="agentInteraction.debug"
-          data-agent-id="settings.agent.debug.on"
-          :class="{ 'is-active': agentInteraction.debug }"
-          :disabled="savingAgentInteraction"
-          @click="setDebugMode(true)"
-        >
-          开启
-        </button>
-      </div>
-      </div>
-    </section>
-
-    <section class="card auto-turn-card" aria-label="自动轮次策略">
-      <div class="auto-turn-card__head">
+    <SettingsCollapsibleCard
+      v-model:expanded="autoTurnCardExpanded"
+      aria-label="自动轮次策略"
+      :controls-id="autoTurnDetailsId"
+      toggle-agent-id="settings.agent.auto-turn.toggle"
+      expand-label="展开自动轮次策略"
+      collapse-label="收起自动轮次策略"
+      with-switch
+    >
+      <template #summary>
         <div>
-          <h2>自动轮次策略</h2>
-          <p class="auto-turn-card__hint">Auto 模式下，由辅助模型在轮次启动前决定本轮执行策略。</p>
+          <div class="settings-row__label">自动轮次策略</div>
+          <p class="agent-collapsible-hint">Auto 模式下调整轮次启动前的执行策略。</p>
         </div>
+      </template>
+      <template #switch>
         <div class="ui-segmented" role="radiogroup" aria-label="自动轮次策略">
           <button
-          type="button"
-          role="radio"
-          :aria-checked="!agentInteraction.autoTurnDecision.enabled"
-          data-agent-id="settings.agent.auto-turn.off"
-          :class="{ 'is-active': !agentInteraction.autoTurnDecision.enabled }"
+            type="button"
+            role="radio"
+            :aria-checked="!agentInteraction.autoTurnDecision.enabled"
+            data-agent-id="settings.agent.auto-turn.off"
+            :class="{ 'is-active': !agentInteraction.autoTurnDecision.enabled }"
             :disabled="savingAgentInteraction"
             @click="setAutoTurnDecisionField('enabled', false)"
           >
             关闭
           </button>
           <button
-          type="button"
-          role="radio"
-          :aria-checked="agentInteraction.autoTurnDecision.enabled"
-          data-agent-id="settings.agent.auto-turn.on"
-          :class="{ 'is-active': agentInteraction.autoTurnDecision.enabled }"
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.autoTurnDecision.enabled"
+            data-agent-id="settings.agent.auto-turn.on"
+            :class="{ 'is-active': agentInteraction.autoTurnDecision.enabled }"
             :disabled="savingAgentInteraction"
             @click="setAutoTurnDecisionField('enabled', true)"
           >
             开启
           </button>
         </div>
-      </div>
+      </template>
 
       <div class="auto-turn-card__grid">
         <div
@@ -582,22 +558,22 @@ onBeforeUnmount(() => {
           <div class="settings-row__label">{{ option.label }}</div>
           <div class="ui-segmented" role="radiogroup" :aria-label="option.ariaLabel">
             <button
-            type="button"
-            role="radio"
-            :aria-checked="!agentInteraction.autoTurnDecision[option.key]"
-            :data-agent-id="`settings.agent.auto-turn.${option.key}.off`"
-            :class="{ 'is-active': !agentInteraction.autoTurnDecision[option.key] }"
+              type="button"
+              role="radio"
+              :aria-checked="!agentInteraction.autoTurnDecision[option.key]"
+              :data-agent-id="`settings.agent.auto-turn.${option.key}.off`"
+              :class="{ 'is-active': !agentInteraction.autoTurnDecision[option.key] }"
               :disabled="savingAgentInteraction || !agentInteraction.autoTurnDecision.enabled"
               @click="setAutoTurnDecisionField(option.key, false)"
             >
               禁止
             </button>
             <button
-            type="button"
-            role="radio"
-            :aria-checked="agentInteraction.autoTurnDecision[option.key]"
-            :data-agent-id="`settings.agent.auto-turn.${option.key}.on`"
-            :class="{ 'is-active': agentInteraction.autoTurnDecision[option.key] }"
+              type="button"
+              role="radio"
+              :aria-checked="agentInteraction.autoTurnDecision[option.key]"
+              :data-agent-id="`settings.agent.auto-turn.${option.key}.on`"
+              :class="{ 'is-active': agentInteraction.autoTurnDecision[option.key] }"
               :disabled="savingAgentInteraction || !agentInteraction.autoTurnDecision.enabled"
               @click="setAutoTurnDecisionField(option.key, true)"
             >
@@ -606,35 +582,27 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-    </section>
+    </SettingsCollapsibleCard>
 
-    <section
-      class="card subagent-mode-card"
+    <SettingsCollapsibleCard
+      v-model:expanded="subagentCardExpanded"
+      aria-label="Subagent 模式"
+      :controls-id="subagentDetailsId"
+      toggle-agent-id="settings.agent-interaction.subagent-details.toggle"
+      expand-label="展开 Subagent 详细配置"
+      collapse-label="收起 Subagent 详细配置"
+      :disabled="!agentInteraction.subagentMode.enabled"
+      with-switch
     >
-      <div
-        class="subagent-mode-card__header"
-        data-agent-id="settings.agent-interaction.subagent-details.toggle"
-        role="button"
-        :tabindex="agentInteraction.subagentMode.enabled ? 0 : -1"
-        :aria-controls="subagentDetailsId"
-        :aria-expanded="subagentCardExpanded"
-        :aria-disabled="!agentInteraction.subagentMode.enabled"
-        :aria-label="subagentCardExpanded ? '收起 Subagent 详细配置' : '展开 Subagent 详细配置'"
-        @click="toggleSubagentCard"
-        @keydown.enter.prevent="toggleSubagentCard"
-        @keydown.space.prevent="toggleSubagentCard"
-      >
-        <div class="subagent-mode-card__summary">
+      <template #summary>
+        <div>
           <div class="settings-row__label">Subagent 模式</div>
-          <p class="subagent-mode-card__hint">启用后可展开配置 Codex 与 Claude 的子代理行为。</p>
+          <p class="agent-collapsible-hint">启用后可展开配置 Codex 与 Claude 的子代理行为。</p>
         </div>
+      </template>
 
-        <div
-          class="ui-segmented subagent-mode-card__switch"
-          role="radiogroup"
-          aria-label="Subagent 模式"
-          @click.stop
-        >
+      <template #switch>
+        <div class="ui-segmented" role="radiogroup" aria-label="Subagent 模式">
           <button
           type="button"
           role="radio"
@@ -658,17 +626,9 @@ onBeforeUnmount(() => {
             开启
           </button>
         </div>
+      </template>
 
-        <component
-          :is="subagentCardExpanded ? ChevronDown : ChevronRight"
-          :size="16"
-          aria-hidden="true"
-          class="subagent-mode-card__chevron"
-        />
-      </div>
-
-      <div v-if="subagentCardExpanded" :id="subagentDetailsId" class="subagent-mode-card__details">
-        <div class="settings-row settings-row--nested">
+      <div class="settings-row settings-row--nested">
           <div class="settings-row__label">Codex Subagent</div>
           <div class="ui-segmented" role="radiogroup" aria-label="Codex Subagent">
             <button
@@ -779,8 +739,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-      </div>
-    </section>
+    </SettingsCollapsibleCard>
 
     <Suspense v-if="subagentCatalogReady">
       <SubagentCatalogSection />
@@ -815,23 +774,7 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.subagent-mode-card {
-  overflow: hidden;
-}
-
-.auto-turn-card {
-  display: grid;
-  gap: 12px;
-}
-
-.auto-turn-card__head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 14px;
-}
-
-.auto-turn-card__hint {
+.agent-collapsible-hint {
   margin: 4px 0 0;
   color: var(--text-secondary, rgba(255, 255, 255, 0.6));
   font-size: 13px;
@@ -885,8 +828,6 @@ onBeforeUnmount(() => {
 .main-agent-prompt-panel {
   display: grid;
   gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
 }
 
 .main-agent-prompt-panel__head {
@@ -933,55 +874,8 @@ onBeforeUnmount(() => {
   justify-self: start;
 }
 
-.subagent-mode-card__header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 12px;
-  padding: 0;
-  cursor: pointer;
-}
-
-.subagent-mode-card__header[aria-disabled="true"] {
-  cursor: default;
-}
-
-.subagent-mode-card__header:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.18);
-  outline-offset: -2px;
-  border-radius: 14px;
-}
-
-.subagent-mode-card__summary {
-  min-width: 0;
-}
-
-.subagent-mode-card__hint {
-  margin: 4px 0 0;
-  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
-  font-size: 13px;
-}
-
-.subagent-mode-card__switch {
-  justify-self: end;
-}
-
-.subagent-mode-card__chevron {
-  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
-}
-
-.subagent-mode-card__details {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
-}
-
 .settings-row--nested {
   padding-left: 12px;
-}
-
-.subagent-mode-card__details .settings-row--nested {
-  padding-left: 0;
 }
 
 .subagent-section--placeholder {

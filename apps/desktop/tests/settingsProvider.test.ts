@@ -208,6 +208,38 @@ describe("Settings provider switch", () => {
     expect(localStorage.getItem("lilia.cornerRadius")).toBe("14");
   });
 
+  it("外观页可以保存 Agent 运行配置", async () => {
+    const view = await renderSettings("/settings?tab=appearance");
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
+      ).toBe(true);
+    });
+
+    const nonInterruptGroup = view.getByRole("radiogroup", { name: "非打断模式" });
+    await fireEvent.click(within(nonInterruptGroup).getByRole("radio", { name: "开启" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          nonInterruptMode: true,
+        }),
+      });
+    });
+
+    const debugGroup = view.getByRole("radiogroup", { name: "Debug 面板" });
+    await fireEvent.click(within(debugGroup).getByRole("radio", { name: "开启" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          debug: true,
+        }),
+      });
+    });
+  });
+
   it("额度页显示近 7 天 Token 和成本统计", async () => {
     const view = await renderSettings("/settings?tab=quota");
 
@@ -838,9 +870,24 @@ describe("Settings provider switch", () => {
     });
 
     expect(view.getByRole("heading", { level: 2, name: "权限行为" })).toBeInTheDocument();
-    expect(view.getByRole("heading", { level: 2, name: "主 Agent 策略" })).toBeInTheDocument();
-    expect(view.getByRole("heading", { level: 2, name: "运行配置" })).toBeInTheDocument();
-    expect(view.getByRole("heading", { level: 2, name: "自动轮次策略" })).toBeInTheDocument();
+    expect(view.getByRole("region", { name: "策略模式" })).toBeInTheDocument();
+    expect(view.getByRole("region", { name: "主 Agent 提示词" })).toBeInTheDocument();
+    expect(view.getByRole("region", { name: "自动轮次策略" })).toBeInTheDocument();
+    expect(view.queryByRole("heading", { level: 2, name: "运行配置" })).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "展开策略模式" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(view.getByRole("button", { name: "展开主 Agent 提示词" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(view.getByRole("button", { name: "展开自动轮次策略" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(view.queryByRole("radio", { name: "激进" })).not.toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "展开策略模式" }));
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();
@@ -884,6 +931,7 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
 
+    await fireEvent.click(view.getByRole("button", { name: "展开策略模式" }));
     await fireEvent.click(view.getByRole("radio", { name: "激进" }));
 
     await waitFor(() => {
@@ -904,7 +952,9 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
 
+    await fireEvent.click(view.getByRole("button", { name: "展开策略模式" }));
     await fireEvent.click(view.getByRole("radio", { name: "自定义" }));
+    await fireEvent.click(view.getByRole("button", { name: "展开主 Agent 提示词" }));
 
     const textarea = await view.findByLabelText("自定义主 Agent 提示词");
     expect((textarea as HTMLTextAreaElement).value).toContain("主 Agent 策略：保守");
