@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   MonitorSmartphone,
   QrCode,
-  RotateCw,
   Smartphone,
   Trash2,
 } from "@lucide/vue";
@@ -35,20 +34,6 @@ const keepAwakeEnabled = computed(() => status.value?.keepAwakeEnabled ?? true);
 const trustedDevices = computed(() => status.value?.trustedDevices ?? []);
 const activeTicket = computed(() => status.value?.activeTicket ?? null);
 const shouldPollRemoteControl = computed(() => hostEnabled.value || activeTicket.value !== null);
-const connectionLabel = computed(() => {
-  switch (status.value?.state) {
-    case "pairing":
-      return "等待扫码";
-    case "listening":
-      return "可连接";
-    case "connected":
-      return "已连接";
-    case "disabled":
-      return "未启用";
-    default:
-      return "未初始化";
-  }
-});
 
 watch(
   () => activeTicket.value?.pairingUri,
@@ -88,10 +73,6 @@ async function refreshRemoteControl(options: { silent?: boolean } = {}) {
     if (!options.silent) loading.value = false;
     refreshInFlight = false;
   }
-}
-
-function handleRefreshClick() {
-  void refreshRemoteControl();
 }
 
 function startRemoteControlPolling() {
@@ -224,18 +205,13 @@ onBeforeUnmount(stopRemoteControlPolling);
           <input
             type="checkbox"
             role="switch"
+            aria-label="远控服务"
             data-agent-id="settings.remote-control.host.toggle"
             :checked="hostEnabled"
             :disabled="loading"
             @change="toggleHost"
           />
-          <span>远控服务</span>
         </label>
-        <span class="settings-row__status-text muted">{{ connectionLabel }}</span>
-        <button type="button" class="ui-button ui-button--ghost" data-agent-id="settings.remote-control.refresh" :disabled="loading" @click="handleRefreshClick">
-          <RotateCw :size="11" aria-hidden="true" />
-          刷新
-        </button>
       </div>
     </div>
 
@@ -246,16 +222,13 @@ onBeforeUnmount(stopRemoteControlPolling);
           <input
             type="checkbox"
             role="switch"
+            aria-label="远控期间保持电脑唤醒"
             data-agent-id="settings.remote-control.keep-awake"
             :checked="keepAwakeEnabled"
             :disabled="savingKeepAwake"
             @change="toggleKeepAwake"
           />
-          <span>远控期间保持电脑唤醒</span>
         </label>
-        <span class="settings-row__status-text muted">
-          {{ keepAwakeEnabled ? "已开启" : "已关闭" }}
-        </span>
       </div>
     </div>
 
