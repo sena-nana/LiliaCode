@@ -150,7 +150,10 @@ import {
   countProjectTaskStatuses,
   createChatBackendRecord,
   deriveProjectDashboardCounts,
+  DEFAULT_QUOTA_USAGE_STATS_DAYS,
   defaultRouterModeForBackend,
+  isQuotaUsageStatsBackendFilter,
+  isQuotaUsageStatsDays,
   createMemoryUpsertInput,
   normalizeAgentInteractionSettings,
   normalizeMemorySettings,
@@ -161,6 +164,8 @@ import {
   type ChatBackendKind,
   type Memory,
   type MemorySettings,
+  type QuotaUsageStatsBackendFilter,
+  type QuotaUsageStatsDays,
   type RouterMode,
 } from "@lilia/contracts";
 import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "./pluginCommands";
@@ -171,6 +176,7 @@ type UnlistenFn = () => void;
 const SERIALIZE_TO_IPC_FN = "__TAURI_TO_IPC_KEY__";
 let mockChannelId = 0;
 const now = 1_720_000_000_000;
+const dayMs = 86_400_000;
 
 const projects = [
   {
@@ -382,6 +388,7 @@ let memories: Memory[] = [
 ];
 
 let memorySettings: MemorySettings = { ...DEFAULT_MEMORY_SETTINGS };
+let devResetCreditAvailableCount = 2;
 
 const providerBackends = CHAT_BACKENDS as readonly ChatBackendKind[];
 
@@ -421,6 +428,233 @@ function text(args: Args, key: string): string {
 
 function bool(args: Args, key: string, fallback = false): boolean {
   return typeof args[key] === "boolean" ? args[key] : fallback;
+}
+
+function record(value: unknown): Args {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Args : {};
+}
+
+function dayStart(timestamp: number) {
+  return Math.floor(timestamp / dayMs) * dayMs;
+}
+
+function dateOnly(timestamp: number) {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function quotaUsageStatsDays(value: unknown): QuotaUsageStatsDays {
+  return isQuotaUsageStatsDays(value) ? value : DEFAULT_QUOTA_USAGE_STATS_DAYS;
+}
+
+function quotaUsageStatsBackend(value: unknown): QuotaUsageStatsBackendFilter {
+  return isQuotaUsageStatsBackendFilter(value) ? value : "all";
+}
+
+function sumQuotaTokens(rows: Array<{
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+}>) {
+  return rows.reduce(
+    (acc, row) => ({
+      inputTokens: acc.inputTokens + row.inputTokens,
+      outputTokens: acc.outputTokens + row.outputTokens,
+      cacheReadTokens: acc.cacheReadTokens + row.cacheReadTokens,
+      cacheCreationTokens: acc.cacheCreationTokens + row.cacheCreationTokens,
+      totalTokens: acc.totalTokens + row.totalTokens,
+    }),
+    { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0 },
+  );
+}
+
+function quotaCostSummary(
+  rows: Array<{ knownCostUsd: number | null; costRecordCount: number; recordCount: number }>,
+) {
+  const costRecordCount = rows.reduce((sum, row) => sum + row.costRecordCount, 0);
+  const knownCostUsd = rows.reduce(
+    (sum, row) => sum + (row.knownCostUsd ?? 0),
+    0,
+  );
+  return {
+    knownCostUsd: costRecordCount > 0 ? Number(knownCostUsd.toFixed(4)) : null,
+    costRecordCount,
+    totalRecordCount: rows.reduce((sum, row) => sum + row.recordCount, 0),
+  };
+}
+
+function createDevQuotaUsageStats(args: Args = {}) {
+  const input = record(args.input);
+  const days = quotaUsageStatsDays(input.days);
+  const backend = quotaUsageStatsBackend(input.backend);
+  const rangeEnd = dayStart(Date.now()) + dayMs;
+  const rangeStart = rangeEnd - days * dayMs;
+  const backendNames: ChatBackendKind[] = backend === "all"
+    ? ["claude", "codex"]
+    : [CHAT_BACKENDS.includes(backend as ChatBackendKind) ? backend as ChatBackendKind : "codex"];
+  const daily = Array.from({ length: days }, (_, index) => {
+    const active = index >= Math.max(0, days - 6);
+    const scale = backend === "codex" ? 0.72 : backend === "claude" ? 0.94 : 1;
+    const base = active ? Math.round((index + 3) * 420 * scale) : 0;
+    const inputTokens = base * 3;
+    const outputTokens = base;
+    const cacheReadTokens = active ? Math.round(base * 0.42) : 0;
+    const cacheCreationTokens = active ? Math.round(base * 0.16) : 0;
+    return {
+      dayStart: rangeStart + index * dayMs,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+      knownCostUsd: active && backend !== "codex" ? Number((0.012 * (index + 1)).toFixed(4)) : null,
+      costRecordCount: active && backend !== "codex" ? 1 : 0,
+      recordCount: active ? 1 : 0,
+    };
+  });
+  const totals = sumQuotaTokens(daily);
+  const cost = quotaCostSummary(daily);
+  const backends = backendNames.map((name, index) => {
+    const ratio = backend === "all" && name === "claude" ? 0.55 : backend === "all" ? 0.45 : 1;
+    return {
+      backend: name,
+      inputTokens: Math.round(totals.inputTokens * ratio),
+      outputTokens: Math.round(totals.outputTokens * ratio),
+      cacheReadTokens: Math.round(totals.cacheReadTokens * ratio),
+      cacheCreationTokens: Math.round(totals.cacheCreationTokens * ratio),
+      totalTokens: Math.round(totals.totalTokens * ratio),
+      knownCostUsd: name === "claude" ? Number((0.12 + index * 0.03).toFixed(2)) : null,
+      costRecordCount: name === "claude" ? 3 : 0,
+      recordCount: Math.max(1, cost.totalRecordCount),
+    };
+  });
+  const summary = {
+    ...totals,
+    knownCostUsd: cost.knownCostUsd,
+    costRecordCount: cost.costRecordCount,
+    recordCount: cost.totalRecordCount,
+  };
+  return {
+    days,
+    backend,
+    rangeStart,
+    rangeEnd,
+    totals,
+    cost,
+    daily,
+    backends,
+    recent: backends.map((row, index) => ({
+      eventId: `dev-quota-${row.backend}-${index}`,
+      taskId: `dev-quota-task-${index + 1}`,
+      turnId: `dev-quota-turn-${index + 1}`,
+      backend: row.backend,
+      sessionId: row.backend === "codex" ? "dev-codex-thread" : "dev-claude-session",
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      cacheReadTokens: row.cacheReadTokens,
+      cacheCreationTokens: row.cacheCreationTokens,
+      totalTokens: row.totalTokens,
+      knownCostUsd: row.knownCostUsd,
+      createdAt: rangeEnd - (index + 1) * 3_600_000,
+    })),
+    projects: [{
+      projectId: "lilia",
+      projectName: "Lilia",
+      projectCwd: "C:\\Files\\workspace\\Lilia",
+      ...summary,
+    }],
+    conversations: [{
+      taskId: "t-001",
+      taskTitle: "浏览开发期 mock 页面",
+      taskStatus: "running",
+      projectId: "lilia",
+      projectName: "Lilia",
+      ...summary,
+    }],
+    tools: [
+      {
+        key: "command::",
+        label: "命令",
+        kind: "command",
+        subkind: null,
+        toolName: null,
+        callCount: Math.max(1, cost.totalRecordCount - 1),
+        sharePercent: 62,
+      },
+      {
+        key: "search:grep:",
+        label: "内容搜索",
+        kind: "search",
+        subkind: "grep",
+        toolName: null,
+        callCount: Math.max(1, Math.floor(cost.totalRecordCount / 2)),
+        sharePercent: 38,
+      },
+    ],
+  };
+}
+
+function createDevCodexAccountUsageBuckets() {
+  const end = dayStart(Date.now());
+  return Array.from({ length: 70 }, (_, index) => {
+    const timestamp = end - (69 - index) * dayMs;
+    const wave = (index % 9) + 1;
+    const sprint = index >= 56 ? 2 : 1;
+    return {
+      startDate: dateOnly(timestamp),
+      tokens: sprint * wave * 38_000_000 + (index % 4) * 7_500_000,
+    };
+  });
+}
+
+function createDevCodexAccountQuotaStatus() {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const buckets = createDevCodexAccountUsageBuckets();
+  const peakDailyTokens = Math.max(...buckets.map((bucket) => bucket.tokens));
+  const lifetimeTokens = buckets.reduce((sum, bucket) => sum + bucket.tokens, 0);
+  return {
+    available: true,
+    connectionMode: "codex-account",
+    limitId: "codex",
+    limitName: null,
+    planType: "dev",
+    rateLimitReachedType: null,
+    fiveHour: {
+      usedPercent: 18,
+      windowDurationMins: 300,
+      resetsAt: nowSeconds + 7_200,
+    },
+    weekly: {
+      usedPercent: 42,
+      windowDurationMins: 10_080,
+      resetsAt: nowSeconds + 2 * 86_400,
+    },
+    sparkFiveHour: null,
+    sparkWeekly: null,
+    credits: {
+      hasCredits: true,
+      unlimited: false,
+      balance: "3",
+    },
+    sparkCredits: null,
+    rateLimitResetCredits: {
+      availableCount: devResetCreditAvailableCount,
+    },
+    accountUsage: {
+      summary: {
+        lifetimeTokens,
+        peakDailyTokens,
+        longestRunningTurnSec: 13_380,
+        currentStreakDays: 16,
+        longestStreakDays: 31,
+      },
+      dailyUsageBuckets: buckets,
+    },
+    usageError: null,
+    fetchedAt: Date.now(),
+    error: null,
+  };
 }
 
 function architecture(projectId: string) {
@@ -992,49 +1226,20 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
     case GITHUB_CLONE_REPO_COMMAND:
       return "C:\\Files\\workspace\\mock-clone" as T;
     case QUOTA_USAGE_GET_STATS_COMMAND:
-      return { today: null, weekly: null, monthly: null, updatedAt: Date.now() } as T;
+      return createDevQuotaUsageStats(args) as T;
     case QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND:
-      return {
-        available: false,
-        connectionMode: "codex-account",
-        limitId: null,
-        limitName: null,
-        planType: null,
-        rateLimitReachedType: null,
-        fiveHour: null,
-        weekly: null,
-        sparkFiveHour: null,
-        sparkWeekly: null,
-        credits: null,
-        sparkCredits: null,
-        rateLimitResetCredits: null,
-        accountUsage: null,
-        usageError: null,
-        fetchedAt: Date.now(),
-        error: "dev-mock",
-      } as T;
+      return createDevCodexAccountQuotaStatus() as T;
     case QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND:
+      if (devResetCreditAvailableCount > 0) {
+        devResetCreditAvailableCount -= 1;
+        return {
+          outcome: "reset",
+          status: createDevCodexAccountQuotaStatus(),
+        } as T;
+      }
       return {
         outcome: "noCredit",
-        status: {
-          available: false,
-          connectionMode: "codex-account",
-          limitId: null,
-          limitName: null,
-          planType: null,
-          rateLimitReachedType: null,
-          fiveHour: null,
-          weekly: null,
-          sparkFiveHour: null,
-          sparkWeekly: null,
-          credits: null,
-          sparkCredits: null,
-          rateLimitResetCredits: null,
-          accountUsage: null,
-          usageError: null,
-          fetchedAt: Date.now(),
-          error: "dev-mock",
-        },
+        status: createDevCodexAccountQuotaStatus(),
       } as T;
     default:
       console.warn(`[lilia:dev-mock] Unhandled Tauri command: ${cmd}`, args);

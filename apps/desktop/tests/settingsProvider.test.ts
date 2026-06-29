@@ -286,7 +286,7 @@ describe("Settings provider switch", () => {
 
     const view = await renderSettings("/settings?tab=quota");
 
-    expect(await view.findAllByText("暂无新增额度数据")).toHaveLength(2);
+    expect(await view.findByText("暂无新增额度数据")).toBeInTheDocument();
     expect(view.getByText("无新增记录")).toBeInTheDocument();
     expect(view.queryByRole("img", { name: /Token 用量趋势/ })).not.toBeInTheDocument();
   });
@@ -299,6 +299,15 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("周限额")).not.toBeInTheDocument();
     expect(view.getAllByText(/^重置 /)).toHaveLength(4);
     expect(view.getByRole("button", { name: "使用重置次数" })).toBeEnabled();
+    expect(view.getByText("累计 Token 数")).toBeInTheDocument();
+    expect(view.getByText("峰值 Token 数")).toBeInTheDocument();
+    expect(view.getByText("最长任务时长")).toBeInTheDocument();
+    expect(view.getByText("当前连续天数")).toBeInTheDocument();
+    expect(view.getByText("最长连续天数")).toBeInTheDocument();
+    expect(view.getByText("9 分钟")).toBeInTheDocument();
+    expect(view.getByLabelText("官方账号每日 Token 活动")).toBeInTheDocument();
+    expect(view.getByLabelText("2026-06-17: 1,200 tokens")).toBeInTheDocument();
+    expect(view.getByLabelText("2026-06-18: 3,400 tokens")).toBeInTheDocument();
   });
 
   it("额度页在 Codex API 模式隐藏官方额度", async () => {
