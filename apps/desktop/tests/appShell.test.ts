@@ -164,7 +164,7 @@ describe("AppShell left sidebar collapse", () => {
     });
   });
 
-  it("导入和插件入口收敛到设置分类", async () => {
+  it("导入和插件资源入口收敛到设置分类", async () => {
     const view = await renderAppShell("/settings");
 
     expect(view.queryByRole("link", { name: "从 Claude / Codex 导入对话" })).not.toBeInTheDocument();
@@ -174,9 +174,9 @@ describe("AppShell left sidebar collapse", () => {
     await waitFor(() => {
       expect(view.router.currentRoute.value.fullPath).toBe("/settings?tab=import");
     });
-    await fireEvent.click(view.getByRole("button", { name: /插件 \/ 技能/ }));
+    await fireEvent.click(view.getByRole("button", { name: "技能" }));
     await waitFor(() => {
-      expect(view.router.currentRoute.value.fullPath).toBe("/settings?tab=plugins");
+      expect(view.router.currentRoute.value.fullPath).toBe("/settings?tab=plugin-skills");
     });
   });
 

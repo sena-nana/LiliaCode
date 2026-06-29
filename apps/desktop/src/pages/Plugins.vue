@@ -46,8 +46,15 @@ import { measurePerfAsync } from "../utils/perf";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useHookSourceEditor } from "./plugins/useHookSourceEditor";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
-import PluginsTabBar from "./plugins/PluginsTabBar.vue";
 import { createLazyLoadState } from "../utils/lazyLoadState";
+
+type PluginsSection = "skills" | "packages" | "hooks" | "mcp";
+
+const props = withDefaults(defineProps<{
+  section?: PluginsSection;
+}>(), {
+  section: "skills",
+});
 
 const skillCreateDialogLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(
@@ -95,8 +102,10 @@ const McpServerEditorDialog = defineAsyncComponent({
   loader: loadMcpServerEditorDialog,
 });
 
+const backend = ref<"claude" | "codex">("claude");
+const showBackendSwitch = computed(() => props.section === "hooks" || props.section === "mcp");
+
 const {
-  tab,
   projectCwd,
   projectOptions,
   userSkills,
@@ -132,6 +141,15 @@ const hookDocumentLoading = ref(false);
 const hookDocumentError = ref<string | null>(null);
 let hookDocumentRequestId = 0;
 let disposed = false;
+
+const showTopbar = computed(() => props.section === "skills" || showBackendSwitch.value);
+const backendSwitchLabel = computed(() => props.section === "mcp" ? "MCP 后端" : "Hooks 后端");
+const claudeBackendCount = computed(() =>
+  props.section === "mcp" ? claudeMcpServers.value.length : claudeHookSources.value.length,
+);
+const codexBackendCount = computed(() =>
+  props.section === "mcp" ? codexServers.value.length : codexHookSources.value.length,
+);
 
 const mcpEditor = useMcpServerEditor<PluginMcpServer>({
   backend: "claude",
@@ -299,7 +317,7 @@ function mergeUniqueTexts(...groups: string[][]) {
 }
 
 const allEntries = computed<PluginEntry[]>(() => {
-  if (tab.value === "claude-skills") {
+  if (props.section === "skills") {
     return [...userSkills.value, ...projectSkills.value].map((skill) => {
       const projectLabel = projectLabelForSkill(skill);
       return {
@@ -313,7 +331,7 @@ const allEntries = computed<PluginEntry[]>(() => {
     });
   }
 
-  if (tab.value === "claude-plugins") {
+  if (props.section === "packages") {
     return claudePlugins.value.map((plugin) => ({
       kind: "plugin",
       key: `plugin:${plugin.path}`,
@@ -326,11 +344,13 @@ const allEntries = computed<PluginEntry[]>(() => {
     }));
   }
 
-  if (tab.value === "claude-hooks") {
-    return claudeHookSources.value.map((source) => buildHookEntry("claude-hook", source));
+  if (props.section === "hooks") {
+    return backend.value === "codex"
+      ? codexHookSources.value.map((source) => buildHookEntry("codex-hook", source))
+      : claudeHookSources.value.map((source) => buildHookEntry("claude-hook", source));
   }
 
-  if (tab.value === "claude-mcp") {
+  if (backend.value === "claude") {
     return claudeMcpServers.value.map((server) => ({
       kind: "claude-mcp",
       key: `claude-mcp:${server.name}`,
@@ -341,10 +361,6 @@ const allEntries = computed<PluginEntry[]>(() => {
       ),
       item: server,
     }));
-  }
-
-  if (tab.value === "codex-hooks") {
-    return codexHookSources.value.map((source) => buildHookEntry("codex-hook", source));
   }
 
   return codexServers.value.map((server) => ({
@@ -472,9 +488,9 @@ const detailRows = computed<DetailRow[]>(() => {
 
 const emptyText = computed(() => {
   if (query.value.trim()) return "没有匹配项";
-  if (tab.value === "claude-skills") return "没有 Skill";
-  if (tab.value === "claude-plugins") return "没有 Plugin";
-  if (tab.value === "claude-hooks" || tab.value === "codex-hooks") return "没有 Hooks 来源";
+  if (props.section === "skills") return "没有 Skill";
+  if (props.section === "packages") return "没有 Plugin";
+  if (props.section === "hooks") return "没有 Hooks 来源";
   return "没有 MCP";
 });
 
@@ -497,9 +513,14 @@ watch(
   { immediate: true },
 );
 
-watch(tab, () => {
-  query.value = "";
-});
+watch(
+  () => props.section,
+  () => {
+    backend.value = "claude";
+    query.value = "";
+    selectedKey.value = null;
+  },
+);
 
 watch(
   selectedHookSource,
@@ -682,17 +703,17 @@ function selectEntry(entry: PluginEntry) {
 function openMcpCreate() {
   if (disposed) return;
   void loadMcpServerEditorDialog();
-  if (tab.value === "claude-mcp") mcpEditor.openCreateMcp();
-  else if (tab.value === "codex-mcp") codexMcpEditor.openCreateMcp();
+  if (backend.value === "claude") mcpEditor.openCreateMcp();
+  else codexMcpEditor.openCreateMcp();
 }
 
 function canCreateInDetail() {
-  if (tab.value === "claude-mcp" || tab.value === "codex-mcp") return true;
+  if (props.section === "mcp") return true;
   return !!selectedHookSource.value && selectedHookSource.value.editable && !selectedHookSource.value.exists;
 }
 
 function detailCreateLabel() {
-  return tab.value === "claude-mcp" || tab.value === "codex-mcp" ? "新增 MCP" : "创建来源";
+  return props.section === "mcp" ? "新增 MCP" : "创建来源";
 }
 
 function openDetailCreate() {
@@ -786,19 +807,42 @@ function canOpenConfig(entry: PluginEntry) {
         </div>
       </div>
 
-      <div class="plugins-browser__topbar">
-        <PluginsTabBar
-          v-model="tab"
-          :skills-count="userSkills.length + projectSkills.length"
-          :plugins-count="claudePlugins.length"
-          :claude-hooks-count="claudeHookSources.length"
-          :claude-mcp-count="claudeMcpServers.length"
-          :codex-hooks-count="codexHookSources.length"
-          :codex-mcp-count="codexServers.length"
-        />
+      <div v-if="showTopbar" class="plugins-browser__topbar">
+        <div
+          v-if="showBackendSwitch"
+          class="plugins-backend-tabs ui-tabs ui-tabs--pill"
+          role="tablist"
+          :aria-label="backendSwitchLabel"
+        >
+          <button
+            type="button"
+            role="tab"
+            class="ui-tabs__tab"
+            :aria-selected="backend === 'claude'"
+            :class="{ 'is-active': backend === 'claude' }"
+            data-agent-id="plugins.backend.claude"
+            @click="backend = 'claude'"
+          >
+            Claude
+            <span class="ui-tabs__count">{{ claudeBackendCount }}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="ui-tabs__tab"
+            :aria-selected="backend === 'codex'"
+            :class="{ 'is-active': backend === 'codex' }"
+            data-agent-id="plugins.backend.codex"
+            @click="backend = 'codex'"
+          >
+            Codex
+            <span class="ui-tabs__count">{{ codexBackendCount }}</span>
+          </button>
+        </div>
+        <div v-else class="plugins-browser__topbar-spacer" aria-hidden="true" />
         <div class="plugins-browser__topbar-actions">
           <button
-            v-if="tab === 'claude-skills'"
+            v-if="props.section === 'skills'"
             type="button"
             class="ui-button ui-button--ghost"
             data-agent-id="plugins.skill.create"

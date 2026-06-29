@@ -192,7 +192,7 @@ export function createLiliaRouter(history: RouterHistory = createDefaultHistory(
             props: true,
           },
           { path: "settings", component: Settings },
-          { path: "plugins", redirect: { path: "/settings", query: { tab: "plugins" } } },
+          { path: "plugins", redirect: { path: "/settings", query: { tab: "plugin-skills" } } },
           { path: "automations", component: Automations },
           {
             path: "import",

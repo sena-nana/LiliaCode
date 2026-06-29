@@ -18,7 +18,7 @@ function lastCodexMcpCreateInput() {
 
 describe("Plugins page", () => {
   it("混合显示全局和项目 Skill，并把新建入口放在顶部", async () => {
-    const view = render(Plugins);
+    const view = render(Plugins, { props: { section: "skills" } });
     const list = view.getByRole("region", { name: "检索结果" });
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
@@ -34,10 +34,20 @@ describe("Plugins page", () => {
     expect(within(detail).getByText("Lilia")).toBeInTheDocument();
   });
 
-  it("展示并管理 Claude MCP server", async () => {
-    const view = render(Plugins);
+  it("插件页只显示 Claude Plugin", async () => {
+    const view = render(Plugins, { props: { section: "packages" } });
+    const list = view.getByRole("region", { name: "检索结果" });
 
-    await fireEvent.click(view.getByRole("tab", { name: /Claude MCP/ }));
+    await waitFor(() => {
+      expect(within(list).getByRole("button", { name: /demo-plugin/ })).toBeInTheDocument();
+    });
+    expect(within(list).queryByRole("button", { name: /mock-skill/ })).not.toBeInTheDocument();
+    expect(view.queryByRole("tab", { name: /Claude/ })).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "新建 Skill" })).not.toBeInTheDocument();
+  });
+
+  it("展示并管理 Claude MCP server", async () => {
+    const view = render(Plugins, { props: { section: "mcp" } });
     const list = view.getByRole("region", { name: "检索结果" });
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
@@ -87,9 +97,9 @@ describe("Plugins page", () => {
   });
 
   it("管理 Codex stdio MCP 并保持 HTTP server 只读", async () => {
-    const view = render(Plugins);
+    const view = render(Plugins, { props: { section: "mcp" } });
 
-    await fireEvent.click(view.getByRole("tab", { name: /Codex MCP/ }));
+    await fireEvent.click(view.getByRole("tab", { name: /Codex/ }));
     const list = view.getByRole("region", { name: "检索结果" });
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
@@ -144,9 +154,7 @@ describe("Plugins page", () => {
   });
 
   it("展示 Claude Hooks 并在编辑结构化字段后保留高级 JSON", async () => {
-    const view = render(Plugins);
-
-    await fireEvent.click(view.getByRole("tab", { name: /Claude Hooks/ }));
+    const view = render(Plugins, { props: { section: "hooks" } });
     const list = view.getByRole("region", { name: "检索结果" });
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
@@ -181,9 +189,8 @@ describe("Plugins page", () => {
   });
 
   it("支持创建缺失的 Hooks 来源，并对 Codex 只读来源展示限制", async () => {
-    const view = render(Plugins);
+    const view = render(Plugins, { props: { section: "hooks" } });
 
-    await fireEvent.click(view.getByRole("tab", { name: /Claude Hooks/ }));
     const list = view.getByRole("region", { name: "检索结果" });
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
@@ -206,7 +213,7 @@ describe("Plugins page", () => {
       ),
     ).toBe(true);
 
-    await fireEvent.click(view.getByRole("tab", { name: /Codex Hooks/ }));
+    await fireEvent.click(view.getByRole("tab", { name: /Codex/ }));
     await waitFor(() => {
       expect(within(list).getByRole("button", { name: /Codex User Config Hooks/ })).toBeInTheDocument();
     });

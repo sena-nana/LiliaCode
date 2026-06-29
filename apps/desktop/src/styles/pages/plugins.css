@@ -5,11 +5,6 @@
   flex-direction: column;
 }
 
-/* ---- Tabs ---- */
-.plugins-tabs {
-  margin-bottom: 0;
-}
-
 .plugins-browser {
   min-height: 0;
   flex: 1 1 auto;
@@ -39,14 +34,18 @@
   overflow: hidden;
 }
 
-.plugins-browser__topbar .plugins-tabs {
+.plugins-browser__topbar .plugins-backend-tabs {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.plugins-browser__topbar .plugins-tabs::-webkit-scrollbar {
+.plugins-browser__topbar .plugins-backend-tabs::-webkit-scrollbar {
   display: none;
+}
+
+.plugins-browser__topbar-spacer {
+  min-width: 0;
 }
 
 .plugins-browser__topbar-actions {

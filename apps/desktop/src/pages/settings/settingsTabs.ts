@@ -9,7 +9,10 @@ import {
   Network,
   PanelTop,
   Palette,
+  Puzzle,
+  Server,
   Sparkles,
+  Workflow,
 } from "@lucide/vue";
 import type { Component } from "vue";
 
@@ -22,7 +25,10 @@ export type SettingsTabKey =
   | "model-config"
   | "agent"
   | "quota"
-  | "plugins"
+  | "plugin-skills"
+  | "plugin-packages"
+  | "plugin-hooks"
+  | "plugin-mcp"
   | "import"
   | "project"
   | "about";
@@ -75,9 +81,24 @@ export const SETTINGS_TABS: SettingsTab[] = [
     icon: Gauge,
   },
   {
-    key: "plugins",
-    label: "插件 / 技能",
+    key: "plugin-skills",
+    label: "技能",
     icon: Sparkles,
+  },
+  {
+    key: "plugin-packages",
+    label: "插件",
+    icon: Puzzle,
+  },
+  {
+    key: "plugin-hooks",
+    label: "Hooks",
+    icon: Workflow,
+  },
+  {
+    key: "plugin-mcp",
+    label: "MCP",
+    icon: Server,
   },
   {
     key: "import",
@@ -100,6 +121,7 @@ export const DEFAULT_SETTINGS_TAB: SettingsTabKey = "appearance";
 
 export function normalizeSettingsTab(value: unknown): SettingsTabKey {
   const candidate = Array.isArray(value) ? value[0] : value;
+  if (candidate === "plugins") return "plugin-skills";
   return SETTINGS_TABS.some((tab) => tab.key === candidate)
     ? (candidate as SettingsTabKey)
     : DEFAULT_SETTINGS_TAB;

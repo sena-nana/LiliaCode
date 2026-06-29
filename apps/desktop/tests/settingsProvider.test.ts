@@ -135,10 +135,17 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("Codex 会话管理")).not.toBeInTheDocument();
   });
 
-  it("插件技能和导入对话保持原页面主内容布局", async () => {
-    const plugins = await renderSettings("/settings?tab=plugins");
-    expect(plugins.container.querySelector(".plugins-page")).toBeInTheDocument();
-    expect(plugins.queryByRole("heading", { level: 1, name: "插件 / 技能" }))
+  it("旧插件技能 tab 回落到技能页，插件资源入口保持原页面主内容布局", async () => {
+    const legacyPlugins = await renderSettings("/settings?tab=plugins");
+    expect(legacyPlugins.container.querySelector(".plugins-page")).toBeInTheDocument();
+    expect(legacyPlugins.getByRole("button", { name: "新建 Skill" })).toBeInTheDocument();
+    expect(legacyPlugins.queryByRole("heading", { level: 1, name: "技能" }))
+      .not.toBeInTheDocument();
+
+    const mcp = await renderSettings("/settings?tab=plugin-mcp");
+    expect(mcp.container.querySelector(".plugins-page")).toBeInTheDocument();
+    expect(mcp.getByRole("tablist", { name: "MCP 后端" })).toBeInTheDocument();
+    expect(mcp.queryByRole("heading", { level: 1, name: "MCP" }))
       .not.toBeInTheDocument();
 
     const imports = await renderSettings("/settings?tab=import");
@@ -1190,12 +1197,19 @@ describe("Settings provider switch", () => {
     }
   });
 
-  it("设置侧边栏将辅助能力改为 Provider 配置并新增模型配置", async () => {
+  it("设置侧边栏将辅助能力改为 Provider 配置并拆分插件资源入口", async () => {
     const view = await renderSettings("/settings?tab=assistant");
 
     expect(SETTINGS_TABS).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "assistant", label: "Provider 配置" }),
       expect.objectContaining({ key: "model-config", label: "模型配置" }),
+      expect.objectContaining({ key: "plugin-skills", label: "技能" }),
+      expect.objectContaining({ key: "plugin-packages", label: "插件" }),
+      expect.objectContaining({ key: "plugin-hooks", label: "Hooks" }),
+      expect.objectContaining({ key: "plugin-mcp", label: "MCP" }),
+    ]));
+    expect(SETTINGS_TABS).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "plugins" }),
     ]));
     expect(view.getByRole("heading", { level: 2, name: "Provider 配置" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: /Assistant AI Provider/ })).toBeInTheDocument();

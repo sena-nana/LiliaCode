@@ -9,18 +9,9 @@ import {
 } from "../../services/plugins";
 import { listProjects } from "../../services/projectsStore";
 
-export type PluginsTab =
-  | "claude-skills"
-  | "claude-plugins"
-  | "claude-hooks"
-  | "claude-mcp"
-  | "codex-hooks"
-  | "codex-mcp";
-
 export function usePluginsOverview(options: {
   isDisposed?: () => boolean;
 } = {}) {
-  const tab = ref<PluginsTab>("claude-skills");
   const projects = computed(() => listProjects());
   const projectsWithCwd = computed(() =>
     projects.value.filter((p): p is typeof p & { cwd: string } => !!p.cwd),
@@ -89,7 +80,6 @@ export function usePluginsOverview(options: {
   });
 
   return {
-    tab,
     projectCwd,
     projectOptions,
     userSkills,
