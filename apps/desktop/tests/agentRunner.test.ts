@@ -2335,23 +2335,24 @@ describe("Codex app-server mapping", () => {
     expect(codexPermissionProfileIdForMode("free")).toBe(":danger-no-sandbox");
 
     expect(mapCodexApprovalPolicy("ask")).toBe("on-request");
-    expect(mapCodexSandboxMode("ask")).toBe("workspace-write");
-    expect(codexPermissionProfileIdForMode("ask")).toBe(":workspace");
+    expect(mapCodexSandboxMode("ask")).toBe("read-only");
+    expect(codexPermissionProfileIdForMode("ask")).toBe(":read-only");
 
-    expect(mapCodexApprovalPolicy("readonly")).toBe("never");
+    expect(mapCodexApprovalPolicy("readonly")).toBe("on-request");
     expect(mapCodexSandboxMode("readonly")).toBe("read-only");
     expect(codexPermissionProfileIdForMode("readonly")).toBe(":read-only");
+    expect(codexPermissionRuntimeParams("readonly")).toEqual(codexPermissionRuntimeParams("ask"));
 
     expect(mapCodexApprovalPolicy("unknown")).toBe("on-request");
-    expect(mapCodexSandboxMode("unknown")).toBe("workspace-write");
-    expect(codexPermissionProfileIdForMode("unknown")).toBe(":workspace");
+    expect(mapCodexSandboxMode("unknown")).toBe("read-only");
+    expect(codexPermissionProfileIdForMode("unknown")).toBe(":read-only");
     expect(codexPermissionRuntimeParams("ask")).toEqual({
       approvalPolicy: "on-request",
-      permissions: ":workspace",
-      sandboxPolicy: { type: "workspaceWrite" },
+      permissions: ":read-only",
+      sandboxPolicy: { type: "readOnly" },
     });
     expect(codexLegacyPermissionRuntimeParams("readonly")).toEqual({
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       sandbox: "read-only",
     });
   });
@@ -3685,7 +3686,7 @@ describe("Codex app-server mapping", () => {
     ]);
   });
 
-  it("passes Codex approval fields through and honors codexDecision first", async () => {
+  it("passes Codex approval fields through for readonly runs and honors codexDecision first", async () => {
     const calls: any[] = [];
     let seenPayload: any = null;
     const handled = await maybeHandleCodexApprovalRequest(
@@ -3709,6 +3710,7 @@ describe("Codex app-server mapping", () => {
         },
       },
       {
+        executionPermission: "readonly",
         interactions: {
           requestUserConsent: async (payload: any) => {
             seenPayload = payload;
@@ -3814,6 +3816,7 @@ describe("Codex app-server mapping", () => {
           command: "yarn test",
           cwd: "C:/repo",
           availableDecisions: ["accept", "decline", "cancel"],
+          proposedExecpolicyAmendment: { sandbox: "workspace-write" },
         },
       },
       {
@@ -3921,12 +3924,12 @@ describe("Codex app-server mapping", () => {
       ["request", "command/exec", {
         command: "pnpm test --changed",
         cwd: undefined,
-        permissionProfile: ":workspace",
+        permissionProfile: ":read-only",
       }],
       ["request", "process/spawn", {
         command: "pnpm test --changed",
         cwd: undefined,
-        permissionProfile: ":workspace",
+        permissionProfile: ":read-only",
       }],
       ["respond", "approval-rpc-4", { decision: "decline" }],
     ]);
@@ -4198,7 +4201,7 @@ describe("Codex app-server mapping", () => {
       reasoningEffort: "high",
       effort: "high",
       runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-      permissions: ":workspace",
+      permissions: ":read-only",
       persistExtendedHistory: true,
     });
     expect(calls[updateIndex].params.collaborationMode).toBeUndefined();
@@ -4207,7 +4210,7 @@ describe("Codex app-server mapping", () => {
       responsesapiClientMetadata: { surface: "lilia-test" },
       additionalContext: "extra context",
       runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-      permissions: ":workspace",
+      permissions: ":read-only",
     });
     expect(startCall.params.initialTurnsPage).toBeUndefined();
     expect(startCall.params.excludeTurns).toBeUndefined();
@@ -4345,7 +4348,7 @@ describe("Codex app-server mapping", () => {
       params: {
         threadId: "thread-1",
         cwd: "C:/repo",
-        approvalPolicy: "never",
+        approvalPolicy: "on-request",
         permissions: ":read-only",
         collaborationMode: { mode: "default" },
       },
@@ -4386,7 +4389,7 @@ describe("Codex app-server mapping", () => {
     });
 
     const turnStart = calls.find((call) => call.method === "turn/start");
-    expect(turnStart.params.approvalPolicy).toBe("never");
+    expect(turnStart.params.approvalPolicy).toBe("on-request");
     expect(turnStart.params.permissions).toBe(":read-only");
     expect(turnStart.params.sandboxPolicy).toEqual({ type: "readOnly" });
   });
@@ -4806,7 +4809,7 @@ describe("Codex app-server mapping", () => {
         cwd: "C:/repo",
         model: "gpt-5.5",
         runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-        permissions: ":workspace",
+        permissions: ":read-only",
         excludeTurns: true,
       },
     });
@@ -5144,7 +5147,7 @@ describe("Codex app-server mapping", () => {
         effort: "high",
         runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
         permissions: ":read-only",
-        approvalPolicy: "never",
+        approvalPolicy: "on-request",
         persistExtendedHistory: true,
         environments: [{ id: "env-1" }],
         experimentalRawEvents: true,
@@ -5899,7 +5902,7 @@ describe("Codex app-server mapping", () => {
       params: {
         threadId: "thread-1",
         runtimeWorkspaceRoots: ["C:/repo"],
-        permissions: ":workspace",
+        permissions: ":read-only",
       },
     });
     expect(json()).toEqual([
@@ -5958,7 +5961,7 @@ describe("Codex app-server mapping", () => {
       method: "turn/start",
       params: {
         model: "gpt-5.7",
-        approvalPolicy: "never",
+        approvalPolicy: "on-request",
         sandboxPolicy: { type: "readOnly" },
       },
     });
