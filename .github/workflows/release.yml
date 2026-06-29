@@ -27,6 +27,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
+      TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
 
     steps:
       - name: Resolve ref
@@ -98,6 +99,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
+      TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
 
     steps:
       - name: Resolve ref
@@ -153,6 +155,10 @@ jobs:
       - name: 配置 Tauri 签名密钥
         shell: pwsh
         run: |
+          if (-not $env:TAURI_UPDATER_PUBKEY) {
+            throw "No Tauri updater public key is configured. Set repository variable TAURI_UPDATER_PUBKEY."
+          }
+
           $localSigningKeyPath = Join-Path $env:GITHUB_WORKSPACE "..\\tauri-signing.key"
           $hasLocalSigningKey = Test-Path $localSigningKeyPath
           if ($hasLocalSigningKey) {
@@ -182,6 +188,9 @@ jobs:
           releaseDraft: true
           generateReleaseNotes: true
           assetNamePattern: LiliaCode_[version]_[arch][setup][ext]
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          uploadUpdaterSignatures: true
           releaseBody: |
             ## 首发发布检查清单
 
@@ -194,7 +203,8 @@ jobs:
             - [ ] 已确认基础窗口操作正常。
             - [ ] smoke 已覆盖卸载流程，并确认卸载后新的 PowerShell 或 cmd 中 `liliacode` 不再可用。
             - [ ] 已在 Release 说明中保留签名提示：当前安装包使用 `tauri-signing.key` 完成 Tauri 签名。
-            - [ ] 已在 Release 说明中保留升级提示：当前没有应用内自动更新，升级需要手动下载并安装新版安装包。
+            - [ ] 已确认 Release assets 包含 `latest.json`、NSIS updater zip 和对应 `.sig` 签名。
+            - [ ] 已在 Release 说明中保留升级提示：LiliaCode 会在启动后检查应用内自动更新，并在用户确认后安装新版。
 
             ## Windows 安装验证记录
 
@@ -211,8 +221,24 @@ jobs:
 
             - 当前只发布 Windows 安装包。
             - 当前安装包使用 `tauri-signing.key` 完成 Tauri 签名。
-            - 当前不包含 Tauri updater 自动更新能力。
             - 当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包。
+
+      - name: Verify updater release assets
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $release = gh release view "${{ steps.release_ref.outputs.tag }}" --json assets | ConvertFrom-Json
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          if ($assetNames -notcontains "latest.json") {
+            throw "Release is missing latest.json for Tauri updater."
+          }
+          if (-not ($assetNames | Where-Object { $_ -like "*.nsis.zip" })) {
+            throw "Release is missing the NSIS updater zip."
+          }
+          if (-not ($assetNames | Where-Object { $_ -like "*.nsis.zip.sig" })) {
+            throw "Release is missing the NSIS updater signature."
+          }
 
       - name: Show sccache stats
         shell: pwsh

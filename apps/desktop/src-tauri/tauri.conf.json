@@ -38,12 +38,18 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": []
+      "endpoints": [
+        "https://github.com/sena-nana/LiliaCode/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "nsis",
+    "createUpdaterArtifacts": true,
     "resources": {
       "../codex-account-quota.mjs": "codex-account-quota.mjs",
       "../agent-runner/codex/accountQuota.mjs": "agent-runner/codex/accountQuota.mjs",

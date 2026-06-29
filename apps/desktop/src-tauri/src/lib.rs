@@ -7,6 +7,7 @@ mod agent_extensions;
 mod agent_interaction_contract;
 pub mod agent_timeline;
 mod agent_timeline_contract;
+mod app_commands;
 mod app_events_contract;
 mod automation;
 mod chat;
@@ -171,6 +172,15 @@ pub fn run() {
     apply_agent_debug_dev_url_override(&mut context);
 
     let builder = tauri::Builder::default();
+    let updater_builder = tauri_plugin_updater::Builder::new();
+    let updater_builder = if let Some(pubkey) = option_env!("TAURI_UPDATER_PUBKEY")
+        .map(str::trim)
+        .filter(|pubkey| !pubkey.is_empty())
+    {
+        updater_builder.pubkey(pubkey)
+    } else {
+        updater_builder
+    };
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
         cli_project::handle_second_instance(app, argv, cwd);
@@ -182,7 +192,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(updater_builder.build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -237,6 +247,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
+            app_commands::app_restart,
             chat::attachments::chat_describe_attachments,
             chat::attachments::chat_read_clipboard_file_paths,
             chat::attachments::chat_save_clipboard_image,

@@ -1,5 +1,6 @@
 import {
   CHAT_BACKENDS,
+  APP_RESTART_COMMAND,
   AGENT_TIMELINE_LIST_COMMAND,
   AGENT_DEBUG_LOGS_COMMAND,
   AGENT_DEBUG_RECORD_ACTION_COMMAND,
@@ -439,6 +440,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
   if (cmd.startsWith("plugin:updater|")) return null as T;
 
   switch (cmd) {
+    case APP_RESTART_COMMAND:
+      return undefined as T;
     case AGENT_DEBUG_STATUS_COMMAND:
       return {
         enabled: true,

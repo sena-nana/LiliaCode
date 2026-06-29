@@ -2,7 +2,7 @@
 
 ## 发布摘要
 
-本版本是 LiliaCode Windows 首发手动发布包。发布前请确认本页面仍是 draft，并完成下方安装验证后再正式发布。
+本版本是 LiliaCode Windows 发布包。发布前请确认本页面仍是 draft，并完成下方安装验证后再正式发布。
 
 ## 主要变更
 
@@ -14,6 +14,7 @@
 ## 安装包
 
 - Windows x64 安装包：`LiliaCode_<version>_x64-setup.exe`
+- Tauri updater 产物：`latest.json`、`*.nsis.zip`、`*.nsis.zip.sig`
 
 ## Windows 安装验证
 
@@ -39,10 +40,9 @@
 
 - 当前只发布 Windows 安装包。
 - 当前安装包使用 `tauri-signing.key` 完成 Tauri 签名。
-- 当前不包含 Tauri updater 自动更新能力。
 - 当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包。
 
 ## 升级说明
 
-首发阶段不承诺应用内自动更新。用户升级时需要手动下载新版 Windows 安装包并安装。
+LiliaCode 支持应用内自动更新。启动后会自动检查新版本，用户确认后自动下载、安装并重启；也可以从 GitHub Release 手动下载新版 Windows 安装包并安装。
 
