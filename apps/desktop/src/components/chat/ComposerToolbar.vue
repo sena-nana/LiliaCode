@@ -224,6 +224,10 @@ const activeModeChips = computed<ModeChip[]>(() => {
 const worktreeTitle = computed(() =>
   props.worktreeError || props.worktreeOptions.find((option) => option.value === props.worktreeValue)?.hint || "工作树",
 );
+const permissionTitle = computed(() => {
+  const option = props.permissionOptions.find((item) => item.value === props.state.permission);
+  return option?.hint || option?.label || "权限模式";
+});
 
 function toggleActionMenu(event: MouseEvent) {
   captureActionMenuAnchor(event);
@@ -403,6 +407,7 @@ onBeforeUnmount(() => {
           :model-value="state.permission"
           :options="permissionOptions"
           :icon="ShieldCheck"
+          :title="permissionTitle"
           @update:model-value="emit('setPermission', $event)"
         />
         <Dropdown

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ArrowRight, ArrowUp, Square } from "@lucide/vue";
+import { ArrowLeft, ArrowRight, ArrowUp, Check, Pencil, SkipForward, Square, X } from "@lucide/vue";
 import type { ToolConsentDecision } from "../../services/chat";
 import type { ComposerPendingEntryActionsMode } from "./useComposerPendingInteraction";
 
@@ -50,9 +50,11 @@ const emit = defineEmits<{
       class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
       data-agent-id="chat.pending.skip"
       :disabled="actionsBlocked"
+      title="跳过"
       @click="emit('skipAsk')"
     >
-      跳过
+      <SkipForward :size="13" aria-hidden="true" />
+      <span class="composer-inline__btn-label">跳过</span>
     </button>
 
     <div v-if="mode === 'ask-input'" class="chat-composer__pending-actions">
@@ -62,19 +64,22 @@ const emit = defineEmits<{
         class="ui-button ui-button--ghost composer-inline__btn"
         data-agent-id="chat.pending.back"
         :disabled="actionsBlocked"
+        title="上一题"
         @click="emit('backAsk')"
       >
         <ArrowLeft :size="13" aria-hidden="true" />
-        上一题
+        <span class="composer-inline__btn-label">上一题</span>
       </button>
       <button
         type="button"
         class="ui-button ui-button--primary composer-inline__btn"
         data-agent-id="chat.pending.continue"
         :disabled="actionsBlocked || !canAskSubmit"
+        :title="askIsLast ? '完成' : '继续'"
         @click="emit('submitAsk')"
       >
-        {{ askIsLast ? "完成" : "继续" }}
+        <span class="composer-inline__btn-label">{{ askIsLast ? "完成" : "继续" }}</span>
+        <Check v-if="askIsLast" :size="13" aria-hidden="true" />
         <ArrowRight v-if="!askIsLast" :size="13" aria-hidden="true" />
       </button>
     </div>
@@ -85,18 +90,22 @@ const emit = defineEmits<{
         class="ui-button ui-button--ghost composer-inline__btn"
         data-agent-id="chat.pending.plan.modify"
         :disabled="actionsBlocked || !hasPendingInputText"
+        :title="hasPendingInputText ? '修改' : '忽略'"
         @click="emit('modifyPlanApproval')"
       >
-        {{ hasPendingInputText ? "修改" : "忽略" }}
+        <component :is="hasPendingInputText ? Pencil : SkipForward" :size="13" aria-hidden="true" />
+        <span class="composer-inline__btn-label">{{ hasPendingInputText ? "修改" : "忽略" }}</span>
       </button>
       <button
         type="button"
         class="ui-button ui-button--primary composer-inline__btn"
         data-agent-id="chat.pending.plan.accept"
         :disabled="actionsBlocked"
+        title="同意"
         @click="emit('submitAsk')"
       >
-        同意
+        <Check :size="13" aria-hidden="true" />
+        <span class="composer-inline__btn-label">同意</span>
       </button>
     </div>
 
@@ -106,9 +115,13 @@ const emit = defineEmits<{
         class="ui-button ui-button--ghost composer-inline__btn"
         data-agent-id="chat.pending.tool.secondary"
         :disabled="actionsBlocked || toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
+        :title="isEditingToolCommand ? '取消' : hasPendingInputText ? '修改' : '忽略'"
         @click="isEditingToolCommand ? emit('cancelToolCommandEdit') : emit('decideToolConsent', 'deny')"
       >
-        {{ toolSubmitting === "deny" ? "处理中..." : isEditingToolCommand ? "取消" : hasPendingInputText ? "修改" : "忽略" }}
+        <component :is="isEditingToolCommand ? X : hasPendingInputText ? Pencil : SkipForward" :size="13" aria-hidden="true" />
+        <span class="composer-inline__btn-label">
+          {{ toolSubmitting === "deny" ? "处理中..." : isEditingToolCommand ? "取消" : hasPendingInputText ? "修改" : "忽略" }}
+        </span>
       </button>
       <button
         type="button"
@@ -116,9 +129,13 @@ const emit = defineEmits<{
         data-agent-id="chat.pending.tool.allow"
         :class="toolDanger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked || toolSubmitting !== null || toolCommandIsEmpty"
+        :title="toolDanger ? '同意执行' : '同意'"
         @click="emit('decideToolConsent', 'allow')"
       >
-        {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
+        <Check :size="13" aria-hidden="true" />
+        <span class="composer-inline__btn-label">
+          {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
+        </span>
       </button>
     </div>
 
