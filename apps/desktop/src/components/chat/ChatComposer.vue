@@ -18,12 +18,18 @@ import {
   type ShallowRef,
 } from "vue";
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
+  Check,
   FileText,
   Folder,
   Image,
   Paperclip,
+  Pencil,
+  SkipForward,
   Square,
+  X,
 } from "@lucide/vue";
 import {
   ASK_USER_MULTI_SELECT_MODE,
@@ -1695,9 +1701,11 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
             data-agent-id="chat.composer.pending.skip"
             :disabled="actionsBlocked"
+            title="跳过"
             @click="skipAsk"
           >
-            跳过
+            <SkipForward :size="13" aria-hidden="true" />
+            <span class="composer-inline__btn-label">跳过</span>
           </button>
 
           <div v-if="pendingEntryActionsMode === 'ask-input'" class="chat-composer__pending-actions">
@@ -1707,18 +1715,23 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
               class="ui-button ui-button--ghost composer-inline__btn"
               data-agent-id="chat.composer.pending.back"
               :disabled="actionsBlocked"
+              title="上一题"
               @click="backAsk"
             >
-              上一题
+              <ArrowLeft :size="13" aria-hidden="true" />
+              <span class="composer-inline__btn-label">上一题</span>
             </button>
             <button
               type="button"
               class="ui-button ui-button--primary composer-inline__btn"
               data-agent-id="chat.composer.pending.submit"
               :disabled="actionsBlocked || !canAskSubmit"
+              :title="askIsLast ? '完成' : '继续'"
               @click="submitAsk"
             >
-              {{ askIsLast ? "完成" : "继续" }}
+              <span class="composer-inline__btn-label">{{ askIsLast ? "完成" : "继续" }}</span>
+              <Check v-if="askIsLast" :size="13" aria-hidden="true" />
+              <ArrowRight v-if="!askIsLast" :size="13" aria-hidden="true" />
             </button>
           </div>
 
@@ -1728,18 +1741,22 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
               class="ui-button ui-button--ghost composer-inline__btn"
               data-agent-id="chat.composer.plan.modify"
               :disabled="actionsBlocked || !hasPendingInputText"
+              :title="hasPendingInputText ? '修改' : '忽略'"
               @click="modifyPlanApproval"
             >
-              {{ hasPendingInputText ? "修改" : "忽略" }}
+              <component :is="hasPendingInputText ? Pencil : SkipForward" :size="13" aria-hidden="true" />
+              <span class="composer-inline__btn-label">{{ hasPendingInputText ? "修改" : "忽略" }}</span>
             </button>
             <button
               type="button"
               class="ui-button ui-button--primary composer-inline__btn"
               data-agent-id="chat.composer.plan.accept"
               :disabled="actionsBlocked"
+              title="同意"
               @click="submitAsk"
             >
-              同意
+              <Check :size="13" aria-hidden="true" />
+              <span class="composer-inline__btn-label">同意</span>
             </button>
           </div>
 
@@ -1749,8 +1766,11 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
               class="ui-button ui-button--ghost composer-inline__btn"
               data-agent-id="chat.composer.tool.deny"
               :disabled="actionsBlocked || toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
+              :title="isEditingToolCommand ? '取消' : hasPendingInputText ? '修改' : '忽略'"
               @click="isEditingToolCommand ? cancelCommandEdit() : decideToolConsent('deny')"
             >
+              <component :is="isEditingToolCommand ? X : hasPendingInputText ? Pencil : SkipForward" :size="13" aria-hidden="true" />
+              <span class="composer-inline__btn-label">
               {{
                 toolSubmitting === "deny"
                   ? "处理中..."
@@ -1760,6 +1780,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
                       ? "修改"
                       : "忽略"
               }}
+              </span>
             </button>
             <button
               type="button"
@@ -1767,9 +1788,13 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
               data-agent-id="chat.composer.tool.allow"
               :class="toolDanger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
               :disabled="actionsBlocked || toolSubmitting !== null || toolCommandIsEmpty"
+              :title="toolDanger ? '同意执行' : '同意'"
               @click="decideToolConsent('allow')"
             >
-              {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
+              <Check :size="13" aria-hidden="true" />
+              <span class="composer-inline__btn-label">
+                {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
+              </span>
             </button>
           </div>
 

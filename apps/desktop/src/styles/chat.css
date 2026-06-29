@@ -614,6 +614,8 @@
 
 .chat-controls {
   width: min(100%, 860px);
+  max-width: 100%;
+  min-width: 0;
   align-self: center;
   display: flex;
   flex-direction: column;
@@ -2211,6 +2213,9 @@
 
 /* ----- Composer ----- */
 .chat-composer {
+  container: chat-composer / inline-size;
+  min-width: 0;
+  max-width: 100%;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2735,6 +2740,7 @@
 
 .chat-composer__row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
@@ -2744,7 +2750,16 @@
 .chat-composer__group {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+}
+
+.chat-composer__group > .dd,
+.chat-composer__group > .composer-model-picker {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .chat-composer__action-menu {
@@ -2835,6 +2850,8 @@
 
 .chat-composer__mode-chip {
   position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
   height: 24px;
   padding: 0 6px;
   border: 0;
@@ -2860,6 +2877,9 @@
 }
 
 .chat-composer__mode-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2904,7 +2924,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .chat-composer__context-action {
@@ -3171,7 +3192,9 @@ button.chat-composer__context-action:active:not(:disabled) {
   display: inline-flex;
   align-items: flex-end;
   gap: 8px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   min-width: 0;
 }
 
@@ -3179,10 +3202,21 @@ button.chat-composer__context-action:active:not(:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .chat-composer__entry-row .composer-inline__btn {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.composer-inline__btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -3197,8 +3231,85 @@ button.chat-composer__context-action:active:not(:disabled) {
   min-width: 0;
 }
 
+.chat-composer__toolbar .chat-composer__entry-actions {
+  align-items: center;
+}
+
 .chat-composer__toolbar .chat-composer__attachments {
   padding: 0 1px;
+}
+
+@container chat-composer (max-width: 560px) {
+  .chat-composer__row {
+    gap: 6px;
+  }
+
+  .chat-composer__group {
+    gap: 4px;
+  }
+
+  .chat-composer__permission-dropdown .chat-chip,
+  .chat-composer__worktree-dropdown .chat-chip,
+  .composer-model-picker__trigger,
+  .chat-composer__mode-chip {
+    position: relative;
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+    border-radius: var(--radius-pill);
+  }
+
+  .chat-composer__permission-dropdown .chat-chip__caret,
+  .chat-composer__worktree-dropdown .chat-chip__caret {
+    display: none;
+  }
+
+  .chat-composer__permission-dropdown .chat-chip__label,
+  .chat-composer__worktree-dropdown .chat-chip__label,
+  .composer-model-picker__trigger > span,
+  .chat-composer__mode-chip-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@container chat-composer (max-width: 430px) {
+  .chat-composer__entry-row,
+  .chat-composer__pending-actions {
+    gap: 6px;
+  }
+
+  .chat-composer__entry-row .composer-inline__btn {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: var(--radius-pill);
+  }
+
+  .chat-composer__entry-row .composer-inline__btn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
 }
 
 .composer-inline {
@@ -3572,6 +3683,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 }
 
 .composer-inline__btn {
+  position: relative;
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
