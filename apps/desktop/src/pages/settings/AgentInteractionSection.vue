@@ -56,18 +56,35 @@ let subagentCatalogMountSeq = 0;
 let disposed = false;
 
 const lockedPermissionModes = new Set<PermissionMode>(LOCKED_PERMISSION_MODES);
-const permissionAvailabilityOptions: Array<{
-  value: PermissionMode;
+const askReadonlyPermissionModes: readonly [PermissionMode, PermissionMode] = ["ask", "readonly"];
+type PermissionAvailabilityOption = {
+  id: string;
+  mode: PermissionMode | null;
+  currentModes: readonly PermissionMode[];
   label: string;
   description: string;
   locked: boolean;
-}> =
-  PERMISSION_MODE_DISPLAY_ORDER.map((value) => ({
-    value,
-    label: PERMISSION_MODE_DISPLAY[value].label,
-    description: PERMISSION_MODE_DISPLAY[value].description,
-    locked: lockedPermissionModes.has(value),
-  }));
+};
+const permissionAvailabilityOptions: PermissionAvailabilityOption[] = [
+  {
+    id: "ask-readonly",
+    mode: null,
+    currentModes: askReadonlyPermissionModes,
+    label: "默认权限",
+    description: "允许读取与分析，涉及变更时等待确认。",
+    locked: askReadonlyPermissionModes.every((mode) => lockedPermissionModes.has(mode)),
+  },
+  ...PERMISSION_MODE_DISPLAY_ORDER
+    .filter((value) => value !== "ask" && value !== "readonly")
+    .map((value) => ({
+      id: value,
+      mode: value,
+      currentModes: [value],
+      label: PERMISSION_MODE_DISPLAY[value].label,
+      description: PERMISSION_MODE_DISPLAY[value].description,
+      locked: lockedPermissionModes.has(value),
+    })),
+];
 
 type SubagentModePatch = Partial<Omit<AgentInteractionSettings["subagentMode"], "codex" | "claude">> & {
   codex?: Partial<AgentInteractionSettings["subagentMode"]["codex"]>;
@@ -170,6 +187,19 @@ async function setPermissionModeAvailable(permissionMode: PermissionMode, enable
       [permissionMode]: enabled,
     },
   });
+}
+
+function setPermissionAvailabilityOptionAvailable(option: PermissionAvailabilityOption, enabled: boolean) {
+  if (option.mode === null) return;
+  return setPermissionModeAvailable(option.mode, enabled);
+}
+
+function isPermissionAvailabilityOptionCurrent(option: PermissionAvailabilityOption) {
+  return option.currentModes.includes(agentInteraction.value.permissionMode);
+}
+
+function isPermissionAvailabilityOptionEnabled(option: PermissionAvailabilityOption) {
+  return option.mode !== null && agentInteraction.value.permissionModeAvailability[option.mode];
 }
 
 async function setMainAgentPromptMode(mainAgentPromptMode: MainAgentPromptMode) {
@@ -337,15 +367,15 @@ onBeforeUnmount(() => {
       <div class="permission-toggle-list">
         <div
           v-for="option in permissionAvailabilityOptions"
-          :key="option.value"
+          :key="option.id"
           class="permission-toggle-item"
-          :data-agent-id="`settings.agent.permission-availability.${option.value}`"
+          :data-agent-id="`settings.agent.permission-availability.${option.id}`"
         >
           <div class="permission-toggle-item__content">
             <div class="settings-row__label">
               {{ option.label }}
               <span
-                v-if="agentInteraction.permissionMode === option.value"
+                v-if="isPermissionAvailabilityOptionCurrent(option)"
                 class="permission-toggle-item__badge"
               >
                 当前默认
@@ -357,7 +387,7 @@ onBeforeUnmount(() => {
             v-if="option.locked"
             type="button"
             class="ui-button ui-button--ghost permission-toggle-item__locked"
-            :data-agent-id="`settings.agent.permission-availability.${option.value}.locked`"
+            :data-agent-id="`settings.agent.permission-availability.${option.id}.locked`"
             disabled
           >
             固定启用
@@ -366,22 +396,22 @@ onBeforeUnmount(() => {
             <button
               type="button"
               role="radio"
-              :aria-checked="!agentInteraction.permissionModeAvailability[option.value]"
-              :data-agent-id="`settings.agent.permission-availability.${option.value}.off`"
-              :class="{ 'is-active': !agentInteraction.permissionModeAvailability[option.value] }"
+              :aria-checked="!isPermissionAvailabilityOptionEnabled(option)"
+              :data-agent-id="`settings.agent.permission-availability.${option.id}.off`"
+              :class="{ 'is-active': !isPermissionAvailabilityOptionEnabled(option) }"
               :disabled="savingAgentInteraction"
-              @click="setPermissionModeAvailable(option.value, false)"
+              @click="setPermissionAvailabilityOptionAvailable(option, false)"
             >
               关闭
             </button>
             <button
               type="button"
               role="radio"
-              :aria-checked="agentInteraction.permissionModeAvailability[option.value]"
-              :data-agent-id="`settings.agent.permission-availability.${option.value}.on`"
-              :class="{ 'is-active': agentInteraction.permissionModeAvailability[option.value] }"
+              :aria-checked="isPermissionAvailabilityOptionEnabled(option)"
+              :data-agent-id="`settings.agent.permission-availability.${option.id}.on`"
+              :class="{ 'is-active': isPermissionAvailabilityOptionEnabled(option) }"
               :disabled="savingAgentInteraction"
-              @click="setPermissionModeAvailable(option.value, true)"
+              @click="setPermissionAvailabilityOptionAvailable(option, true)"
             >
               启用
             </button>
