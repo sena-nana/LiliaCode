@@ -1,5 +1,6 @@
 export * from "./project";
 export * from "./app-events";
+export * from "./app-commands";
 export * from "./task";
 export * from "./todo";
 export * from "./provider";

@@ -25,6 +25,13 @@ const contextMenuHostLoad = createLazyLoadState(() =>
     { detail: "ContextMenuHost" },
   )
 );
+const appUpdateHostLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "app.update-host.load",
+    async () => (await import("./components/AppUpdateHost.vue")).default,
+    { detail: "AppUpdateHost" },
+  )
+);
 const deferredBridgeLoad = createLazyLoadState(() =>
   measurePerfAsync(
     "app.bridge.import",
@@ -37,6 +44,10 @@ const deferredBridgeLoad = createLazyLoadState(() =>
 
 const ContextMenuHost = defineAsyncComponent({
   loader: () => contextMenuHostLoad.load(),
+  suspensible: false,
+});
+const AppUpdateHost = defineAsyncComponent({
+  loader: () => appUpdateHostLoad.load(),
   suspensible: false,
 });
 
@@ -149,5 +160,6 @@ onBeforeUnmount(() => {
 <template>
   <RouterView />
   <ContextMenuHost />
+  <AppUpdateHost />
 </template>
 

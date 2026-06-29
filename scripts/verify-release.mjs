@@ -99,6 +99,30 @@ function verifyWindowsCliInstallerHook(tauriConfig) {
   }
 }
 
+function verifyUpdaterConfig(tauriConfig) {
+  const expectedEndpoint = "https://github.com/sena-nana/LiliaCode/releases/latest/download/latest.json";
+  const updater = tauriConfig.plugins?.updater;
+
+  if (tauriConfig.bundle?.createUpdaterArtifacts !== true) {
+    reportError("Tauri bundle.createUpdaterArtifacts must be true so release builds generate updater assets.");
+  }
+  if (!updater?.endpoints?.includes(expectedEndpoint)) {
+    reportError(`Tauri updater endpoints must include ${expectedEndpoint}.`);
+  }
+  if (updater?.windows?.installMode !== "passive") {
+    reportError("Tauri updater Windows installMode must be passive.");
+  }
+  if (!process.env.TAURI_UPDATER_PUBKEY?.trim()) {
+    reportError("TAURI_UPDATER_PUBKEY must be set for release checks and release builds.");
+  }
+
+  const libSource = readText("apps/desktop/src-tauri/src/lib.rs");
+  requireSnippets("apps/desktop/src-tauri/src/lib.rs", libSource, [
+    ['option_env!("TAURI_UPDATER_PUBKEY")', "read the updater public key from the compile-time environment"],
+    [".pubkey(pubkey)", "override the updater public key from TAURI_UPDATER_PUBKEY"],
+  ]);
+}
+
 function verifyReleaseTemplate(expectedVersion, productName) {
   const source = "docs/github/release-template.md";
   const template = readText(source);
@@ -107,7 +131,7 @@ function verifyReleaseTemplate(expectedVersion, productName) {
     ["## 已知限制", "include a known limitations section"],
     ["当前只发布 Windows 安装包", "state that only the Windows installer is published"],
     ["当前安装包使用 `tauri-signing.key` 完成 Tauri 签名", "state that the installer is signed with tauri-signing.key"],
-    ["当前不包含 Tauri updater 自动更新能力", "state that Tauri updater auto-update is not included"],
+    ["应用内自动更新", "state that Tauri updater auto-update is supported"],
     ["当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包", "state that macOS/Linux packages are not published"],
   ];
   const windowsVerification = [
@@ -155,6 +179,14 @@ function verifyReleaseDocs() {
   ]);
   requireSnippets(releaseWorkflowPath, releaseWorkflow, [
     ["assetNamePattern: LiliaCode_[version]_[arch][setup][ext]", "keep the Tauri action asset naming pattern"],
+    ["uploadUpdaterJson: true", "upload latest.json for Tauri updater"],
+    ["updaterJsonPreferNsis: true", "prefer the NSIS updater bundle in latest.json"],
+    ["uploadUpdaterSignatures: true", "upload updater signature files"],
+    ["TAURI_UPDATER_PUBKEY", "inject the updater public key for release builds"],
+    ["Verify updater release assets", "verify updater assets after publishing the draft Release"],
+    ["latest.json", "check the updater JSON release asset"],
+    ["*.nsis.zip", "check the NSIS updater zip release asset"],
+    ["*.nsis.zip.sig", "check the NSIS updater signature release asset"],
     ["Smoke Windows installer", "run the Windows installer smoke after publishing the draft Release"],
     ["corepack yarn release:smoke:windows --tag", "keep the Windows installer smoke workflow entrypoint"],
     ["LiliaCode_<version>_x64-setup.*", "keep the draft Release checklist installer naming expectation"],
@@ -162,7 +194,7 @@ function verifyReleaseDocs() {
     ["liliacode <测试项目路径>", "keep the draft Release CLI verification check"],
     ["当前只发布 Windows 安装包", "keep the draft Release Windows-only limitation"],
     ["当前安装包使用 `tauri-signing.key` 完成 Tauri 签名", "keep the draft Release signing key limitation"],
-    ["当前不包含 Tauri updater 自动更新能力", "keep the draft Release no-updater limitation"],
+    ["应用内自动更新", "keep the draft Release updater support wording"],
     ["当前不发布 macOS 公证包、macOS 安装包或 Linux 安装包", "keep the draft Release non-Windows package limitation"],
   ]);
 }
@@ -212,6 +244,7 @@ if (!tagMatch) {
     verifyWindowsCliInstallerHook(tauriConfig);
   }
 
+  verifyUpdaterConfig(tauriConfig);
   verifyReleaseTemplate(expectedVersion, tauriConfig.productName);
   verifyReleaseDocs();
 
@@ -230,6 +263,7 @@ if (!tagMatch) {
       installers.push(`${productName}_${expectedVersion}_x64.msi`);
     }
     console.log(`[release:check] Expected Windows installers: ${installers.join(" and/or ")}`);
+    console.log("[release:check] Updater endpoint: https://github.com/sena-nana/LiliaCode/releases/latest/download/latest.json");
     console.log("[release:check] Release notes known limitations and Windows verification record entry are present.");
     console.log("[release:check] Automated before publishing: run release:smoke:windows against the draft Release installer and record the result in the Release body.");
   }

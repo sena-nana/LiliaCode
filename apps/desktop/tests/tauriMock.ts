@@ -13,6 +13,7 @@ import {
   AUTOMATION_RUN_UPDATED_EVENT_NAME,
   AUTOMATION_SAVE_DRAFT_COMMAND,
   AUTOMATION_SET_ENABLED_COMMAND,
+  APP_RESTART_COMMAND,
   AGENT_TIMELINE_BATCH_EVENT_NAME,
   AGENT_TIMELINE_CLEAR_TASK_COMMAND,
   AGENT_TIMELINE_LIST_COMMAND,
@@ -2597,6 +2598,9 @@ export const mockListen = vi.fn(async (
 
 export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
   switch (cmd) {
+    case APP_RESTART_COMMAND:
+      return undefined;
+
     case TAURI_PLUGIN_DIALOG_OPEN_COMMAND:
       return mockPickedFolderPath;
 
