@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   Coins,
   Database,
-  Gauge,
   RotateCcw,
   RefreshCw,
 } from "@lucide/vue";
@@ -578,14 +577,23 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card quota-panel" data-agent-id="settings.quota">
-    <div class="quota-panel__head">
-      <h2>
-        <span class="card-h2__title">
-          <Gauge :size="14" aria-hidden="true" />
-          额度统计
-        </span>
-      </h2>
+  <div class="quota-toolbar" data-agent-id="settings.quota">
+    <div class="ui-segmented" role="radiogroup" aria-label="额度统计后端">
+      <button
+        v-for="opt in backendOptions"
+        :key="opt.value"
+        type="button"
+        role="radio"
+        :data-agent-id="`settings.quota.backend.${opt.value}`"
+        :aria-checked="selectedBackend === opt.value"
+        :class="{ 'is-active': selectedBackend === opt.value }"
+        :disabled="loading"
+        @click="selectBackend(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+    <div class="quota-toolbar__actions">
       <button
         type="button"
         class="ui-button ui-button--ghost quota-panel__refresh"
@@ -596,24 +604,6 @@ onBeforeUnmount(() => {
         <RefreshCw :size="12" :class="{ 'is-spinning': refreshing }" aria-hidden="true" />
         刷新
       </button>
-    </div>
-
-    <div class="quota-panel__controls">
-      <div class="ui-segmented" role="radiogroup" aria-label="额度统计后端">
-        <button
-          v-for="opt in backendOptions"
-          :key="opt.value"
-          type="button"
-          role="radio"
-          :data-agent-id="`settings.quota.backend.${opt.value}`"
-          :aria-checked="selectedBackend === opt.value"
-          :class="{ 'is-active': selectedBackend === opt.value }"
-          :disabled="loading"
-          @click="selectBackend(opt.value)"
-        >
-          {{ opt.label }}
-        </button>
-      </div>
       <div class="ui-segmented" role="radiogroup" aria-label="额度统计时间范围">
         <button
           v-for="opt in daysOptions"
@@ -630,111 +620,122 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+  </div>
 
-    <div v-if="showOfficialQuota" class="quota-official">
-      <div class="quota-official__head">
-        <div>
-          <strong>Codex 官方额度</strong>
-          <span>
-            {{ officialQuota?.planType ? `计划 ${officialQuota.planType}` : "官方账号" }}
-            <template v-if="officialQuota?.limitName"> · {{ officialQuota.limitName }}</template>
-          </span>
-        </div>
-        <span class="ui-badge ui-badge--muted">
-          {{ quotaLoading ? "读取中" : `查询 ${formatDateTime(officialQuota?.fetchedAt ?? Date.now())}` }}
-        </span>
-      </div>
-      <div class="quota-official__actions">
-        <span class="ui-badge ui-badge--muted">
-          重置次数 {{ resetCreditText(resetCreditAvailableCount) }}
-        </span>
-        <button
-          type="button"
-          class="ui-button ui-button--ghost quota-official__reset"
-          data-agent-id="settings.quota.reset-credit.consume"
-          :disabled="!canConsumeResetCredit"
-          @click="consumeResetCredit"
-        >
-          <RotateCcw :size="12" :class="{ 'is-spinning': resetCreditLoading }" aria-hidden="true" />
-          {{ resetCreditLoading ? "使用中" : "使用重置次数" }}
-        </button>
-      </div>
-      <div
-        v-for="group in officialQuotaGroups"
-        :key="group.key"
-        class="quota-official__section"
-      >
-        <strong v-if="group.label">{{ group.label }}</strong>
-        <div class="quota-official__grid">
-          <div
-            v-for="row in group.rows"
-            :key="row.key"
-            class="quota-official-window"
-          >
-            <strong>{{ row.window ? formatPercent(row.window.usedPercent) : "--" }}</strong>
-            <small>{{ quotaWindowLabel(row.window) }}</small>
-            <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
-          </div>
-        </div>
-      </div>
-      <div class="quota-official__credits" aria-label="Codex 官方重置次数">
-        <div
-          v-for="row in officialQuotaCreditRows"
-          :key="row.key"
-          class="quota-official-credit"
-        >
-          <span>{{ row.label }}</span>
-          <strong>{{ codexAccountQuotaCreditsLabel(row.credits) }}</strong>
-        </div>
-      </div>
-      <div v-if="!hasOfficialQuotaWindow" class="quota-official__empty">
-        暂无官方额度数据
-      </div>
-      <div v-if="resetCreditMessage" class="quota-official__message">
-        {{ resetCreditMessage }}
-      </div>
-      <div v-if="resetCreditError" class="quota-official__error">
-        {{ resetCreditError }}
-      </div>
-      <div
-        v-if="accountUsageSummaryRows.length || accountUsageBuckets.length || officialQuota?.usageError"
-        class="quota-official-usage"
-      >
-        <div class="quota-official-usage__head">
-          <strong>官方账号用量</strong>
-          <span v-if="officialQuota?.usageError">{{ officialQuota.usageError }}</span>
-        </div>
-        <div v-if="accountUsageSummaryRows.length" class="quota-official-usage__metrics">
-          <div
-            v-for="row in accountUsageSummaryRows"
-            :key="row.key"
-            class="quota-official-usage__metric"
-          >
-            <span>{{ row.label }}</span>
-            <strong>{{ accountUsageValue(row.value, row.suffix) }}</strong>
-          </div>
-        </div>
-        <QuotaChartCanvas
-          v-if="accountUsageBuckets.length"
-          class="quota-official-usage__chart"
-          type="bar"
-          label="官方账号每日用量"
-          :data="accountUsageChartData"
-          :options="accountUsageChartOptions"
-        />
-      </div>
-      <div v-if="officialQuota?.error" class="quota-official__error">
-        {{ officialQuota.error }}
-      </div>
-    </div>
-
-    <div v-if="error" class="conn-banner conn-banner--err">
+  <div v-if="error" class="card quota-panel">
+    <div class="conn-banner conn-banner--err">
       <AlertTriangle :size="16" aria-hidden="true" />
       <div>
         <div class="conn-banner__title">额度统计</div>
         <div class="conn-banner__hint">{{ error }}</div>
       </div>
     </div>
+  </div>
+
+  <div v-if="showOfficialQuota" class="card quota-panel quota-official">
+    <div class="quota-official__head">
+      <div>
+        <h2>
+          <span class="card-h2__title">Codex 官方额度</span>
+        </h2>
+        <span>
+          {{ officialQuota?.planType ? `计划 ${officialQuota.planType}` : "官方账号" }}
+          <template v-if="officialQuota?.limitName"> · {{ officialQuota.limitName }}</template>
+        </span>
+      </div>
+      <span class="ui-badge ui-badge--muted">
+        {{ quotaLoading ? "读取中" : `查询 ${formatDateTime(officialQuota?.fetchedAt ?? Date.now())}` }}
+      </span>
+    </div>
+    <div class="quota-official__actions">
+      <span class="ui-badge ui-badge--muted">
+        重置次数 {{ resetCreditText(resetCreditAvailableCount) }}
+      </span>
+      <button
+        type="button"
+        class="ui-button ui-button--ghost quota-official__reset"
+        data-agent-id="settings.quota.reset-credit.consume"
+        :disabled="!canConsumeResetCredit"
+        @click="consumeResetCredit"
+      >
+        <RotateCcw :size="12" :class="{ 'is-spinning': resetCreditLoading }" aria-hidden="true" />
+        {{ resetCreditLoading ? "使用中" : "使用重置次数" }}
+      </button>
+    </div>
+    <div
+      v-for="group in officialQuotaGroups"
+      :key="group.key"
+      class="quota-official__section"
+    >
+      <strong v-if="group.label">{{ group.label }}</strong>
+      <div class="quota-official__grid">
+        <div
+          v-for="row in group.rows"
+          :key="row.key"
+          class="quota-official-window"
+        >
+          <strong>{{ row.window ? formatPercent(row.window.usedPercent) : "--" }}</strong>
+          <small>{{ quotaWindowLabel(row.window) }}</small>
+          <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
+        </div>
+      </div>
+    </div>
+    <div class="quota-official__credits" aria-label="Codex 官方重置次数">
+      <div
+        v-for="row in officialQuotaCreditRows"
+        :key="row.key"
+        class="quota-official-credit"
+      >
+        <span>{{ row.label }}</span>
+        <strong>{{ codexAccountQuotaCreditsLabel(row.credits) }}</strong>
+      </div>
+    </div>
+    <div v-if="!hasOfficialQuotaWindow" class="quota-official__empty">
+      暂无官方额度数据
+    </div>
+    <div v-if="resetCreditMessage" class="quota-official__message">
+      {{ resetCreditMessage }}
+    </div>
+    <div v-if="resetCreditError" class="quota-official__error">
+      {{ resetCreditError }}
+    </div>
+    <div
+      v-if="accountUsageSummaryRows.length || accountUsageBuckets.length || officialQuota?.usageError"
+      class="quota-official-usage"
+    >
+      <div class="quota-official-usage__head">
+        <strong>官方账号用量</strong>
+        <span v-if="officialQuota?.usageError">{{ officialQuota.usageError }}</span>
+      </div>
+      <div v-if="accountUsageSummaryRows.length" class="quota-official-usage__metrics">
+        <div
+          v-for="row in accountUsageSummaryRows"
+          :key="row.key"
+          class="quota-official-usage__metric"
+        >
+          <span>{{ row.label }}</span>
+          <strong>{{ accountUsageValue(row.value, row.suffix) }}</strong>
+        </div>
+      </div>
+      <QuotaChartCanvas
+        v-if="accountUsageBuckets.length"
+        class="quota-official-usage__chart"
+        type="bar"
+        label="官方账号每日用量"
+        :data="accountUsageChartData"
+        :options="accountUsageChartOptions"
+      />
+    </div>
+    <div v-if="officialQuota?.error" class="quota-official__error">
+      {{ officialQuota.error }}
+    </div>
+  </div>
+
+  <div class="card quota-panel">
+    <h2>
+      <span class="card-h2__title">统计摘要</span>
+      <span class="ui-badge ui-badge--muted">{{ quotaUsageStatsBackendFilterLabel(selectedBackend) }} · 近 {{ selectedDays }} 天</span>
+    </h2>
 
     <div class="quota-metrics" aria-label="额度统计摘要">
       <div class="quota-metric">
@@ -793,7 +794,7 @@ onBeforeUnmount(() => {
     <h2>
       <span class="card-h2__title">
         <Coins :size="14" aria-hidden="true" />
-        分布与记录
+        后端分布
       </span>
     </h2>
 
@@ -817,105 +818,112 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="quota-breakdowns">
-      <section class="quota-breakdown" aria-label="项目消耗">
-        <div class="quota-breakdown__head">
-          <strong>项目消耗</strong>
-          <span>按 Token</span>
-        </div>
-        <div class="quota-breakdown__body">
-          <QuotaChartCanvas
-            v-if="projectBreakdown.length"
-            class="quota-breakdown__chart"
-            type="doughnut"
-            label="项目消耗图表"
-            :data="projectBreakdownChartData"
-            :options="breakdownChartOptions"
-          />
-          <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
-          <div class="quota-breakdown__list">
-            <div
-              v-for="item in projectBreakdown"
-              :key="item.key"
-              class="quota-breakdown__row"
-            >
-              <i :style="{ background: item.color }" />
-              <span>{{ item.label }}</span>
-              <strong>{{ item.meta }}</strong>
-            </div>
-            <div v-if="projectBreakdown.length === 0" class="quota-breakdown__empty">
-              暂无项目消耗
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="quota-breakdown" aria-label="对话消耗">
-        <div class="quota-breakdown__head">
-          <strong>对话消耗</strong>
-          <span>按 Token</span>
-        </div>
-        <div class="quota-breakdown__body">
-          <QuotaChartCanvas
-            v-if="conversationBreakdown.length"
-            class="quota-breakdown__chart"
-            type="doughnut"
-            label="对话消耗图表"
-            :data="conversationBreakdownChartData"
-            :options="breakdownChartOptions"
-          />
-          <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
-          <div class="quota-breakdown__list">
-            <div
-              v-for="item in conversationBreakdown"
-              :key="item.key"
-              class="quota-breakdown__row"
-            >
-              <i :style="{ background: item.color }" />
-              <span>{{ item.label }}</span>
-              <strong>{{ item.meta }}</strong>
-            </div>
-            <div v-if="conversationBreakdown.length === 0" class="quota-breakdown__empty">
-              暂无对话消耗
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="quota-breakdown" aria-label="工具活跃度">
-        <div class="quota-breakdown__head">
-          <strong>工具活跃度</strong>
-          <span>按调用次数统计</span>
-        </div>
-        <div class="quota-breakdown__body">
-          <QuotaChartCanvas
-            v-if="toolBreakdown.length"
-            class="quota-breakdown__chart"
-            type="doughnut"
-            label="工具活跃度图表"
-            :data="toolBreakdownChartData"
-            :options="breakdownChartOptions"
-          />
-          <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
-          <div class="quota-breakdown__list">
-            <div
-              v-for="item in toolBreakdown"
-              :key="item.key"
-              class="quota-breakdown__row"
-            >
-              <i :style="{ background: item.color }" />
-              <span>{{ item.label }}</span>
-              <strong>{{ item.meta }}</strong>
-            </div>
-            <div v-if="toolBreakdown.length === 0" class="quota-breakdown__empty">
-              暂无工具调用
-            </div>
-          </div>
-        </div>
-      </section>
+    <div v-else class="quota-empty quota-empty--compact">
+      暂无后端分布
     </div>
+  </div>
 
-    <div v-if="stats?.recent.length" class="quota-recent">
+  <section class="card quota-panel quota-breakdown" aria-label="项目消耗">
+    <h2>
+      <span class="card-h2__title">项目消耗</span>
+      <span class="ui-badge ui-badge--muted">按 Token</span>
+    </h2>
+    <div class="quota-breakdown__body">
+      <QuotaChartCanvas
+        v-if="projectBreakdown.length"
+        class="quota-breakdown__chart"
+        type="doughnut"
+        label="项目消耗图表"
+        :data="projectBreakdownChartData"
+        :options="breakdownChartOptions"
+      />
+      <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
+      <div class="quota-breakdown__list">
+        <div
+          v-for="item in projectBreakdown"
+          :key="item.key"
+          class="quota-breakdown__row"
+        >
+          <i :style="{ background: item.color }" />
+          <span>{{ item.label }}</span>
+          <strong>{{ item.meta }}</strong>
+        </div>
+        <div v-if="projectBreakdown.length === 0" class="quota-breakdown__empty">
+          暂无项目消耗
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card quota-panel quota-breakdown" aria-label="对话消耗">
+    <h2>
+      <span class="card-h2__title">对话消耗</span>
+      <span class="ui-badge ui-badge--muted">按 Token</span>
+    </h2>
+    <div class="quota-breakdown__body">
+      <QuotaChartCanvas
+        v-if="conversationBreakdown.length"
+        class="quota-breakdown__chart"
+        type="doughnut"
+        label="对话消耗图表"
+        :data="conversationBreakdownChartData"
+        :options="breakdownChartOptions"
+      />
+      <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
+      <div class="quota-breakdown__list">
+        <div
+          v-for="item in conversationBreakdown"
+          :key="item.key"
+          class="quota-breakdown__row"
+        >
+          <i :style="{ background: item.color }" />
+          <span>{{ item.label }}</span>
+          <strong>{{ item.meta }}</strong>
+        </div>
+        <div v-if="conversationBreakdown.length === 0" class="quota-breakdown__empty">
+          暂无对话消耗
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card quota-panel quota-breakdown" aria-label="工具活跃度">
+    <h2>
+      <span class="card-h2__title">工具活跃度</span>
+      <span class="ui-badge ui-badge--muted">按调用次数统计</span>
+    </h2>
+    <div class="quota-breakdown__body">
+      <QuotaChartCanvas
+        v-if="toolBreakdown.length"
+        class="quota-breakdown__chart"
+        type="doughnut"
+        label="工具活跃度图表"
+        :data="toolBreakdownChartData"
+        :options="breakdownChartOptions"
+      />
+      <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
+      <div class="quota-breakdown__list">
+        <div
+          v-for="item in toolBreakdown"
+          :key="item.key"
+          class="quota-breakdown__row"
+        >
+          <i :style="{ background: item.color }" />
+          <span>{{ item.label }}</span>
+          <strong>{{ item.meta }}</strong>
+        </div>
+        <div v-if="toolBreakdown.length === 0" class="quota-breakdown__empty">
+          暂无工具调用
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div v-if="stats?.recent.length" class="card quota-panel">
+    <h2>
+      <span class="card-h2__title">最近记录</span>
+    </h2>
+    <div class="quota-recent">
       <div
         v-for="record in stats.recent"
         :key="record.eventId"
@@ -929,42 +937,50 @@ onBeforeUnmount(() => {
         <span>{{ formatRecordCost(record.knownCostUsd) }}</span>
       </div>
     </div>
-
-    <div v-if="!hasUsage && !loading" class="quota-empty quota-empty--compact">
-      暂无新增额度数据
-    </div>
   </div>
 </template>
 
 <style scoped>
+.quota-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.quota-toolbar__actions {
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .quota-panel {
   display: grid;
   gap: 12px;
 }
 
-.quota-panel__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.quota-panel h2 {
+  min-width: 0;
+  margin-bottom: 0;
 }
 
-.quota-panel__head h2,
-.quota-panel h2 {
-  margin-bottom: 0;
+.quota-panel h2 .ui-badge {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quota-panel__refresh {
   height: 28px;
   padding-inline: 8px;
   font-size: 12px;
-}
-
-.quota-panel__controls {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 10px;
 }
 
 .quota-metrics {
@@ -1011,10 +1027,6 @@ onBeforeUnmount(() => {
 .quota-official {
   display: grid;
   gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-  background: var(--bg);
 }
 
 .quota-official__head {
@@ -1030,12 +1042,7 @@ onBeforeUnmount(() => {
   gap: 2px;
 }
 
-.quota-official__head strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.quota-official__head span,
+.quota-official__head > div > span,
 .quota-official-window span,
 .quota-official-window small,
 .quota-official-credit span,
@@ -1202,10 +1209,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   display: grid;
   gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-  background: var(--bg);
 }
 
 .quota-chart {
@@ -1219,10 +1222,6 @@ onBeforeUnmount(() => {
 
 .quota-backends__chart {
   height: 116px;
-  padding: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  background: var(--bg);
 }
 
 .quota-backends__list {
@@ -1230,35 +1229,12 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.quota-breakdowns {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
 .quota-breakdown {
   min-width: 0;
   display: grid;
   gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-  background: var(--bg);
 }
 
-.quota-breakdown__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.quota-breakdown__head strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.quota-breakdown__head span,
 .quota-breakdown__empty {
   overflow: hidden;
   color: var(--text-muted);
@@ -1346,8 +1322,6 @@ onBeforeUnmount(() => {
 .quota-recent {
   display: grid;
   gap: 1px;
-  border-top: 1px solid var(--border-soft);
-  padding-top: 8px;
 }
 
 .quota-recent__row {
@@ -1397,6 +1371,10 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 860px) {
+  .quota-toolbar {
+    align-items: flex-start;
+  }
+
   .quota-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1408,10 +1386,6 @@ onBeforeUnmount(() => {
   .quota-official__grid,
   .quota-official__credits,
   .quota-official-usage__metrics {
-    grid-template-columns: 1fr;
-  }
-
-  .quota-breakdowns {
     grid-template-columns: 1fr;
   }
 
