@@ -574,7 +574,9 @@ function accountUsageHeatLevel(tokens: number, maxTokens: number) {
 }
 
 function accountUsageHeatTitle(day: CodexAccountUsageDailyBucket) {
-  return `${day.startDate}: ${formatNumber(day.tokens)} tokens`;
+  const tokens = Math.max(0, Math.trunc(day.tokens));
+  const tokenText = tokens >= 100_000_000 ? `${(tokens / 100_000_000).toFixed(3)} 亿` : formatNumber(tokens);
+  return `${day.startDate}: ${tokenText} tokens`;
 }
 
 function formatAccountUsageMonth(month: string) {
