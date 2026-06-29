@@ -45,6 +45,30 @@ export function codexLegacyPermissionRuntimeParams(permission) {
   };
 }
 
+const CODEX_PERMISSION_PROFILE_BY_SANDBOX = Object.freeze({
+  "danger-full-access": ":danger-no-sandbox",
+  dangerFullAccess: ":danger-no-sandbox",
+  "workspace-write": ":workspace",
+  workspaceWrite: ":workspace",
+  "read-only": ":read-only",
+  readOnly: ":read-only",
+});
+
+function codexPermissionProfileIdForApprovedRequest(payload, fallbackPermission) {
+  const amendment = isRecord(payload?.proposedExecpolicyAmendment)
+    ? payload.proposedExecpolicyAmendment
+    : {};
+  const explicitProfile = stringOrNull(amendment?.permissionProfile) ||
+    stringOrNull(amendment?.permissionProfileId);
+  if (explicitProfile) return explicitProfile;
+  const sandbox = stringOrNull(amendment?.sandbox) ||
+    stringOrNull(amendment?.sandboxMode) ||
+    stringOrNull(amendment?.sandboxPolicy) ||
+    stringOrNull(amendment?.sandboxPolicy?.type);
+  return CODEX_PERMISSION_PROFILE_BY_SANDBOX[sandbox] ||
+    codexPermissionProfileIdForMode(fallbackPermission);
+}
+
 function codexApprovalDecisionFromConsent(response, availableDecisions) {
   const explicit = stringOrNull(response?.codexDecision);
   if (explicit) return explicit;
@@ -169,7 +193,7 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
           server,
           edit,
           payload.cwd,
-          codexPermissionProfileIdForMode(ctx?.executionPermission),
+          codexPermissionProfileIdForApprovedRequest(payload, ctx?.executionPermission),
         );
         emitLiliaEditedCommandTimeline(ctx, payload, edit, result, result.exitCode === 0 ? "success" : "error");
         server.respond(msg.id, { decision: codexCancelDecision(payload.availableDecisions) });

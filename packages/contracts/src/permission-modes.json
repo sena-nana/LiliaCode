@@ -58,16 +58,16 @@
         "permissionProfileId": ":danger-no-sandbox"
       },
       "ask": {
-        "sandboxMode": "workspace-write",
-        "sandboxPolicy": "workspaceWrite",
+        "sandboxMode": "read-only",
+        "sandboxPolicy": "readOnly",
         "approvalPolicy": "on-request",
-        "permissionProfile": "workspaceWrite",
-        "permissionProfileId": ":workspace"
+        "permissionProfile": "readOnly",
+        "permissionProfileId": ":read-only"
       },
       "readonly": {
         "sandboxMode": "read-only",
         "sandboxPolicy": "readOnly",
-        "approvalPolicy": "never",
+        "approvalPolicy": "on-request",
         "permissionProfile": "readOnly",
         "permissionProfileId": ":read-only"
       },
