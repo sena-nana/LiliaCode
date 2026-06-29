@@ -844,7 +844,7 @@ describe("Settings provider switch", () => {
     expect(view.getByRole("radio", { name: "保守" })).toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("radio", { name: "激进" })).toBeInTheDocument();
     expect(view.getByRole("radio", { name: "自定义" })).toBeInTheDocument();
-    expect(view.getAllByRole("button", { name: "固定启用" })).toHaveLength(2);
+    expect(view.container.querySelectorAll(".permission-toggle-item__locked")).toHaveLength(1);
     expect(view.getByRole("radiogroup", { name: "完全访问权限可用性" })).toBeInTheDocument();
     expect(view.getByRole("radiogroup", { name: "自由实现权限可用性" })).toBeInTheDocument();
   });
