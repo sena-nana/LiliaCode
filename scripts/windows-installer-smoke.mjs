@@ -178,10 +178,10 @@ function storeContainsProjectPath(liliaHome, projectPath) {
   return dbFiles.some((filePath) => fileContainsText(filePath, needles));
 }
 
-function logStoreDiagnostics(liliaHome, projectPath) {
+function logStoreDiagnostics(label, liliaHome, projectPath) {
   const dbDir = path.join(liliaHome, "db");
   const dbFiles = ["lilia.db", "lilia.db-wal"].map((name) => path.join(dbDir, name));
-  log(`CLI project path candidates: ${projectPathNeedles(projectPath).join(" | ")}`);
+  log(`${label} CLI project path candidates: ${projectPathNeedles(projectPath).join(" | ")}`);
   for (const filePath of dbFiles) {
     if (!fs.existsSync(filePath)) {
       log(`Store file missing: ${filePath}`);
@@ -194,6 +194,17 @@ function logStoreDiagnostics(liliaHome, projectPath) {
 
 function storeDbPath(liliaHome) {
   return path.join(liliaHome, "db", "lilia.db");
+}
+
+function waitForProjectInStore(label, liliaHome, projectPath, appOutput) {
+  try {
+    waitUntil(`${label} CLI project path in the Lilia store`, () => storeContainsProjectPath(liliaHome, projectPath));
+  } catch (err) {
+    logBufferedOutput("Installed app output", appOutput);
+    logStoreDiagnostics(label, liliaHome, projectPath);
+    throw err;
+  }
+  log(`${label} CLI project path reached the Lilia store`);
 }
 
 function ensureInstallerPath() {
@@ -230,14 +241,22 @@ function ensureInstallerPath() {
   return installers[0];
 }
 
-function ensureTestProject() {
+function ensureTestProjects() {
   const explicitProject = getArgValue("--test-project");
-  const projectPath = explicitProject
+  const ownedProjectRoot = path.join(os.tmpdir(), `lilia release smoke projects ${process.pid}`);
+  const initialProject = explicitProject
     ? path.resolve(explicitProject)
-    : path.join(os.tmpdir(), `lilia-release-smoke-project-${process.pid}`);
-  fs.mkdirSync(projectPath, { recursive: true });
-  fs.writeFileSync(path.join(projectPath, ".lilia-smoke"), "release smoke\n", "utf8");
-  return projectPath;
+    : path.join(ownedProjectRoot, "initial project with spaces");
+  const secondProject = path.join(ownedProjectRoot, "second project with spaces");
+  for (const projectPath of [initialProject, secondProject]) {
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(path.join(projectPath, ".lilia-smoke"), "release smoke\n", "utf8");
+  }
+  return {
+    initialProject,
+    secondProject,
+    ownedProjectRoot,
+  };
 }
 
 function main() {
@@ -257,7 +276,11 @@ function main() {
   const installer = ensureInstallerPath();
   const installDir = path.join(os.tmpdir(), `lilia-release-smoke-install-${process.pid}`);
   const liliaHome = path.join(os.tmpdir(), `lilia-release-smoke-home-${process.pid}`);
-  const testProject = ensureTestProject();
+  const {
+    initialProject,
+    secondProject,
+    ownedProjectRoot,
+  } = ensureTestProjects();
   const installedExe = path.join(installDir, processName);
   const cliCmd = path.join(installDir, "liliacode.cmd");
   const uninstaller = path.join(installDir, "uninstall.exe");
@@ -267,7 +290,8 @@ function main() {
   log(`Installer: ${installer}`);
   log(`Install dir: ${installDir}`);
   log(`LILIA_HOME: ${liliaHome}`);
-  log(`Test project: ${testProject}`);
+  log(`Initial CLI project: ${initialProject}`);
+  log(`Second-instance CLI project: ${secondProject}`);
 
   try {
     const preInstallCli = resolveLiliacode(freshWindowsEnv());
@@ -292,8 +316,8 @@ function main() {
     }
     log("CLI command is available from fresh PATH");
 
-    log("Launching installed app");
-    const app = spawn(installedExe, [], {
+    log("Launching installed app through liliacode with a spaced project path");
+    const app = spawn("cmd.exe", ["/d", "/s", "/c", `liliacode ${quoteCmdArg(initialProject)}`], {
       env: runtimeEnv,
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],
@@ -306,17 +330,11 @@ function main() {
     log("Installed app process started");
     waitUntil("Lilia store database initialization", () => fs.existsSync(storeDbPath(liliaHome)));
     log("Lilia store database initialized");
+    waitForProjectInStore("Initial launch", liliaHome, initialProject, appOutput);
 
-    log("Opening test project through liliacode");
-    run("cmd.exe", ["/d", "/s", "/c", `liliacode ${quoteCmdArg(testProject)}`], { env: runtimeEnv });
-    try {
-      waitUntil("CLI project path in the Lilia store", () => storeContainsProjectPath(liliaHome, testProject));
-    } catch (err) {
-      logBufferedOutput("Installed app output", appOutput);
-      logStoreDiagnostics(liliaHome, testProject);
-      throw err;
-    }
-    log("CLI project path reached the Lilia store");
+    log("Opening second project through liliacode while the app is already running");
+    run("cmd.exe", ["/d", "/s", "/c", `liliacode ${quoteCmdArg(secondProject)}`], { env: runtimeEnv });
+    waitForProjectInStore("Second-instance", liliaHome, secondProject, appOutput);
 
     log("Stopping installed app before uninstall");
     stopAppIfRunning();
@@ -342,9 +360,7 @@ function main() {
     if (fs.existsSync(installDir)) {
       fs.rmSync(installDir, { recursive: true, force: true });
     }
-    if (!getArgValue("--test-project")) {
-      fs.rmSync(testProject, { recursive: true, force: true });
-    }
+    fs.rmSync(ownedProjectRoot, { recursive: true, force: true });
   }
 }
 
