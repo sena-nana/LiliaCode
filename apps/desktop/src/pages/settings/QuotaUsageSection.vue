@@ -80,12 +80,9 @@ const breakdownPalette = [
   "var(--text-muted)",
 ];
 const accountUsageHeatmapLayout = {
-  cellSize: 11,
+  cellSize: 12,
   gap: 3,
   minWeeks: 53,
-  weekdayGap: 6,
-  weekdayWidth: 22,
-  weekdays: ["", "Mon", "", "Wed", "", "Fri", ""],
 } as const;
 
 const selectedBackend = ref<QuotaUsageStatsBackendFilter>("all");
@@ -188,17 +185,14 @@ const accountUsageMonthLabels = computed(() =>
 );
 const accountUsageHeatmapStyle = computed<CSSProperties>(() => {
   const weekCount = Math.max(1, accountUsageWeeks.value.length);
-  const { cellSize, gap, weekdayGap, weekdayWidth } = accountUsageHeatmapLayout;
+  const { cellSize, gap } = accountUsageHeatmapLayout;
   const weekGridWidth =
     weekCount * cellSize + (weekCount - 1) * gap;
-  const maxWidth = weekdayWidth + weekdayGap + weekGridWidth;
   return {
     "--quota-heatmap-week-count": weekCount,
     "--quota-heatmap-cell-size": `${cellSize}px`,
     "--quota-heatmap-gap": `${gap}px`,
-    "--quota-heatmap-weekday-gap": `${weekdayGap}px`,
-    "--quota-heatmap-weekday-width": `${weekdayWidth}px`,
-    "--quota-heatmap-max-width": `${maxWidth}px`,
+    "--quota-heatmap-max-width": `${weekGridWidth}px`,
   };
 });
 const sortedBackends = computed(() =>
@@ -741,7 +735,7 @@ onBeforeUnmount(() => {
 
   <div
     v-if="showOfficialQuota && (accountUsageSummaryRows.length || accountUsageBuckets.length || officialQuota?.usageError)"
-    class="card quota-panel quota-official-usage"
+    class="quota-official-usage"
   >
     <div v-if="accountUsageSummaryRows.length" class="quota-official-usage__metrics">
       <div
@@ -753,9 +747,8 @@ onBeforeUnmount(() => {
         <span>{{ row.label }}</span>
       </div>
     </div>
-    <div class="quota-official-usage__head">
-      <strong>Token 活动</strong>
-      <span v-if="officialQuota?.usageError">{{ officialQuota.usageError }}</span>
+    <div v-if="officialQuota?.usageError" class="quota-official-usage__head">
+      <span>{{ officialQuota.usageError }}</span>
     </div>
     <div
       v-if="accountUsageWeeks.length"
@@ -764,6 +757,22 @@ onBeforeUnmount(() => {
     >
       <div class="quota-official-usage__heatmap-window">
         <div class="quota-official-usage__heatmap-grid" :style="accountUsageHeatmapStyle">
+          <div class="quota-official-usage__weeks">
+            <div
+              v-for="week in accountUsageWeeks"
+              :key="week[0]?.weekStart"
+              class="quota-official-usage__week"
+            >
+              <span
+                v-for="day in week"
+                :key="day.startDate"
+                class="quota-official-usage__day"
+                :class="`quota-official-usage__day--${day.level}`"
+                :title="accountUsageHeatTitle(day)"
+                :aria-label="accountUsageHeatTitle(day)"
+              />
+            </div>
+          </div>
           <div class="quota-official-usage__months" aria-hidden="true">
             <span
               v-for="month in accountUsageMonthLabels"
@@ -773,33 +782,6 @@ onBeforeUnmount(() => {
             >
               {{ month.label }}
             </span>
-          </div>
-          <div class="quota-official-usage__heatmap-body">
-            <div class="quota-official-usage__weekdays" aria-hidden="true">
-              <span
-                v-for="(label, index) in accountUsageHeatmapLayout.weekdays"
-                :key="index"
-                class="quota-official-usage__weekday"
-              >
-                {{ label }}
-              </span>
-            </div>
-            <div class="quota-official-usage__weeks">
-              <div
-                v-for="week in accountUsageWeeks"
-                :key="week[0]?.weekStart"
-                class="quota-official-usage__week"
-              >
-                <span
-                  v-for="day in week"
-                  :key="day.startDate"
-                  class="quota-official-usage__day"
-                  :class="`quota-official-usage__day--${day.level}`"
-                  :title="accountUsageHeatTitle(day)"
-                  :aria-label="accountUsageHeatTitle(day)"
-                />
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -1290,9 +1272,14 @@ onBeforeUnmount(() => {
 }
 
 .quota-official-usage {
+  box-sizing: border-box;
   min-width: 0;
+  width: min(100%, 792px);
+  margin-block: 4px 2px;
+  margin-inline: auto;
+  padding: 8px 12px 4px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .quota-official-usage__head {
@@ -1301,11 +1288,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
-}
-
-.quota-official-usage__head strong {
-  color: var(--text);
-  font-size: 13px;
 }
 
 .quota-official-usage__head span,
@@ -1325,9 +1307,7 @@ onBeforeUnmount(() => {
 .quota-official-usage__metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg);
+  min-width: 0;
 }
 
 .quota-official-usage__metric {
@@ -1336,10 +1316,6 @@ onBeforeUnmount(() => {
   gap: 3px;
   justify-items: center;
   padding: 11px 10px 10px;
-}
-
-.quota-official-usage__metric + .quota-official-usage__metric {
-  border-left: 1px solid var(--border-soft);
 }
 
 .quota-official-usage__metric span,
@@ -1372,79 +1348,50 @@ onBeforeUnmount(() => {
 .quota-official-usage__heatmap-window {
   width: 100%;
   min-width: 0;
+  display: flex;
+  justify-content: flex-end;
   overflow: hidden;
 }
 
 .quota-official-usage__heatmap-grid {
-  width: min(100%, var(--quota-heatmap-max-width, 100%));
-  margin-left: auto;
-  min-width: 0;
+  flex: none;
+  width: var(--quota-heatmap-max-width, 100%);
 }
 
 .quota-official-usage__months,
 .quota-official-usage__weeks {
   display: grid;
-  grid-template-columns: repeat(var(--quota-heatmap-week-count, 1), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--quota-heatmap-week-count, 1), var(--quota-heatmap-cell-size));
   gap: var(--quota-heatmap-gap);
-  min-width: 0;
 }
 
 .quota-official-usage__months {
-  box-sizing: border-box;
-  padding-left: calc(var(--quota-heatmap-weekday-width) + var(--quota-heatmap-weekday-gap));
-  margin-bottom: 4px;
+  margin-top: 6px;
 }
 
 .quota-official-usage__month {
   min-width: 0;
-  height: 14px;
+  height: 16px;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 14px;
+  font-size: 11px;
+  line-height: 16px;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.quota-official-usage__heatmap-body {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: var(--quota-heatmap-weekday-gap);
-  min-width: 0;
-}
-
-.quota-official-usage__weekdays {
-  display: grid;
-  grid-template-rows: repeat(7, minmax(0, 1fr));
-  gap: var(--quota-heatmap-gap);
-  align-items: center;
-}
-
-.quota-official-usage__weekday {
-  width: var(--quota-heatmap-weekday-width);
-  overflow: visible;
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1;
-  text-align: center;
-  white-space: nowrap;
-}
-
 .quota-official-usage__week {
-  min-width: 0;
   display: grid;
-  grid-template-rows: repeat(7, auto);
+  grid-template-rows: repeat(7, var(--quota-heatmap-cell-size));
   gap: var(--quota-heatmap-gap);
   justify-items: center;
 }
 
 .quota-official-usage__day {
   box-sizing: border-box;
-  min-width: 0;
-  width: 100%;
-  max-width: var(--quota-heatmap-cell-size);
-  aspect-ratio: 1;
+  width: var(--quota-heatmap-cell-size);
+  height: var(--quota-heatmap-cell-size);
   border: 1px solid color-mix(in srgb, var(--bg) 22%, transparent);
   border-radius: 3px;
   background: var(--bg-subtle);
@@ -1652,18 +1599,6 @@ onBeforeUnmount(() => {
   .quota-official-usage__metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    border: 0;
-    background: transparent;
-  }
-
-  .quota-official-usage__metric {
-    border: 1px solid var(--border-soft);
-    border-radius: 7px;
-    background: var(--bg);
-  }
-
-  .quota-official-usage__metric + .quota-official-usage__metric {
-    border-left: 1px solid var(--border-soft);
   }
 
   .quota-recent__row {
