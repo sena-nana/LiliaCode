@@ -14,9 +14,9 @@ import {
 import { pickFolder } from "../../services/projects";
 import {
   SB_MENU_POP_TRANSITION_MS,
+  useAnchoredOverlay,
   type AnchoredMenuPosition,
-} from "../../composables/menuMotion";
-import { useAnchoredOverlay } from "../../composables/useAnchoredOverlay";
+} from "@lilia/ui";
 import { createLazyLoadState } from "../../utils/lazyLoadState";
 
 const props = defineProps<{

@@ -2,7 +2,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   createAnchoredMenuPosition,
   type AnchoredMenuPosition,
-} from "./menuMotion";
+} from "@lilia/ui";
 import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 export function useSidebarAddMenu() {

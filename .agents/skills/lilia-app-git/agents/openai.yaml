@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lilia App Git"
+  short_description: "Git workflow for Lilia app changes"
+  default_prompt: "Use $lilia-app-git to commit or push Lilia app changes."

@@ -853,6 +853,8 @@ onBeforeUnmount(() => {
           v-for="row in group.rows"
           :key="row.key"
           class="quota-official-window"
+          role="group"
+          :aria-label="`${group.label}${row.label}`"
         >
           <div class="quota-official-window__main">
             <strong>{{ row.label }}</strong>

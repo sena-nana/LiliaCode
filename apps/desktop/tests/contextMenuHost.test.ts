@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import ContextMenuHost from "../src/components/ContextMenuHost.vue";
+import { ContextMenuHost } from "@lilia/ui";
 import {
   closeContextMenu,
   openContextMenuAt,
-} from "../src/composables/useContextMenu";
-import { installContextMenu } from "../src/composables/useContextMenuInstall";
-import { SB_MENU_POP_TRANSITION_MS } from "../src/composables/menuMotion";
+  installContextMenu,
+  SB_MENU_POP_TRANSITION_MS,
+} from "@lilia/ui";
 
 async function waitForMenuLeave() {
   await vi.advanceTimersByTimeAsync(SB_MENU_POP_TRANSITION_MS + 50);

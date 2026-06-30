@@ -5,7 +5,7 @@ import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, GitMerge, Load
 import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
-import type { ContextMenuItem } from "../../composables/useContextMenu";
+import type { ContextMenuItem } from "@lilia/ui";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { scheduleTaskDetailPreload } from "../../router";

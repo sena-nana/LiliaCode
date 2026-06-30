@@ -10,9 +10,7 @@ import {
   type Task,
 } from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
-import ContextMenuHost from "../src/components/ContextMenuHost.vue";
-import { installContextMenu } from "../src/composables/useContextMenuInstall";
-import { vContextMenu } from "../src/directives/contextMenu";
+import { ContextMenuHost, installContextMenu, vContextMenu } from "@lilia/ui";
 import { TASKS } from "../src/data/tasks";
 import { mockInvoke } from "./tauriMock";
 

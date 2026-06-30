@@ -13,9 +13,9 @@ import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
   useCornerStyle,
-} from "../../composables/useCornerStyle";
+  useTheme,
+} from "@lilia/ui";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
-import { useTheme } from "../../composables/useTheme";
 import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
 
 const { theme, setTheme } = useTheme();

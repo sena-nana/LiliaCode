@@ -138,6 +138,7 @@ onBeforeUnmount(() => {
       <select
         class="ui-input"
         :aria-label="row.label"
+        :data-agent-id="`settings.model-config.chat.${row.tier}`"
         :value="modelFeatureSettings.chat[row.tier] ?? ''"
         :disabled="!hasModelOptions || savingModelFeatures"
         @change="(e) => setChatTier(row.tier, (e.target as HTMLSelectElement).value)"
@@ -185,6 +186,7 @@ onBeforeUnmount(() => {
           class="ui-input"
           :class="{ 'model-feature-row__select': row.key === 'suggestion' }"
           :aria-label="row.key === 'suggestion' ? '新对话建议模型' : row.label"
+          :data-agent-id="`settings.model-config.feature.${row.key}`"
           :value="modelFeatureSettings[row.key] ?? ''"
           :disabled="!hasModelOptions || savingModelFeatures"
           @change="(e) => setFeature(row.key, (e.target as HTMLSelectElement).value)"

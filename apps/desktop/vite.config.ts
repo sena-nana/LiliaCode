@@ -50,6 +50,9 @@ export default defineConfig(async ({ command, mode }) => ({
   resolve: {
     alias: {
       ...(command === "serve" && mode !== "test" && !strictPort ? devMockAliases : {}),
+      "@lucide/vue": fileURLToPath(
+        new URL("../../node_modules/@lucide/vue/dist/cjs/lucide-vue.js", import.meta.url),
+      ),
       "@lilia/contracts/agentInteractionContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/agentInteractionContract.mjs", import.meta.url),
       ),
@@ -108,6 +111,7 @@ export default defineConfig(async ({ command, mode }) => ({
         new URL("../../packages/contracts/src/index.ts", import.meta.url),
       ),
     },
+    dedupe: ["vue", "@vue/runtime-core", "@vue/runtime-dom", "@lucide/vue"],
   },
 
   // 这些 Vite 选项面向 Tauri 开发，只在 `tauri dev` 或 `tauri build` 中生效

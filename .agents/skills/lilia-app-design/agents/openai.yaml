@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lilia App Design"
+  short_description: "Design rules for Lilia desktop apps"
+  default_prompt: "Use $lilia-app-design to design or review a Lilia desktop app page."
