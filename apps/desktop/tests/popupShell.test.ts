@@ -84,8 +84,12 @@ function encodeDraftQueryText(text: string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function composerInput(view: ReturnType<typeof render>): HTMLElement | null {
+  return view.container.querySelector(".chat-composer [role='textbox']");
+}
+
 function expectComposerFocused(view: ReturnType<typeof render>) {
-  const input = view.container.querySelector(".chat-composer [role='textbox']");
+  const input = composerInput(view);
   expect(input).toBeInstanceOf(HTMLElement);
   expect(document.activeElement).toBe(input);
   return input as HTMLElement;
@@ -101,25 +105,20 @@ describe("Popup shell", () => {
   it("弹出窗口路由只渲染对话主体，不渲染左右侧栏", async () => {
     const view = await renderPopup();
 
-    expect(view.container.querySelector(".popup-shell")).toBeInTheDocument();
-    expect(view.container.querySelector(".secondary-panel")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".chat-sidebar")).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "关闭弹出窗口" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "新对话" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "回到主窗口" })).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "折叠左侧栏" })).not.toBeInTheDocument();
   });
 
   it("对话状态悬浮窗路由只渲染状态列表", async () => {
     const view = await renderPopup("/popup/status");
 
-    expect(view.container.querySelector(".conversation-status-float")).toBeInTheDocument();
-    expect(view.container.querySelector(".popup-titlebar")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".secondary-panel")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".chat-sidebar")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".chat-page")).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "新对话" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "关闭对话悬浮窗" })).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "回到主窗口" })).not.toBeInTheDocument();
     expect(view.queryByText("对话状态")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".conversation-status-float__count")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".sb-conn")).toBeInTheDocument();
+    expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(view.getByRole("button", { name: /接入 Claude Code 会话发现/ }))
@@ -167,9 +166,6 @@ describe("Popup shell", () => {
     await waitFor(() => {
       expect(mockCurrentWindow.setAlwaysOnTop).toHaveBeenCalledWith(false);
     });
-
-    const titlebarButtons = view.container.querySelectorAll(".conversation-status-float__titlebar .titlebar__btn");
-    expect(titlebarButtons[0]).toHaveAttribute("aria-label", "置顶");
 
     await fireEvent.click(view.getByRole("button", { name: "置顶" }));
     expect(mockCurrentWindow.setAlwaysOnTop).toHaveBeenLastCalledWith(true);

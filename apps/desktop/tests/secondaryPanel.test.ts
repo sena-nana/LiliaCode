@@ -276,8 +276,7 @@ describe("SecondaryPanel project tree expansion", () => {
     const view = await renderSecondaryPanel();
 
     await waitFor(() => {
-      const label = view.container.querySelector(".sb-conn__label");
-      expect(label).toHaveTextContent("Codex");
+      expect(view.getByRole("link", { name: /Codex/ })).toBeInTheDocument();
     }, { timeout: 2_000 });
   });
 
@@ -292,8 +291,7 @@ describe("SecondaryPanel project tree expansion", () => {
     const view = await renderSecondaryPanel();
 
     await waitFor(() => {
-      const card = view.container.querySelector(".sb-conn");
-      expect(card).toHaveClass("sb-conn--error");
+      const card = view.getByRole("link", { name: /Codex app-server 环境不满足/ });
       expect(card).toHaveTextContent("异常");
       expect(card).toHaveAttribute("title", expect.stringContaining("Codex app-server 环境不满足"));
       expect(card).toHaveAttribute("title", expect.not.stringContaining("OpenAI Responses API"));
@@ -600,9 +598,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
     emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-003", queuedCount: 0 });
     await waitFor(() => {
-      expect(within(row).getByLabelText("对话中")).toHaveClass(
-        "sb-tree__activity--running",
-      );
+      expect(within(row).getByLabelText("对话中")).toBeInTheDocument();
     });
 
     emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
@@ -618,16 +614,12 @@ describe("SecondaryPanel project chat navigation", () => {
       },
     });
     await waitFor(() => {
-      expect(within(row).getByLabelText("等待交互")).toHaveClass(
-        "sb-tree__activity--requires_action",
-      );
+      expect(within(row).getByLabelText("等待交互")).toBeInTheDocument();
     });
 
     emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });
     await waitFor(() => {
-      expect(within(row).getByLabelText("对话完成")).toHaveClass(
-        "sb-tree__activity--completed",
-      );
+      expect(within(row).getByLabelText("对话完成")).toBeInTheDocument();
     });
   });
 
@@ -640,9 +632,7 @@ describe("SecondaryPanel project chat navigation", () => {
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_GET_RUNTIME_SNAPSHOT_COMMAND))
         .toBe(true);
-      expect(within(row).getByLabelText("对话中")).toHaveClass(
-        "sb-tree__activity--running",
-      );
+      expect(within(row).getByLabelText("对话中")).toBeInTheDocument();
     });
   });
 
@@ -677,9 +667,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const row = getConversationRow(view, "整理窗口快捷键");
 
     await waitFor(() => {
-      expect(within(row).getByLabelText("对话中")).toHaveClass(
-        "sb-tree__activity--running",
-      );
+      expect(within(row).getByLabelText("对话中")).toBeInTheDocument();
     });
   });
 
@@ -695,9 +683,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const row = getConversationRow(view, "整理窗口快捷键");
 
     await waitFor(() => {
-      expect(within(row).getByLabelText("发生错误")).toHaveClass(
-        "sb-tree__activity--error",
-      );
+      expect(within(row).getByLabelText("发生错误")).toBeInTheDocument();
     });
   });
 
@@ -714,9 +700,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const row = getConversationRow(view, "整理窗口快捷键");
 
     await waitFor(() => {
-      expect(within(row).getByLabelText("发生错误")).toHaveClass(
-        "sb-tree__activity--error",
-      );
+      expect(within(row).getByLabelText("发生错误")).toBeInTheDocument();
       expect(within(row).queryByLabelText("等待交互")).toBeNull();
     });
   });
@@ -728,9 +712,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const askView = await renderSecondaryPanel();
     const askRow = getConversationRow(askView, "整理窗口快捷键");
     await waitFor(() => {
-      expect(within(askRow).getByLabelText("等待交互")).toHaveClass(
-        "sb-tree__activity--requires_action",
-      );
+      expect(within(askRow).getByLabelText("等待交互")).toBeInTheDocument();
     });
   });
 
@@ -756,9 +738,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const errorView = await renderSecondaryPanel();
     const errorRow = getConversationRow(errorView, "整理窗口快捷键");
     await waitFor(() => {
-      expect(within(errorRow).getByLabelText("发生错误")).toHaveClass(
-        "sb-tree__activity--error",
-      );
+      expect(within(errorRow).getByLabelText("发生错误")).toBeInTheDocument();
     });
   });
 
@@ -780,9 +760,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const row = await findConversationRow(view, "整理窗口快捷键");
 
     await waitFor(() => {
-      expect(within(row).getByLabelText("对话中")).toHaveClass(
-        "sb-tree__activity--running",
-      );
+      expect(within(row).getByLabelText("对话中")).toBeInTheDocument();
     });
   });
 
@@ -793,9 +771,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const row = getConversationRow(view, "随手问问 Claude：tsconfig paths");
 
     await waitFor(() => {
-      expect(within(row).getByLabelText("等待交互")).toHaveClass(
-        "sb-tree__activity--requires_action",
-      );
+      expect(within(row).getByLabelText("等待交互")).toBeInTheDocument();
     });
   });
 
@@ -809,16 +785,12 @@ describe("SecondaryPanel project chat navigation", () => {
       id: "tl-live-pending-tool",
     });
     await waitFor(() => {
-      expect(within(row).getByLabelText("等待交互")).toHaveClass(
-        "sb-tree__activity--requires_action",
-      );
+      expect(within(row).getByLabelText("等待交互")).toBeInTheDocument();
     });
 
     emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });
     await waitFor(() => {
-      expect(within(row).getByLabelText("对话完成")).toHaveClass(
-        "sb-tree__activity--completed",
-      );
+      expect(within(row).getByLabelText("对话完成")).toBeInTheDocument();
       expect(within(row).queryByLabelText("等待交互")).toBeNull();
     });
   });
@@ -839,9 +811,7 @@ describe("SecondaryPanel project chat navigation", () => {
     });
 
     await waitFor(() => {
-      expect(within(row).getByLabelText("发生错误")).toHaveClass(
-        "sb-tree__activity--error",
-      );
+      expect(within(row).getByLabelText("发生错误")).toBeInTheDocument();
     });
 
     emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });

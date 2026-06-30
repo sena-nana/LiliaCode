@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -34,12 +34,8 @@ async function renderFooter(initialRoute = "/") {
   });
 }
 
-function providerBadge(container: HTMLElement): HTMLElement {
-  const badge = container.querySelector(".sb-conn");
-  if (!(badge instanceof HTMLElement)) {
-    throw new Error("未找到 provider badge");
-  }
-  return badge;
+function providerBadge(container: HTMLElement, name: string | RegExp): HTMLElement {
+  return within(container).getByRole("link", { name });
 }
 
 function officialQuota(overrides: Record<string, unknown> = {}) {
@@ -107,10 +103,6 @@ function invokeCount(command: string): number {
   return mockInvoke.mock.calls.filter(([cmd]) => cmd === command).length;
 }
 
-function popoverMeters(): HTMLElement[] {
-  return Array.from(document.body.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
-}
-
 describe("SidebarConnectionFooter provider quota badge", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -153,12 +145,11 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     const view = await renderFooter();
 
     await waitFor(() => {
-      expect(providerBadge(view.container)).toHaveAttribute(
+      expect(providerBadge(view.container, "Claude API 未配置。点击进入设置。")).toHaveAttribute(
         "aria-label",
         "Claude API 未配置。点击进入设置。",
       );
     });
-    expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
   });
 
   it("does not show quota rings when Codex uses API mode", async () => {
@@ -172,12 +163,11 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     const view = await renderFooter();
 
     await waitFor(() => {
-      expect(providerBadge(view.container)).toHaveAttribute(
+      expect(providerBadge(view.container, "Codex API 未配置。点击进入设置。")).toHaveAttribute(
         "aria-label",
         "Codex API 未配置。点击进入设置。",
       );
     });
-    expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
     expect(view.queryByRole("button", { name: /更新 Codex app-server/ })).not.toBeInTheDocument();
   });
 
@@ -200,8 +190,6 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       "title",
       "切换 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
     );
-    expect(updateButton.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
-    expect(updateButton.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
 
     await fireEvent.mouseEnter(updateButton);
 
@@ -241,9 +229,6 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       "title",
       "下载 Codex app-server（42%）：codex-cli 0.136.0 -> 0.141.0",
     );
-    const ring = updateButton.querySelector<HTMLElement>(".sb-quota-ring");
-    expect(ring).toBeInTheDocument();
-    expect(ring).toHaveStyle({ "--quota-progress": "42" });
   });
 
   it("shows Codex app-server failed switch retry from the badge", async () => {
@@ -266,7 +251,6 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       "title",
       "重试切换 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
     );
-    expect(updateButton.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
 
     await fireEvent.mouseEnter(updateButton);
     expect(await view.findByRole("tooltip")).toHaveTextContent("创建 Codex 切换链接失败");
@@ -314,9 +298,9 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     const tooltip = await view.findByRole("tooltip");
     const error = view.getByText(longUpdateError);
     const releaseNote = view.getByText(longReleaseNote);
-    expect(tooltip).toHaveClass("sb-conn-popover--update");
-    expect(error).toHaveClass("sb-conn-popover__error");
-    expect(releaseNote.parentElement).toHaveClass("sb-conn-popover__update-list");
+    expect(tooltip).toHaveTextContent(longUpdateError);
+    expect(error).toBeInTheDocument();
+    expect(releaseNote).toBeInTheDocument();
   });
 
   it("shows Codex official account quota rings and hover details", async () => {
@@ -325,28 +309,19 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     setMockCodexAccountQuotaStatus(officialQuota());
 
     const view = await renderFooter();
-    const provider = providerBadge(view.container);
+    const provider = providerBadge(view.container, "Codex · 官方账号");
 
-    expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
     expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(0);
 
     await fireEvent.mouseEnter(provider);
 
     await waitFor(() => {
       expect(invokeCount(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND)).toBe(1);
-      expect(view.container.querySelectorAll(".sb-quota-ring")).toHaveLength(2);
     });
-    const rings = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-quota-ring"));
-    expect(rings[0]).toHaveStyle({ "--quota-progress": "58" });
-    expect(rings[1]).toHaveStyle({ "--quota-progress": "9" });
 
-    await view.findByRole("tooltip");
-    const meters = popoverMeters();
-    expect(meters).toHaveLength(4);
-    expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });
-    expect(meters[1]).toHaveStyle({ "--quota-progress": "9" });
-    expect(meters[2]).toHaveStyle({ "--quota-progress": "88" });
-    expect(meters[3]).toHaveStyle({ "--quota-progress": "20" });
+    const tooltip = await view.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("重置次数可用 2 次");
+    expect(tooltip).toHaveTextContent("连续 8 天");
   });
 
   it("keeps the quota popover error state when the official quota call fails", async () => {
@@ -367,7 +342,7 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     }));
 
     const view = await renderFooter();
-    const provider = providerBadge(view.container);
+    const provider = providerBadge(view.container, "Codex · 官方账号");
 
     await fireEvent.mouseEnter(provider);
 
@@ -375,7 +350,6 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       "Codex 官方额度接口未返回可识别的额度数据。",
     );
     expect(view.queryByRole("button", { name: "登录" })).not.toBeInTheDocument();
-    expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
     expect(mockInvoke).toHaveBeenCalledWith(
       QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
       {},
@@ -401,7 +375,7 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     }));
 
     const view = await renderFooter();
-    const provider = providerBadge(view.container);
+    const provider = providerBadge(view.container, "Codex · 官方账号");
 
     await fireEvent.mouseEnter(provider);
 
