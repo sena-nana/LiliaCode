@@ -269,69 +269,6 @@
   color: var(--accent);
 }
 
-.sb-menu {
-  position: fixed;
-  z-index: 1100;
-  min-width: 180px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55);
-  transform-origin: var(--sb-menu-origin-x, 0px) var(--sb-menu-origin-y, 0px);
-  will-change: transform, opacity;
-}
-
-.sb-menu-pop-enter-active,
-.sb-menu-pop-leave-active {
-  transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.sb-menu-pop-leave-active {
-  pointer-events: none;
-}
-
-.sb-menu-pop-enter-from,
-.sb-menu-pop-leave-to {
-  opacity: 0;
-  transform: scale(0.9);
-}
-
-.sb-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 28px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  font-weight: 500;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: background-color 0.12s ease;
-}
-
-.sb-menu__item:hover {
-  background: var(--bg-hover);
-  filter: none;
-}
-
-.sb-menu__label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* 侧栏区域内的内联报错条；占一行、不抢主区，X 按钮关闭。 */
 .sb-banner {
   display: flex;

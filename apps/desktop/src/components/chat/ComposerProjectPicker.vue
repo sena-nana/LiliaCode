@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { FolderPlus } from "@lucide/vue";
 import type { Project } from "@lilia/contracts";
-import { useSidebarAddMenu } from "../../composables/useSidebarAddMenu";
+import { useAnchoredActionMenu } from "@lilia/ui";
 import SidebarProjectAddMenu from "../sidebar/SidebarProjectAddMenu.vue";
 
 defineProps<{
@@ -15,11 +15,11 @@ const emit = defineEmits<{
 }>();
 
 const {
-  addMenuOpen,
-  closeAddMenu,
-  menuPos,
-  openAddMenu,
-} = useSidebarAddMenu();
+  open: addMenuOpen,
+  close: closeAddMenu,
+  position: menuPos,
+  openAtEvent: openAddMenu,
+} = useAnchoredActionMenu();
 
 function onSelect(event: Event) {
   const target = event.target as HTMLSelectElement | null;
