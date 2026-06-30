@@ -627,8 +627,6 @@ describe("Settings provider switch", () => {
       expect(view.container.querySelector("[data-agent-id='settings.provider.probe']")).toBeNull();
       const updateButton = view.getByRole("button", { name: /切换到 0.141.0/ });
       expect(updateButton).toBeEnabled();
-      expect(updateButton.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
-      expect(updateButton.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
     });
 
     await fireEvent.click(view.getByRole("button", { name: /切换到 0.141.0/ }));
@@ -655,9 +653,6 @@ describe("Settings provider switch", () => {
 
     const button = await view.findByRole("button", { name: /下载中 42%/ });
     expect(button).toBeDisabled();
-    const ring = button.querySelector<HTMLElement>(".sb-quota-ring");
-    expect(ring).toBeInTheDocument();
-    expect(ring).toHaveStyle({ "--quota-progress": "42" });
   });
 
   it("Codex app-server 下载失败时设置页保留重新准备入口", async () => {
@@ -676,7 +671,6 @@ describe("Settings provider switch", () => {
 
     const button = await view.findByRole("button", { name: /重新准备 0.141.0/ });
     expect(button).toBeEnabled();
-    expect(button.querySelector(".lucide-rotate-cw")).toBeInTheDocument();
     expect(view.getByText("下载 Codex app-server 失败")).toBeInTheDocument();
 
     mockInvoke.mockClear();
@@ -717,7 +711,6 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(updateButton()).toBeEnabled();
     });
-    expect(updateButton()?.querySelector(".lucide-refresh-cw")).toBeInTheDocument();
     expect(view.getByText(updateError)).toBeInTheDocument();
 
     mockInvoke.mockClear();

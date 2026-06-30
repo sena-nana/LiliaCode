@@ -32,11 +32,9 @@ vi.mock("../src/pages/taskDetail/taskDetailSidebarPanels", () => ({
 }));
 
 function sidebarElement(container: HTMLElement): HTMLElement {
-  const sidebar = container.querySelector(".chat-sidebar");
-  if (!(sidebar instanceof HTMLElement)) {
-    throw new Error("未找到对话侧栏");
-  }
-  return sidebar;
+  const sidebar = container.querySelector<HTMLElement>("[aria-label='对话侧栏']");
+  expect(sidebar).toBeInstanceOf(HTMLElement);
+  return sidebar as HTMLElement;
 }
 
 async function renderTaskDetail() {
@@ -127,7 +125,7 @@ describe("TaskDetail sidebar panel activation", () => {
     }
     await new Promise((resolve) => globalThis.setTimeout(resolve, 30));
 
-    expect(view.container.querySelector(".titlebar__chat-sidebar-btn")).toBeNull();
+    expect(view.queryByRole("button", { name: /对话侧栏/ })).not.toBeInTheDocument();
     expect(sidebarPanelRegistrations.debug).not.toHaveBeenCalled();
     expect(sidebarPanelRegistrations.architecture).not.toHaveBeenCalled();
     expect(sidebarPanelRegistrations.iab).not.toHaveBeenCalled();
@@ -141,7 +139,7 @@ describe("TaskDetail sidebar panel activation", () => {
     });
 
     await waitFor(() => {
-      expect(sidebarElement(view.container)).toHaveClass("is-open");
+      expect(sidebarElement(view.container)).not.toHaveAttribute("aria-hidden");
     });
   });
 
@@ -155,7 +153,7 @@ describe("TaskDetail sidebar panel activation", () => {
 
     expect(sidebarPanelRegistrations.architecture).not.toHaveBeenCalled();
     expect(sidebarPanelRegistrations.iab).not.toHaveBeenCalled();
-    expect(view.container.querySelector(".chat-sidebar")).toBeInstanceOf(HTMLElement);
+    expect(sidebarElement(view.container)).toBeInstanceOf(HTMLElement);
   });
 });
 

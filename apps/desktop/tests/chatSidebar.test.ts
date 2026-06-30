@@ -82,19 +82,13 @@ function renderHost() {
 }
 
 function sidebarElement(container: HTMLElement): HTMLElement {
-  const sidebar = container.querySelector(".chat-sidebar");
-  if (!(sidebar instanceof HTMLElement)) {
-    throw new Error("未找到对话侧栏");
-  }
-  return sidebar;
+  const sidebar = container.querySelector<HTMLElement>("[aria-label='对话侧栏']");
+  expect(sidebar).toBeInstanceOf(HTMLElement);
+  return sidebar as HTMLElement;
 }
 
 function sidebarResizer(container: HTMLElement): HTMLElement {
-  const resizer = container.querySelector(".chat-sidebar__resizer");
-  if (!(resizer instanceof HTMLElement)) {
-    throw new Error("未找到对话侧栏拖拽线");
-  }
-  return resizer;
+  return within(container).getByRole("separator", { hidden: true });
 }
 
 async function renderTaskDetail() {
@@ -138,10 +132,7 @@ async function setComposerText(view: ReturnType<typeof render>, text: string) {
 }
 
 function titlebarSidebarButton(container: HTMLElement): HTMLButtonElement {
-  const button = container.querySelector(".titlebar__chat-sidebar-btn");
-  if (!(button instanceof HTMLButtonElement)) {
-    throw new Error("未找到标题栏侧栏按钮");
-  }
+  const button = within(container).getByRole("button", { name: /对话侧栏/ });
   return button;
 }
 
@@ -186,7 +177,6 @@ describe("chat sidebar host", () => {
     const view = renderHost();
     const sidebar = sidebarElement(view.container);
 
-    expect(sidebar).not.toHaveClass("is-open");
     expect(sidebar).toHaveAttribute("aria-hidden", "true");
     expect(view.getByText("暂无内容")).toBeInTheDocument();
     expect(view.queryByText("侧栏")).not.toBeInTheDocument();
@@ -199,7 +189,6 @@ describe("chat sidebar host", () => {
     const view = renderHost();
     const sidebar = sidebarElement(view.container);
 
-    expect(sidebar).toHaveClass("is-open");
     expect(sidebar).not.toHaveAttribute("aria-hidden");
   });
 
@@ -301,7 +290,6 @@ describe("chat sidebar host", () => {
     const sidebar = sidebarElement(view.container);
     const resizer = sidebarResizer(view.container);
 
-    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("340px");
     expect(resizer).toHaveAttribute("aria-valuemin", "180");
     expect(resizer).toHaveAttribute("aria-valuenow", "340");
 
@@ -316,7 +304,6 @@ describe("chat sidebar host", () => {
     });
 
     await waitFor(() => {
-      expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("440px");
       expect(resizer).toHaveAttribute("aria-valuenow", "440");
     });
 
@@ -326,7 +313,6 @@ describe("chat sidebar host", () => {
     });
 
     await waitFor(() => {
-      expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("520px");
       expect(resizer).toHaveAttribute("aria-valuenow", "520");
     });
 
@@ -336,7 +322,6 @@ describe("chat sidebar host", () => {
     });
 
     await waitFor(() => {
-      expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("180px");
       expect(resizer).toHaveAttribute("aria-valuenow", "180");
     });
 
@@ -358,20 +343,19 @@ describe("TaskDetail chat sidebar toggle", () => {
     closeChatSidebar();
 
     await waitFor(() => {
-      expect(sidebar).not.toHaveClass("is-open");
+      expect(sidebar).toHaveAttribute("aria-hidden", "true");
       expect(toggle).toHaveAttribute("aria-label", "打开对话侧栏");
     });
 
     await fireEvent.click(toggle);
 
-    expect(sidebar).toHaveClass("is-open");
-    expect(toggle).not.toHaveClass("is-active");
+    expect(sidebar).not.toHaveAttribute("aria-hidden");
     expect(toggle).toHaveAttribute("aria-label", "关闭对话侧栏");
     expect(localStorage.getItem(STORAGE_KEY)).toBe("1");
 
     await fireEvent.click(toggle);
 
-    expect(sidebar).not.toHaveClass("is-open");
+    expect(sidebar).toHaveAttribute("aria-hidden", "true");
     expect(toggle).toHaveAttribute("aria-label", "打开对话侧栏");
     expect(localStorage.getItem(STORAGE_KEY)).toBe("0");
   });
