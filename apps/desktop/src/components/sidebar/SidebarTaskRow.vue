@@ -7,7 +7,7 @@ import type { ConversationActivity } from "../../composables/useConversationActi
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
 import type { ContextMenuItem } from "@lilia/ui";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
-import { withComponentEpoch } from "../../composables/useComponentEpoch";
+import { withComponentEpoch } from "@lilia/ui";
 import { scheduleTaskDetailPreload } from "../../router";
 import { archiveTask, removeArchivedTaskFromLists, toggleTaskPin } from "../../services/tasksStore";
 import { openPopupChildQuestion, openPopupTask } from "../../services/popupWindows";

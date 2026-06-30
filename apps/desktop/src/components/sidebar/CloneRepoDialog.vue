@@ -22,7 +22,7 @@ import {
   preloadGitHubRepos,
   readCachedGitHubRepos,
 } from "../../services/projects";
-import SearchDropdown from "../SearchDropdown.vue";
+import SearchDropdown from "@lilia/ui/components/SearchDropdown";
 
 const emit = defineEmits<{
   close: [];

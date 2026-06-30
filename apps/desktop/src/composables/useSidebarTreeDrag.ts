@@ -7,7 +7,7 @@ import {
   reparentTask,
   type OrphanConversation,
 } from "../services/tasksStore";
-import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
 
 export type TreeDragKind = "project" | "task";
 export type TreeDropPosition = "before" | "after" | "inside";

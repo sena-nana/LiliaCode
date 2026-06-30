@@ -26,8 +26,8 @@ import {
   installPerfObservers,
   measurePerfAsync,
   runWhenIdle,
-} from "../utils/perf";
-import { createLazyLoadState } from "../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const sidebarProjectsSectionLoad = createLazyLoadState(() =>
   measurePerfAsync(

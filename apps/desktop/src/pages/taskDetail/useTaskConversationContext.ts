@@ -21,7 +21,7 @@ import {
   type ConversationContextInvalidationReason,
 } from "../../services/conversationContextInvalidation";
 import type { ChatAttachment } from "@lilia/contracts";
-import { measurePerfAsync } from "../../utils/perf";
+import { measurePerfAsync } from "@lilia/ui";
 
 export interface TaskDetailRouteProps {
   projectId?: string;

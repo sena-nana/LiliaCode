@@ -6,7 +6,7 @@ import {
   readScrollbarMetrics,
   scrollOffsetForThumbDrag,
 } from "../../utils/scrollbarMetrics";
-import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
 
 export { clamp } from "../../utils/scrollbarMetrics";
 

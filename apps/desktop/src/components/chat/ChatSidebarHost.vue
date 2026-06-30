@@ -9,9 +9,9 @@ import {
   type ChatSidebarContext,
 } from "../../composables/useChatSidebar";
 import { useResizablePane } from "@lilia/ui";
-import { withComponentEpoch } from "../../composables/useComponentEpoch";
-import { createLazyLoadState, type LazyLoadState } from "../../utils/lazyLoadState";
-import { measurePerfAsync } from "../../utils/perf";
+import { withComponentEpoch } from "@lilia/ui";
+import { createLazyLoadState, type LazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
 
 const props = defineProps<ChatSidebarContext>();
 

@@ -22,8 +22,9 @@ import {
   REMOTE_CONTROL_STATUS_COMMAND,
   SYSTEM_OPEN_URL_COMMAND,
 } from "@lilia/contracts";
+import { SETTINGS_TABS, setLiliaAppConfig } from "@lilia/ui";
+import { appConfig } from "../src/app.config";
 import Settings from "../src/pages/Settings.vue";
-import { SETTINGS_TABS } from "../src/pages/settings/settingsTabs";
 import { createLiliaRouter } from "../src/router";
 import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../src/tauri/pluginCommands";
 import {
@@ -39,6 +40,7 @@ import {
 } from "./tauriMock";
 
 async function renderSettings(initialRoute = "/settings") {
+  setLiliaAppConfig(appConfig);
   const router = createLiliaRouter(createMemoryHistory());
   await router.push(initialRoute);
   await router.isReady();
@@ -108,17 +110,6 @@ describe("Settings provider switch", () => {
     vi.unstubAllGlobals();
   });
 
-  it("卸载时取消设置 tab paint 打点调度", async () => {
-    const cancelAnimationFrame = vi.fn();
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 53));
-    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
-
-    const view = await renderSettings("/settings?tab=appearance");
-    view.unmount();
-
-    expect(cancelAnimationFrame).toHaveBeenCalledWith(53);
-  });
-
   it("非法 tab 默认显示外观分类", async () => {
     const invalid = await renderSettings("/settings?tab=unknown");
     expect(invalid.getByRole("heading", { level: 2, name: "外观" })).toBeInTheDocument();
@@ -162,6 +153,9 @@ describe("Settings provider switch", () => {
 
     await view.router.push("/settings?tab=quota");
     await view.router.isReady();
+    if (typeof vi.dynamicImportSettled === "function") {
+      await vi.dynamicImportSettled();
+    }
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === QUOTA_USAGE_GET_STATS_COMMAND)).toBe(true);

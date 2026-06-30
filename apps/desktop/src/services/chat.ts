@@ -82,7 +82,7 @@ import {
   ROUTER_SET_MODE_COMMAND,
 } from "@lilia/contracts";
 import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../tauri/pluginCommands";
-import { installCombinedUnlisten } from "../utils/eventListeners";
+import { installCombinedUnlisten } from "@lilia/ui";
 import type {
   AgentInteractionSettings,
   AgentInteractionKind,

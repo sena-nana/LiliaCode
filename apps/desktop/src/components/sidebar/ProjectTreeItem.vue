@@ -40,8 +40,8 @@ import {
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import { useInlineRename } from "../../composables/useInlineRename";
 
 const projectTreeConversationListLoad = createLazyLoadState<Component>(() =>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { ChartConfiguration, ChartData, ChartOptions, ChartType } from "chart.js";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
-import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
 
 type ChartConstructor = typeof import("chart.js/auto")["default"];
 

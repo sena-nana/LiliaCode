@@ -2,15 +2,18 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { ArrowLeft } from "@lucide/vue";
-import { useShellSidebar } from "@lilia/ui";
-import TitleBar from "../components/TitleBar.vue";
+import SettingsSidebar from "@lilia/ui/layouts/SettingsSidebar";
 import {
+  SETTINGS_TABS,
   beginPerfStage,
+  createLazyLoadState,
   installPerfObservers,
   measurePerfAsync,
+  normalizeSettingsTab,
   scheduleAfterPaint,
-} from "../utils/perf";
-import { createLazyLoadState } from "../utils/lazyLoadState";
+  useShellSidebar,
+} from "@lilia/ui";
+import TitleBar from "../components/TitleBar.vue";
 
 const secondaryPanelLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -18,26 +21,15 @@ const secondaryPanelLoad = createLazyLoadState(() =>
     async () => (await import("./SecondaryPanel.vue")).default,
   )
 );
-const settingsSidebarLoad = createLazyLoadState(() =>
-  measurePerfAsync(
-    "app-shell.settings-sidebar.load",
-    async () => (await import("./SettingsSidebar.vue")).default,
-  )
-);
-
 const SecondaryPanel = defineAsyncComponent({
   suspensible: false,
   loader: () => secondaryPanelLoad.load(),
 });
 
-const SettingsSidebar = defineAsyncComponent({
-  suspensible: false,
-  loader: () => settingsSidebarLoad.load(),
-});
-
 const route = useRoute();
 const router = useRouter();
 const isSettingsRoute = computed(() => route.path === "/settings");
+const activeSettingsTab = computed(() => normalizeSettingsTab(route.query.tab));
 const isAutomationsRoute = computed(() => route.path === "/automations");
 const isSidebarReplacementRoute = computed(() =>
   isSettingsRoute.value || isAutomationsRoute.value
@@ -135,6 +127,8 @@ onBeforeUnmount(() => {
     />
     <SettingsSidebar
       v-if="isSettingsRoute"
+      :tabs="SETTINGS_TABS"
+      :active-key="activeSettingsTab"
       :return-to="sidebarReturnTo"
     />
     <aside

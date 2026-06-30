@@ -17,7 +17,7 @@ import {
   useAnchoredOverlay,
   type AnchoredMenuPosition,
 } from "@lilia/ui";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { createLazyLoadState } from "@lilia/ui";
 
 const props = defineProps<{
   open: boolean;

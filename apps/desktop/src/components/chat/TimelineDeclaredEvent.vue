@@ -6,8 +6,8 @@ import type {
   PendingAgentActionResolution,
 } from "../../composables/pendingAgentActions";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,

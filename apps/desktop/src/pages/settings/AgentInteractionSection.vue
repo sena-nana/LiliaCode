@@ -16,15 +16,15 @@ import {
 import {
   useAgentInteractionSettings,
 } from "../../composables/useAgentInteractionSettings";
-import SettingsCollapsibleCard from "./SettingsCollapsibleCard.vue";
+import SettingsCollapsibleCard from "@lilia/ui/components/SettingsCollapsibleCard";
 import {
   beginPerfStage,
   cancelIdleRun,
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const subagentCatalogSectionLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(

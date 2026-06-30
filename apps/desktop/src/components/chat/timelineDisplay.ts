@@ -20,7 +20,7 @@ import {
   type AgentTimelinePayload,
   type TimelineDeclaredGroupUnit,
 } from "@lilia/contracts";
-import { measurePerfSync } from "../../utils/perf";
+import { measurePerfSync } from "@lilia/ui";
 
 export {
   aggregateTimelineStatus,

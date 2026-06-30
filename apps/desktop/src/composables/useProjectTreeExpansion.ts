@@ -22,7 +22,7 @@ import {
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../utils/perf";
+} from "@lilia/ui";
 
 const TREE_EXPANSION_KEY = "lilia.projectTree.expansion";
 

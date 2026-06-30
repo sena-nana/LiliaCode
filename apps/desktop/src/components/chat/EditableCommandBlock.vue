@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useFocusOnActivation } from "../../composables/useFocusOnActivation";
+import { useFocusOnActivation } from "@lilia/ui";
 
 const props = defineProps<{
   modelValue: string;

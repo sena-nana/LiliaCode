@@ -14,7 +14,7 @@ import {
   PROJECT_TOGGLE_PIN_COMMAND,
   type Project,
 } from "@lilia/contracts";
-import { singleFlight } from "../utils/singleFlight";
+import { singleFlight } from "@lilia/ui";
 
 interface ProjectRow {
   id: string;

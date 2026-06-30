@@ -971,12 +971,44 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@lilia/build@portal:../LiliaUI/packages/build::locator=lilia-workspace%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@lilia/build@portal:../LiliaUI/packages/build::locator=lilia-workspace%40workspace%3A."
+  peerDependencies:
+    "@lilia/config": 0.1.0
+    "@lilia/tools": 0.1.0
+  bin:
+    lilia-build: ./bin/lilia-build.mjs
+  languageName: node
+  linkType: soft
+
+"@lilia/config@portal:../LiliaUI/packages/config::locator=lilia-workspace%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@lilia/config@portal:../LiliaUI/packages/config::locator=lilia-workspace%40workspace%3A."
+  dependencies:
+    "@vitejs/plugin-vue": "npm:^6.0.7"
+    vite: "npm:^8.0.16"
+    vitepress: "npm:^1.6.4"
+    vue: "npm:^3.5.35"
+  languageName: node
+  linkType: soft
+
 "@lilia/contracts@workspace:*, @lilia/contracts@workspace:packages/contracts":
   version: 0.0.0-use.local
   resolution: "@lilia/contracts@workspace:packages/contracts"
   dependencies:
     typescript: "npm:^6.0.3"
   languageName: unknown
+  linkType: soft
+
+"@lilia/tools@portal:../LiliaUI/packages/tools::locator=lilia-workspace%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@lilia/tools@portal:../LiliaUI/packages/tools::locator=lilia-workspace%40workspace%3A."
+  peerDependencies:
+    "@lilia/config": 0.1.0
+  bin:
+    lilia-tools: ./bin/lilia-tools.mjs
+  languageName: node
   linkType: soft
 
 "@lilia/ui@portal:../../../LiliaUI/packages/ui::locator=desktop%40workspace%3Aapps%2Fdesktop":
@@ -5275,6 +5307,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "lilia-workspace@workspace:."
   dependencies:
+    "@lilia/build": "portal:../LiliaUI/packages/build"
+    "@lilia/config": "portal:../LiliaUI/packages/config"
+    "@lilia/tools": "portal:../LiliaUI/packages/tools"
     vitepress: "npm:^1.6.4"
   languageName: unknown
   linkType: soft
@@ -7116,7 +7151,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite@npm:^8.1.0":
+"vite@npm:^8.0.16, vite@npm:^8.1.0":
   version: 8.1.0
   resolution: "vite@npm:8.1.0"
   dependencies:
@@ -7379,7 +7414,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vue@npm:^3.5.39":
+"vue@npm:^3.5.35, vue@npm:^3.5.39":
   version: 3.5.39
   resolution: "vue@npm:3.5.39"
   dependencies:

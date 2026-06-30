@@ -30,14 +30,14 @@ import {
   ensureSidebarConversationsLoaded,
   listSidebarConversations,
 } from "../services/sidebarConversations";
-import { installUnlistenFns, runUnlistenFns } from "../utils/eventListeners";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
 import {
   cancelIdleRun,
   installPerfObservers,
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../utils/perf";
+} from "@lilia/ui";
 
 const ALWAYS_ON_TOP_STORAGE_KEY = "lilia.conversationStatus.alwaysOnTop";
 const OPACITY_STORAGE_KEY = "lilia.conversationStatus.opacity";

@@ -201,8 +201,10 @@ describe("AppShell left sidebar collapse", () => {
       pointerId: 1,
     });
 
-    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("360px");
-    expect(resizer).toHaveAttribute("aria-valuenow", "360");
+    await waitFor(() => {
+      expect(shell.style.getPropertyValue("--sidebar-width")).toBe("360px");
+      expect(resizer).toHaveAttribute("aria-valuenow", "360");
+    });
 
     await fireEvent.pointerUp(window, {
       clientX: 300,

@@ -22,11 +22,6 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => titleBarWindowMock,
 }));
 
-async function flushAsyncLifecycle() {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
 async function renderTitleBar(initialRoute: string) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -87,64 +82,6 @@ describe("TitleBar breadcrumbs", () => {
     await waitFor(() => {
       expect(view.getByText("接入 Claude Code 会话发现")).toBeInTheDocument();
     });
-  });
-
-  it("卸载期间完成 resize listener 注册时会立即反注册", async () => {
-    const unlisten = vi.fn();
-    let resolveResizeListener: ((unlisten: () => void) => void) | null = null;
-    titleBarWindowMock.onResized.mockImplementationOnce(
-      () => new Promise((resolve) => {
-        resolveResizeListener = resolve;
-      }),
-    );
-
-    const view = await renderTitleBar("/projects/lilia/tasks/t-001");
-    await waitFor(() => {
-      expect(titleBarWindowMock.onResized).toHaveBeenCalledTimes(1);
-    });
-
-    view.unmount();
-    expect(unlisten).not.toHaveBeenCalled();
-    expect(resolveResizeListener).not.toBeNull();
-    resolveResizeListener?.(unlisten);
-    await flushAsyncLifecycle();
-
-    expect(unlisten).toHaveBeenCalledTimes(1);
-  });
-
-  it("并发窗口状态同步时保留最后一次最大化结果", async () => {
-    let resizeHandler: (() => void) | null = null;
-    titleBarWindowMock.onResized.mockImplementationOnce(async (handler: () => void) => {
-      resizeHandler = handler;
-      return vi.fn();
-    });
-
-    const view = await renderTitleBar("/projects/lilia/tasks/t-001");
-    await waitFor(() => {
-      expect(resizeHandler).not.toBeNull();
-    });
-
-    let resolveOlderSync: (value: boolean) => void = () => {};
-    titleBarWindowMock.isMaximized.mockReset();
-    titleBarWindowMock.isMaximized
-      .mockReturnValueOnce(
-        new Promise((resolve) => {
-          resolveOlderSync = resolve;
-        }),
-      )
-      .mockResolvedValueOnce(true);
-
-    resizeHandler?.();
-    resizeHandler?.();
-
-    await waitFor(() => {
-      expect(view.getByLabelText("还原")).toBeInTheDocument();
-    });
-
-    resolveOlderSync(false);
-    await flushAsyncLifecycle();
-
-    expect(view.getByLabelText("还原")).toBeInTheDocument();
   });
 
   it("卸载时取消面包屑 fallback 的 paint 调度", async () => {

@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatAttachment, ChatContextSearchResult } from "@lilia/contracts";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import { attachmentPart, textPart, type MentionRange } from "./composerParts";
 import {
   compactPathLabel,

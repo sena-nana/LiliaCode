@@ -23,9 +23,9 @@ import {
   measurePerfSync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const agentTimelineLoad = createLazyLoadState(() =>
   measurePerfAsync(

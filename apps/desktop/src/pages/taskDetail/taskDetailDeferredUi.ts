@@ -8,8 +8,8 @@ import {
   type SuggestionStatus,
 } from "@lilia/contracts";
 import type { Router } from "vue-router";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const suggestionDepsLoad = createLazyLoadState<{
   getConversationSuggestions: typeof import("../../services/chat").getConversationSuggestions;

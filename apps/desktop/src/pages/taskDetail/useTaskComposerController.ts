@@ -98,10 +98,10 @@ import {
   pendingInteractionRequestIdsToKeepAfterLoad,
   syncPendingInteractionsForTimelineEvents,
 } from "./usePendingInteractionActions";
-import { installUnlistenFns } from "../../utils/eventListeners";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
-import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
-import { singleFlight } from "../../utils/singleFlight";
+import { installUnlistenFns } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync, scheduleAfterPaint } from "@lilia/ui";
+import { singleFlight } from "@lilia/ui";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
 

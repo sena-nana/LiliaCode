@@ -7,7 +7,7 @@ import {
   type AskUserInteractionKind,
 } from "@lilia/contracts";
 import { onAgentInteractionRequest } from "../services/chat";
-import { installUnlistenFns, runUnlistenFns } from "../utils/eventListeners";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
 import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
 import { handleAgentPendingInteractionRequest } from "./useAgentPendingInteractions";
 import { handleProjectArchitectureInteractionRequest } from "./useProjectArchitectureInteractions";

@@ -14,7 +14,7 @@ import {
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
+} from "@lilia/ui";
 
 const props = defineProps<{ projectId: string }>();
 

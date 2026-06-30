@@ -16,7 +16,7 @@ import {
 import { useAnchoredOverlay } from "@lilia/ui";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus, startCodexAccountLogin } from "../services/chat";
-import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "../utils/perf";
+import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "@lilia/ui";
 import {
   codexAccountNeedsLogin,
   codexQuotaUnavailableStatus,

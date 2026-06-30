@@ -10,7 +10,7 @@ import {
   cancelIdleRun,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
+} from "@lilia/ui";
 import { useDeferredVisibility } from "./markdown/useDeferredVisibility";
 import {
   MERMAID_EXPLICIT_RENDER_LENGTH,

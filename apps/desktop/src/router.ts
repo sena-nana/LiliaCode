@@ -11,8 +11,8 @@ import {
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "./utils/perf";
-import { createLazyLoadState } from "./utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 function loadRouteComponent<T>(name: string, loader: () => Promise<T>): () => Promise<T> {
   const state = createLazyLoadState(() =>
