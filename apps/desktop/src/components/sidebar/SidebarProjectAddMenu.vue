@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, ref } from "vue";
 import {
   FolderOpen,
   FolderPlus,
@@ -13,8 +13,8 @@ import {
 } from "../../services/projectsStore";
 import { pickFolder } from "../../services/projects";
 import {
-  SB_MENU_POP_TRANSITION_MS,
-  useAnchoredOverlay,
+  ActionMenuItem,
+  AnchoredActionMenu,
   type AnchoredMenuPosition,
 } from "@lilia/ui";
 import { createLazyLoadState } from "@lilia/ui";
@@ -40,19 +40,6 @@ const CloneRepoDialog = defineAsyncComponent(
 const cloneOpen = ref(false);
 const categoryOpen = ref(false);
 let disposed = false;
-const openState = computed(() => props.open);
-const preferredPlacement = computed(() => "bottom-start" as const);
-const {
-  overlayEl: menuEl,
-  overlayStyle,
-  setAnchorPoint,
-  updatePosition,
-} = useAnchoredOverlay({
-  open: openState,
-  preferredPlacement,
-  offset: 0,
-});
-void menuEl;
 
 async function pickLocalFolder() {
   if (disposed) return;
@@ -96,10 +83,6 @@ function onCategoryCreated(project: Project) {
   categoryOpen.value = false;
 }
 
-function setMenuEl(el: Element | ComponentPublicInstance | null) {
-  menuEl.value = el instanceof HTMLElement ? el : null;
-}
-
 async function confirmCategory(name: string) {
   if (disposed) return;
   try {
@@ -112,73 +95,38 @@ async function confirmCategory(name: string) {
   }
 }
 
-watch(
-  () => [
-    props.open,
-    props.position.x,
-    props.position.y,
-    props.position.anchorX,
-    props.position.anchorY,
-  ] as const,
-  ([open]) => {
-    if (!open) return;
-    setAnchorPoint({
-      x: props.position.anchorX,
-      y: props.position.anchorY,
-    });
-    void updatePosition();
-  },
-  { immediate: true },
-);
-
 onBeforeUnmount(() => {
   disposed = true;
 });
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
-      <div
-        v-if="open"
-        :ref="setMenuEl"
-        class="sb-menu"
-        role="menu"
-        :style="overlayStyle"
-      >
-        <button
-          type="button"
-          class="sb-menu__item"
-          role="menuitem"
-          data-agent-id="sidebar.project-add.local-folder"
-          @click="pickLocalFolder"
-        >
-          <FolderOpen :size="13" aria-hidden="true" />
-          <span class="sb-menu__label">使用本地文件夹</span>
-        </button>
-        <button
-          type="button"
-          class="sb-menu__item"
-          role="menuitem"
-          data-agent-id="sidebar.project-add.clone"
-          @click="openClone"
-        >
-          <GitBranch :size="13" aria-hidden="true" />
-          <span class="sb-menu__label">从 GitHub clone</span>
-        </button>
-        <button
-          type="button"
-          class="sb-menu__item"
-          role="menuitem"
-          data-agent-id="sidebar.project-add.category"
-          @click="openCategory"
-        >
-          <FolderPlus :size="13" aria-hidden="true" />
-          <span class="sb-menu__label">创建空分类</span>
-        </button>
-      </div>
-    </Transition>
-  </Teleport>
+  <AnchoredActionMenu
+    :open="open"
+    :position="position"
+  >
+    <ActionMenuItem
+      :icon="FolderOpen"
+      agent-id="sidebar.project-add.local-folder"
+      @click="pickLocalFolder"
+    >
+      使用本地文件夹
+    </ActionMenuItem>
+    <ActionMenuItem
+      :icon="GitBranch"
+      agent-id="sidebar.project-add.clone"
+      @click="openClone"
+    >
+      从 GitHub clone
+    </ActionMenuItem>
+    <ActionMenuItem
+      :icon="FolderPlus"
+      agent-id="sidebar.project-add.category"
+      @click="openCategory"
+    >
+      创建空分类
+    </ActionMenuItem>
+  </AnchoredActionMenu>
 
   <CloneRepoDialog
     v-if="cloneOpen"

@@ -18,7 +18,6 @@ import {
 import { useSidebarRunningProcesses } from "../composables/useSidebarRunningProcesses";
 import type { SidebarRunningProcessItem } from "../components/sidebar/sidebarTypes";
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
-import { useSidebarAddMenu } from "../composables/useSidebarAddMenu";
 import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
 import {
   beginPerfStage,
@@ -26,6 +25,7 @@ import {
   installPerfObservers,
   measurePerfAsync,
   runWhenIdle,
+  useAnchoredActionMenu,
 } from "@lilia/ui";
 import { createLazyLoadState } from "@lilia/ui";
 
@@ -146,11 +146,11 @@ const {
 } = useSidebarTreeDrag(projects, orphans, reportProjectError);
 
 const {
-  addMenuOpen,
-  closeAddMenu,
-  menuPos,
-  openAddMenu,
-} = useSidebarAddMenu();
+  open: addMenuOpen,
+  close: closeAddMenu,
+  position: menuPos,
+  openAtEvent: openAddMenu,
+} = useAnchoredActionMenu();
 
 const currentTaskId = computed(() =>
   typeof route.params.taskId === "string" ? route.params.taskId : null,
