@@ -25,12 +25,12 @@ import type {
   ModelSelectionExplanation,
   PermissionMode,
 } from "@lilia/contracts";
-import Dropdown from "../Dropdown.vue";
+import { Dropdown } from "@lilia/ui";
 import { attachmentImageSrc } from "./imageViewer";
 import {
   SB_MENU_POP_TRANSITION_MS,
-} from "../../composables/menuMotion";
-import { useAnchoredMenuMotion } from "../../composables/useAnchoredMenuMotion";
+  useAnchoredMenuMotion,
+} from "@lilia/ui";
 import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 import { measurePerfAsync } from "../../utils/perf";
 import { createLazyLoadState } from "../../utils/lazyLoadState";
@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
         </div>
         <Dropdown
           class="chat-composer__permission-dropdown"
-          data-agent-id="chat.composer.permission"
+          agent-id="chat.composer.permission"
           :class="{ 'is-full-access': state.permission === 'full' }"
           :model-value="state.permission"
           :options="permissionOptions"
@@ -412,7 +412,7 @@ onBeforeUnmount(() => {
         />
         <Dropdown
           class="chat-composer__worktree-dropdown"
-          data-agent-id="chat.composer.worktree"
+          agent-id="chat.composer.worktree"
           :class="{ 'is-error': worktreeError }"
           :model-value="worktreeValue"
           :options="worktreeOptions"

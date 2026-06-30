@@ -3248,8 +3248,8 @@ button.chat-composer__context-action:active:not(:disabled) {
     gap: 4px;
   }
 
-  .chat-composer__permission-dropdown .chat-chip,
-  .chat-composer__worktree-dropdown .chat-chip,
+  .chat-composer__permission-dropdown .dd__button,
+  .chat-composer__worktree-dropdown .dd__button,
   .composer-model-picker__trigger,
   .chat-composer__mode-chip {
     position: relative;
@@ -3262,13 +3262,13 @@ button.chat-composer__context-action:active:not(:disabled) {
     border-radius: var(--radius-pill);
   }
 
-  .chat-composer__permission-dropdown .chat-chip__caret,
-  .chat-composer__worktree-dropdown .chat-chip__caret {
+  .chat-composer__permission-dropdown .dd__button-caret,
+  .chat-composer__worktree-dropdown .dd__button-caret {
     display: none;
   }
 
-  .chat-composer__permission-dropdown .chat-chip__label,
-  .chat-composer__worktree-dropdown .chat-chip__label,
+  .chat-composer__permission-dropdown .dd__button-label,
+  .chat-composer__worktree-dropdown .dd__button-label,
   .composer-model-picker__trigger > span,
   .chat-composer__mode-chip-label {
     position: absolute;
@@ -4202,7 +4202,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 }
 
 /* ----- 下拉 chip + popover ----- */
-.chat-chip {
+.dd__button {
   height: 28px;
   padding: 0 10px;
   border: 0;
@@ -4218,54 +4218,54 @@ button.chat-composer__context-action:active:not(:disabled) {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.chat-chip:hover:not(.is-disabled):not(:disabled) {
+.dd__button:hover:not(.is-disabled):not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
   filter: none;
 }
 
-.chat-chip.is-open {
+.dd__button.is-open {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.chat-composer__permission-dropdown .chat-chip {
+.chat-composer__permission-dropdown .dd__button {
   background: transparent;
 }
 
-.chat-composer__permission-dropdown .chat-chip:hover:not(.is-disabled):not(:disabled),
-.chat-composer__permission-dropdown .chat-chip.is-open {
+.chat-composer__permission-dropdown .dd__button:hover:not(.is-disabled):not(:disabled),
+.chat-composer__permission-dropdown .dd__button.is-open {
   background: transparent;
   color: var(--text);
 }
 
-.chat-composer__permission-dropdown.is-full-access .chat-chip,
-.chat-composer__permission-dropdown.is-full-access .chat-chip:hover:not(.is-disabled):not(:disabled),
-.chat-composer__permission-dropdown.is-full-access .chat-chip.is-open {
+.chat-composer__permission-dropdown.is-full-access .dd__button,
+.chat-composer__permission-dropdown.is-full-access .dd__button:hover:not(.is-disabled):not(:disabled),
+.chat-composer__permission-dropdown.is-full-access .dd__button.is-open {
   color: var(--warn);
 }
 
-.chat-chip:disabled,
-.chat-chip.is-disabled {
+.dd__button:disabled,
+.dd__button.is-disabled {
   cursor: not-allowed;
   opacity: 0.55;
   filter: none;
 }
 
-.chat-chip--icon {
+.dd__button--icon {
   padding: 0;
   width: 28px;
   justify-content: center;
 }
 
-.chat-chip__label {
+.dd__button-label {
   white-space: nowrap;
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.chat-chip__caret {
+.dd__button-caret {
   opacity: 0.65;
 }
 

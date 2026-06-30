@@ -98,9 +98,13 @@ const SETTINGS_SURFACE_TABS = [
   "providers",
   "remote-control",
   "assistant",
+  "model-config",
   "agent",
   "quota",
-  "plugins",
+  "plugin-skills",
+  "plugin-packages",
+  "plugin-hooks",
+  "plugin-mcp",
   "import",
   "project",
   "about",
@@ -1019,9 +1023,11 @@ function buildImplementedSurfaceScenarios(targets) {
     expected: [
       "settings.sidebar",
       `settings.tab.${tab}`,
-      tab === "plugins" || tab === "import" ? "settings.full-page-section" : `settings.page.${tab}`,
+      tab.startsWith("plugin-") || tab === "import"
+        ? "settings.full-page-section"
+        : `settings.page.${tab}`,
     ],
-    timeoutMs: tab === "plugins" || tab === "quota" ? 30_000 : 20_000,
+    timeoutMs: tab.startsWith("plugin-") || tab === "quota" ? 30_000 : 20_000,
   }));
 
   const projectId = targets.firstProject ? encodeURIComponent(targets.firstProject.id) : null;

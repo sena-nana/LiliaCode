@@ -304,7 +304,10 @@ describe("Settings provider switch", () => {
     expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
     expect(view.queryByText("5 小时限额")).not.toBeInTheDocument();
     expect(view.queryByText("周限额")).not.toBeInTheDocument();
-    expect(view.getAllByText(/^重置 /)).toHaveLength(4);
+    expect(view.getByRole("group", { name: "通用额度5 小时使用限额" })).toBeInTheDocument();
+    expect(view.getByRole("group", { name: "通用额度每周使用限制" })).toBeInTheDocument();
+    expect(view.getByRole("group", { name: "Spark额度5 小时使用限额" })).toBeInTheDocument();
+    expect(view.getByRole("group", { name: "Spark额度每周使用限制" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "使用重置次数" })).toBeEnabled();
     expect(view.getByText("累计 Token 数")).toBeInTheDocument();
     expect(view.getByText("峰值 Token 数")).toBeInTheDocument();

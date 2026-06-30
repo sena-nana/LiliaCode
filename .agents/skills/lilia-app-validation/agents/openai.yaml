@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lilia App Validation"
+  short_description: "Validation choices for Lilia app changes"
+  default_prompt: "Use $lilia-app-validation to choose checks for a Lilia app change."

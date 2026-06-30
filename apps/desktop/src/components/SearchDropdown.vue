@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from "vue";
-import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
+import { useAnchoredOverlay } from "@lilia/ui";
 import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 interface Segment {

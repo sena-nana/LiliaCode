@@ -18,10 +18,9 @@ import {
   type Task,
 } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
-import ContextMenuHost from "../src/components/ContextMenuHost.vue";
+import { ContextMenuHost, vContextMenu } from "@lilia/ui";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
-import { vContextMenu } from "../src/directives/contextMenu";
 import { createLiliaRouter } from "../src/router";
 import { resetSidebarConversationsCache } from "../src/data/sidebarConversations";
 import { ORPHAN_LIST, ORPHANS_LOADED, PROJECT_TASKS_LOADED, TASKS } from "../src/data/tasks";

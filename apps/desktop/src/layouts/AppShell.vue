@@ -2,8 +2,8 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { ArrowLeft } from "@lucide/vue";
+import { useShellSidebar } from "@lilia/ui";
 import TitleBar from "../components/TitleBar.vue";
-import { useResizablePane } from "../composables/useResizablePane";
 import {
   beginPerfStage,
   installPerfObservers,
@@ -35,59 +35,16 @@ const SettingsSidebar = defineAsyncComponent({
   loader: () => settingsSidebarLoad.load(),
 });
 
-/** 侧栏宽度的硬约束：太窄项目名糊成一团，太宽主区被挤掉。 */
-const MIN_WIDTH = 180;
-const MAX_WIDTH = 480;
-const DEFAULT_WIDTH = 220;
-const WIDTH_STORAGE_KEY = "lilia.sidebarWidth";
-const COLLAPSED_STORAGE_KEY = "lilia.sidebarCollapsed";
-
-function readStorage(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* ignore */
-  }
-}
-
-function loadSidebarCollapsed(): boolean {
-  return readStorage(COLLAPSED_STORAGE_KEY) === "1";
-}
-
 const route = useRoute();
 const router = useRouter();
-const sidebarCollapsed = ref(loadSidebarCollapsed());
 const isSettingsRoute = computed(() => route.path === "/settings");
 const isAutomationsRoute = computed(() => route.path === "/automations");
 const isSidebarReplacementRoute = computed(() =>
   isSettingsRoute.value || isAutomationsRoute.value
 );
-const effectiveSidebarCollapsed = computed(
-  () => !isSidebarReplacementRoute.value && sidebarCollapsed.value,
-);
+const sidebar = useShellSidebar(isSidebarReplacementRoute);
+const effectiveSidebarCollapsed = sidebar.effectiveCollapsed;
 const previousSidebarReplacementRoute = ref<string | null>(null);
-const sidebarWidth = useResizablePane({
-  storageKey: WIDTH_STORAGE_KEY,
-  minWidth: MIN_WIDTH,
-  maxWidth: MAX_WIDTH,
-  defaultWidth: DEFAULT_WIDTH,
-  edge: "right",
-  disabled: effectiveSidebarCollapsed,
-});
-
-function toggleSidebarCollapsed() {
-  if (isSidebarReplacementRoute.value) return;
-  sidebarCollapsed.value = !sidebarCollapsed.value;
-  writeStorage(COLLAPSED_STORAGE_KEY, sidebarCollapsed.value ? "1" : "0");
-}
 
 function isSidebarReturnCandidate(path: string): boolean {
   return path.startsWith("/") &&
@@ -164,17 +121,17 @@ onBeforeUnmount(() => {
     class="shell"
     data-agent-id="app.shell"
     :class="{
-      'is-resizing': sidebarWidth.isResizing.value,
+      'is-resizing': sidebar.isResizing.value,
       'is-sidebar-collapsed': effectiveSidebarCollapsed,
       'is-settings-mode': isSettingsRoute,
       'is-automations-mode': isAutomationsRoute,
     }"
-    :style="{ '--sidebar-width': effectiveSidebarCollapsed ? '0px' : sidebarWidth.width.value + 'px' }"
+    :style="{ '--sidebar-width': sidebar.widthStyle.value }"
   >
     <TitleBar
       :left-sidebar-collapsed="effectiveSidebarCollapsed"
       :sidebar-toggles-disabled="isSidebarReplacementRoute"
-      @toggle-left-sidebar="toggleSidebarCollapsed"
+      @toggle-left-sidebar="sidebar.toggleCollapsed"
     />
     <SettingsSidebar
       v-if="isSettingsRoute"
@@ -209,12 +166,12 @@ onBeforeUnmount(() => {
       role="separator"
       aria-orientation="vertical"
       :aria-disabled="effectiveSidebarCollapsed ? 'true' : undefined"
-      :aria-valuenow="sidebarWidth.width.value"
-      :aria-valuemin="MIN_WIDTH"
-      :aria-valuemax="MAX_WIDTH"
+      :aria-valuenow="sidebar.width.value"
+      :aria-valuemin="sidebar.minWidth"
+      :aria-valuemax="sidebar.maxWidth"
       title="拖动调整侧栏宽度（双击恢复默认）"
-      @pointerdown="sidebarWidth.startResize"
-      @dblclick="sidebarWidth.resetWidth"
+      @pointerdown="sidebar.startResize"
+      @dblclick="sidebar.resetWidth"
     />
     <main class="shell__main" data-agent-id="app.main">
       <RouterView />

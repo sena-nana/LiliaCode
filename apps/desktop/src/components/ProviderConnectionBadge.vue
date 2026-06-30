@@ -13,7 +13,7 @@ import {
   type CodexAccountQuotaWindow,
   routerModeUsesCodexAccount,
 } from "@lilia/contracts";
-import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
+import { useAnchoredOverlay } from "@lilia/ui";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus, startCodexAccountLogin } from "../services/chat";
 import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "../utils/perf";

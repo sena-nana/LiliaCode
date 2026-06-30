@@ -19,7 +19,7 @@ import type { ConversationActivity } from "../../composables/useConversationActi
 import {
   openContextMenuAt,
   type ContextMenuItem,
-} from "../../composables/useContextMenu";
+} from "@lilia/ui";
 import {
   archiveProjectConversations,
   removeProject,

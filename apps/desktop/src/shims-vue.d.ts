@@ -4,7 +4,7 @@ declare module "*.vue" {
   export default component;
 }
 
-import type { vContextMenu } from "./directives/contextMenu";
+import type { vContextMenu } from "@lilia/ui";
 
 declare module "vue" {
   interface GlobalDirectives {

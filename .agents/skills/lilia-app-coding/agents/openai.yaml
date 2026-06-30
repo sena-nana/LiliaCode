@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lilia App Coding"
+  short_description: "Coding workflow for Lilia app features"
+  default_prompt: "Use $lilia-app-coding to implement or fix a Lilia app feature."

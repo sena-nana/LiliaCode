@@ -979,6 +979,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@lilia/ui@portal:../../../LiliaUI/packages/ui::locator=desktop%40workspace%3Aapps%2Fdesktop":
+  version: 0.0.0-use.local
+  resolution: "@lilia/ui@portal:../../../LiliaUI/packages/ui::locator=desktop%40workspace%3Aapps%2Fdesktop"
+  peerDependencies:
+    "@lucide/vue": ^1.17.0
+    "@tauri-apps/api": ^2.11.0
+    vue: ^3.5.35
+    vue-router: ^5.1.0
+  languageName: node
+  linkType: soft
+
 "@lucide/vue@npm:^1.21.0":
   version: 1.21.0
   resolution: "@lucide/vue@npm:1.21.0"
@@ -3940,6 +3951,7 @@ __metadata:
     "@anthropic-ai/claude-agent-sdk": "npm:^0.3.195"
     "@anthropic-ai/sdk": "npm:^0.106.0"
     "@lilia/contracts": "workspace:*"
+    "@lilia/ui": "portal:../../../LiliaUI/packages/ui"
     "@lucide/vue": "npm:^1.21.0"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@tauri-apps/api": "npm:^2.11.1"

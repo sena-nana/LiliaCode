@@ -22,7 +22,7 @@ import {
   pluginMcpTransportLabel,
   pluginToggleActionLabel,
 } from "@lilia/contracts";
-import ConfirmDialog from "../components/ConfirmDialog.vue";
+import { ConfirmDialog } from "@lilia/ui";
 import {
   createHookSource,
   createSkill,

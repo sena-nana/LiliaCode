@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ChevronDown, ChevronRight } from "@lucide/vue";
+import { computed } from "vue";
 
 const props = withDefaults(defineProps<{
   expanded: boolean;
@@ -7,7 +8,8 @@ const props = withDefaults(defineProps<{
   toggleAgentId: string;
   expandLabel: string;
   collapseLabel: string;
-  ariaLabel: string;
+  ariaLabel?: string;
+  "aria-label"?: string;
   disabled?: boolean;
   withSwitch?: boolean;
 }>(), {
@@ -23,10 +25,12 @@ function toggle() {
   if (props.disabled) return;
   emit("update:expanded", !props.expanded);
 }
+
+const resolvedAriaLabel = computed(() => props.ariaLabel ?? props["aria-label"] ?? "");
 </script>
 
 <template>
-  <section class="card settings-collapsible-card" :aria-label="ariaLabel">
+  <section class="card settings-collapsible-card" :aria-label="resolvedAriaLabel">
     <div
       class="settings-collapsible-card__header"
       :class="{ 'settings-collapsible-card__header--with-switch': withSwitch }"

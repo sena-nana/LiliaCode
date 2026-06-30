@@ -8,7 +8,7 @@ import {
   useChatSidebar,
   type ChatSidebarContext,
 } from "../../composables/useChatSidebar";
-import { useResizablePane } from "../../composables/useResizablePane";
+import { useResizablePane } from "@lilia/ui";
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { createLazyLoadState, type LazyLoadState } from "../../utils/lazyLoadState";
 import { measurePerfAsync } from "../../utils/perf";

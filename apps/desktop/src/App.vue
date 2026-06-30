@@ -21,7 +21,7 @@ import { measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
 const contextMenuHostLoad = createLazyLoadState(() =>
   measurePerfAsync(
     "app.context-menu-host.load",
-    async () => (await import("./components/ContextMenuHost.vue")).default,
+    async () => (await import("@lilia/ui/components/ContextMenuHost")).default,
     { detail: "ContextMenuHost" },
   )
 );
