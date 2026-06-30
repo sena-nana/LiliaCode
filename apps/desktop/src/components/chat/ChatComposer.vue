@@ -59,7 +59,7 @@ import {
   pendingAskInteractionKey,
   type PendingAsk,
 } from "../../composables/useAskUser";
-import { withComponentEpoch } from "../../composables/useComponentEpoch";
+import { withComponentEpoch } from "@lilia/ui";
 import type { SearchResult } from "../../services/sessionSearch";
 import type {
   PromptOptimizeRoute,
@@ -97,8 +97,8 @@ import {
   measurePerfSync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const composerContextPanelLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(

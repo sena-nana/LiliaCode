@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { beginPerfStage } from "../../../utils/perf";
+import { beginPerfStage } from "@lilia/ui";
 
 type ElementGetter = () => Element | null;
 

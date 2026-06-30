@@ -2,7 +2,7 @@ import { fireEvent, render } from "@testing-library/vue";
 import { computed, defineComponent, h, nextTick, reactive, ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolConsentRequest } from "@lilia/contracts";
-import { useFocusOnActivation } from "../src/composables/useFocusOnActivation";
+import { useFocusOnActivation } from "@lilia/ui";
 import { useInlineRename } from "../src/composables/useInlineRename";
 import { useEditableToolCommand } from "../src/composables/useEditableToolCommand";
 import { toolConsentRequestFixture as toolConsentRequest } from "./interactionTestHelpers";

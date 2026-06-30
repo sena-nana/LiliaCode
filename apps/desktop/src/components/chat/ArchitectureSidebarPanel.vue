@@ -11,7 +11,7 @@ import {
   rollbackProjectArchitecture,
 } from "../../services/chat";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
-import { withComponentEpoch } from "../../composables/useComponentEpoch";
+import { withComponentEpoch } from "@lilia/ui";
 import MarkdownMermaid from "./MarkdownMermaid.vue";
 
 const props = defineProps<{

@@ -27,11 +27,11 @@ import {
   measurePerfSync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import type { PendingAsk } from "../../composables/useAskUser";
 import { useChatSidebar } from "../../composables/useChatSidebar";
-import { withComponentEpoch } from "../../composables/useComponentEpoch";
+import { withComponentEpoch } from "@lilia/ui";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,

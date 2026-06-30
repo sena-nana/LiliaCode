@@ -29,8 +29,8 @@ import {
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const props = defineProps<{ projectId: string }>();
 const roadmapMilestoneInsightsLoad = createLazyLoadState<Component>(() =>

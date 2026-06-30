@@ -17,7 +17,7 @@ import {
   type ComposerPart,
 } from "./composerParts";
 import { isImageAttachment } from "./imageViewer";
-import { measurePerfSync } from "../../utils/perf";
+import { measurePerfSync } from "@lilia/ui";
 
 type InlineIconName = "file" | "folder" | "image" | "paperclip" | "x";
 

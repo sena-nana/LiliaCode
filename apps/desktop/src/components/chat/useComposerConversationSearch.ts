@@ -1,8 +1,8 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatConversationReference } from "@lilia/contracts";
 import type { SearchResult } from "../../services/sessionSearch";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import { conversationReferencePart, textPart, type MentionRange } from "./composerParts";
 import { readConversationReferenceRange } from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";

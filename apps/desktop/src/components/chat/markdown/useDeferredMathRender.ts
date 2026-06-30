@@ -5,8 +5,8 @@ import {
   measurePerfSync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../../utils/perf";
-import { createLazyLoadState } from "../../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import { useDeferredVisibility } from "./useDeferredVisibility";
 
 const mathRenderModuleLoad = createLazyLoadState(() =>

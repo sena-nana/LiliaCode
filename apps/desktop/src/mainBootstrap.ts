@@ -7,7 +7,7 @@ import { installAgentDebugHarness } from "./agentDebug/harness";
 import { appConfig } from "./app.config";
 import "./styles/components.css";
 import "./styles/shell.css";
-import { installPerfObservers } from "./utils/perf";
+import { installPerfObservers } from "@lilia/ui";
 
 export function mountLiliaApp(): void {
   installPerfObservers();

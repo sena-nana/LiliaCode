@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { shallowRef } from "vue";
 import type { ProjectDashboardSummary } from "@lilia/contracts";
 import { PROJECT_DASHBOARD_LIST_COMMAND, TASKS_CHANGED_EVENT_NAME } from "@lilia/contracts";
-import { addDomEventListener } from "../utils/eventListeners";
+import { addDomEventListener } from "@lilia/ui";
 
 export const PROJECT_DASHBOARD_SUMMARIES = shallowRef<ProjectDashboardSummary[]>([]);
 

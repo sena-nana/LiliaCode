@@ -57,6 +57,9 @@
     "verify:agent-debug": "yarn check:package-manager && node apps/desktop/agent-debug/verify-agent-debug.mjs"
   },
   "devDependencies": {
+    "@lilia/build": "portal:../LiliaUI/packages/build",
+    "@lilia/config": "portal:../LiliaUI/packages/config",
+    "@lilia/tools": "portal:../LiliaUI/packages/tools",
     "vitepress": "^1.6.4"
   },
   "packageManager": "yarn@4.14.1"

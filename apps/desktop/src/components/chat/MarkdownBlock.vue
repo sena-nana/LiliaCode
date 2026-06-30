@@ -12,9 +12,9 @@ import {
 } from "./markdown/markdownParser";
 import type { ChatImageViewerSource } from "./imageViewer";
 import type { MarkdownBlockTone } from "./timelineDisplay";
-import { measurePerfAsync, measurePerfSync } from "../../utils/perf";
+import { measurePerfAsync, measurePerfSync } from "@lilia/ui";
 import type { InlineToken } from "./markdown/types";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { createLazyLoadState } from "@lilia/ui";
 
 const markdownMathBlockLoad = createLazyLoadState(() =>
   measurePerfAsync(

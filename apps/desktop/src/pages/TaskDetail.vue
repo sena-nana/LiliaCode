@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { defineAsyncComponent, type Component } from "vue";
-import { createLazyLoadState } from "../utils/lazyLoadState";
-import { measurePerfAsync } from "../utils/perf";
+import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
 
 const props = withDefaults(defineProps<{
   projectId?: string;

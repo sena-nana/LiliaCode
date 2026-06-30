@@ -3,7 +3,7 @@ import {
   createAnchoredMenuPosition,
   type AnchoredMenuPosition,
 } from "@lilia/ui";
-import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
 
 export function useSidebarAddMenu() {
   const addMenuOpen = ref(false);

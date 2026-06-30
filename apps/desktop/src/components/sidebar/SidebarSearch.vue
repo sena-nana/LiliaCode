@@ -6,8 +6,8 @@ import {
   searchSessions,
   type SearchResult,
 } from "../../services/sessionSearch";
-import { measurePerfAsync } from "../../utils/perf";
-import SearchDropdown from "../SearchDropdown.vue";
+import { measurePerfAsync } from "@lilia/ui";
+import SearchDropdown from "@lilia/ui/components/SearchDropdown";
 
 const props = defineProps<{
   modelValue?: boolean;

@@ -26,8 +26,8 @@ import {
 } from "./timelinePendingActions";
 import { useAgentTimelineEntries } from "./useAgentTimelineEntries";
 import { useTimelineRailMask } from "./useTimelineRailMask";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const timelineEntryItemLoad = createLazyLoadState(() =>
   measurePerfAsync(

@@ -8,11 +8,12 @@ import {
   RefreshCw,
   X,
 } from "@lucide/vue";
+import { PopupTitleBarFrame } from "@lilia/ui";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invalidateConversationContextSnapshot } from "../services/conversationContextInvalidation";
 import { focusMainWindow } from "../services/popupWindows";
-import { createLazyLoadState } from "../utils/lazyLoadState";
-import { measurePerfAsync } from "../utils/perf";
+import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
 
 const route = useRoute();
 const router = useRouter();
@@ -211,8 +212,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="popup-titlebar" data-agent-id="popup.titlebar" data-tauri-drag-region>
-    <div class="popup-titlebar__controls popup-titlebar__controls--left">
+  <PopupTitleBarFrame :close-window="false">
+    <template #left-actions>
       <button
         type="button"
         class="titlebar__btn"
@@ -233,30 +234,28 @@ onBeforeUnmount(() => {
       >
         <MessageSquarePlus :size="15" aria-hidden="true" />
       </button>
-    </div>
+    </template>
 
-    <div class="popup-titlebar__crumbs" data-tauri-drag-region>
-      <template v-for="(crumb, index) in crumbs" :key="`${index}:${crumb.text}`">
-        <span
-          class="titlebar__crumb"
-          :class="{
-            'titlebar__crumb--muted': crumb.muted,
-            'titlebar__crumb--leaf': !crumb.muted,
-          }"
-          :title="crumb.text"
-          data-tauri-drag-region
-        >{{ crumb.text }}</span>
-        <ChevronRight
-          v-if="index < crumbs.length - 1"
-          class="titlebar__crumb-sep"
-          :size="12"
-          aria-hidden="true"
-          data-tauri-drag-region
-        />
-      </template>
-    </div>
+    <template v-for="(crumb, index) in crumbs" :key="`${index}:${crumb.text}`">
+      <span
+        class="titlebar__crumb"
+        :class="{
+          'titlebar__crumb--muted': crumb.muted,
+          'titlebar__crumb--leaf': !crumb.muted,
+        }"
+        :title="crumb.text"
+        data-tauri-drag-region
+      >{{ crumb.text }}</span>
+      <ChevronRight
+        v-if="index < crumbs.length - 1"
+        class="titlebar__crumb-sep"
+        :size="12"
+        aria-hidden="true"
+        data-tauri-drag-region
+      />
+    </template>
 
-    <div class="popup-titlebar__controls popup-titlebar__controls--right">
+    <template #right-actions>
       <button
         v-if="popupStoresStatus === 'error'"
         type="button"
@@ -278,7 +277,7 @@ onBeforeUnmount(() => {
       >
         <X :size="15" aria-hidden="true" />
       </button>
-    </div>
-  </header>
+    </template>
+  </PopupTitleBarFrame>
 </template>
 

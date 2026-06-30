@@ -31,9 +31,9 @@ import {
   SB_MENU_POP_TRANSITION_MS,
   useAnchoredMenuMotion,
 } from "@lilia/ui";
-import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const composerModelPickerLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(

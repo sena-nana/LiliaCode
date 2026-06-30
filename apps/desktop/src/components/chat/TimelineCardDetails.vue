@@ -6,8 +6,8 @@ import type {
   AgentTimelineDisplayListItem,
 } from "@lilia/contracts";
 import type { TimelineMarkdownView } from "./timelineDisplay";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const markdownBlockLoad = createLazyLoadState(() =>
   measurePerfAsync(

@@ -25,8 +25,8 @@ import {
   listProjects,
   registerProjectRemovalHandler,
 } from "./projects";
-import { addDomEventListener } from "../utils/eventListeners";
-import { singleFlight } from "../utils/singleFlight";
+import { addDomEventListener } from "@lilia/ui";
+import { singleFlight } from "@lilia/ui";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
 export interface OrphanConversation {

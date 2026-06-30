@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
 import type { ChatImageViewerSource } from "./imageViewer";
-import { addDomEventListener } from "../../utils/eventListeners";
+import { addDomEventListener } from "@lilia/ui";
 
 const props = defineProps<{
   image: ChatImageViewerSource;

@@ -25,7 +25,7 @@ import {
   AUTOMATION_SAVE_DRAFT_COMMAND,
   AUTOMATION_SET_ENABLED_COMMAND,
 } from "@lilia/contracts";
-import { installUnlistenFns } from "../utils/eventListeners";
+import { installUnlistenFns } from "@lilia/ui";
 
 export type {
   AutomationRun,

@@ -1,7 +1,7 @@
 import type { ChatAttachment } from "@lilia/contracts";
 import { onScopeDispose } from "vue";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 import { textPart } from "./composerParts";
 import { pasteHasFileItems, pastedImageFiles, pastedPlainText } from "./composerPasteEvent";
 import type { useComposerRichInput } from "./useComposerRichInput";

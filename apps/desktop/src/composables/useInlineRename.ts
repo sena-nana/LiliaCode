@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { useFocusOnActivation } from "./useFocusOnActivation";
+import { useFocusOnActivation } from "@lilia/ui";
 
 export interface InlineRenameOptions {
   commit: (id: string, value: string) => void;

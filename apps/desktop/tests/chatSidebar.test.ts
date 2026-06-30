@@ -315,24 +315,30 @@ describe("chat sidebar host", () => {
       pointerId: 1,
     });
 
-    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("440px");
-    expect(resizer).toHaveAttribute("aria-valuenow", "440");
+    await waitFor(() => {
+      expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("440px");
+      expect(resizer).toHaveAttribute("aria-valuenow", "440");
+    });
 
     await fireEvent.pointerMove(window, {
       clientX: 200,
       pointerId: 1,
     });
 
-    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("520px");
-    expect(resizer).toHaveAttribute("aria-valuenow", "520");
+    await waitFor(() => {
+      expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("520px");
+      expect(resizer).toHaveAttribute("aria-valuenow", "520");
+    });
 
     await fireEvent.pointerMove(window, {
       clientX: 900,
       pointerId: 1,
     });
 
-    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("180px");
-    expect(resizer).toHaveAttribute("aria-valuenow", "180");
+    await waitFor(() => {
+      expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("180px");
+      expect(resizer).toHaveAttribute("aria-valuenow", "180");
+    });
 
     await fireEvent.pointerUp(window, {
       clientX: 900,

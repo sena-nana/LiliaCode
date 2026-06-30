@@ -6,8 +6,8 @@ import {
   TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
   TASKS_CHANGED_EVENT_NAME,
 } from "@lilia/contracts";
-import { addDomEventListener } from "../utils/eventListeners";
-import { measurePerfAsync } from "../utils/perf";
+import { addDomEventListener } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
 
 export const SIDEBAR_CONVERSATIONS = shallowRef<SidebarConversationSummary[]>([]);
 const SIDEBAR_CONVERSATIONS_BY_KEY = shallowRef<Map<string, SidebarConversationSummary>>(new Map());

@@ -40,9 +40,9 @@ import {
   measurePerfSync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { installUnlistenFns, runUnlistenFns } from "../../utils/eventListeners";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const automationInspectorPanelLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(

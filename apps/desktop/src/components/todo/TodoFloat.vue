@@ -22,7 +22,7 @@ import {
   listTodos,
   onTodoChanged,
 } from "../../services/todos";
-import { runUnlistenFns } from "../../utils/eventListeners";
+import { runUnlistenFns } from "@lilia/ui";
 import {
   PENDING_TASK_TODO_GUIDE_STATUS,
   QUEUED_TASK_TODO_GUIDE_STATUS,

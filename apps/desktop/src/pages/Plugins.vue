@@ -42,11 +42,11 @@ import {
   type PluginPackage,
   type PluginSkill,
 } from "../services/plugins";
-import { measurePerfAsync } from "../utils/perf";
+import { measurePerfAsync } from "@lilia/ui";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useHookSourceEditor } from "./plugins/useHookSourceEditor";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
-import { createLazyLoadState } from "../utils/lazyLoadState";
+import { createLazyLoadState } from "@lilia/ui";
 
 type PluginsSection = "skills" | "packages" | "hooks" | "mcp";
 

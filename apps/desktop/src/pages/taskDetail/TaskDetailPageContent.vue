@@ -11,7 +11,7 @@ import { useRoute, useRouter } from "vue-router";
 import { isChatBackendKind, type ChatAttachment, type Project, type SuggestionItem, type SuggestionStatus } from "@lilia/contracts";
 import { useChatSidebar } from "../../composables/useChatSidebar";
 import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
-import { withComponentEpoch } from "../../composables/useComponentEpoch";
+import { withComponentEpoch } from "@lilia/ui";
 import { useTaskAttachments } from "./useTaskAttachments";
 import { useTaskComposerController } from "./useTaskComposerController";
 import { isAgentDebugFrontendEnabled } from "../../agentDebug/harness";
@@ -26,8 +26,8 @@ import {
   measurePerfSync,
   runWhenIdle,
   scheduleAfterPaint,
-} from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const props = withDefaults(defineProps<{
   projectId?: string;

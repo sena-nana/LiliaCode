@@ -14,9 +14,9 @@ import {
   openCliProject,
   type CliProjectOpenPayload,
 } from "./services/cliProjectOpen";
-import { installCombinedUnlisten } from "./utils/eventListeners";
-import { createLazyLoadState } from "./utils/lazyLoadState";
-import { measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
+import { installCombinedUnlisten } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync, scheduleAfterPaint } from "@lilia/ui";
 
 const contextMenuHostLoad = createLazyLoadState(() =>
   measurePerfAsync(

@@ -15,8 +15,8 @@ import {
   onDone,
   onTurnStarted,
 } from "../services/chat";
-import { installUnlistenFns, runUnlistenFns } from "../utils/eventListeners";
-import { measurePerfAsync } from "../utils/perf";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui";
 
 export type ConversationActivity = "running" | "requires_action" | "completed" | "error";
 

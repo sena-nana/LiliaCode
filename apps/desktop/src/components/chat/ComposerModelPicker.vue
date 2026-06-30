@@ -8,7 +8,7 @@ import {
   type ModelSelectionExplanation,
   type ReasoningEffort,
 } from "@lilia/contracts";
-import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
 
 const props = defineProps<{
   state: ChatComposerState;

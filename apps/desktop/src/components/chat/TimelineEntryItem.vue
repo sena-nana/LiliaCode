@@ -28,8 +28,8 @@ import {
   timelineStatusClass,
   type TimelineDisplayContext,
 } from "./timelineDisplay";
-import { measurePerfAsync } from "../../utils/perf";
-import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui";
 
 const timelineDeclaredEventLoad = createLazyLoadState(() =>
   measurePerfAsync(
