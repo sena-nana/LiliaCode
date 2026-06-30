@@ -8,12 +8,14 @@ import {
   RefreshCw,
   X,
 } from "@lucide/vue";
-import { PopupTitleBarFrame } from "@lilia/ui";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  createLazyLoadState,
+  measurePerfAsync,
+  PopupTitleBarFrame,
+} from "@lilia/ui";
 import { invalidateConversationContextSnapshot } from "../services/conversationContextInvalidation";
 import { focusMainWindow } from "../services/popupWindows";
-import { createLazyLoadState } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
 
 const route = useRoute();
 const router = useRouter();

@@ -25,15 +25,16 @@ import type {
   ModelSelectionExplanation,
   PermissionMode,
 } from "@lilia/contracts";
-import { Dropdown } from "@lilia/ui";
 import { attachmentImageSrc } from "./imageViewer";
 import {
+  addDomEventListener,
+  createLazyLoadState,
+  Dropdown,
+  measurePerfAsync,
+  runUnlistenFns,
   SB_MENU_POP_TRANSITION_MS,
   useAnchoredMenuMotion,
 } from "@lilia/ui";
-import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
 
 const composerModelPickerLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(
