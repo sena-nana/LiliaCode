@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { CornerDownRight, GitFork, WandSparkles } from "@lucide/vue";
+import CornerDownRight from "@lucide/vue/dist/esm/icons/corner-down-right.mjs";
+import GitFork from "@lucide/vue/dist/esm/icons/git-fork.mjs";
+import WandSparkles from "@lucide/vue/dist/esm/icons/wand-sparkles.mjs";
 import {
   timelineFinalReplyBatchApplyInput,
   type AgentTimelineEvent,

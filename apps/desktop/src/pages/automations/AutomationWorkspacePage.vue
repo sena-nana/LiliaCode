@@ -1,24 +1,22 @@
 <script setup lang="ts">
 import "../../styles/pages/automations.css";
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
-import {
-  Bot,
-  Braces,
-  Check,
-  CircleHelp,
-  GitBranch,
-  Loader2,
-  Maximize2,
-  Minus,
-  Play,
-  Plus,
-  Save,
-  ToggleLeft,
-  ToggleRight,
-  Trash2,
-  Wrench,
-  Zap,
-} from "@lucide/vue";
+import Bot from "@lucide/vue/dist/esm/icons/bot.mjs";
+import Braces from "@lucide/vue/dist/esm/icons/braces.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import CircleHelp from "@lucide/vue/dist/esm/icons/circle-question-mark.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import Maximize2 from "@lucide/vue/dist/esm/icons/maximize-2.mjs";
+import Minus from "@lucide/vue/dist/esm/icons/minus.mjs";
+import Play from "@lucide/vue/dist/esm/icons/play.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Save from "@lucide/vue/dist/esm/icons/save.mjs";
+import ToggleLeft from "@lucide/vue/dist/esm/icons/toggle-left.mjs";
+import ToggleRight from "@lucide/vue/dist/esm/icons/toggle-right.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
+import Wrench from "@lucide/vue/dist/esm/icons/wrench.mjs";
+import Zap from "@lucide/vue/dist/esm/icons/zap.mjs";
 import type {
   AutomationNodeKind,
   AutomationWorkflow,

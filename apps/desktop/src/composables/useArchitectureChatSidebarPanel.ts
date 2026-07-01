@@ -1,4 +1,4 @@
-import { Network } from "@lucide/vue";
+import Network from "@lucide/vue/dist/esm/icons/network.mjs";
 import { registerChatSidebarPanel } from "./useChatSidebar";
 
 export function registerArchitectureChatSidebarPanel(): () => void {

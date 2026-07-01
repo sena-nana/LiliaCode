@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Plus, Trash2, Workflow } from "@lucide/vue";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
+import Workflow from "@lucide/vue/dist/esm/icons/workflow.mjs";
 import type { HookHandlerDraftRow } from "./useHookSourceEditor";
 
 defineProps<{

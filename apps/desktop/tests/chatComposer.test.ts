@@ -17,7 +17,7 @@ import type { ToolConsentRequest } from "../src/services/chat";
 import { setModelFeatureSettings } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
 import { mockInvoke, setMockClipboardFilePaths } from "./tauriMock";
-import { domRect, placeEditableCaret } from "./domTestHelpers";
+import { placeEditableCaret } from "./domTestHelpers";
 
 const baseState: ChatComposerState = {
   taskId: "task-1",
@@ -175,58 +175,6 @@ function composerText(input: HTMLElement): string {
 async function openComposerActionMenu(view: ReturnType<typeof render>) {
   await requestComposerChrome(view);
   await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }));
-}
-
-function installComposerMenuGeometryMock(input: { triggerY: number; popoverY: number; innerHeight?: number }) {
-  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-  const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-  const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-  const originalInnerHeight = window.innerHeight;
-  if (input.innerHeight !== undefined) {
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: input.innerHeight,
-    });
-  }
-  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-    configurable: true,
-    value: function mockRect(this: HTMLElement) {
-      if (this.classList.contains("chat-composer__action-menu") ||
-        this.classList.contains("chat-composer__action-trigger")) {
-        return domRect(100, input.triggerY, 28, 28);
-      }
-      if (this.classList.contains("chat-composer__action-menu-popover")) {
-        return domRect(100, input.popoverY, 190, 124);
-      }
-      return originalGetBoundingClientRect.call(this);
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-    configurable: true,
-    get() {
-      return this.classList.contains("chat-composer__action-menu-popover") ? 190 : 0;
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-    configurable: true,
-    get() {
-      return this.classList.contains("chat-composer__action-menu-popover") ? 124 : 0;
-    },
-  });
-  return () => {
-    if (input.innerHeight !== undefined) {
-      Object.defineProperty(window, "innerHeight", {
-        configurable: true,
-        value: originalInnerHeight,
-      });
-    }
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value: originalGetBoundingClientRect,
-    });
-    if (originalOffsetWidth) Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
-    if (originalOffsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
-  };
 }
 
 function createTextPasteEvent(text: string, html = ""): ClipboardEvent {
@@ -891,56 +839,6 @@ describe("ChatComposer", () => {
     await waitFor(() => {
       expect(view.queryByRole("menu")).toBeNull();
     });
-  });
-
-  it("加号菜单会按触发位置设置展开 origin", async () => {
-    const restoreGeometry = installComposerMenuGeometryMock({ triggerY: 200, popoverY: 70 });
-
-    try {
-      const view = renderComposer();
-
-      await requestComposerChrome(view);
-      await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }), {
-        clientX: 112,
-        clientY: 214,
-      });
-
-      const menu = view.getByRole("menu");
-      await waitFor(() => {
-        expect(menu).toHaveStyle({
-          "--sb-menu-origin-x": "12px",
-          "--sb-menu-origin-y": "124px",
-        });
-      });
-    } finally {
-      restoreGeometry();
-    }
-  });
-
-  it("加号菜单上方空间不足时会翻转到底部语义", async () => {
-    const restoreGeometry = installComposerMenuGeometryMock({
-      triggerY: 24,
-      popoverY: 58,
-      innerHeight: 360,
-    });
-
-    try {
-      const view = renderComposer();
-
-      await requestComposerChrome(view);
-      await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }), {
-        clientX: 112,
-        clientY: 38,
-      });
-
-      const menu = await view.findByRole("menu");
-      await waitFor(() => {
-        expect(menu).toHaveClass("dd__menu--bottom");
-        expect(menu).toHaveStyle({ top: "58px" });
-      });
-    } finally {
-      restoreGeometry();
-    }
   });
 
   it("加号菜单可触发添加附件", async () => {

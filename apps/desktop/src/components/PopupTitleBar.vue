@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import {
-  ChevronRight,
-  ExternalLink,
-  MessageSquarePlus,
-  RefreshCw,
-  X,
-} from "@lucide/vue";
+import ChevronRight from "@lucide/vue/dist/esm/icons/chevron-right.mjs";
+import ExternalLink from "@lucide/vue/dist/esm/icons/external-link.mjs";
+import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mjs";
+import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   createLazyLoadState,

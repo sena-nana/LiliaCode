@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Bot, Pencil, Plus, Trash2 } from "@lucide/vue";
+import Bot from "@lucide/vue/dist/esm/icons/bot.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import type { CustomSubagentDefinition } from "@lilia/contracts";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 

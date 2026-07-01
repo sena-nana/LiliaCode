@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Brain, Check, Sparkles } from "@lucide/vue";
+import Brain from "@lucide/vue/dist/esm/icons/brain.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
 import {
   reasoningEffortsForBackend,
   type ChatComposerState,

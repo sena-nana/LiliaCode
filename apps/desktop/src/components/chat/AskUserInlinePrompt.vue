@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  CircleHelp,
-  X,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import ArrowLeft from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
+import ArrowRight from "@lucide/vue/dist/esm/icons/arrow-right.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import CircleHelp from "@lucide/vue/dist/esm/icons/circle-question-mark.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import {
   ASK_USER_MULTI_SELECT_MODE,
   ASK_USER_SINGLE_SELECT_MODE,

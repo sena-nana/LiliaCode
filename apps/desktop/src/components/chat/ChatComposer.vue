@@ -17,20 +17,18 @@ import {
   type EffectScope,
   type ShallowRef,
 } from "vue";
-import {
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Check,
-  FileText,
-  Folder,
-  Image,
-  Paperclip,
-  Pencil,
-  SkipForward,
-  Square,
-  X,
-} from "@lucide/vue";
+import ArrowLeft from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
+import ArrowRight from "@lucide/vue/dist/esm/icons/arrow-right.mjs";
+import ArrowUp from "@lucide/vue/dist/esm/icons/arrow-up.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import FileText from "@lucide/vue/dist/esm/icons/file-text.mjs";
+import Folder from "@lucide/vue/dist/esm/icons/folder.mjs";
+import Image from "@lucide/vue/dist/esm/icons/image.mjs";
+import Paperclip from "@lucide/vue/dist/esm/icons/paperclip.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import SkipForward from "@lucide/vue/dist/esm/icons/skip-forward.mjs";
+import Square from "@lucide/vue/dist/esm/icons/square.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import {
   ASK_USER_MULTI_SELECT_MODE,
   ASK_USER_SINGLE_SELECT_MODE,

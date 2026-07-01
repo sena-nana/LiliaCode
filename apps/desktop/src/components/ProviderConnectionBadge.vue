@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { AlertTriangle, Download, Loader2, LogIn, RefreshCw, RotateCw, Sparkles } from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Download from "@lucide/vue/dist/esm/icons/download.mjs";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import LogIn from "@lucide/vue/dist/esm/icons/log-in.mjs";
+import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
+import RotateCw from "@lucide/vue/dist/esm/icons/rotate-cw.mjs";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
 import {
   chatBackendLabel,
   codexAccountQuotaWindowRemainingLine as quotaRemainingLine,

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
-import { ArrowDown, ArrowUp, Trash2 } from "@lucide/vue";
+import ArrowDown from "@lucide/vue/dist/esm/icons/arrow-down.mjs";
+import ArrowUp from "@lucide/vue/dist/esm/icons/arrow-up.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import {
   PROJECT_ROADMAP_STATUS_ORDER,
   countProjectTaskStatuses,

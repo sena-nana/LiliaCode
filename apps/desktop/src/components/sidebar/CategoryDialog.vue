@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { FolderPlus } from "@lucide/vue";
+import FolderPlus from "@lucide/vue/dist/esm/icons/folder-plus.mjs";
 
 const emit = defineEmits<{
   close: [];

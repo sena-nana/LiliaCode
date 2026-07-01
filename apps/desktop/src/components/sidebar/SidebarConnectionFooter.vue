@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { RouterLink } from "vue-router";
-import {
-  GitBranch,
-  Settings,
-} from "@lucide/vue";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import Settings from "@lucide/vue/dist/esm/icons/settings.mjs";
 import ProviderConnectionBadge from "../ProviderConnectionBadge.vue";
 </script>
 

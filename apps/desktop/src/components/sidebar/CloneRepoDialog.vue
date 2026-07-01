@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { FolderOpen, GitBranch, Lock, Sparkles } from "@lucide/vue";
+import FolderOpen from "@lucide/vue/dist/esm/icons/folder-open.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import Lock from "@lucide/vue/dist/esm/icons/lock.mjs";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
 import type {
   GitHubBindingStatus,
   GitHubRepoSummary,

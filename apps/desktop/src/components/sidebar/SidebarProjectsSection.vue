@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import {
-  AlertTriangle,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  LayoutGrid,
-  Plus,
-  X,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import ChevronsDownUp from "@lucide/vue/dist/esm/icons/chevrons-down-up.mjs";
+import ChevronsUpDown from "@lucide/vue/dist/esm/icons/chevrons-up-down.mjs";
+import LayoutGrid from "@lucide/vue/dist/esm/icons/layout-grid.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import type { Project } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type {

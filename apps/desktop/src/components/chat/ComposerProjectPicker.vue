@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FolderPlus } from "@lucide/vue";
+import FolderPlus from "@lucide/vue/dist/esm/icons/folder-plus.mjs";
 import type { Project } from "@lilia/contracts";
 import { useAnchoredActionMenu } from "@lilia/ui";
 import SidebarProjectAddMenu from "../sidebar/SidebarProjectAddMenu.vue";

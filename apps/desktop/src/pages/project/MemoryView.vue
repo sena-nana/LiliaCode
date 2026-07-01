@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { Check, Pencil, Plus, RotateCcw, Save, Trash2 } from "@lucide/vue";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import RotateCcw from "@lucide/vue/dist/esm/icons/rotate-ccw.mjs";
+import Save from "@lucide/vue/dist/esm/icons/save.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import {
   DEFAULT_MEMORY_SETTINGS,
   MEMORY_SCOPE_DISPLAY_SPECS,

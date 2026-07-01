@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, ref } from "vue";
-import {
-  FolderOpen,
-  FolderPlus,
-  GitBranch,
-} from "@lucide/vue";
+import FolderOpen from "@lucide/vue/dist/esm/icons/folder-open.mjs";
+import FolderPlus from "@lucide/vue/dist/esm/icons/folder-plus.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
 import type { Project } from "@lilia/contracts";
 import CategoryDialog from "./CategoryDialog.vue";
 import {

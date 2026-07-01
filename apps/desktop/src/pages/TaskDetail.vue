@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, type Component } from "vue";
-import { createLazyLoadState } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
+import { loadTaskDetailPageContent } from "./taskDetail/taskDetailLazyLoaders";
 
 const props = withDefaults(defineProps<{
   projectId?: string;
@@ -16,22 +15,10 @@ const TaskDetailLoading = {
   template: "<div aria-live=\"polite\">正在打开对话…</div>",
 } satisfies Component;
 
-function taskDetailPerfDetail() {
-  return `${props.projectId ?? "orphan"}:${props.taskId}:${props.variant ?? "main"}`;
-}
-
-const taskDetailPageContentLoad = createLazyLoadState(() =>
-  measurePerfAsync(
-    "task-detail.page-content.load",
-    async () => (await import("./taskDetail/TaskDetailPageContent.vue")).default,
-    { detail: taskDetailPerfDetail() },
-  )
-);
-
 const TaskDetailPageContent = defineAsyncComponent({
   suspensible: false,
   loadingComponent: TaskDetailLoading,
-  loader: () => taskDetailPageContentLoad.load(),
+  loader: () => loadTaskDetailPageContent(),
 });
 </script>
 

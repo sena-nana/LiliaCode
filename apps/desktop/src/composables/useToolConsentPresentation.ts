@@ -1,12 +1,10 @@
 import { computed, type Component, type ComputedRef } from "vue";
-import {
-  Bot,
-  FilePen,
-  Globe,
-  Search,
-  Terminal,
-  Wrench,
-} from "@lucide/vue";
+import Bot from "@lucide/vue/dist/esm/icons/bot.mjs";
+import FilePen from "@lucide/vue/dist/esm/icons/file-pen.mjs";
+import Globe from "@lucide/vue/dist/esm/icons/globe.mjs";
+import Search from "@lucide/vue/dist/esm/icons/search.mjs";
+import Terminal from "@lucide/vue/dist/esm/icons/terminal.mjs";
+import Wrench from "@lucide/vue/dist/esm/icons/wrench.mjs";
 import type { ToolConsentRequest } from "../services/chat";
 
 const DANGEROUS_BASH_RE =

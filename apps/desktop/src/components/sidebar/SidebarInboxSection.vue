@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { useRoute } from "vue-router";
-import {
-  ChevronsDownUp,
-  ChevronsUpDown,
-  Plus,
-} from "@lucide/vue";
+import ChevronsDownUp from "@lucide/vue/dist/esm/icons/chevrons-down-up.mjs";
+import ChevronsUpDown from "@lucide/vue/dist/esm/icons/chevrons-up-down.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type { OrphanConversation } from "../../services/tasksStore";

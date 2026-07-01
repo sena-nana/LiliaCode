@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Plus, Server, Trash2 } from "@lucide/vue";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Server from "@lucide/vue/dist/esm/icons/server.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import type { EnvDraftRow, EditableMcpServer } from "./useMcpServerEditor";
 
 defineProps<{

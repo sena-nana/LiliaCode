@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { AlertTriangle, MessageSquarePlus, X } from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import type { TreeDragKind } from "../composables/useSidebarTreeDrag";
 import {
   createDraftOrphan,

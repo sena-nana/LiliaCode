@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import ChevronDown from "@lucide/vue/dist/esm/icons/chevron-down.mjs";
+import ChevronRight from "@lucide/vue/dist/esm/icons/chevron-right.mjs";
 import type { ToolConsentRequest } from "../../services/chat";
 import EditableCommandBlock from "./EditableCommandBlock.vue";
 

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { AlertTriangle, KeyRound, Pencil, Plug, Plus, Save, Sparkles, X } from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import KeyRound from "@lucide/vue/dist/esm/icons/key-round.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import Plug from "@lucide/vue/dist/esm/icons/plug.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Save from "@lucide/vue/dist/esm/icons/save.mjs";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import type {
   AssistantAIConfig,
   AssistantAIModelPoolItem,

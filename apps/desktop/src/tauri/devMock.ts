@@ -21,6 +21,7 @@ import {
   CHAT_SEARCH_SLASH_COMMANDS_COMMAND,
   CHAT_SEND_MESSAGE_COMMAND,
   CHAT_SET_COMPOSER_STATE_COMMAND,
+  CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND,
   DEFAULT_MODEL_BY_BACKEND,
   MODEL_OPTIONS_BY_BACKEND,
   DEFAULT_MEMORY_SETTINGS,
@@ -704,6 +705,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
   switch (cmd) {
     case APP_RESTART_COMMAND:
       return undefined as T;
+    case CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND:
+      return null as T;
     case AGENT_DEBUG_STATUS_COMMAND:
       return {
         enabled: true,

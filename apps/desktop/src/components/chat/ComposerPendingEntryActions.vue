@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ArrowLeft, ArrowRight, ArrowUp, Check, Pencil, SkipForward, Square, X } from "@lucide/vue";
+import ArrowLeft from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
+import ArrowRight from "@lucide/vue/dist/esm/icons/arrow-right.mjs";
+import ArrowUp from "@lucide/vue/dist/esm/icons/arrow-up.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import SkipForward from "@lucide/vue/dist/esm/icons/skip-forward.mjs";
+import Square from "@lucide/vue/dist/esm/icons/square.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import type { ToolConsentDecision } from "../../services/chat";
 import type { ComposerPendingEntryActionsMode } from "./useComposerPendingInteraction";
 
