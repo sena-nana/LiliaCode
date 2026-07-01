@@ -273,6 +273,7 @@ watch(() => props.task.id, refreshWorktreeBinding);
     @click="onClick"
     @dragstart.prevent
     @auxclick="onAuxClick"
+    @pointerdown.left="preloadConversationDetail"
     @mouseenter="preloadConversationDetail"
     @focusin="preloadConversationDetail"
     @mouseleave="onRowLeave"

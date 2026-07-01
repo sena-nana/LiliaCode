@@ -32,11 +32,3 @@ export function loadChatTranscript() {
 export function loadChatComposer() {
   return chatComposerLoad.load();
 }
-
-export async function preloadTaskDetailCore() {
-  await taskDetailPageContentLoad.load();
-  await Promise.all([
-    chatTranscriptLoad.load(),
-    chatComposerLoad.load(),
-  ]);
-}
