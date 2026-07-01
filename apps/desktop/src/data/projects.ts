@@ -7,6 +7,7 @@ import { ref } from "vue";
 import {
   PROJECT_CREATE_COMMAND,
   PROJECT_GET_COMMAND,
+  PROJECT_ENSURE_FOLDERS_COMMAND,
   PROJECT_LIST_COMMAND,
   PROJECT_REMOVE_COMMAND,
   PROJECT_RENAME_COMMAND,
@@ -112,6 +113,15 @@ export async function createProject(input: {
     cwd: input.cwd && input.cwd.trim() ? input.cwd.trim() : null,
   });
   return upsertProject(projectRowToProject(row));
+}
+
+export async function ensureFolderProjects(paths: string[]): Promise<Project[]> {
+  const rows = await invoke<ProjectRow[]>(PROJECT_ENSURE_FOLDERS_COMMAND, { paths });
+  const projects = rows.map(projectRowToProject);
+  for (const project of projects) {
+    upsertProject(project);
+  }
+  return projects;
 }
 
 /** 更新项目名称；trim 后为空时不改动。返回是否真正更新。 */

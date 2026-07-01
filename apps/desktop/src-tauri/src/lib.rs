@@ -362,6 +362,7 @@ pub fn run() {
             projects_tasks::project_dashboard_list,
             projects_tasks::project_get,
             projects_tasks::project_create,
+            projects_tasks::project_ensure_folders,
             projects_tasks::project_rename,
             projects_tasks::project_remove,
             projects_tasks::project_toggle_pin,

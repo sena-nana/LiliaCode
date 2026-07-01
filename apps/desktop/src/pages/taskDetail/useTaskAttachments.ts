@@ -8,47 +8,12 @@ import {
   describeAttachments,
   pickAttachmentFiles,
 } from "../../services/chat";
-
-export interface DropPoint {
-  x: number;
-  y: number;
-}
-
-export interface DropPayload {
-  type: string;
-  paths: string[];
-  position: DropPoint | null;
-}
-
-export function isPointInsideElement(
-  point: DropPoint | null,
-  element: HTMLElement | null,
-): boolean {
-  if (!point || !element) return false;
-  const rect = element.getBoundingClientRect();
-  return point.x >= rect.left &&
-    point.x <= rect.right &&
-    point.y >= rect.top &&
-    point.y <= rect.bottom;
-}
-
-export function readDropPayload(payload: unknown): DropPayload | null {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const row = payload as Record<string, unknown>;
-  const paths = Array.isArray(row.paths)
-    ? row.paths.filter((path): path is string => typeof path === "string")
-    : [];
-  const position = row.position && typeof row.position === "object" && !Array.isArray(row.position)
-    ? row.position as Record<string, unknown>
-    : null;
-  const x = typeof position?.x === "number" ? position.x : null;
-  const y = typeof position?.y === "number" ? position.y : null;
-  return {
-    type: typeof row.type === "string" ? row.type : "",
-    paths,
-    position: x === null || y === null ? null : { x, y },
-  };
-}
+import {
+  isPointInsideElement,
+  normalizeDropPoint as normalizeWebviewDropPoint,
+  readDropPayload,
+  type DropPoint,
+} from "../../composables/webviewDrop";
 
 export function useTaskAttachments(options: {
   chatPageRef: Ref<HTMLElement | null>;
@@ -73,18 +38,8 @@ export function useTaskAttachments(options: {
 
   async function normalizeDropPoint(point: DropPoint | null): Promise<DropPoint | null> {
     if (disposed) return null;
-    if (!point) return null;
-    try {
-      const scaleFactor = await appWindow.scaleFactor();
-      if (disposed) return null;
-      if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) return point;
-      return {
-        x: point.x / scaleFactor,
-        y: point.y / scaleFactor,
-      };
-    } catch {
-      return point;
-    }
+    const normalized = await normalizeWebviewDropPoint(point, () => appWindow.scaleFactor());
+    return disposed ? null : normalized;
   }
 
   async function addAttachmentsFromPaths(paths: string[], appendToEnd = false) {

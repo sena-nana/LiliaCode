@@ -76,6 +76,7 @@ import {
   PROJECT_ARCHITECTURE_ROLLBACK_COMMAND,
   PROJECT_CREATE_COMMAND,
   PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_ENSURE_FOLDERS_COMMAND,
   PROJECT_GET_COMMAND,
   PROJECT_GET_SETTINGS_COMMAND,
   PROJECT_LIST_COMMAND,
@@ -430,6 +431,33 @@ function bool(args: Args, key: string, fallback = false): boolean {
   return typeof args[key] === "boolean" ? args[key] : fallback;
 }
 
+function projectNameFromPath(path: string): string {
+  const parts = path.trim().replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || "未命名项目";
+}
+
+function projectCwdKey(path: string): string {
+  return path.trim().replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+}
+
+function ensureDevFolderProjects(paths: string[]) {
+  return paths
+    .filter((path, index) => path && paths.indexOf(path) === index && !/\.[^\\/]+$/.test(path))
+    .map((path, index) => {
+      const key = projectCwdKey(path);
+      const existing = projects.find((project) => project.cwd && projectCwdKey(project.cwd) === key);
+      if (existing) return existing;
+      return {
+        id: `project-${Date.now()}-${index}`,
+        name: projectNameFromPath(path),
+        cwd: path,
+        sessionCount: 0,
+        sortOrder: projects.length + index,
+        pinned: false,
+      };
+    });
+}
+
 function record(value: unknown): Args {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Args : {};
 }
@@ -719,6 +747,10 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return clone(projects.find((project) => project.id === text(args, "id")) ?? null) as T;
     case PROJECT_CREATE_COMMAND:
       return clone({ ...projects[0], id: `project-${Date.now()}`, name: text(args, "name") || "未命名项目", pinned: false }) as T;
+    case PROJECT_ENSURE_FOLDERS_COMMAND:
+      return clone(ensureDevFolderProjects(
+        Array.isArray(args.paths) ? args.paths.map(String) : [],
+      )) as T;
     case PROJECT_RENAME_COMMAND:
     case PROJECT_REMOVE_COMMAND:
       return true as T;

@@ -304,6 +304,7 @@ import {
   PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS,
   PROJECT_CREATE_COMMAND,
   PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_ENSURE_FOLDERS_COMMAND,
   PROJECT_DASHBOARD_STATUS_ORDER,
   PROJECT_GET_COMMAND,
   PROJECT_GET_SETTINGS_COMMAND,
@@ -4143,6 +4144,7 @@ describe("contracts normalization helpers", () => {
     expect(PROJECT_DASHBOARD_LIST_COMMAND).toBe("project_dashboard_list");
     expect(PROJECT_GET_COMMAND).toBe("project_get");
     expect(PROJECT_CREATE_COMMAND).toBe("project_create");
+    expect(PROJECT_ENSURE_FOLDERS_COMMAND).toBe("project_ensure_folders");
     expect(PROJECT_RENAME_COMMAND).toBe("project_rename");
     expect(PROJECT_REMOVE_COMMAND).toBe("project_remove");
     expect(PROJECT_TOGGLE_PIN_COMMAND).toBe("project_toggle_pin");

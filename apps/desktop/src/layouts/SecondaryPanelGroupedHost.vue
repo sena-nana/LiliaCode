@@ -18,6 +18,7 @@ import {
 import { useSidebarRunningProcesses } from "../composables/useSidebarRunningProcesses";
 import type { SidebarRunningProcessItem } from "../components/sidebar/sidebarTypes";
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
+import { useSidebarFolderDrop } from "../composables/useSidebarFolderDrop";
 import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
 import {
   beginPerfStage,
@@ -146,6 +147,17 @@ const {
 } = useSidebarTreeDrag(projects, orphans, reportProjectError);
 
 const {
+  folderDropTarget,
+  folderDropZoneClass,
+} = useSidebarFolderDrop({
+  projects,
+  openProject: openProjectChat,
+  reportError: reportProjectError,
+});
+
+const effectiveProjectDropTarget = computed(() => folderDropTarget.value ?? treeDropTarget.value);
+
+const {
   open: addMenuOpen,
   close: closeAddMenu,
   position: menuPos,
@@ -271,7 +283,7 @@ function onProjectCreated(project: Project) {
 <template>
   <div
     class="secondary-panel__grouped"
-    :class="{ 'is-tree-dragging': treeDrag?.active }"
+    :class="{ 'is-tree-dragging': treeDrag?.active || folderDropTarget }"
     @pointerdown="onTreePointerDown($event)"
     @click.capture="onTreeClickCapture($event)"
   >
@@ -287,7 +299,8 @@ function onProjectCreated(project: Project) {
       :add-menu-open="addMenuOpen"
       :all-expanded="allExpanded"
       :drag-source="treeDrag"
-      :drop-target="treeDropTarget"
+      :drop-target="effectiveProjectDropTarget"
+      :project-drop-zone-class="folderDropZoneClass"
       :activity-for-task="conversationActivityForTask"
       :is-project-expanded="isProjectExpanded"
       :project-error="projectError"

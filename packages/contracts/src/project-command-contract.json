@@ -4,6 +4,7 @@
     "dashboardList": "project_dashboard_list",
     "get": "project_get",
     "create": "project_create",
+    "ensureFolders": "project_ensure_folders",
     "rename": "project_rename",
     "remove": "project_remove",
     "togglePin": "project_toggle_pin",

@@ -11,6 +11,7 @@ import {
   POPUP_OPEN_TASK_COMMAND,
   PROJECT_CREATE_COMMAND,
   PROJECT_REORDER_COMMAND,
+  PROJECT_ENSURE_FOLDERS_COMMAND,
   TASK_LIST_COMMAND,
   TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
   TASK_REORDER_COMMAND,
@@ -27,14 +28,17 @@ import { ORPHAN_LIST, ORPHANS_LOADED, PROJECT_TASKS_LOADED, TASKS } from "../src
 import {
   emitMockTimelineEvent,
   emitTauriEvent,
+  emitWebviewDragDropEvent,
   mockInvoke,
   replaceMockTimelineEvents,
   resetTauriMockData,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
   setMockChatRunning,
+  setMockProjectPinned,
   setMockTasks,
   setMockRuntimeSnapshot,
+  setMockWindowScaleFactor,
 } from "./tauriMock";
 import { domRect } from "./domTestHelpers";
 import {
@@ -136,6 +140,29 @@ async function findRunningProcessRow(view: ReturnType<typeof render>, title: str
 
 function box(top: number, bottom: number): DOMRect {
   return domRect(0, top, 220, bottom - top);
+}
+
+function mockElementFromPoint(element: Element | null) {
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: vi.fn(() => element),
+  });
+}
+
+function mockProjectTreeDropHit(element: Element | null) {
+  const tree = document.querySelector('[data-agent-id="sidebar.projects.tree"]');
+  if (tree instanceof HTMLElement) {
+    tree.getBoundingClientRect = () => domRect(0, 0, 260, 420);
+  }
+  mockElementFromPoint(element);
+}
+
+function emitFolderDropEvent(
+  type: "enter" | "over" | "drop" | "leave",
+  paths: string[],
+  position: { x: number; y: number } | null,
+) {
+  emitWebviewDragDropEvent({ type, paths, position });
 }
 
 function projectConversation(id: string, title: string, index: number): Task {
@@ -981,6 +1008,99 @@ describe("SecondaryPanel project tree drag", () => {
     });
 
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_REPARENT_COMMAND)).toBe(false);
+  });
+
+  it("文件夹拖到未置顶项目行时显示项目落点，松手后创建并插入", async () => {
+    const view = await renderSecondaryPanel();
+    const tools = getProjectRow(view, "工具箱");
+    tools.getBoundingClientRect = () => box(40, 68);
+    mockProjectTreeDropHit(tools);
+    mockInvoke.mockClear();
+
+    emitFolderDropEvent("over", ["D:\\PROJECT\\workspace\\NewApp"], { x: 20, y: 42 });
+
+    await waitFor(() => {
+      expect(tools).toHaveClass("is-tree-drop-target");
+      expect(tools).toHaveClass("is-tree-drop-before");
+      expect(tools).not.toHaveClass("is-tree-drop-invalid");
+    });
+
+    emitFolderDropEvent("drop", ["D:\\PROJECT\\workspace\\NewApp"], { x: 20, y: 42 });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_ENSURE_FOLDERS_COMMAND, {
+        paths: ["D:\\PROJECT\\workspace\\NewApp"],
+      }, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_REORDER_COMMAND, {
+        orderedIds: ["lilia", "p-3", "tools"],
+      }, undefined);
+    });
+  });
+
+  it("一次拖入多个文件夹时按拖入顺序连续插入", async () => {
+    const view = await renderSecondaryPanel();
+    const tools = getProjectRow(view, "工具箱");
+    tools.getBoundingClientRect = () => box(40, 68);
+    mockProjectTreeDropHit(tools);
+    mockInvoke.mockClear();
+
+    emitFolderDropEvent("drop", [
+      "D:\\PROJECT\\workspace\\Alpha",
+      "D:\\PROJECT\\workspace\\Beta",
+    ], { x: 20, y: 42 });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_ENSURE_FOLDERS_COMMAND, {
+        paths: [
+          "D:\\PROJECT\\workspace\\Alpha",
+          "D:\\PROJECT\\workspace\\Beta",
+        ],
+      }, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_REORDER_COMMAND, {
+        orderedIds: ["lilia", "p-3", "p-4", "tools"],
+      }, undefined);
+    });
+  });
+
+  it("文件夹拖到置顶项目行时显示无效落点且不创建项目", async () => {
+    setMockProjectPinned("tools", true);
+    const view = await renderSecondaryPanel();
+    const tools = getProjectRow(view, "工具箱");
+    tools.getBoundingClientRect = () => box(40, 68);
+    mockProjectTreeDropHit(tools);
+    mockInvoke.mockClear();
+
+    emitFolderDropEvent("over", ["D:\\PROJECT\\workspace\\PinnedDrop"], { x: 20, y: 42 });
+
+    await waitFor(() => {
+      expect(tools).toHaveClass("is-tree-drop-target");
+      expect(tools).toHaveClass("is-tree-drop-invalid");
+    });
+
+    emitFolderDropEvent("drop", ["D:\\PROJECT\\workspace\\PinnedDrop"], { x: 20, y: 42 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_ENSURE_FOLDERS_COMMAND))
+      .toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_REORDER_COMMAND)).toBe(false);
+  });
+
+  it("文件夹拖放按窗口缩放归一化坐标后解析项目落点", async () => {
+    setMockWindowScaleFactor(2);
+    const view = await renderSecondaryPanel();
+    const tools = getProjectRow(view, "工具箱");
+    tools.getBoundingClientRect = () => box(40, 68);
+    mockProjectTreeDropHit(tools);
+    mockInvoke.mockClear();
+
+    emitFolderDropEvent("drop", ["D:\\PROJECT\\workspace\\Scaled"], { x: 40, y: 84 });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_REORDER_COMMAND, {
+        orderedIds: ["lilia", "p-3", "tools"],
+      }, undefined);
+    });
   });
 });
 

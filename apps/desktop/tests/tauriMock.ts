@@ -76,6 +76,7 @@ import {
   PROJECT_ARCHITECTURE_APPLY_COMMAND,
   PROJECT_CREATE_COMMAND,
   PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_ENSURE_FOLDERS_COMMAND,
   PROJECT_GET_COMMAND,
   PROJECT_GET_SETTINGS_COMMAND,
   PROJECT_LIST_COMMAND,
@@ -1274,6 +1275,46 @@ let codexAccountQuotaStatusOverride: Record<string, unknown> | null = null;
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
+}
+
+function projectNameFromPath(path: string): string {
+  const parts = path.trim().replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || "未命名项目";
+}
+
+function projectCwdKey(path: string): string {
+  return path.trim().replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+}
+
+function isMockDirectoryPath(path: string): boolean {
+  return path.trim().length > 0 && !/\.[^\\/]+$/.test(path);
+}
+
+function ensureMockFolderProjects(paths: string[]): ProjectRow[] {
+  const seen = new Set<string>();
+  const ensured: ProjectRow[] = [];
+  for (const path of paths) {
+    if (!isMockDirectoryPath(path)) continue;
+    const key = projectCwdKey(path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const existing = projects.find((project) => project.cwd && projectCwdKey(project.cwd) === key);
+    if (existing) {
+      ensured.push(existing);
+      continue;
+    }
+    const project: ProjectRow = {
+      id: `p-${projects.length + 1}`,
+      name: projectNameFromPath(path),
+      cwd: path,
+      sessionCount: 0,
+      sortOrder: projects.length,
+      pinned: false,
+    };
+    projects.push(project);
+    ensured.push(project);
+  }
+  return ensured.map(cloneProject);
 }
 
 function cloneTask(row: TaskRow): TaskRow {
@@ -2823,6 +2864,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
       projects.push(project);
       return cloneProject(project);
+    }
+
+    case PROJECT_ENSURE_FOLDERS_COMMAND: {
+      const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
+      return ensureMockFolderProjects(paths);
     }
 
     case PROJECT_REMOVE_COMMAND: {
