@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
   PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
   PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
   PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
 } from "@lilia/contracts";
 import Plugins from "../src/pages/Plugins.vue";
@@ -26,12 +28,53 @@ describe("Plugins page", () => {
       expect(within(list).getByRole("button", { name: /mock-skill/ })).toBeInTheDocument();
     });
     expect(within(list).getByRole("button", { name: /project-skill.*Lilia/ })).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: /tools-skill.*工具箱/ })).toBeInTheDocument();
     expect(view.queryByRole("radiogroup", { name: "Skill scope" })).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "新建 Skill" })).toBeInTheDocument();
 
     await fireEvent.click(within(list).getByRole("button", { name: /project-skill/ }));
     expect(within(detail).getByText(/项目 · 已启用 · Lilia/)).toBeInTheDocument();
     expect(within(detail).getByText("Lilia")).toBeInTheDocument();
+  });
+
+  it("按项目 Skill 条目的真实路径执行启停和删除", async () => {
+    const view = render(Plugins, { props: { section: "skills" } });
+    const list = view.getByRole("region", { name: "检索结果" });
+
+    await waitFor(() => {
+      expect(within(list).getByRole("button", { name: /tools-skill.*工具箱/ })).toBeInTheDocument();
+    });
+    await fireEvent.click(within(list).getByRole("button", { name: /tools-skill.*工具箱/ }));
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "停用" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PLUGINS_SET_SKILL_ENABLED_COMMAND,
+        expect.objectContaining({
+          scope: "project",
+          projectCwd: "D:\\PROJECT\\workspace\\tools",
+          name: "tools-skill",
+          enabled: false,
+        }),
+        undefined,
+      );
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "删除" }));
+    const deleteButtons = view.getAllByRole("button", { name: "删除" });
+    await fireEvent.click(deleteButtons[deleteButtons.length - 1]);
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PLUGINS_DELETE_SKILL_COMMAND,
+        expect.objectContaining({
+          scope: "project",
+          projectCwd: "D:\\PROJECT\\workspace\\tools",
+          name: "tools-skill",
+        }),
+        undefined,
+      );
+    });
   });
 
   it("插件页只显示 Claude Plugin", async () => {
@@ -159,9 +202,9 @@ describe("Plugins page", () => {
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
     await waitFor(() => {
-      expect(within(list).getByRole("button", { name: /Claude Project Hooks/ })).toBeInTheDocument();
+      expect(within(list).getByRole("button", { name: /Claude Project Hooks.*Lilia/ })).toBeInTheDocument();
     });
-    await fireEvent.click(within(list).getByRole("button", { name: /Claude Project Hooks/ }));
+    await fireEvent.click(within(list).getByRole("button", { name: /Claude Project Hooks.*Lilia/ }));
     await waitFor(() => {
       expect(within(detail).getAllByText(/MODE/).length).toBeGreaterThan(0);
     });
@@ -195,9 +238,9 @@ describe("Plugins page", () => {
     const detail = view.getByRole("region", { name: "插件和技能详情" });
 
     await waitFor(() => {
-      expect(within(list).getByRole("button", { name: /Claude Local Hooks/ })).toBeInTheDocument();
+      expect(within(list).getByRole("button", { name: /Claude Local Hooks.*Lilia/ })).toBeInTheDocument();
     });
-    await fireEvent.click(within(list).getByRole("button", { name: /Claude Local Hooks/ }));
+    await fireEvent.click(within(list).getByRole("button", { name: /Claude Local Hooks.*Lilia/ }));
     expect(within(detail).getByText("未创建")).toBeInTheDocument();
     await fireEvent.click(view.getByRole("button", { name: "创建来源" }));
 
@@ -209,9 +252,25 @@ describe("Plugins page", () => {
         ([command, args]) =>
           command === PLUGINS_CREATE_HOOK_SOURCE_COMMAND &&
           args?.backend === "claude" &&
-          args?.scope === "local",
+          args?.scope === "local" &&
+          args?.projectCwd === "D:\\PROJECT\\workspace\\Lilia",
       ),
     ).toBe(true);
+
+    await fireEvent.click(within(list).getByRole("button", { name: /Claude Local Hooks.*工具箱/ }));
+    mockInvoke.mockClear();
+    await fireEvent.click(view.getByRole("button", { name: "创建来源" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+        expect.objectContaining({
+          backend: "claude",
+          scope: "local",
+          projectCwd: "D:\\PROJECT\\workspace\\tools",
+        }),
+        undefined,
+      );
+    });
 
     await fireEvent.click(view.getByRole("tab", { name: /Codex/ }));
     await waitFor(() => {

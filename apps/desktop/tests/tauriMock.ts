@@ -87,6 +87,7 @@ import {
   PROJECT_TOGGLE_PIN_COMMAND,
   PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
   PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
   PLUGINS_DELETE_HOOK_SOURCE_COMMAND,
   PLUGINS_DELETE_MCP_SERVER_COMMAND,
   PLUGINS_HOOKS_OVERVIEW_COMMAND,
@@ -94,6 +95,7 @@ import {
   PLUGINS_OPEN_MCP_CONFIG_COMMAND,
   PLUGINS_OVERVIEW_COMMAND,
   PLUGINS_READ_HOOK_SOURCE_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
   PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
   PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
   PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
@@ -1019,6 +1021,48 @@ function initialHookDocuments(): Record<string, MockHookDocumentView> {
     rawDocument: null,
   });
 
+  const claudeToolsProject = makeHookDocument({
+    source: makeHookSource({
+      id: "claude-project-tools",
+      backend: "claude",
+      scope: "project",
+      format: "claude_settings_json",
+      name: "Claude Project Hooks",
+      path: "D:\\\\PROJECT\\\\workspace\\\\tools\\\\.claude\\\\settings.json",
+      editable: true,
+      exists: true,
+      enabled: true,
+      handlerCount: 1,
+      description: ".claude/settings.json 中的 hooks",
+    }),
+    handlers: [
+      makeHookHandler({
+        id: "claude-project-tools-1",
+        event: "PostToolUse",
+        matcher: "Edit",
+        type: "command",
+        command: "node tools-project-hook.js",
+      }),
+    ],
+  });
+
+  const claudeToolsLocal = makeHookDocument({
+    source: makeHookSource({
+      id: "claude-local-tools",
+      backend: "claude",
+      scope: "local",
+      format: "claude_settings_json",
+      name: "Claude Local Hooks",
+      path: "D:\\\\PROJECT\\\\workspace\\\\tools\\\\.claude\\\\settings.local.json",
+      editable: true,
+      exists: false,
+      enabled: false,
+      handlerCount: 0,
+      description: ".claude/settings.local.json 中的 hooks",
+    }),
+    rawDocument: null,
+  });
+
   const claudeManaged = makeHookDocument({
     source: makeHookSource({
       id: "claude-managed",
@@ -1149,6 +1193,8 @@ function initialHookDocuments(): Record<string, MockHookDocumentView> {
     [claudeUser.source.id]: claudeUser,
     [claudeProject.source.id]: claudeProject,
     [claudeLocal.source.id]: claudeLocal,
+    [claudeToolsProject.source.id]: claudeToolsProject,
+    [claudeToolsLocal.source.id]: claudeToolsLocal,
     [claudeManaged.source.id]: claudeManaged,
     [codexUser.source.id]: codexUser,
     [codexUserConfig.source.id]: codexUserConfig,
@@ -1159,18 +1205,51 @@ function initialHookDocuments(): Record<string, MockHookDocumentView> {
 
 let hookDocuments = initialHookDocuments();
 
-function hookSourcesOverview() {
-  return Object.values(hookDocuments).map((document) => {
+function mockProjectCwdFromPluginPath(path: string) {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/, "");
+  const lower = normalized.toLocaleLowerCase();
+  for (const marker of [
+    "/.claude/skills/",
+    "/.claude/settings.json",
+    "/.claude/settings.local.json",
+    "/.codex/hooks.json",
+    "/.codex/config.toml",
+    "/.codex/requirements.toml",
+  ]) {
+    const index = lower.indexOf(marker);
+    if (index > 0) return normalized.slice(0, index);
+  }
+  return null;
+}
+
+function knownMockProjectCwdFromPluginPath(path: string) {
+  const ownerCwd = mockProjectCwdFromPluginPath(path);
+  if (!ownerCwd) return null;
+  return baseProjects.some((project) => project.cwd && projectCwdKey(project.cwd) === projectCwdKey(ownerCwd))
+    ? ownerCwd
+    : null;
+}
+
+function matchesMockProjectCwd(path: string, projectCwd: string | null) {
+  const ownerCwd = knownMockProjectCwdFromPluginPath(path);
+  if (!projectCwd) return ownerCwd === null;
+  return ownerCwd === null || projectCwdKey(ownerCwd) === projectCwdKey(projectCwd);
+}
+
+function hookSourcesOverview(projectCwd: string | null) {
+  return Object.values(hookDocuments).flatMap((document) => {
     syncHookDocument(document);
-    return structuredClone(document.source);
+    if (!matchesMockProjectCwd(document.source.path, projectCwd)) return [];
+    return [structuredClone(document.source)];
   });
 }
 
-function editableHookSourceFor(backend: string, scope: string) {
+function editableHookSourceFor(backend: string, scope: string, projectCwd: string | null) {
   return Object.values(hookDocuments).find((document) =>
     document.source.backend === backend &&
     document.source.scope === scope &&
-    document.source.editable,
+    document.source.editable &&
+    matchesMockProjectCwd(document.source.path, projectCwd),
   );
 }
 
@@ -1283,7 +1362,7 @@ function projectNameFromPath(path: string): string {
 }
 
 function projectCwdKey(path: string): string {
-  return path.trim().replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+  return path.trim().replace(/[\\/]+$/, "").replace(/[\\/]+/g, "\\").toLowerCase();
 }
 
 function isMockDirectoryPath(path: string): boolean {
@@ -3924,7 +4003,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case PLUGINS_OVERVIEW_COMMAND:
+    case PLUGINS_OVERVIEW_COMMAND: {
+      const projectCwd = typeof args.projectCwd === "string" ? args.projectCwd : null;
+      const projectSkillName = projectCwd && projectCwdKey(projectCwd) === projectCwdKey("D:\\PROJECT\\workspace\\tools")
+        ? "tools-skill"
+        : "project-skill";
+      const projectSkillPath = projectCwd
+        ? `${projectCwd}\\.claude\\skills\\${projectSkillName}\\SKILL.md`
+        : null;
       return {
         skills: [
           {
@@ -3935,14 +4021,16 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             enabled: true,
             path: "C:\\Users\\mock\\.claude\\skills\\mock-skill\\SKILL.md",
           },
-          {
-            backend: "claude",
-            scope: "project",
-            name: "project-skill",
-            description: "项目 Skill",
-            enabled: true,
-            path: "D:\\PROJECT\\workspace\\Lilia\\.claude\\skills\\project-skill\\SKILL.md",
-          },
+          ...(projectSkillPath
+            ? [{
+                backend: "claude",
+                scope: "project",
+                name: projectSkillName,
+                description: "项目 Skill",
+                enabled: true,
+                path: projectSkillPath,
+              }]
+            : []),
         ],
         packages: claudePlugins.map((plugin) => ({ ...plugin })),
         mcpServers: [
@@ -3963,10 +4051,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
         warnings: [],
       };
+    }
 
     case PLUGINS_HOOKS_OVERVIEW_COMMAND:
       return {
-        sources: hookSourcesOverview(),
+        sources: hookSourcesOverview(typeof args.projectCwd === "string" ? args.projectCwd : null),
         warnings: [],
       };
 
@@ -4030,7 +4119,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case PLUGINS_CREATE_HOOK_SOURCE_COMMAND: {
       const backend = String(args.backend);
       const scope = String(args.scope);
-      const document = editableHookSourceFor(backend, scope);
+      const projectCwd = typeof args.projectCwd === "string" ? args.projectCwd : null;
+      const document = editableHookSourceFor(backend, scope, projectCwd);
       if (!document) throw new Error("当前 scope 不支持创建 hooks source");
       document.source.exists = true;
       document.handlers = [];
@@ -4038,6 +4128,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       syncHookDocument(document);
       return structuredClone(document.source);
     }
+
+    case PLUGINS_SET_SKILL_ENABLED_COMMAND:
+    case PLUGINS_DELETE_SKILL_COMMAND:
+      return undefined;
 
     case PLUGINS_DELETE_HOOK_SOURCE_COMMAND: {
       const source = args.source as { id?: string };

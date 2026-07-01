@@ -106,7 +106,6 @@ const backend = ref<"claude" | "codex">("claude");
 const showBackendSwitch = computed(() => props.section === "hooks" || props.section === "mcp");
 
 const {
-  projectCwd,
   projectOptions,
   userSkills,
   projectSkills,
@@ -226,52 +225,104 @@ function codexServerSummary(server: PluginMcpServer) {
   return commandLine(server.command, server.args) || `${pluginMcpTransportLabel(server.transport)} MCP server`;
 }
 
+const SKILL_PROJECT_MARKERS = ["/.claude/skills/"];
+const HOOK_PROJECT_MARKERS = [
+  "/.claude/settings.json",
+  "/.claude/settings.local.json",
+  "/.codex/hooks.json",
+  "/.codex/config.toml",
+  "/.codex/requirements.toml",
+];
+
 function normalizePath(value: string | null | undefined) {
-  return (value ?? "").replace(/\\/g, "/").toLocaleLowerCase();
+  return normalizedDisplayPath(value).toLocaleLowerCase();
 }
 
-function projectFolderFromSkillPath(path: string) {
-  const normalized = path.replace(/\\/g, "/");
-  const marker = "/.claude/skills/";
-  const markerIndex = normalized.toLocaleLowerCase().indexOf(marker);
-  if (markerIndex <= 0) return "";
-  const projectPath = normalized.slice(0, markerIndex).replace(/\/*$/, "");
-  const parts = projectPath.split("/");
+function normalizedDisplayPath(value: string | null | undefined) {
+  return (value ?? "").replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/, "");
+}
+
+function pathStartsWithProject(path: string, projectPath: string) {
+  const normalizedPath = normalizePath(path);
+  const normalizedProject = normalizePath(projectPath);
+  return normalizedPath === normalizedProject || normalizedPath.startsWith(`${normalizedProject}/`);
+}
+
+function projectOptionForPath(path: string) {
+  let matched: (typeof projectOptions.value)[number] | null = null;
+  for (const project of projectOptions.value) {
+    if (!pathStartsWithProject(path, project.value)) continue;
+    if (!matched || normalizePath(project.value).length > normalizePath(matched.value).length) {
+      matched = project;
+    }
+  }
+  return matched;
+}
+
+function projectCwdFromPath(path: string, markers: string[]) {
+  const matchedProject = projectOptionForPath(path);
+  if (matchedProject) return matchedProject.value;
+  const normalized = normalizedDisplayPath(path);
+  const lower = normalized.toLocaleLowerCase();
+  for (const marker of markers) {
+    const index = lower.indexOf(marker);
+    if (index > 0) return normalized.slice(0, index);
+  }
+  return null;
+}
+
+function projectCwdForSkill(skill: PluginSkill) {
+  if (skill.scope !== "project") return null;
+  return projectCwdFromPath(skill.path, SKILL_PROJECT_MARKERS);
+}
+
+function projectCwdForHookSource(source: HookSourceSummary) {
+  if (source.scope !== "project" && source.scope !== "local") return null;
+  return projectCwdFromPath(source.path, HOOK_PROJECT_MARKERS);
+}
+
+function requireProjectCwd(cwd: string | null, label: string) {
+  if (cwd) return cwd;
+  throw new Error(`${label} 缺少项目路径，已取消项目级操作`);
+}
+
+function projectFolderFromCwd(cwd: string | null) {
+  if (!cwd) return "";
+  const parts = normalizedDisplayPath(cwd).split("/");
   return parts[parts.length - 1] ?? "";
 }
 
 function projectSkillsRootFromPath(path: string) {
-  const normalized = path.replace(/\\/g, "/");
-  const marker = "/.claude/skills/";
-  const markerIndex = normalized.toLocaleLowerCase().indexOf(marker);
-  if (markerIndex <= 0) return "";
-  return `${normalized.slice(0, markerIndex)}\\.claude\\skills\\`;
+  const projectCwd = projectCwdFromPath(path, SKILL_PROJECT_MARKERS);
+  return projectCwd ? `${projectCwd}\\.claude\\skills\\` : "";
 }
 
 function projectLabelForSkill(skill: PluginSkill) {
   if (skill.scope !== "project") return "";
-  const skillPath = normalizePath(skill.path);
-  const matchedProject = projectOptions.value.find((project) =>
-    skillPath.startsWith(normalizePath(project.value)),
-  );
+  const matchedProject = projectOptionForPath(skill.path);
   if (matchedProject) return matchedProject.label;
-  return projectFolderFromSkillPath(skill.path) || "项目";
+  return projectFolderFromCwd(projectCwdForSkill(skill)) || "项目";
 }
 
 function skillLocation(skill: PluginSkill) {
   if (skill.scope === "user") return USER_SKILLS_ROOT;
-  const skillPath = normalizePath(skill.path);
-  const project = projectOptions.value.find((option) =>
-    skillPath.startsWith(normalizePath(option.value)),
-  );
+  const project = projectOptionForPath(skill.path);
   return project
     ? `${project.value}\\.claude\\skills\\`
     : projectSkillsRootFromPath(skill.path) || "未选择项目";
 }
 
+function projectLabelForHookSource(source: HookSourceSummary) {
+  if (source.scope !== "project" && source.scope !== "local") return "";
+  const matchedProject = projectOptionForPath(source.path);
+  if (matchedProject) return matchedProject.label;
+  return projectFolderFromCwd(projectCwdForHookSource(source)) || "项目";
+}
+
 function hookSourceMeta(source: HookSourceSummary) {
   return [
     hookScopeLabel(source.scope),
+    projectLabelForHookSource(source),
     hookSourceEditLabel(source),
     hookSourceStateLabel(source),
     source.managed ? "Managed" : "",
@@ -584,9 +635,12 @@ async function confirmCreate() {
 async function toggleSkill(skill: PluginSkill) {
   if (disposed) return;
   try {
+    const targetProjectCwd = skill.scope === "project"
+      ? requireProjectCwd(projectCwdForSkill(skill), "Skill")
+      : null;
     await setSkillEnabled(
       skill.scope,
-      skill.scope === "project" ? projectCwd.value : null,
+      targetProjectCwd,
       skill.name,
       !skill.enabled,
     );
@@ -622,10 +676,13 @@ async function toggleMcp(server: PluginMcpServer) {
 async function createSelectedHookSource(entry: HookEntry) {
   if (disposed) return;
   try {
+    const targetProjectCwd = entry.item.scope === "project" || entry.item.scope === "local"
+      ? requireProjectCwd(projectCwdForHookSource(entry.item), "Hooks 来源")
+      : null;
     await createHookSource(
       entry.item.backend,
       entry.item.scope,
-      entry.item.scope === "project" || entry.item.scope === "local" ? projectCwd.value : null,
+      targetProjectCwd,
     );
     if (disposed) return;
     await refresh();
@@ -654,9 +711,12 @@ async function confirmRemove() {
   try {
     if (pendingRemoveSkill.value) {
       const skill = pendingRemoveSkill.value;
+      const targetProjectCwd = skill.scope === "project"
+        ? requireProjectCwd(projectCwdForSkill(skill), "Skill")
+        : null;
       await deleteSkill(
         skill.scope,
-        skill.scope === "project" ? projectCwd.value : null,
+        targetProjectCwd,
         skill.name,
       );
       if (disposed) return;

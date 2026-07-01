@@ -7,7 +7,43 @@ import {
   type PluginPackage,
   type PluginSkill,
 } from "../../services/plugins";
-import { listProjects } from "../../services/projectsStore";
+import { ensureProjectsLoaded, listProjects } from "../../services/projectsStore";
+
+function uniqueBy<T>(items: T[], keyFor: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const key = keyFor(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function pathKey(value: string) {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase();
+}
+
+function skillKey(skill: PluginSkill) {
+  return `${skill.backend}:${skill.scope}:${pathKey(skill.path)}`;
+}
+
+function packageKey(plugin: PluginPackage) {
+  return `${plugin.backend}:${plugin.scope}:${pathKey(plugin.path)}`;
+}
+
+function mcpServerKey(server: PluginMcpServer) {
+  return `${server.backend}:${server.name}`;
+}
+
+function hookSourceKey(source: HookSourceSummary) {
+  return source.id || `${source.backend}:${source.scope}:${source.format}:${pathKey(source.path)}`;
+}
+
+function overviewTargets(projectCwds: string[]): Array<string | null> {
+  return projectCwds.length ? projectCwds : [null];
+}
 
 export function usePluginsOverview(options: {
   isDisposed?: () => boolean;
@@ -16,7 +52,7 @@ export function usePluginsOverview(options: {
   const projectsWithCwd = computed(() =>
     projects.value.filter((p): p is typeof p & { cwd: string } => !!p.cwd),
   );
-  const projectCwd = ref<string | null>(projectsWithCwd.value[0]?.cwd ?? null);
+  const projectCwdSignature = computed(() => projectsWithCwd.value.map((p) => p.cwd).join("\n"));
   const projectOptions = computed(() =>
     projectsWithCwd.value.map((p) => ({ value: p.cwd, label: p.name, hint: p.cwd })),
   );
@@ -43,25 +79,35 @@ export function usePluginsOverview(options: {
     loading.value = true;
     errorText.value = null;
     try {
-      const [pluginsData, hooksData] = await Promise.all([
-        pluginsOverview(projectCwd.value),
-        hooksOverview(projectCwd.value),
+      await ensureProjectsLoaded();
+      if (isDisposed() || seq !== refreshSeq) return;
+      const targets = overviewTargets(projectsWithCwd.value.map((project) => project.cwd));
+      const [pluginOverviews, hookOverviews] = await Promise.all([
+        Promise.all(targets.map((cwd) => pluginsOverview(cwd))),
+        Promise.all(targets.map((cwd) => hooksOverview(cwd))),
       ]);
       if (isDisposed() || seq !== refreshSeq) return;
-      userSkills.value = pluginsData.skills.filter(
+      const allSkills = pluginOverviews.flatMap((data) => data.skills);
+      const allPackages = pluginOverviews.flatMap((data) => data.packages);
+      const allMcpServers = pluginOverviews.flatMap((data) => data.mcpServers);
+      const allHookSources = hookOverviews.flatMap((data) => data.sources);
+      userSkills.value = uniqueBy(allSkills.filter(
         (skill) => skill.backend === "claude" && skill.scope === "user",
-      );
-      projectSkills.value = pluginsData.skills.filter(
+      ), skillKey);
+      projectSkills.value = uniqueBy(allSkills.filter(
         (skill) => skill.backend === "claude" && skill.scope === "project",
-      );
-      claudePlugins.value = pluginsData.packages.filter((plugin) => plugin.backend === "claude");
-      claudeMcpServers.value = pluginsData.mcpServers.filter((server) => server.backend === "claude");
-      claudeMcpConfigPath.value = pluginsData.configPaths.claude ?? null;
-      claudeHookSources.value = hooksData.sources.filter((source) => source.backend === "claude");
-      codexServers.value = pluginsData.mcpServers.filter((server) => server.backend === "codex");
-      codexConfigPath.value = pluginsData.configPaths.codex ?? null;
-      codexHookSources.value = hooksData.sources.filter((source) => source.backend === "codex");
-      warnings.value = [...pluginsData.warnings, ...hooksData.warnings];
+      ), skillKey);
+      claudePlugins.value = uniqueBy(allPackages.filter((plugin) => plugin.backend === "claude"), packageKey);
+      claudeMcpServers.value = uniqueBy(allMcpServers.filter((server) => server.backend === "claude"), mcpServerKey);
+      claudeMcpConfigPath.value = pluginOverviews[0]?.configPaths.claude ?? null;
+      claudeHookSources.value = uniqueBy(allHookSources.filter((source) => source.backend === "claude"), hookSourceKey);
+      codexServers.value = uniqueBy(allMcpServers.filter((server) => server.backend === "codex"), mcpServerKey);
+      codexConfigPath.value = pluginOverviews[0]?.configPaths.codex ?? null;
+      codexHookSources.value = uniqueBy(allHookSources.filter((source) => source.backend === "codex"), hookSourceKey);
+      warnings.value = Array.from(new Set([
+        ...pluginOverviews.flatMap((data) => data.warnings),
+        ...hookOverviews.flatMap((data) => data.warnings),
+      ]));
     } catch (err) {
       if (!isDisposed() && seq === refreshSeq) errorText.value = String(err);
     } finally {
@@ -70,7 +116,7 @@ export function usePluginsOverview(options: {
   }
 
   onMounted(() => refresh());
-  watch(projectCwd, () => {
+  watch(projectCwdSignature, () => {
     void refresh();
   });
 
@@ -80,7 +126,6 @@ export function usePluginsOverview(options: {
   });
 
   return {
-    projectCwd,
     projectOptions,
     userSkills,
     projectSkills,
