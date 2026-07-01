@@ -62,6 +62,7 @@ function onSelect(event: Event) {
     <SidebarProjectAddMenu
       :open="addMenuOpen"
       :position="menuPos"
+      :allow-category="false"
       @close="closeAddMenu"
       @created="emit('created-project', $event)"
       @error="emit('error', $event)"

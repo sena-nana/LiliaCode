@@ -19,10 +19,13 @@ import {
 } from "@lilia/ui";
 import { createLazyLoadState } from "@lilia/ui";
 
-const props = defineProps<{
+withDefaults(defineProps<{
   open: boolean;
   position: AnchoredMenuPosition;
-}>();
+  allowCategory?: boolean;
+}>(), {
+  allowCategory: true,
+});
 
 const emit = defineEmits<{
   close: [];
@@ -117,6 +120,7 @@ onBeforeUnmount(() => {
       从 GitHub clone
     </ActionMenuItem>
     <ActionMenuItem
+      v-if="allowCategory"
       :icon="FolderPlus"
       agent-id="sidebar.project-add.category"
       @click="openCategory"
