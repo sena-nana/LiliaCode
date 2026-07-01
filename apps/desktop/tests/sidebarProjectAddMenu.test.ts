@@ -2,7 +2,7 @@ import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
 import SidebarProjectAddMenu from "../src/components/sidebar/SidebarProjectAddMenu.vue";
 import { pickFolder } from "../src/services/projects";
-import { createProject } from "../src/services/projectsStore";
+import { ensureFolderProjects } from "../src/services/projectsStore";
 
 vi.mock("../src/services/projects", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/services/projects")>();
@@ -14,7 +14,7 @@ vi.mock("../src/services/projects", async (importOriginal) => {
 
 vi.mock("../src/services/projectsStore", () => ({
   createProject: vi.fn(),
-  deriveProjectName: (path: string) => path.split(/[\\/]/).pop() ?? "",
+  ensureFolderProjects: vi.fn(),
 }));
 
 describe("SidebarProjectAddMenu", () => {
@@ -25,13 +25,13 @@ describe("SidebarProjectAddMenu", () => {
         resolvePickFolder = resolve;
       }),
     );
-    vi.mocked(createProject).mockResolvedValue({
+    vi.mocked(ensureFolderProjects).mockResolvedValue([{
       id: "p-late",
       name: "Late",
       cwd: "D:\\PROJECT\\workspace\\Late",
       sessionCount: 0,
       pinned: false,
-    });
+    }]);
     const onCreated = vi.fn();
     const onError = vi.fn();
 
@@ -49,7 +49,7 @@ describe("SidebarProjectAddMenu", () => {
     resolvePickFolder("D:\\PROJECT\\workspace\\Late");
     await Promise.resolve();
 
-    expect(createProject).not.toHaveBeenCalled();
+    expect(ensureFolderProjects).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });

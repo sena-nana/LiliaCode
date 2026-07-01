@@ -10,6 +10,7 @@ export {
   getProject,
   ensureProjectLoaded,
   ensureProjectsLoaded,
+  ensureFolderProjects,
   createProject,
   renameProject,
   removeProject,

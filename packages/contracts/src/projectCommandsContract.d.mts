@@ -3,6 +3,7 @@ export const PROJECT_LIST_COMMAND: "project_list";
 export const PROJECT_DASHBOARD_LIST_COMMAND: "project_dashboard_list";
 export const PROJECT_GET_COMMAND: "project_get";
 export const PROJECT_CREATE_COMMAND: "project_create";
+export const PROJECT_ENSURE_FOLDERS_COMMAND: "project_ensure_folders";
 export const PROJECT_RENAME_COMMAND: "project_rename";
 export const PROJECT_REMOVE_COMMAND: "project_remove";
 export const PROJECT_TOGGLE_PIN_COMMAND: "project_toggle_pin";

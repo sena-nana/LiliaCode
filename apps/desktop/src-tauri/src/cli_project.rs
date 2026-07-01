@@ -6,12 +6,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
-use uuid::Uuid;
 
-use crate::{app_events_contract, store::LiliaStore, util::now_millis, MAIN_WINDOW_LABEL};
+use crate::{
+    MAIN_WINDOW_LABEL, app_events_contract,
+    projects_tasks::{display_project_path, ensure_project_row_for_cwd},
+    store::LiliaStore,
+};
 
 const STORE_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const STORE_READY_POLL: Duration = Duration::from_millis(50);
@@ -156,85 +159,15 @@ fn resolve_project_path(project_path_arg: &str, cwd: &Path) -> Result<PathBuf, S
 }
 
 fn ensure_project_for_cwd(conn: &Connection, cwd: &str) -> Result<CliProjectOpenPayload, String> {
-    let target_key = cwd_key(cwd);
-    if let Some(project_id) = find_project_by_cwd(conn, &target_key)? {
-        return Ok(CliProjectOpenPayload {
-            project_id,
-            cwd: cwd.to_string(),
-        });
-    }
-
-    let id = Uuid::new_v4().to_string();
-    let now = now_millis();
-    let name = project_name_from_cwd(cwd);
-    let sort_order: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) FROM projects",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|err| format!("cli_project_open: max sort_order 失败：{err}"))?;
-    conn.execute(
-        "INSERT INTO projects (id, name, cwd, created_at, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, name, cwd, now, sort_order + 1],
-    )
-    .map_err(|err| format!("cli_project_open: 创建项目失败：{err}"))?;
-
+    let project = ensure_project_row_for_cwd(conn, cwd, "cli_project_open")?;
     Ok(CliProjectOpenPayload {
-        project_id: id,
+        project_id: project.id,
         cwd: cwd.to_string(),
     })
 }
 
-fn find_project_by_cwd(conn: &Connection, target_key: &str) -> Result<Option<String>, String> {
-    let mut stmt = conn
-        .prepare("SELECT id, cwd FROM projects WHERE cwd IS NOT NULL")
-        .map_err(|err| format!("cli_project_open: prepare 失败：{err}"))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|err| format!("cli_project_open: query 失败：{err}"))?;
-
-    for row in rows {
-        let (id, cwd) = row.map_err(|err| format!("cli_project_open: row 失败：{err}"))?;
-        if cwd_key(&cwd) == target_key {
-            return Ok(Some(id));
-        }
-    }
-    Ok(None)
-}
-
-fn project_name_from_cwd(cwd: &str) -> String {
-    let cleaned = cwd.trim().trim_end_matches(['\\', '/']);
-    let name = cleaned.rsplit(['\\', '/']).next().unwrap_or("").trim();
-    if name.is_empty() {
-        "未命名项目".to_string()
-    } else {
-        name.to_string()
-    }
-}
-
-fn cwd_key(value: &str) -> String {
-    let cleaned = normalize_windows_extended_path(value.trim())
-        .trim_end_matches(['\\', '/'])
-        .replace('/', "\\");
-    if cfg!(windows) {
-        cleaned.to_ascii_lowercase()
-    } else {
-        cleaned
-    }
-}
-
 fn display_path(path: &Path) -> String {
-    normalize_windows_extended_path(&path.to_string_lossy())
-}
-
-fn normalize_windows_extended_path(value: &str) -> String {
-    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{rest}");
-    }
-    value.strip_prefix(r"\\?\").unwrap_or(value).to_string()
+    display_project_path(path)
 }
 
 fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {

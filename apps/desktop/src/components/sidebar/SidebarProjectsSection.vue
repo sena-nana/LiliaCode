@@ -22,6 +22,7 @@ defineProps<{
   dragSource: TreeDragSource | null;
   dropTarget: TreeDropTarget | null;
   isProjectExpanded: (projectId: string) => boolean;
+  projectDropZoneClass: Record<string, boolean>;
   projectError: string | null;
   projects: Project[];
 }>();
@@ -78,7 +79,7 @@ const emit = defineEmits<{
       </button>
     </div>
 
-    <div class="sb-tree" data-agent-id="sidebar.projects.tree">
+    <div class="sb-tree" :class="projectDropZoneClass" data-agent-id="sidebar.projects.tree">
       <ProjectTreeItem
         v-for="p in projects"
         :key="p.id"

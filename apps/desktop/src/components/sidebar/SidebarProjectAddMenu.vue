@@ -9,7 +9,7 @@ import type { Project } from "@lilia/contracts";
 import CategoryDialog from "./CategoryDialog.vue";
 import {
   createProject,
-  deriveProjectName,
+  ensureFolderProjects,
 } from "../../services/projectsStore";
 import { pickFolder } from "../../services/projects";
 import {
@@ -47,11 +47,8 @@ async function pickLocalFolder() {
   try {
     const picked = await pickFolder({ title: "选择项目根目录" });
     if (disposed || !picked) return;
-    const project = await createProject({
-      name: deriveProjectName(picked) || "新项目",
-      cwd: picked,
-    });
-    if (disposed) return;
+    const [project] = await ensureFolderProjects([picked]);
+    if (disposed || !project) return;
     emit("created", project);
   } catch (err) {
     if (disposed) return;

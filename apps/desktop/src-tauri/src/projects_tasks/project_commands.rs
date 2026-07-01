@@ -1,4 +1,10 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+};
+
+use rusqlite::{Connection, OptionalExtension, params};
 use tauri::State;
 use uuid::Uuid;
 
@@ -67,6 +73,122 @@ fn row_to_project_dashboard_summary(
         cost_record_count: row.get(15)?,
         usage_record_count: row.get(16)?,
     })
+}
+
+fn normalize_windows_extended_path(value: &str) -> String {
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    value.strip_prefix(r"\\?\").unwrap_or(value).to_string()
+}
+
+pub(crate) fn display_project_path(path: &Path) -> String {
+    normalize_windows_extended_path(&path.to_string_lossy())
+}
+
+fn cwd_key(value: &str) -> String {
+    let cleaned = normalize_windows_extended_path(value.trim())
+        .trim_end_matches(['\\', '/'])
+        .replace('/', "\\");
+    if cfg!(windows) {
+        cleaned.to_ascii_lowercase()
+    } else {
+        cleaned
+    }
+}
+
+fn project_name_from_cwd(cwd: &str) -> String {
+    let cleaned = cwd.trim().trim_end_matches(['\\', '/']);
+    let name = cleaned.rsplit(['\\', '/']).next().unwrap_or("").trim();
+    if name.is_empty() {
+        "未命名项目".to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn find_project_row_by_cwd(
+    conn: &Connection,
+    target_key: &str,
+    context: &str,
+) -> Result<Option<ProjectRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT p.id, p.name, p.cwd,
+                      (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.archived = 0)
+                      AS session_count,
+                      p.sort_order,
+                      p.pinned
+               FROM projects p
+               WHERE p.cwd IS NOT NULL"#,
+        )
+        .map_err(|err| format!("{context}: prepare 失败：{err}"))?;
+    let rows = stmt
+        .query_map([], row_to_project)
+        .map_err(|err| format!("{context}: query 失败：{err}"))?;
+
+    for row in rows {
+        let project = row.map_err(|err| format!("{context}: row 失败：{err}"))?;
+        if project
+            .cwd
+            .as_deref()
+            .is_some_and(|cwd| cwd_key(cwd) == target_key)
+        {
+            return Ok(Some(project));
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn ensure_project_row_for_cwd(
+    conn: &Connection,
+    cwd: &str,
+    context: &str,
+) -> Result<ProjectRow, String> {
+    let target_key = cwd_key(cwd);
+    if let Some(project) = find_project_row_by_cwd(conn, &target_key, context)? {
+        return Ok(project);
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let now = now_millis();
+    let name = project_name_from_cwd(cwd);
+    let sort_order: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM projects",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|err| format!("{context}: max sort_order 失败：{err}"))?
+        + 1;
+    conn.execute(
+        "INSERT INTO projects (id, name, cwd, created_at, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, name, cwd, now, sort_order],
+    )
+    .map_err(|err| format!("{context}: 创建项目失败：{err}"))?;
+
+    Ok(ProjectRow {
+        id,
+        name,
+        cwd: Some(cwd.to_string()),
+        session_count: 0,
+        sort_order,
+        pinned: false,
+    })
+}
+
+fn resolve_folder_project_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    if !path.exists() || !path.is_dir() {
+        return None;
+    }
+    fs::canonicalize(&path)
+        .ok()
+        .map(|path| display_project_path(&path))
 }
 
 fn list_project_dashboard_summaries(
@@ -237,6 +359,32 @@ pub fn project_create(
         sort_order,
         pinned: false,
     })
+}
+
+#[tauri::command]
+pub fn project_ensure_folders(
+    paths: Vec<String>,
+    store: State<'_, LiliaStore>,
+) -> Result<Vec<ProjectRow>, String> {
+    let conn = store.conn()?;
+    let mut seen = HashSet::new();
+    let mut projects = Vec::new();
+
+    for path in paths {
+        let Some(cwd) = resolve_folder_project_path(&path) else {
+            continue;
+        };
+        if !seen.insert(cwd_key(&cwd)) {
+            continue;
+        }
+        projects.push(ensure_project_row_for_cwd(
+            &conn,
+            &cwd,
+            "project_ensure_folders",
+        )?);
+    }
+
+    Ok(projects)
 }
 
 #[tauri::command]

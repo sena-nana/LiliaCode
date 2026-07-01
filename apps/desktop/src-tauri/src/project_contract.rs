@@ -19,6 +19,7 @@ struct ProjectCommandsContract {
     dashboard_list: String,
     get: String,
     create: String,
+    ensure_folders: String,
     rename: String,
     remove: String,
     toggle_pin: String,
@@ -41,8 +42,8 @@ mod tests {
     use super::*;
     use crate::project_shell::{project_get_settings, project_set_settings};
     use crate::projects_tasks::{
-        project_create, project_dashboard_list, project_get, project_list, project_remove,
-        project_rename, project_reorder, project_toggle_pin,
+        project_create, project_dashboard_list, project_ensure_folders, project_get, project_list,
+        project_remove, project_rename, project_reorder, project_toggle_pin,
     };
 
     #[test]
@@ -52,6 +53,7 @@ mod tests {
         let _ = project_dashboard_list;
         let _ = project_get;
         let _ = project_create;
+        let _ = project_ensure_folders;
         let _ = project_rename;
         let _ = project_remove;
         let _ = project_toggle_pin;
@@ -63,6 +65,7 @@ mod tests {
         assert_eq!(commands.dashboard_list, stringify!(project_dashboard_list));
         assert_eq!(commands.get, stringify!(project_get));
         assert_eq!(commands.create, stringify!(project_create));
+        assert_eq!(commands.ensure_folders, stringify!(project_ensure_folders));
         assert_eq!(commands.rename, stringify!(project_rename));
         assert_eq!(commands.remove, stringify!(project_remove));
         assert_eq!(commands.toggle_pin, stringify!(project_toggle_pin));
