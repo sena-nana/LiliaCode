@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Copy,
-  FolderOpen,
-  FolderTree,
-  GitBranch,
-  Link2,
-  LoaderCircle,
-  Unplug,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import CheckCircle2 from "@lucide/vue/dist/esm/icons/circle-check.mjs";
+import Copy from "@lucide/vue/dist/esm/icons/copy.mjs";
+import FolderOpen from "@lucide/vue/dist/esm/icons/folder-open.mjs";
+import FolderTree from "@lucide/vue/dist/esm/icons/folder-tree.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import Link2 from "@lucide/vue/dist/esm/icons/link-2.mjs";
+import LoaderCircle from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import Unplug from "@lucide/vue/dist/esm/icons/unplug.mjs";
 import type {
   GitHubBindingStatus,
   GitHubDeviceFlowStart,

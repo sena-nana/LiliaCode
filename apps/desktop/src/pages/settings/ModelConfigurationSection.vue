@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Brain } from "@lucide/vue";
+import Brain from "@lucide/vue/dist/esm/icons/brain.mjs";
 import type {
   AssistantAIModelPoolItem,
   ModelFeatureSettings,

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { ChevronDown, ChevronRight, RotateCcw } from "@lucide/vue";
+import ChevronDown from "@lucide/vue/dist/esm/icons/chevron-down.mjs";
+import ChevronRight from "@lucide/vue/dist/esm/icons/chevron-right.mjs";
+import RotateCcw from "@lucide/vue/dist/esm/icons/rotate-ccw.mjs";
 import type { AgentTimelineEvent, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,

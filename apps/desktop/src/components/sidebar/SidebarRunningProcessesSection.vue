@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Loader2, Square } from "@lucide/vue";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import Square from "@lucide/vue/dist/esm/icons/square.mjs";
 import type { SidebarRunningProcessItem } from "./sidebarTypes";
 
 defineProps<{

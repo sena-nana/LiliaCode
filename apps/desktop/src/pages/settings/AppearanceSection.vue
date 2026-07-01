@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import {
-  AlertTriangle,
-  List,
-  Moon,
-  PanelsTopLeft,
-  Radius,
-  SquareRoundCorner,
-  Sun,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import List from "@lucide/vue/dist/esm/icons/list.mjs";
+import Moon from "@lucide/vue/dist/esm/icons/moon.mjs";
+import PanelsTopLeft from "@lucide/vue/dist/esm/icons/panels-top-left.mjs";
+import Radius from "@lucide/vue/dist/esm/icons/radius.mjs";
+import SquareRoundCorner from "@lucide/vue/dist/esm/icons/square-round-corner.mjs";
+import Sun from "@lucide/vue/dist/esm/icons/sun.mjs";
 import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,

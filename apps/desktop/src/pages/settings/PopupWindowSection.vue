@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { AlertTriangle, Keyboard, Save, Trash2 } from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Keyboard from "@lucide/vue/dist/esm/icons/keyboard.mjs";
+import Save from "@lucide/vue/dist/esm/icons/save.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import type { PopupWindowSettings } from "@lilia/contracts";
 import {
   getPopupWindowSettings,

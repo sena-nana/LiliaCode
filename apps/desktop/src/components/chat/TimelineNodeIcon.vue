@@ -1,24 +1,22 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import {
-  AlertTriangle,
-  BookOpen,
-  Bot,
-  CircleHelp,
-  FilePen,
-  GitBranch,
-  Globe,
-  Goal,
-  ListChecks,
-  ListOrdered,
-  MessageSquare,
-  Plug,
-  Search,
-  Stethoscope,
-  Terminal,
-  TextCursorInput,
-  Wrench,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import BookOpen from "@lucide/vue/dist/esm/icons/book-open.mjs";
+import Bot from "@lucide/vue/dist/esm/icons/bot.mjs";
+import CircleHelp from "@lucide/vue/dist/esm/icons/circle-question-mark.mjs";
+import FilePen from "@lucide/vue/dist/esm/icons/file-pen.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import Globe from "@lucide/vue/dist/esm/icons/globe.mjs";
+import Goal from "@lucide/vue/dist/esm/icons/goal.mjs";
+import ListChecks from "@lucide/vue/dist/esm/icons/list-checks.mjs";
+import ListOrdered from "@lucide/vue/dist/esm/icons/list-ordered.mjs";
+import MessageSquare from "@lucide/vue/dist/esm/icons/message-square.mjs";
+import Plug from "@lucide/vue/dist/esm/icons/plug.mjs";
+import Search from "@lucide/vue/dist/esm/icons/search.mjs";
+import Stethoscope from "@lucide/vue/dist/esm/icons/stethoscope.mjs";
+import Terminal from "@lucide/vue/dist/esm/icons/terminal.mjs";
+import TextCursorInput from "@lucide/vue/dist/esm/icons/text-cursor-input.mjs";
+import Wrench from "@lucide/vue/dist/esm/icons/wrench.mjs";
 
 const props = defineProps<{
   icon?: string | null;

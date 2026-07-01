@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Plus } from "@lucide/vue";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
 import type {
   AgentTimelineEvent,
   AskUserResult,
@@ -29,6 +29,7 @@ import {
   scheduleAfterPaint,
 } from "@lilia/ui";
 import { createLazyLoadState } from "@lilia/ui";
+import { loadChatComposer, loadChatTranscript } from "./taskDetailLazyLoaders";
 import type { PendingAsk } from "../../composables/useAskUser";
 import { useChatSidebar } from "../../composables/useChatSidebar";
 import { withComponentEpoch } from "@lilia/ui";
@@ -43,18 +44,6 @@ import type {
 } from "../../services/chat";
 import type { TaskTodo } from "../../services/todos";
 
-const chatTranscriptLoad = createLazyLoadState(() =>
-  measurePerfAsync(
-    "task-detail.transcript.load",
-    async () => (await import("../../components/chat/ChatTranscript.vue")).default,
-  )
-);
-const chatComposerLoad = createLazyLoadState(() =>
-  measurePerfAsync(
-    "task-detail.composer.load",
-    async () => (await import("../../components/chat/ChatComposer.vue")).default,
-  )
-);
 const chatSuggestionsLoad = createLazyLoadState(() =>
   measurePerfAsync(
     "task-detail.chat-suggestions.load",
@@ -88,11 +77,11 @@ const chatSidebarHostLoad = createLazyLoadState(() =>
 
 const ChatTranscript = defineAsyncComponent({
   suspensible: false,
-  loader: () => chatTranscriptLoad.load(),
+  loader: () => loadChatTranscript(),
 });
 const ChatComposer = defineAsyncComponent({
   suspensible: false,
-  loader: () => chatComposerLoad.load(),
+  loader: () => loadChatComposer(),
 });
 const ChatSuggestions = defineAsyncComponent({
   suspensible: false,

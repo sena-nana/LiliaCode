@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import {
-  FilePen,
-  FileText,
-  HelpCircle,
-  KeyRound,
-  ListChecks,
-  ListOrdered,
-  Rows3,
-  SquareStack,
-  Terminal,
-} from "@lucide/vue";
+import FilePen from "@lucide/vue/dist/esm/icons/file-pen.mjs";
+import FileText from "@lucide/vue/dist/esm/icons/file-text.mjs";
+import HelpCircle from "@lucide/vue/dist/esm/icons/circle-question-mark.mjs";
+import KeyRound from "@lucide/vue/dist/esm/icons/key-round.mjs";
+import ListChecks from "@lucide/vue/dist/esm/icons/list-checks.mjs";
+import ListOrdered from "@lucide/vue/dist/esm/icons/list-ordered.mjs";
+import Rows3 from "@lucide/vue/dist/esm/icons/rows-3.mjs";
+import SquareStack from "@lucide/vue/dist/esm/icons/square-stack.mjs";
+import Terminal from "@lucide/vue/dist/esm/icons/terminal.mjs";
 import { useDebugTimelineInteractions } from "../../composables/useDebugTimelineInteractions";
 
 const props = defineProps<{

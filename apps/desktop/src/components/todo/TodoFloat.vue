@@ -7,16 +7,14 @@
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import {
-  Bot,
-  Goal,
-  Pencil,
-  RefreshCw,
-  Send,
-  Sparkles,
-  Trash2,
-  X,
-} from "@lucide/vue";
+import Bot from "@lucide/vue/dist/esm/icons/bot.mjs";
+import Goal from "@lucide/vue/dist/esm/icons/goal.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
+import Send from "@lucide/vue/dist/esm/icons/send.mjs";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import {
   deleteTodo,
   listTodos,

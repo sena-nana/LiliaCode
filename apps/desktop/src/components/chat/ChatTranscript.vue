@@ -9,7 +9,9 @@ import {
   watch,
   type CSSProperties,
 } from "vue";
-import { Copy, MessageSquarePlus, Quote } from "@lucide/vue";
+import Copy from "@lucide/vue/dist/esm/icons/copy.mjs";
+import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mjs";
+import Quote from "@lucide/vue/dist/esm/icons/quote.mjs";
 import type { AgentTimelineEvent, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,

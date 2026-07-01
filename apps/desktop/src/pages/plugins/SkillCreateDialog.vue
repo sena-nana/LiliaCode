@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Sparkles } from "@lucide/vue";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
 
 defineProps<{
   open: boolean;

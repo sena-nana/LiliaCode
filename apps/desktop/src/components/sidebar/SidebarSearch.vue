@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { FileText, Search, X } from "@lucide/vue";
+import FileText from "@lucide/vue/dist/esm/icons/file-text.mjs";
+import Search from "@lucide/vue/dist/esm/icons/search.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import {
   ensureSessionSearchCorpusLoaded,
   searchSessions,

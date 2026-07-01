@@ -4,13 +4,11 @@ import {
   PhysicalPosition,
   PhysicalSize,
 } from "@tauri-apps/api/dpi";
-import {
-  AlertTriangle,
-  Blend,
-  MessageSquarePlus,
-  Pin,
-  X,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Blend from "@lucide/vue/dist/esm/icons/blend.mjs";
+import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mjs";
+import Pin from "@lucide/vue/dist/esm/icons/pin.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   openPopupNewChat,

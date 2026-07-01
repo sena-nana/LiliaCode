@@ -1,4 +1,4 @@
-import { Globe } from "@lucide/vue";
+import Globe from "@lucide/vue/dist/esm/icons/globe.mjs";
 import { registerChatSidebarPanel } from "./useChatSidebar";
 
 export function registerIabChatSidebarPanel(): () => void {

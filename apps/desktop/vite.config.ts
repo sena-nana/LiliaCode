@@ -50,9 +50,6 @@ export default defineConfig(async ({ command, mode }) => ({
   resolve: {
     alias: {
       ...(command === "serve" && mode !== "test" && !strictPort ? devMockAliases : {}),
-      "@lucide/vue": fileURLToPath(
-        new URL("../../node_modules/@lucide/vue/dist/cjs/lucide-vue.js", import.meta.url),
-      ),
       "@lilia/contracts/agentInteractionContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/agentInteractionContract.mjs", import.meta.url),
       ),

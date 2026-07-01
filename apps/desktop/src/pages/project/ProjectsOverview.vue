@@ -2,7 +2,7 @@
 import "../../styles/pages/project.css";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { Pin } from "@lucide/vue";
+import Pin from "@lucide/vue/dist/esm/icons/pin.mjs";
 import {
   PROJECT_DASHBOARD_STATUS_ORDER,
   taskStatusLabel,

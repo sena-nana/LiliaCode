@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
-import {
-  ArrowUp,
-  CornerDownRight,
-  GitFork,
-  ListChecks,
-  Paperclip,
-  Plus,
-  MessageSquareQuote,
-  Goal,
-  GitBranch,
-  ShieldCheck,
-  Square,
-  WandSparkles,
-  X,
-} from "@lucide/vue";
+import ArrowUp from "@lucide/vue/dist/esm/icons/arrow-up.mjs";
+import CornerDownRight from "@lucide/vue/dist/esm/icons/corner-down-right.mjs";
+import GitFork from "@lucide/vue/dist/esm/icons/git-fork.mjs";
+import ListChecks from "@lucide/vue/dist/esm/icons/list-checks.mjs";
+import Paperclip from "@lucide/vue/dist/esm/icons/paperclip.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import MessageSquareQuote from "@lucide/vue/dist/esm/icons/message-square-quote.mjs";
+import Goal from "@lucide/vue/dist/esm/icons/goal.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import ShieldCheck from "@lucide/vue/dist/esm/icons/shield-check.mjs";
+import Square from "@lucide/vue/dist/esm/icons/square.mjs";
+import WandSparkles from "@lucide/vue/dist/esm/icons/wand-sparkles.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import { clampPercent } from "@lilia/contracts";
 import type {
   ChatAttachment,

@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import {
-  AlertTriangle,
-  Download,
-  KeyRound,
-  LogIn,
-  Loader2,
-  Network,
-  Pencil,
-  RefreshCw,
-  RotateCw,
-  Save,
-  Trash2,
-  UserRound,
-  X,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Download from "@lucide/vue/dist/esm/icons/download.mjs";
+import KeyRound from "@lucide/vue/dist/esm/icons/key-round.mjs";
+import LogIn from "@lucide/vue/dist/esm/icons/log-in.mjs";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import Network from "@lucide/vue/dist/esm/icons/network.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
+import RotateCw from "@lucide/vue/dist/esm/icons/rotate-cw.mjs";
+import Save from "@lucide/vue/dist/esm/icons/save.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
+import UserRound from "@lucide/vue/dist/esm/icons/user-round.mjs";
+import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import {
   API_KEY_ENV_BY_BACKEND,
   CHAT_BACKENDS,

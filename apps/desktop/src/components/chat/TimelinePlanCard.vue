@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { ChevronDown, ChevronRight } from "@lucide/vue";
+import ChevronDown from "@lucide/vue/dist/esm/icons/chevron-down.mjs";
+import ChevronRight from "@lucide/vue/dist/esm/icons/chevron-right.mjs";
 import {
   agentTimelinePlanAllowedPromptRows,
   agentTimelinePlanArchitectureImpactRows,

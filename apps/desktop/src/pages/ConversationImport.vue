@@ -3,15 +3,13 @@ import "../styles/chat.css";
 import "../styles/pages/conversation-import.css";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import {
-  Check,
-  ChevronDown,
-  Clock3,
-  Code2,
-  Loader2,
-  Search,
-  TerminalSquare,
-} from "@lucide/vue";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import ChevronDown from "@lucide/vue/dist/esm/icons/chevron-down.mjs";
+import Clock3 from "@lucide/vue/dist/esm/icons/clock-3.mjs";
+import Code2 from "@lucide/vue/dist/esm/icons/code-xml.mjs";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import Search from "@lucide/vue/dist/esm/icons/search.mjs";
+import TerminalSquare from "@lucide/vue/dist/esm/icons/square-terminal.mjs";
 import type {
   AgentTimelineEvent,
   HistoryImportItem,

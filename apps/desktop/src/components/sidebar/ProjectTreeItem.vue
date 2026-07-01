@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import {
-  Archive,
-  Code2,
-  Folder,
-  FolderOpen,
-  LayoutGrid,
-  MessageSquarePlus,
-  MoreHorizontal,
-  Pencil,
-  Pin,
-  Plus,
-  Trash2,
-} from "@lucide/vue";
+import Archive from "@lucide/vue/dist/esm/icons/archive.mjs";
+import Code2 from "@lucide/vue/dist/esm/icons/code-xml.mjs";
+import Folder from "@lucide/vue/dist/esm/icons/folder.mjs";
+import FolderOpen from "@lucide/vue/dist/esm/icons/folder-open.mjs";
+import LayoutGrid from "@lucide/vue/dist/esm/icons/layout-grid.mjs";
+import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mjs";
+import MoreHorizontal from "@lucide/vue/dist/esm/icons/ellipsis.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import Pin from "@lucide/vue/dist/esm/icons/pin.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import type { Project } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import {

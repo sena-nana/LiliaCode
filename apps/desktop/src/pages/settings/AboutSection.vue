@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronRight } from "@lucide/vue";
+import ChevronRight from "@lucide/vue/dist/esm/icons/chevron-right.mjs";
 import openSourceLicenseManifest from "../../generated/openSourceLicenseManifest.json";
 
 interface OpenSourceLicenseManifestDependency {

@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
-import { ArrowLeft } from "@lucide/vue";
+import ArrowLeft from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
 import SettingsSidebar from "@lilia/ui/layouts/SettingsSidebar";
 import {
   SETTINGS_TABS,
   beginPerfStage,
+  cancelIdleRun,
   createLazyLoadState,
   installPerfObservers,
   measurePerfAsync,
   normalizeSettingsTab,
+  runWhenIdle,
   scheduleAfterPaint,
   useShellSidebar,
 } from "@lilia/ui";
 import TitleBar from "../components/TitleBar.vue";
+import { preloadTaskDetailCore } from "../pages/taskDetail/taskDetailLazyLoaders";
 
 const secondaryPanelLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -57,6 +60,8 @@ type PendingRoutePaintMeasure = {
 };
 let pendingRoutePaintMeasure: PendingRoutePaintMeasure | null = null;
 let routePaintSeq = 0;
+let cancelTaskDetailPreloadPaint: (() => void) | null = null;
+let taskDetailPreloadIdleHandle: number | null = null;
 
 const removeBeforeEach = router.beforeEach((to, from) => {
   if (
@@ -102,8 +107,24 @@ watch(
   { immediate: true },
 );
 
+onMounted(() => {
+  cancelTaskDetailPreloadPaint = scheduleAfterPaint(() => {
+    cancelTaskDetailPreloadPaint = null;
+    taskDetailPreloadIdleHandle = runWhenIdle(() => {
+      taskDetailPreloadIdleHandle = null;
+      void preloadTaskDetailCore().catch(() => undefined);
+    });
+  });
+});
+
 onBeforeUnmount(() => {
   cancelPendingRoutePaintMeasure("cancelled");
+  cancelTaskDetailPreloadPaint?.();
+  cancelTaskDetailPreloadPaint = null;
+  if (taskDetailPreloadIdleHandle !== null) {
+    cancelIdleRun(taskDetailPreloadIdleHandle);
+    taskDetailPreloadIdleHandle = null;
+  }
   removeBeforeEach();
 });
 </script>

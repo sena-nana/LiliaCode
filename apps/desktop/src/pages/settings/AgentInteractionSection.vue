@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
-import { AlertTriangle, Sparkles } from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
 import type {
   AgentInteractionSettings,
   MainAgentPromptMode,

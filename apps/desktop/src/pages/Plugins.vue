@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import "../styles/pages/plugins.css";
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
-import {
-  AlertTriangle,
-  Check,
-  FolderOpen,
-  Loader2,
-  Pencil,
-  Plus,
-  Search,
-  Trash2,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import FolderOpen from "@lucide/vue/dist/esm/icons/folder-open.mjs";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import Pencil from "@lucide/vue/dist/esm/icons/pencil.mjs";
+import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
+import Search from "@lucide/vue/dist/esm/icons/search.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import {
   hookScopeLabel,
   hookSourceEditLabel,

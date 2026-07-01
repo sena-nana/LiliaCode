@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, GitMerge, Loader2, MessageSquarePlus, Pin } from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Archive from "@lucide/vue/dist/esm/icons/archive.mjs";
+import Check from "@lucide/vue/dist/esm/icons/check.mjs";
+import CircleHelp from "@lucide/vue/dist/esm/icons/circle-question-mark.mjs";
+import ExternalLink from "@lucide/vue/dist/esm/icons/external-link.mjs";
+import GitMerge from "@lucide/vue/dist/esm/icons/git-merge.mjs";
+import Loader2 from "@lucide/vue/dist/esm/icons/loader-circle.mjs";
+import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mjs";
+import Pin from "@lucide/vue/dist/esm/icons/pin.mjs";
 import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";

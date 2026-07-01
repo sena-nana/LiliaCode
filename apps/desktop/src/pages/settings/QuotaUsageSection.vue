@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, type CSSProperties } from "vue";
 import type { ChartData, ChartOptions, ChartType, TooltipItem } from "chart.js";
-import {
-  AlertTriangle,
-  Coins,
-  Database,
-  RotateCcw,
-  RefreshCw,
-} from "@lucide/vue";
+import AlertTriangle from "@lucide/vue/dist/esm/icons/triangle-alert.mjs";
+import Coins from "@lucide/vue/dist/esm/icons/coins.mjs";
+import Database from "@lucide/vue/dist/esm/icons/database.mjs";
+import RotateCcw from "@lucide/vue/dist/esm/icons/rotate-ccw.mjs";
+import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
 import {
   type CodexAccountUsageDailyBucket,
   type CodexAccountQuotaWindow,

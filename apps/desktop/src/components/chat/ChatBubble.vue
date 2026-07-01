@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { FileText, Folder, Hash, Image, Paperclip } from "@lucide/vue";
+import FileText from "@lucide/vue/dist/esm/icons/file-text.mjs";
+import Folder from "@lucide/vue/dist/esm/icons/folder.mjs";
+import Hash from "@lucide/vue/dist/esm/icons/hash.mjs";
+import Image from "@lucide/vue/dist/esm/icons/image.mjs";
+import Paperclip from "@lucide/vue/dist/esm/icons/paperclip.mjs";
 import type { ChatAttachment, ChatConversationReference, ChatMessage } from "@lilia/contracts";
 import {
   attachmentImageSrc,

@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import {
-  MonitorSmartphone,
-  QrCode,
-  Smartphone,
-  Trash2,
-} from "@lucide/vue";
+import MonitorSmartphone from "@lucide/vue/dist/esm/icons/monitor-smartphone.mjs";
+import QrCode from "@lucide/vue/dist/esm/icons/qr-code.mjs";
+import Smartphone from "@lucide/vue/dist/esm/icons/smartphone.mjs";
+import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import { toDataURL } from "qrcode";
 import type { RemoteControlStatus } from "@lilia/contracts";
 import {

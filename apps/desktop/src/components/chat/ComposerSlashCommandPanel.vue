@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { CodeXml, FileQuestion, GitBranch, GitCommit, TerminalSquare } from "@lucide/vue";
+import CodeXml from "@lucide/vue/dist/esm/icons/code-xml.mjs";
+import FileQuestion from "@lucide/vue/dist/esm/icons/file-question-mark.mjs";
+import GitBranch from "@lucide/vue/dist/esm/icons/git-branch.mjs";
+import GitCommit from "@lucide/vue/dist/esm/icons/git-commit-horizontal.mjs";
+import TerminalSquare from "@lucide/vue/dist/esm/icons/square-terminal.mjs";
 import { chatSlashCommandSourceLabel, chatWorkflowSlashKindLabel } from "@lilia/contracts";
 import type {
   ComposerSlashCommandItem,

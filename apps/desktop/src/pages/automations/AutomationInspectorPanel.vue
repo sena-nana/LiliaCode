@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { CircleHelp, Play } from "@lucide/vue";
+import CircleHelp from "@lucide/vue/dist/esm/icons/circle-question-mark.mjs";
+import Play from "@lucide/vue/dist/esm/icons/play.mjs";
 import {
   DEFAULT_AUTOMATION_HUMAN_PROMPT,
   AUTOMATION_WAITING_USER_STATUS,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { ExternalLink, Globe } from "@lucide/vue";
+import ExternalLink from "@lucide/vue/dist/esm/icons/external-link.mjs";
+import Globe from "@lucide/vue/dist/esm/icons/globe.mjs";
 import type { ChatSidebarContext } from "../../composables/useChatSidebar";
 
 defineProps<ChatSidebarContext>();
