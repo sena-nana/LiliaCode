@@ -44,11 +44,11 @@ yarn dev
 # 4. 启动 Tauri 桌面端，需要本地有 Rust 工具链和 WebView2
 yarn tauri:dev
 
-`yarn tauri:build:no-bundle` 会执行发布级别编译但跳过安装包生成，适合发布前快速验证本机打包链路。
-
 # 5. 运行类型检查、单测、Rust 编译检查、契约包检查
 yarn verify
 ```
+
+`yarn tauri:build:no-bundle` 会执行发布级别编译但跳过安装包生成，适合发布前快速验证本机打包链路。
 
 如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本和 workspace 脚本都会执行同一个包管理器检查，让贡献者统一走 Corepack 管理的 Yarn 路径。
 
@@ -61,6 +61,12 @@ yarn verify
 ```bash
 TAURI_TEMPLATE_INSTALL_DRY_RUN=1 yarn tauri:install
 ```
+
+## Rust 构建缓存
+
+根脚本会在 Rust 编译入口自动复用本机已有的 `sccache`：`yarn verify:tauri`、`yarn tauri:build`、`yarn tauri:build:no-bundle` 和 `yarn verify:agent-debug` 都会先检查 `RUSTC_WRAPPER`，如果用户已经设置则保持原值；如果未设置且当前 `PATH` 中能执行 `sccache --version`，脚本会只给本次子进程注入 `RUSTC_WRAPPER=sccache`。
+
+仓库不会自动安装 `sccache`，没有安装时这些命令仍按普通 Rust / Tauri 流程执行。需要显式关闭本仓库的自动接入时，可在命令前设置 `LILIA_RUST_CACHE=0`。`verify:agent-debug` 本身不构建 debug 桌面二进制，但它启动的 Rust 子流程会继承同一份缓存环境；如果二进制缺失，仍需先运行 `yarn verify:tauri`、`yarn tauri:build:no-bundle` 或手动构建 debug binary。
 
 ## 文档站
 
