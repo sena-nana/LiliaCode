@@ -3,12 +3,12 @@ import { defineAsyncComponent, onBeforeUnmount, onMounted } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { AppNavigateEvent } from "@lilia/contracts";
 import {
   CLI_PROJECT_OPEN_EVENT_NAME,
   MAIN_NAVIGATE_EVENT_NAME,
   POPUP_NAVIGATE_EVENT_NAME,
-  type AppNavigateEvent,
-} from "@lilia/contracts";
+} from "@lilia/contracts/appEventsContract.mjs";
 import {
   consumePendingCliProjectOpen,
   openCliProject,

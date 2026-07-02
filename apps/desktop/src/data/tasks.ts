@@ -16,10 +16,10 @@ import {
   TASK_PROMOTE_COMMAND,
   TASK_REORDER_COMMAND,
   TASK_REPARENT_COMMAND,
-  TASKS_CHANGED_EVENT_NAME,
   TASK_TOGGLE_PIN_COMMAND,
   TASK_UPDATE_DEPENDENCIES_COMMAND,
-} from "@lilia/contracts";
+} from "@lilia/contracts/taskCommandsContract.mjs";
+import { TASKS_CHANGED_EVENT_NAME } from "@lilia/contracts/taskEventsContract.mjs";
 import {
   ensureProjectsLoaded,
   listProjects,

@@ -8,17 +8,19 @@ import LogIn from "@lucide/vue/dist/esm/icons/log-in.mjs";
 import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
 import RotateCw from "@lucide/vue/dist/esm/icons/rotate-cw.mjs";
 import Sparkles from "@lucide/vue/dist/esm/icons/sparkles.mjs";
-import {
-  chatBackendLabel,
-  codexAccountQuotaWindowRemainingLine as quotaRemainingLine,
-  codexAccountQuotaWindowRemainingPercent,
-  codexRuntimeIssue,
-  connectionModeIsUnconfigured,
-  connectionModeUsesCodexAccount,
-  type CodexAccountQuotaStatus,
-  type CodexAccountQuotaWindow,
-  routerModeUsesCodexAccount,
+import type {
+  ChatBackendKind,
+  CodexAccountQuotaStatus,
+  CodexAccountQuotaWindow,
+  CodexAppServerStatus,
+  RouterMode,
 } from "@lilia/contracts";
+import {
+  CHAT_BACKEND_LABELS,
+  CONNECTION_MODES_USING_CODEX_ACCOUNT,
+  ROUTER_MODES_USING_CODEX_ACCOUNT,
+  UNCONFIGURED_CONNECTION_MODES,
+} from "@lilia/contracts/chatBackendsContract.mjs";
 import { useAnchoredOverlay } from "@lilia/ui";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus, startCodexAccountLogin } from "../services/chat";
@@ -28,12 +30,51 @@ import {
   codexQuotaUnavailableStatus,
   formatCompactNumber,
   formatUnixSeconds,
+  quotaWindowLine as quotaRemainingLine,
+  quotaWindowRemainingPercent,
   quotaPercentTone,
 } from "../utils/quotaDisplay";
 
 const QUOTA_STALE_MS = 60_000;
 const STARTUP_CONNECTION_REFRESH_DELAY_MS = 1_200;
 const STARTUP_REMOTE_REFRESH_DELAY_MS = 2_500;
+const CONNECTION_MODES_USING_CODEX_ACCOUNT_SET = new Set<string>(CONNECTION_MODES_USING_CODEX_ACCOUNT);
+const ROUTER_MODES_USING_CODEX_ACCOUNT_SET = new Set<string>(ROUTER_MODES_USING_CODEX_ACCOUNT);
+const UNCONFIGURED_CONNECTION_MODE_SET = new Set<string>(UNCONFIGURED_CONNECTION_MODES);
+
+function chatBackendLabel(backend: ChatBackendKind): string {
+  return CHAT_BACKEND_LABELS[backend];
+}
+
+function connectionModeIsUnconfigured(mode: unknown): mode is "unconfigured" {
+  return typeof mode === "string" && UNCONFIGURED_CONNECTION_MODE_SET.has(mode);
+}
+
+function connectionModeUsesCodexAccount(mode: unknown): mode is "codex-account" {
+  return typeof mode === "string" && CONNECTION_MODES_USING_CODEX_ACCOUNT_SET.has(mode);
+}
+
+function routerModeUsesCodexAccount(mode: RouterMode): boolean {
+  return ROUTER_MODES_USING_CODEX_ACCOUNT_SET.has(mode);
+}
+
+function codexRuntimeIssue(status: CodexAppServerStatus | null): string {
+  const issue = status?.issues.join(" ") ||
+    "Codex app-server 不满足 Lilia 所需的流式事件、工具审批和 AskUser 协议能力。";
+  if (status?.failureKind === "providerIncompatible") {
+    return `${issue} 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。`;
+  }
+  if (status?.failureKind === "missingCli") {
+    return `${issue} 请在 Provider 设置中安装或更新 Lilia 内置 Codex app-server。`;
+  }
+  if (
+    status?.failureKind === "appServerUnavailable" ||
+    status?.failureKind === "experimentalApiUnsupported"
+  ) {
+    return `${issue} 请在 Provider 设置中更新 Lilia 内置 Codex app-server 后重新检测。`;
+  }
+  return issue;
+}
 
 const props = withDefaults(defineProps<{
   to?: RouteLocationRaw | null;
@@ -258,7 +299,7 @@ const codexUpdateErrorText = computed(() =>
 );
 
 function quotaRingStyle(window: CodexAccountQuotaWindow | null | undefined) {
-  const remainingPercent = codexAccountQuotaWindowRemainingPercent(window);
+  const remainingPercent = quotaWindowRemainingPercent(window);
   return {
     "--quota-progress": String(remainingPercent),
   };

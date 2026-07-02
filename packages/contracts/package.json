@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./agentInteractionDefaults.mjs": "./src/agentInteractionDefaults.mjs",
+    "./agentInteraction.mjs": "./src/agent-interaction.ts",
     "./agentInteractionContract.mjs": "./src/agentInteractionContract.mjs",
+    "./appCommandsContract.mjs": "./src/appCommandsContract.mjs",
     "./appEventsContract.mjs": "./src/appEventsContract.mjs",
     "./askUserContract.mjs": "./src/askUserContract.mjs",
     "./architectureContract.mjs": "./src/architectureContract.mjs",
@@ -37,6 +39,7 @@
     "./providerCommandsContract.mjs": "./src/providerCommandsContract.mjs",
     "./projectCommandsContract.mjs": "./src/projectCommandsContract.mjs",
     "./quotaContract.mjs": "./src/quotaContract.mjs",
+    "./remoteControlCommandsContract.mjs": "./src/remoteControlCommandsContract.mjs",
     "./runnerProtocolContract.mjs": "./src/runnerProtocolContract.mjs",
     "./runtimeCommandContract.mjs": "./src/runtimeCommandContract.mjs",
     "./sessionManagementContract.mjs": "./src/sessionManagementContract.mjs",

@@ -4,6 +4,7 @@
  */
 import { invoke } from "../tauri/runtime";
 import { ref } from "vue";
+import type { Project } from "@lilia/contracts";
 import {
   PROJECT_CREATE_COMMAND,
   PROJECT_GET_COMMAND,
@@ -13,8 +14,7 @@ import {
   PROJECT_RENAME_COMMAND,
   PROJECT_REORDER_COMMAND,
   PROJECT_TOGGLE_PIN_COMMAND,
-  type Project,
-} from "@lilia/contracts";
+} from "@lilia/contracts/projectCommandsContract.mjs";
 import { singleFlight } from "@lilia/ui";
 
 interface ProjectRow {

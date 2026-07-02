@@ -50,14 +50,32 @@ export default defineConfig(async ({ command, mode }) => ({
   resolve: {
     alias: {
       ...(command === "serve" && mode !== "test" && !strictPort ? devMockAliases : {}),
+      "@lilia/contracts/agentInteraction.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/agent-interaction.ts", import.meta.url),
+      ),
       "@lilia/contracts/agentInteractionContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/agentInteractionContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/appCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/appCommandsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/appEventsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/appEventsContract.mjs", import.meta.url),
       ),
       "@lilia/contracts/askUserContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/askUserContract.mjs", import.meta.url),
       ),
       "@lilia/contracts/architectureContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/architectureContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/chatBackendsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/chatBackendsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/chatCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/chatCommandsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/chatEventsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/chatEventsContract.mjs", import.meta.url),
       ),
       "@lilia/contracts/claudePlanContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/claudePlanContract.mjs", import.meta.url),
@@ -67,6 +85,9 @@ export default defineConfig(async ({ command, mode }) => ({
       ),
       "@lilia/contracts/conversationContextContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/conversationContextContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/githubCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/githubCommandsContract.mjs", import.meta.url),
       ),
       "@lilia/contracts/historyImportContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/historyImportContract.mjs", import.meta.url),
@@ -80,6 +101,9 @@ export default defineConfig(async ({ command, mode }) => ({
       "@lilia/contracts/liliaCodeCore.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/liliaCodeCore.mjs", import.meta.url),
       ),
+      "@lilia/contracts/milestoneCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/milestoneCommandsContract.mjs", import.meta.url),
+      ),
       "@lilia/contracts/permissionModes.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/permissionModes.vite.mjs", import.meta.url),
       ),
@@ -89,8 +113,17 @@ export default defineConfig(async ({ command, mode }) => ({
       "@lilia/contracts/provider.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/providerRuntime.mjs", import.meta.url),
       ),
+      "@lilia/contracts/providerCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/providerCommandsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/projectCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/projectCommandsContract.mjs", import.meta.url),
+      ),
       "@lilia/contracts/quotaContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/quotaContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/remoteControlCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/remoteControlCommandsContract.mjs", import.meta.url),
       ),
       "@lilia/contracts/runnerProtocolContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/runnerProtocolContract.mjs", import.meta.url),
@@ -100,6 +133,18 @@ export default defineConfig(async ({ command, mode }) => ({
       ),
       "@lilia/contracts/sessionManagementContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/sessionManagementContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/suggestionsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/suggestionsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/systemCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/systemCommandsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/taskCommandsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/taskCommandsContract.mjs", import.meta.url),
+      ),
+      "@lilia/contracts/taskEventsContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/taskEventsContract.mjs", import.meta.url),
       ),
       "@lilia/contracts/timelineContract.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/timelineContract.mjs", import.meta.url),

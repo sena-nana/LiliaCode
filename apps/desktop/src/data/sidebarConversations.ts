@@ -2,10 +2,8 @@ import { invoke } from "../tauri/runtime";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { shallowRef } from "vue";
 import type { SidebarConversationSummary } from "@lilia/contracts";
-import {
-  TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
-  TASKS_CHANGED_EVENT_NAME,
-} from "@lilia/contracts";
+import { TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND } from "@lilia/contracts/taskCommandsContract.mjs";
+import { TASKS_CHANGED_EVENT_NAME } from "@lilia/contracts/taskEventsContract.mjs";
 import { addDomEventListener } from "@lilia/ui";
 import { measurePerfAsync } from "@lilia/ui";
 

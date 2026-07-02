@@ -12,14 +12,16 @@ import {
   setActiveBackend as persistActiveBackend,
   type EnvStatusReport,
 } from "../services/chat";
-import {
-  DEFAULT_CHAT_BACKEND,
-  normalizeChatBackendKind,
-  type BackendEnvStatus,
-  type ChatBackendKind,
-  type CodexAppServerStatus,
-  type RouterMode,
+import type {
+  BackendEnvStatus,
+  ChatBackendKind,
+  CodexAppServerStatus,
+  RouterMode,
 } from "@lilia/contracts";
+import {
+  CHAT_BACKENDS,
+  DEFAULT_CHAT_BACKEND,
+} from "@lilia/contracts/chatBackendsContract.mjs";
 
 const report = ref<EnvStatusReport | null>(null);
 const activeBackend = ref<ChatBackendKind>(DEFAULT_CHAT_BACKEND);
@@ -34,6 +36,16 @@ let codexUpdateCheckInflight: Promise<void> | null = null;
 let codexUpdateInstallInflight: Promise<void> | null = null;
 let activeBackendLoaded = false;
 let codexUpdatePollTimer: ReturnType<typeof setTimeout> | null = null;
+const CHAT_BACKEND_SET = new Set<string>(CHAT_BACKENDS);
+
+function normalizeChatBackendKind(
+  value: unknown,
+  fallback: ChatBackendKind = DEFAULT_CHAT_BACKEND,
+): ChatBackendKind {
+  return typeof value === "string" && CHAT_BACKEND_SET.has(value)
+    ? value as ChatBackendKind
+    : fallback;
+}
 
 async function probeOnce(forceRefresh = false) {
   if (inflight) return inflight;
