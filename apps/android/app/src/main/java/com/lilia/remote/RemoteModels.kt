@@ -49,6 +49,14 @@ data class RemoteTimelineDetail(
     val value: String,
 )
 
+data class RemoteTimelinePage(
+    val events: List<RemoteTimelineItem>,
+    val beforeCursor: String? = null,
+    val afterCursor: String? = null,
+    val hasMoreBefore: Boolean = false,
+    val hasMoreAfter: Boolean = false,
+)
+
 enum class RemoteSessionForkMode(val wireValue: String, val label: String) {
     CONTINUE("continue", "Continue from selected turn"),
     FORK("fork", "Fork from selected turn"),
@@ -89,6 +97,7 @@ data class RemoteTaskDetail(
     val processSessionId: String?,
     val timeline: List<RemoteTimelineItem>,
     val pendingInteraction: PendingInteraction?,
+    val timelinePage: RemoteTimelinePage = RemoteTimelinePage(timeline),
 )
 
 data class RemoteTaskState(
@@ -107,6 +116,7 @@ data class RemoteBridgeStatus(
 data class RemoteCapabilities(
     val supportsTaskInbox: Boolean = true,
     val supportsTimelineSubscription: Boolean = true,
+    val supportsTimelinePagination: Boolean = false,
     val supportsChatSend: Boolean = true,
     val supportsInteractionResponse: Boolean = true,
     val supportsInterrupt: Boolean = true,

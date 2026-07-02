@@ -24,6 +24,7 @@ object RemotePayloadParser {
         return RemoteCapabilities(
             supportsTaskInbox = capabilities.optBoolean("supportsTaskInbox", true),
             supportsTimelineSubscription = capabilities.optBoolean("supportsTimelineSubscription", true),
+            supportsTimelinePagination = capabilities.optBoolean("supportsTimelinePagination", false),
             supportsChatSend = capabilities.optBoolean("supportsChatSend", true),
             supportsInteractionResponse = capabilities.optBoolean("supportsInteractionResponse", true),
             supportsInterrupt = capabilities.optBoolean("supportsInterrupt", true),
@@ -69,18 +70,32 @@ object RemotePayloadParser {
     ): RemoteTaskDetail {
         val state = parseTaskState(taskId, taskPayload, pendingPayload)
         val runtime = taskPayload.optJSONObject("runtime")
+        val timelinePage = parseTimelinePagePayload(timelinePayload)
         return RemoteTaskDetail(
             task = state.task,
             relatedTasks = listOf(state.task),
             runtimePhase = state.runtimePhase,
             processSessionId = runtime?.optNullableString("processSessionId"),
-            timeline = parseTimelinePayload(timelinePayload),
+            timeline = timelinePage.events,
             pendingInteraction = state.pendingInteraction,
+            timelinePage = timelinePage,
         )
     }
 
     fun parseTimelinePayload(payload: JSONObject): List<RemoteTimelineItem> =
-        parseTimeline(payload.optJSONArray("events") ?: JSONArray())
+        parseTimelinePagePayload(payload).events
+
+    fun parseTimelinePagePayload(payload: JSONObject): RemoteTimelinePage {
+        val events = parseTimeline(payload.optJSONArray("events") ?: JSONArray())
+        val page = payload.optJSONObject("page")
+        return RemoteTimelinePage(
+            events = events,
+            beforeCursor = page?.optNullableString("beforeCursor"),
+            afterCursor = page?.optNullableString("afterCursor"),
+            hasMoreBefore = page?.optBoolean("hasMoreBefore") ?: false,
+            hasMoreAfter = page?.optBoolean("hasMoreAfter") ?: false,
+        )
+    }
 
     fun mergeTimeline(
         existing: List<RemoteTimelineItem>,
@@ -91,6 +106,18 @@ object RemotePayloadParser {
         val merged = LinkedHashMap<String, RemoteTimelineItem>()
         existing.forEach { item -> merged[item.id] = item }
         incoming.forEach { item -> merged[item.id] = item }
+        return merged.values.toList()
+    }
+
+    fun prependTimeline(
+        existing: List<RemoteTimelineItem>,
+        incoming: List<RemoteTimelineItem>,
+    ): List<RemoteTimelineItem> {
+        if (incoming.isEmpty()) return existing
+        if (existing.isEmpty()) return incoming
+        val merged = LinkedHashMap<String, RemoteTimelineItem>()
+        incoming.forEach { item -> merged[item.id] = item }
+        existing.forEach { item -> merged[item.id] = item }
         return merged.values.toList()
     }
 

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +54,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 internal const val UNTRUSTED_PC_MESSAGE = "This PC no longer trusts this phone. Pair again."
@@ -122,6 +125,7 @@ fun LiliaRemoteApp(
     var providerStatus by remember { mutableStateOf<RemoteProviderStatus?>(null) }
     var pairingBusy by remember { mutableStateOf(false) }
     var pairingError by remember { mutableStateOf("") }
+    var timelineLoadingOlder by remember { mutableStateOf(false) }
     var pendingPcSwitchTaskId by remember { mutableStateOf<String?>(null) }
     var pendingColdRestoreTaskId by remember { mutableStateOf(initialTaskId) }
     var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
@@ -133,6 +137,7 @@ fun LiliaRemoteApp(
         detailLoading = false
         bridgeStatus = null
         providerStatus = null
+        timelineLoadingOlder = false
         pendingBranchAnchor = null
         fallbackRepository?.setActiveTaskId(null)
         pendingColdRestoreTaskId = null
@@ -236,8 +241,15 @@ fun LiliaRemoteApp(
         inboxTasks = syncInboxTaskStatus(inboxTasks, detail)
     }
 
+    fun applyOlderTimelinePage(taskId: String, page: RemoteTimelinePage) {
+        val current = selectedTask ?: return
+        if (current.task.taskId != taskId) return
+        selectedTask = current.withOlderTimelinePage(page)
+    }
+
     fun closeTaskDetail() {
         selectedTask = null
+        timelineLoadingOlder = false
         fallbackRepository?.setActiveTaskId(null)
         pendingColdRestoreTaskId = null
     }
@@ -258,6 +270,25 @@ fun LiliaRemoteApp(
         applyTaskDetail(detail)
         clearLiveUpdateError()
         return true
+    }
+
+    fun loadOlderTimeline(pc: SavedPc, taskId: String) {
+        val remoteClient = client ?: return
+        val detail = selectedTask ?: return
+        val beforeCursor = detail.timelinePage.beforeCursor ?: return
+        if (!detail.timelinePage.hasMoreBefore || timelineLoadingOlder) return
+        timelineLoadingOlder = true
+        scope.launch {
+            remoteClient.timelineBefore(pc, taskId, beforeCursor)
+                .onSuccess {
+                    if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
+                    applyOlderTimelinePage(taskId, it)
+                }
+                .onFailure { handleRemoteFailure(it, "Failed to load earlier timeline", pc) }
+            if (!shouldIgnorePcResult(activePc, pc)) {
+                timelineLoadingOlder = false
+            }
+        }
     }
 
     suspend fun recoverLiveTaskUpdate(
@@ -602,6 +633,7 @@ fun LiliaRemoteApp(
                     loading = detailLoading,
                     error = remoteError,
                     pendingBranchAnchor = pendingBranchAnchor,
+                    timelineLoadingOlder = timelineLoadingOlder,
                     onBack = { closeTaskDetail() },
                     onSelectPc = { selectActivePc(it) },
                     onRefresh = { openTask(activePc!!, selectedTask!!.task.taskId) },
@@ -634,6 +666,9 @@ fun LiliaRemoteApp(
                     },
                     onSelectBranchAnchor = { pendingBranchAnchor = it },
                     onClearBranchAnchor = { pendingBranchAnchor = null },
+                    onLoadOlderTimeline = {
+                        loadOlderTimeline(activePc!!, selectedTask!!.task.taskId)
+                    },
                     onSend = { message, branchAnchor ->
                         val pc = activePc!!
                         val detail = selectedTask!!
@@ -748,6 +783,16 @@ private fun RemoteTaskDetail.withRelatedTasks(tasks: List<RemoteTaskSummary>): R
     tasks.forEach { byId[it.taskId] = it }
     byId[task.taskId] = task
     return copy(relatedTasks = byId.values.toList())
+}
+
+internal fun RemoteTaskDetail.withOlderTimelinePage(page: RemoteTimelinePage): RemoteTaskDetail {
+    val mergedTimeline = RemotePayloadParser.prependTimeline(timeline, page.events)
+    val mergedPage = timelinePage.copy(
+        events = mergedTimeline,
+        beforeCursor = page.beforeCursor,
+        hasMoreBefore = page.hasMoreBefore,
+    )
+    return copy(timeline = mergedTimeline, timelinePage = mergedPage)
 }
 
 internal fun syncInboxTaskStatus(
@@ -974,6 +1019,7 @@ private fun TaskDetailScreen(
     loading: Boolean,
     error: String,
     pendingBranchAnchor: RemoteBranchAnchor?,
+    timelineLoadingOlder: Boolean,
     onBack: () -> Unit,
     onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
@@ -982,6 +1028,7 @@ private fun TaskDetailScreen(
     onResolveInteraction: (PendingInteraction, Boolean, String, Map<String, List<String>>) -> Unit,
     onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
     onClearBranchAnchor: () -> Unit,
+    onLoadOlderTimeline: () -> Unit,
     onSend: (String, RemoteBranchAnchor?) -> Unit,
     onStartProcess: (String) -> Unit,
     onSendProcessStdin: (String) -> Unit,
@@ -997,6 +1044,36 @@ private fun TaskDetailScreen(
     val retryEnabled = !loading && providerReady && capabilities.supportsChatSend
     var interactionResponse by remember(pendingInteraction?.requestId) { mutableStateOf("") }
     var selectedInteractionOptions by remember(pendingInteraction?.requestId) { mutableStateOf<Set<String>>(emptySet()) }
+    val timelineListState = rememberLazyListState()
+    var didScrollInitialTimeline by remember(detail.task.taskId) { mutableStateOf(false) }
+    LaunchedEffect(
+        detail.task.taskId,
+        detail.timelinePage.hasMoreBefore,
+        timelineLoadingOlder,
+    ) {
+        snapshotFlow { timelineListState.firstVisibleItemIndex }
+            .collect { firstVisibleIndex ->
+                if (
+                    firstVisibleIndex <= 1 &&
+                    detail.timelinePage.hasMoreBefore &&
+                    !timelineLoadingOlder
+                ) {
+                    onLoadOlderTimeline()
+                }
+            }
+    }
+    LaunchedEffect(detail.task.taskId, detail.timeline.lastOrNull()?.id) {
+        if (detail.timeline.isEmpty()) return@LaunchedEffect
+        val lastIndex = detail.timeline.lastIndex
+        val lastVisibleIndex = timelineListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+        val shouldFollowLatest = !didScrollInitialTimeline ||
+            lastVisibleIndex == null ||
+            lastVisibleIndex >= lastIndex - 1
+        if (shouldFollowLatest) {
+            timelineListState.scrollToItem(lastIndex)
+            didScrollInitialTimeline = true
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1154,9 +1231,19 @@ private fun TaskDetailScreen(
             }
         }
         LazyColumn(
+            state = timelineListState,
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (timelineLoadingOlder) {
+                item(key = "timeline-loading-older") {
+                    Text(
+                        "Loading earlier events...",
+                        color = Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             if (detail.timeline.isEmpty()) {
                 item {
                     Text(

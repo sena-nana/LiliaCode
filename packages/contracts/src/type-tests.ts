@@ -36,6 +36,8 @@ import type {
   HooksOverview,
   SidebarConversationSummary,
   RemoteRetryChatRequest,
+  RemoteTimelineSnapshotRequest,
+  RemoteResponsePayload,
   AgentDebugSnapshot,
   AgentDebugAction,
 } from "./index";
@@ -218,6 +220,36 @@ export type SessionForkIsNotWorkflowTypeTest = Assert<
     },
     ChatWorkflow
   > extends true ? false : true
+>;
+
+export type RemoteTimelineSnapshotPaginationRequestTypeTest = Assert<
+  Extends<
+    {
+      type: "timeline.snapshot";
+      taskId: "task-1";
+      limit: 80;
+      direction: "before";
+      cursor: "opaque-cursor";
+    },
+    RemoteTimelineSnapshotRequest
+  >
+>;
+
+export type RemoteTimelinePaginationResponseTypeTest = Assert<
+  Extends<
+    {
+      type: "timeline.snapshot";
+      taskId: "task-1";
+      events: [];
+      page: {
+        beforeCursor: "older";
+        afterCursor: "newer";
+        hasMoreBefore: true;
+        hasMoreAfter: false;
+      };
+    },
+    RemoteResponsePayload
+  >
 >;
 
 export type SessionManagementRuntimeCommandTypeTest = Assert<

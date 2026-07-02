@@ -93,6 +93,7 @@ export interface RemoteCapabilitySet {
   supportsPairing: boolean;
   supportsTaskInbox: boolean;
   supportsTimelineSubscription: boolean;
+  supportsTimelinePagination: boolean;
   supportsChatSend: boolean;
   supportsInteractionResponse: boolean;
   supportsInterrupt: boolean;
@@ -156,12 +157,23 @@ export interface RemoteSubscribeTimelineRequest {
   type: "timeline.subscribe";
   taskId: string;
   afterEventId?: string | null;
+  afterCursor?: string | null;
+  limit?: number;
 }
 
 export interface RemoteTimelineSnapshotRequest {
   type: "timeline.snapshot";
   taskId: string;
   limit?: number;
+  direction?: "latest" | "before";
+  cursor?: string | null;
+}
+
+export interface RemoteTimelinePage {
+  beforeCursor: string | null;
+  afterCursor: string | null;
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
 }
 
 export interface RemoteSendChatRequest {
@@ -232,8 +244,8 @@ export type RemoteResponsePayload =
   | { type: "connection.resume"; accepted: boolean; peer: RemotePeerSummary | null }
   | { type: "tasks.list"; tasks: SidebarConversationSummary[] }
   | { type: "tasks.get"; task: Task | null; runtime: ChatRuntimeSnapshot | null }
-  | { type: "timeline.snapshot"; taskId: string; events: AgentTimelineEvent[] }
-  | { type: "timeline.subscribe"; taskId: string; events: AgentTimelineEvent[] }
+  | { type: "timeline.snapshot"; taskId: string; events: AgentTimelineEvent[]; page?: RemoteTimelinePage }
+  | { type: "timeline.subscribe"; taskId: string; events: AgentTimelineEvent[]; page?: RemoteTimelinePage }
   | { type: "chat.send"; result: ChatSendResult }
   | { type: "chat.interrupt"; result: ChatInterruptResult }
   | { type: "chat.retry"; result: ChatSendResult }

@@ -96,10 +96,11 @@ class RemoteBridgeStatusParserTest {
                       "protocolVersion": 1,
                       "minProtocolVersion": 1,
                       "alpn": "lilia.remote-control.v1",
-                      "supportsPairing": true,
-                      "supportsTaskInbox": true,
-                      "supportsTimelineSubscription": true,
-                      "supportsChatSend": true,
+	                      "supportsPairing": true,
+	                      "supportsTaskInbox": true,
+	                      "supportsTimelineSubscription": true,
+	                      "supportsTimelinePagination": true,
+	                      "supportsChatSend": true,
                       "supportsInteractionResponse": true,
                       "supportsInterrupt": true
                     }
@@ -112,9 +113,10 @@ class RemoteBridgeStatusParserTest {
         assertTrue(status.hostEnabled)
         assertEquals("pairing", status.state)
         assertEquals("Desk", status.pcName)
-        assertTrue(status.capabilities.supportsTaskInbox)
-        assertTrue(status.capabilities.supportsTimelineSubscription)
-        assertTrue(status.capabilities.supportsChatSend)
+	        assertTrue(status.capabilities.supportsTaskInbox)
+	        assertTrue(status.capabilities.supportsTimelineSubscription)
+	        assertTrue(status.capabilities.supportsTimelinePagination)
+	        assertTrue(status.capabilities.supportsChatSend)
         assertTrue(status.capabilities.supportsInteractionResponse)
         assertTrue(status.capabilities.supportsInterrupt)
     }

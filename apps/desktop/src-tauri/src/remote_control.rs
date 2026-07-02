@@ -119,6 +119,7 @@ pub struct RemoteCapabilitySet {
     pub supports_pairing: bool,
     pub supports_task_inbox: bool,
     pub supports_timeline_subscription: bool,
+    pub supports_timeline_pagination: bool,
     pub supports_chat_send: bool,
     pub supports_interaction_response: bool,
     pub supports_interrupt: bool,
@@ -198,6 +199,7 @@ fn capabilities() -> RemoteCapabilitySet {
         supports_pairing: true,
         supports_task_inbox: true,
         supports_timeline_subscription: true,
+        supports_timeline_pagination: true,
         supports_chat_send: true,
         supports_interaction_response: true,
         supports_interrupt: true,
@@ -780,10 +782,83 @@ fn dispatch_request(
                 "runtime": runtime,
             }))
         }
-        "timeline.snapshot" | "timeline.subscribe" => {
+        "timeline.snapshot" => {
             let task_id = string_field(&envelope.request, "taskId")?;
+            let direction = envelope
+                .request
+                .get("direction")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("all");
+            let limit = envelope
+                .request
+                .get("limit")
+                .and_then(JsonValue::as_i64)
+                .filter(|value| *value > 0)
+                .map(|value| value.min(500) as usize);
+            if let Some(limit) = limit {
+                let page = match direction {
+                    "before" => {
+                        let cursor = envelope
+                            .request
+                            .get("cursor")
+                            .and_then(JsonValue::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .ok_or_else(|| RemoteDispatchError::invalid("timeline cursor 缺失"))?;
+                        agent_timeline::list_before_page(&conn, &task_id, cursor, limit)
+                    }
+                    _ => agent_timeline::list_latest_page(&conn, &task_id, limit),
+                }
+                .map_err(RemoteDispatchError::internal)?;
+                return Ok(json!({
+                    "type": request_type,
+                    "taskId": task_id,
+                    "events": page.events,
+                    "page": {
+                        "beforeCursor": page.before_cursor,
+                        "afterCursor": page.after_cursor,
+                        "hasMoreBefore": page.has_more_before,
+                        "hasMoreAfter": page.has_more_after,
+                    },
+                }));
+            }
             let events =
                 agent_timeline::list(&conn, &task_id).map_err(RemoteDispatchError::internal)?;
+            Ok(json!({
+                "type": request_type,
+                "taskId": task_id,
+                "events": events,
+            }))
+        }
+        "timeline.subscribe" => {
+            let task_id = string_field(&envelope.request, "taskId")?;
+            let limit = envelope
+                .request
+                .get("limit")
+                .and_then(JsonValue::as_i64)
+                .filter(|value| *value > 0)
+                .map(|value| value.min(500) as usize);
+            let events = if let Some(after_cursor) = envelope
+                .request
+                .get("afterCursor")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                agent_timeline::list_after_cursor(&conn, &task_id, after_cursor, limit)
+                    .map_err(RemoteDispatchError::internal)?
+            } else if let Some(after_event_id) = envelope
+                .request
+                .get("afterEventId")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                agent_timeline::list_after_event(&conn, &task_id, after_event_id, limit)
+                    .map_err(RemoteDispatchError::internal)?
+            } else {
+                agent_timeline::list(&conn, &task_id).map_err(RemoteDispatchError::internal)?
+            };
             Ok(json!({
                 "type": request_type,
                 "taskId": task_id,
@@ -2209,6 +2284,7 @@ mod tests {
         );
         assert_eq!(wire["capabilities"]["supportsPairing"], true);
         assert_eq!(wire["capabilities"]["supportsTaskInbox"], true);
+        assert_eq!(wire["capabilities"]["supportsTimelinePagination"], true);
         assert_eq!(wire["capabilities"]["supportsChatSend"], true);
         assert_eq!(wire["capabilities"]["supportsInteractionResponse"], true);
         assert_eq!(wire["capabilities"]["supportsInterrupt"], true);
