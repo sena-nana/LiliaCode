@@ -9,6 +9,9 @@ const host = process.env.TAURI_DEV_HOST;
 const port = Number.parseInt(process.env.LILIA_DEV_PORT ?? "1420", 10);
 // @ts-expect-error process 是 Node.js 全局对象
 const strictPort = process.env.LILIA_DEV_STRICT_PORT === "1";
+const katexMinifiedEntry = fileURLToPath(
+  new URL("../../node_modules/katex/dist/katex.min.js", import.meta.url),
+);
 
 const devMockAliases = {
   "@tauri-apps/api/core": fileURLToPath(
@@ -39,7 +42,7 @@ function chunkFileNames(chunk: { moduleIds?: string[] }): string {
   if (moduleIds.some((id) => id.includes("/node_modules/@vue-flow/core/"))) {
     return "assets/vendor-vue-flow-[hash].js";
   }
-  if (moduleIds.some((id) => id.includes("/node_modules/katex/"))) {
+  if (moduleIds.some((id) => id.endsWith("/node_modules/katex/dist/katex.min.js"))) {
     return "assets/vendor-katex-[hash].js";
   }
   if (moduleIds.some((id) => id.includes("/node_modules/mermaid/") ||
@@ -51,7 +54,16 @@ function chunkFileNames(chunk: { moduleIds?: string[] }): string {
 
 // https://vite.dev/config/
 export default defineConfig(async ({ command, mode }) => ({
-  plugins: [vue()],
+  plugins: [
+    {
+      name: "lilia-katex-minified-entry",
+      enforce: "pre",
+      resolveId(source) {
+        return source === "katex" ? katexMinifiedEntry : null;
+      },
+    },
+    vue(),
+  ],
 
   resolve: {
     alias: {

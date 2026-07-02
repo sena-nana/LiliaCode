@@ -1,3 +1,4 @@
+import "katex/dist/katex.min.css";
 import { onBeforeUnmount, ref, watch } from "vue";
 import {
   cancelIdleRun,

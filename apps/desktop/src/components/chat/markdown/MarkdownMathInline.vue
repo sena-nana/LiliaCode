@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import "katex/dist/katex.min.css";
 import { ref } from "vue";
 import { useDeferredMathRender } from "./useDeferredMathRender";
 
