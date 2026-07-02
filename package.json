@@ -42,6 +42,7 @@
     "android:verify": "yarn android:doctor && yarn android:smoke:test && yarn android:test && yarn android:build && yarn android:build:release && yarn android:apk:inspect",
     "prebuild": "node scripts/check-package-manager.mjs",
     "build": "yarn check:package-manager && yarn --cwd apps/desktop build",
+    "bundle:desktop:report": "yarn check:package-manager && node scripts/report-desktop-bundle.mjs",
     "pretest": "node scripts/check-package-manager.mjs",
     "test": "yarn check:package-manager && yarn --cwd apps/desktop test",
     "preverify": "node scripts/check-package-manager.mjs",

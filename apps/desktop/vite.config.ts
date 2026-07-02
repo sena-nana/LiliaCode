@@ -31,14 +31,20 @@ const devMockAliases = {
   ),
 };
 
-function isMermaidParserModule(id: string): boolean {
-  const normalized = id.replace(/\\/g, "/");
-  return normalized.includes("/node_modules/@mermaid-js/parser/");
-}
-
 function chunkFileNames(chunk: { moduleIds?: string[] }): string {
-  if (chunk.moduleIds?.some(isMermaidParserModule)) {
-    return "assets/mermaid-parser-[hash].js";
+  const moduleIds = (chunk.moduleIds ?? []).map((id) => id.replace(/\\/g, "/"));
+  if (moduleIds.some((id) => id.includes("/node_modules/@mermaid-js/parser/"))) {
+    return "assets/diagram-mermaid-parser-[hash].js";
+  }
+  if (moduleIds.some((id) => id.includes("/node_modules/@vue-flow/core/"))) {
+    return "assets/vendor-vue-flow-[hash].js";
+  }
+  if (moduleIds.some((id) => id.includes("/node_modules/katex/"))) {
+    return "assets/vendor-katex-[hash].js";
+  }
+  if (moduleIds.some((id) => id.includes("/node_modules/mermaid/") ||
+    id.includes("/node_modules/@mermaid-js/"))) {
+    return "assets/diagram-mermaid-[hash].js";
   }
   return "assets/[name]-[hash].js";
 }

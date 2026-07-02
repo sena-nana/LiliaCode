@@ -1,12 +1,9 @@
-import appEventsContract from "./app-events-contract.json";
-
-const manifest = Object.freeze(appEventsContract);
-
-export const MAIN_NAVIGATE_EVENT_NAME = manifest.mainNavigateEventName;
-export const POPUP_NAVIGATE_EVENT_NAME = manifest.popupNavigateEventName;
-export const CLI_PROJECT_OPEN_EVENT_NAME = manifest.cliProjectOpenEventName;
-export const CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND =
-  manifest.cliProjectOpenConsumePendingCommand;
+export {
+  CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND,
+  CLI_PROJECT_OPEN_EVENT_NAME,
+  MAIN_NAVIGATE_EVENT_NAME,
+  POPUP_NAVIGATE_EVENT_NAME,
+} from "./appEventsContract.mjs";
 export {
   POPUP_FOCUS_MAIN_COMMAND,
   POPUP_GET_WINDOW_SETTINGS_COMMAND,
