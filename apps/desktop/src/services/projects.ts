@@ -22,12 +22,16 @@ import {
   GITHUB_POLL_DEVICE_FLOW_COMMAND,
   GITHUB_START_DEVICE_FLOW_COMMAND,
   GITHUB_UNBIND_COMMAND,
+} from "@lilia/contracts/githubCommandsContract.mjs";
+import {
   PROJECT_GET_SETTINGS_COMMAND,
   PROJECT_SET_SETTINGS_COMMAND,
+} from "@lilia/contracts/projectCommandsContract.mjs";
+import {
   SYSTEM_OPEN_IN_VSCODE_COMMAND,
   SYSTEM_OPEN_PATH_COMMAND,
   SYSTEM_OPEN_URL_COMMAND,
-} from "@lilia/contracts";
+} from "@lilia/contracts/systemCommandsContract.mjs";
 
 export type {
   GitHubBindingStatus,

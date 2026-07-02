@@ -17,7 +17,7 @@ export function normalizeCodexProfileSettings(
 ): CodexProfileSettings;
 
 export function normalizeCodexAccountQuotaStatus(
-  input: Partial<CodexAccountQuotaStatus> | null | undefined,
+  input: unknown,
 ): CodexAccountQuotaStatus;
 
 export function createCodexQuotaUnavailableStatus(

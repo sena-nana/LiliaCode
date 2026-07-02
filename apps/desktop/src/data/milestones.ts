@@ -1,5 +1,11 @@
 import { invoke } from "../tauri/runtime";
 import { ref } from "vue";
+import type {
+  Milestone,
+  MilestoneUpdatePatch,
+  ProjectRoadmap,
+  TaskMilestoneLink,
+} from "@lilia/contracts";
 import {
   MILESTONE_CREATE_COMMAND,
   MILESTONE_DELETE_COMMAND,
@@ -7,11 +13,7 @@ import {
   MILESTONE_REORDER_COMMAND,
   MILESTONE_SET_TASKS_COMMAND,
   MILESTONE_UPDATE_COMMAND,
-  type Milestone,
-  type MilestoneUpdatePatch,
-  type ProjectRoadmap,
-  type TaskMilestoneLink,
-} from "@lilia/contracts";
+} from "@lilia/contracts/milestoneCommandsContract.mjs";
 
 export const MILESTONES = ref<Record<string, Milestone[]>>({});
 export const MILESTONE_LINKS = ref<Record<string, TaskMilestoneLink[]>>({});

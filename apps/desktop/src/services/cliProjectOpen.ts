@@ -1,7 +1,7 @@
 import { invoke } from "../tauri/runtime";
 import type { Router } from "vue-router";
 import type { CliProjectOpenEvent } from "@lilia/contracts";
-import { CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND } from "@lilia/contracts";
+import { CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND } from "@lilia/contracts/appEventsContract.mjs";
 import { ensureProjectLoaded } from "./projectsStore";
 
 export type CliProjectOpenPayload = CliProjectOpenEvent;

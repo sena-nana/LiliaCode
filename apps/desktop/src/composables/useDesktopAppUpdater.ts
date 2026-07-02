@@ -2,7 +2,7 @@ import { computed, shallowRef, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
-import { APP_RESTART_COMMAND } from "@lilia/contracts";
+import { APP_RESTART_COMMAND } from "@lilia/contracts/appCommandsContract.mjs";
 
 type AppUpdate = NonNullable<Awaited<ReturnType<typeof check>>>;
 
