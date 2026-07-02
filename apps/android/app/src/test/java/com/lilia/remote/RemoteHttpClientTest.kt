@@ -357,12 +357,63 @@ class RemoteHttpClientTest {
         assertEquals(listOf("dep-1"), detail.task.dependsOn)
         assertEquals("running", detail.runtimePhase)
         assertEquals(3, requests.size)
-        assertEquals("tasks.get", requests[0].getString("type"))
-        assertEquals("timeline.snapshot", requests[1].getString("type"))
-        assertEquals("interaction.pending.read", requests[2].getString("type"))
+	        assertEquals("tasks.get", requests[0].getString("type"))
+	        assertEquals("timeline.snapshot", requests[1].getString("type"))
+	        assertEquals(REMOTE_TIMELINE_PAGE_SIZE, requests[1].getInt("limit"))
+	        assertEquals("latest", requests[1].getString("direction"))
+	        assertEquals("interaction.pending.read", requests[2].getString("type"))
         requests.forEach { request ->
             assertEquals("task-1", request.getString("taskId"))
-        }
+	    }
+
+	    @Test
+	    fun timelineBeforeDispatchesCursorAndLimit() = runBlocking {
+	        val requestBody = AtomicReference<JSONObject>()
+	        val server = startBridge { exchange ->
+	            assertEquals("POST", exchange.requestMethod)
+	            assertEquals("/dispatch", exchange.requestURI.path)
+	            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+	            exchange.respond(
+	                """
+	                {
+	                  "ok": true,
+	                  "payload": {
+	                    "type": "timeline.snapshot",
+	                    "taskId": "task-1",
+	                    "events": [
+	                      {
+	                        "id": "event-0",
+	                        "kind": "message",
+	                        "summary": "Older",
+	                        "status": "completed"
+	                      }
+	                    ],
+	                    "page": {
+	                      "beforeCursor": null,
+	                      "afterCursor": "after-0",
+	                      "hasMoreBefore": false,
+	                      "hasMoreAfter": true
+	                    }
+	                  }
+	                }
+	                """.trimIndent(),
+	            )
+	        }
+
+	        val page = RemoteHttpClient(FakeDeviceStore())
+	            .timelineBefore(savedPc(server), "task-1", "before-1")
+	            .getOrThrow()
+
+	        val request = requestBody.get().getJSONObject("request")
+	        assertEquals("timeline.snapshot", request.getString("type"))
+	        assertEquals("task-1", request.getString("taskId"))
+	        assertEquals(REMOTE_TIMELINE_PAGE_SIZE, request.getInt("limit"))
+	        assertEquals("before", request.getString("direction"))
+	        assertEquals("before-1", request.getString("cursor"))
+	        assertEquals(listOf("event-0"), page.events.map { it.id })
+	        assertFalse(page.hasMoreBefore)
+	        assertTrue(page.hasMoreAfter)
+	    }
     }
 
     @Test

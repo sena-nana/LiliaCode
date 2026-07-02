@@ -176,6 +176,37 @@ class MainActivityStateTest {
         assertEquals(null, updated[0].pendingAction)
     }
 
+    @Test
+    fun olderTimelinePagePrependsEventsAndKeepsPaginationState() {
+        val detail = taskDetail(
+            timeline = listOf(
+                timelineItem("event-2", "Second"),
+                timelineItem("event-3", "Third"),
+            ),
+            page = RemoteTimelinePage(
+                events = listOf(timelineItem("event-2", "Second"), timelineItem("event-3", "Third")),
+                beforeCursor = "before-2",
+                afterCursor = "after-3",
+                hasMoreBefore = true,
+                hasMoreAfter = false,
+            ),
+        )
+        val olderPage = RemoteTimelinePage(
+            events = listOf(timelineItem("event-1", "First"), timelineItem("event-2", "Duplicate")),
+            beforeCursor = "before-1",
+            hasMoreBefore = false,
+            hasMoreAfter = true,
+        )
+
+        val updated = detail.withOlderTimelinePage(olderPage)
+
+        assertEquals(listOf("event-1", "event-2", "event-3"), updated.timeline.map { it.id })
+        assertEquals("before-1", updated.timelinePage.beforeCursor)
+        assertEquals("after-3", updated.timelinePage.afterCursor)
+        assertFalse(updated.timelinePage.hasMoreBefore)
+        assertFalse(updated.timelinePage.hasMoreAfter)
+    }
+
     private fun savedPc(
         endpointId: String,
         bridgeUrl: String,
@@ -224,14 +255,25 @@ class MainActivityStateTest {
         taskId: String = "task-1",
         status: String = "running",
         pendingActionTitle: String? = null,
+        timeline: List<RemoteTimelineItem> = emptyList(),
+        page: RemoteTimelinePage = RemoteTimelinePage(timeline),
     ): RemoteTaskDetail =
         RemoteTaskDetail(
             task = taskSummary(taskId = taskId, status = status),
             relatedTasks = listOf(taskSummary(taskId = taskId, status = status)),
             runtimePhase = status,
             processSessionId = null,
-            timeline = emptyList(),
+            timeline = timeline,
             pendingInteraction = pendingActionTitle?.let(::pendingInteraction),
+            timelinePage = page,
+        )
+
+    private fun timelineItem(id: String, summary: String): RemoteTimelineItem =
+        RemoteTimelineItem(
+            id = id,
+            title = id,
+            summary = summary,
+            status = "completed",
         )
 
     private fun pendingInteraction(title: String): PendingInteraction =

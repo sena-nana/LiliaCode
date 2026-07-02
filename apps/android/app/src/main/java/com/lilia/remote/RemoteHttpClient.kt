@@ -9,6 +9,8 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
+internal const val REMOTE_TIMELINE_PAGE_SIZE = 80
+
 class RemoteHttpClient(
     private val repository: RemoteDeviceStore,
 ) {
@@ -64,12 +66,43 @@ class RemoteHttpClient(
         }
     }
 
-    suspend fun taskDetail(pc: SavedPc, taskId: String): Result<RemoteTaskDetail> = withContext(Dispatchers.IO) {
+    suspend fun taskDetail(
+        pc: SavedPc,
+        taskId: String,
+        timelineLimit: Int = REMOTE_TIMELINE_PAGE_SIZE,
+    ): Result<RemoteTaskDetail> = withContext(Dispatchers.IO) {
         runCatching {
             val taskPayload = dispatch(pc, JSONObject().put("type", "tasks.get").put("taskId", taskId))
-            val timelinePayload = dispatch(pc, JSONObject().put("type", "timeline.snapshot").put("taskId", taskId))
+            val timelinePayload = dispatch(
+                pc,
+                JSONObject()
+                    .put("type", "timeline.snapshot")
+                    .put("taskId", taskId)
+                    .put("limit", timelineLimit)
+                    .put("direction", "latest"),
+            )
             val pendingPayload = dispatch(pc, JSONObject().put("type", "interaction.pending.read").put("taskId", taskId))
             RemotePayloadParser.parseTaskDetail(taskId, taskPayload, timelinePayload, pendingPayload)
+        }
+    }
+
+    suspend fun timelineBefore(
+        pc: SavedPc,
+        taskId: String,
+        beforeCursor: String,
+        timelineLimit: Int = REMOTE_TIMELINE_PAGE_SIZE,
+    ): Result<RemoteTimelinePage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = dispatch(
+                pc,
+                JSONObject()
+                    .put("type", "timeline.snapshot")
+                    .put("taskId", taskId)
+                    .put("limit", timelineLimit)
+                    .put("direction", "before")
+                    .put("cursor", beforeCursor),
+            )
+            RemotePayloadParser.parseTimelinePagePayload(payload)
         }
     }
 

@@ -97,6 +97,43 @@ class RemotePayloadParserTest {
     }
 
     @Test
+    fun prependTimelineDeduplicatesByIdAndKeepsOlderEventsFirst() {
+        val merged = RemotePayloadParser.prependTimeline(
+            existing = listOf(
+                RemoteTimelineItem(
+                    id = "event-2",
+                    title = "Second",
+                    summary = "Existing second",
+                    status = "running",
+                ),
+                RemoteTimelineItem(
+                    id = "event-3",
+                    title = "Third",
+                    summary = "Existing third",
+                    status = "running",
+                ),
+            ),
+            incoming = listOf(
+                RemoteTimelineItem(
+                    id = "event-1",
+                    title = "First",
+                    summary = "Older first",
+                    status = "completed",
+                ),
+                RemoteTimelineItem(
+                    id = "event-2",
+                    title = "Second",
+                    summary = "Older duplicate second",
+                    status = "completed",
+                ),
+            ),
+        )
+
+        assertEquals(listOf("event-1", "event-2", "event-3"), merged.map { it.id })
+        assertEquals("Existing second", merged[1].summary)
+    }
+
+    @Test
     fun taskListFallsBackForBlankTitleAndStatus() {
         val tasks = RemotePayloadParser.parseTaskList(
             JSONObject(
@@ -164,7 +201,7 @@ class RemotePayloadParserTest {
                 """
                 {
                   "type": "timeline.snapshot",
-                  "events": [
+	                  "events": [
                     {
                       "id": "event-1",
                       "kind": "message",
@@ -172,8 +209,14 @@ class RemotePayloadParserTest {
                       "summary": "Ready",
                       "status": "success"
                     }
-                  ]
-                }
+	                  ],
+	                  "page": {
+	                    "beforeCursor": "before-1",
+	                    "afterCursor": "after-1",
+	                    "hasMoreBefore": true,
+	                    "hasMoreAfter": false
+	                  }
+	                }
                 """.trimIndent(),
             ),
             pendingPayload = JSONObject(
@@ -206,6 +249,10 @@ class RemotePayloadParserTest {
         assertEquals("jsonl-process-1", detail.processSessionId)
         assertEquals("Assistant", detail.timeline[0].title)
         assertEquals("Ready", detail.timeline[0].summary)
+        assertEquals("before-1", detail.timelinePage.beforeCursor)
+        assertEquals("after-1", detail.timelinePage.afterCursor)
+        assertTrue(detail.timelinePage.hasMoreBefore)
+        assertFalse(detail.timelinePage.hasMoreAfter)
         assertNotNull(detail.pendingInteraction)
         assertEquals("task-1", detail.pendingInteraction?.taskId)
         assertEquals("Continue?", detail.pendingInteraction?.body)

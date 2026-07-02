@@ -76,6 +76,23 @@ pub struct AgentTimelineEvent {
     pub intra_turn_order: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelinePageCursor {
+    pub turn_seq: i64,
+    pub intra_turn_order: i64,
+    pub created_at: i64,
+    pub id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimelinePage {
+    pub events: Vec<AgentTimelineEvent>,
+    pub before_cursor: Option<String>,
+    pub after_cursor: Option<String>,
+    pub has_more_before: bool,
+    pub has_more_after: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTimelineEventInput {
@@ -317,6 +334,256 @@ pub fn list(conn: &Connection, task_id: &str) -> Result<Vec<AgentTimelineEvent>,
         out.push(row.map_err(|e| format!("agent_timeline_list: 行解析失败：{e}"))?);
     }
     Ok(out)
+}
+
+pub fn list_latest_page(
+    conn: &Connection,
+    task_id: &str,
+    limit: usize,
+) -> Result<TimelinePage, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, task_id, turn_id, backend, kind, status, title, summary,
+                      payload, created_at, updated_at, turn_seq, intra_turn_order
+               FROM agent_timeline_events
+               WHERE task_id = ?1
+               ORDER BY turn_seq DESC, intra_turn_order DESC, created_at DESC, id DESC
+               LIMIT ?2"#,
+        )
+        .map_err(|e| format!("agent_timeline_latest_page: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id, limit as i64], row_to_event)
+        .map_err(|e| format!("agent_timeline_latest_page: query 失败：{e}"))?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| format!("agent_timeline_latest_page: 行解析失败：{e}"))?);
+    }
+    events.reverse();
+    page_for_events(conn, task_id, events)
+}
+
+pub fn list_before_page(
+    conn: &Connection,
+    task_id: &str,
+    cursor: &str,
+    limit: usize,
+) -> Result<TimelinePage, String> {
+    let cursor = cursor_for_event(conn, task_id, cursor)?
+        .ok_or_else(|| "agent_timeline: timeline cursor 事件不存在".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, task_id, turn_id, backend, kind, status, title, summary,
+                      payload, created_at, updated_at, turn_seq, intra_turn_order
+               FROM agent_timeline_events
+               WHERE task_id = ?1
+                 AND (
+                   turn_seq < ?2
+                   OR (turn_seq = ?2 AND intra_turn_order < ?3)
+                   OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at < ?4)
+                   OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at = ?4 AND id < ?5)
+                 )
+               ORDER BY turn_seq DESC, intra_turn_order DESC, created_at DESC, id DESC
+               LIMIT ?6"#,
+        )
+        .map_err(|e| format!("agent_timeline_before_page: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(
+            params![
+                task_id,
+                cursor.turn_seq,
+                cursor.intra_turn_order,
+                cursor.created_at,
+                cursor.id,
+                limit as i64
+            ],
+            row_to_event,
+        )
+        .map_err(|e| format!("agent_timeline_before_page: query 失败：{e}"))?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| format!("agent_timeline_before_page: 行解析失败：{e}"))?);
+    }
+    events.reverse();
+    page_for_events(conn, task_id, events)
+}
+
+pub fn list_after_event(
+    conn: &Connection,
+    task_id: &str,
+    event_id: &str,
+    limit: Option<usize>,
+) -> Result<Vec<AgentTimelineEvent>, String> {
+    let Some(cursor) = cursor_for_event(conn, task_id, event_id)? else {
+        return list(conn, task_id);
+    };
+    list_after_cursor_key(conn, task_id, &cursor, limit)
+}
+
+pub fn list_after_cursor(
+    conn: &Connection,
+    task_id: &str,
+    cursor: &str,
+    limit: Option<usize>,
+) -> Result<Vec<AgentTimelineEvent>, String> {
+    let Some(cursor) = cursor_for_event(conn, task_id, cursor)? else {
+        return list(conn, task_id);
+    };
+    list_after_cursor_key(conn, task_id, &cursor, limit)
+}
+
+fn list_after_cursor_key(
+    conn: &Connection,
+    task_id: &str,
+    cursor: &TimelinePageCursor,
+    limit: Option<usize>,
+) -> Result<Vec<AgentTimelineEvent>, String> {
+    let limit = limit.map(|value| value as i64).unwrap_or(i64::MAX);
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, task_id, turn_id, backend, kind, status, title, summary,
+                      payload, created_at, updated_at, turn_seq, intra_turn_order
+               FROM agent_timeline_events
+               WHERE task_id = ?1
+                 AND (
+                   turn_seq > ?2
+                   OR (turn_seq = ?2 AND intra_turn_order > ?3)
+                   OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at > ?4)
+                   OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at = ?4 AND id > ?5)
+                 )
+               ORDER BY turn_seq ASC, intra_turn_order ASC, created_at ASC, id ASC
+               LIMIT ?6"#,
+        )
+        .map_err(|e| format!("agent_timeline_after_event: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(
+            params![
+                task_id,
+                cursor.turn_seq,
+                cursor.intra_turn_order,
+                cursor.created_at,
+                &cursor.id,
+                limit
+            ],
+            row_to_event,
+        )
+        .map_err(|e| format!("agent_timeline_after_event: query 失败：{e}"))?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| format!("agent_timeline_after_event: 行解析失败：{e}"))?);
+    }
+    Ok(events)
+}
+
+pub fn encode_page_cursor(event: &AgentTimelineEvent) -> String {
+    event.id.clone()
+}
+
+fn cursor_for_event(
+    conn: &Connection,
+    task_id: &str,
+    event_id: &str,
+) -> Result<Option<TimelinePageCursor>, String> {
+    conn.query_row(
+        r#"SELECT turn_seq, intra_turn_order, created_at, id
+           FROM agent_timeline_events
+           WHERE task_id = ?1 AND id = ?2"#,
+        params![task_id, event_id],
+        |row| {
+            Ok(TimelinePageCursor {
+                turn_seq: row.get(0)?,
+                intra_turn_order: row.get(1)?,
+                created_at: row.get(2)?,
+                id: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("agent_timeline_cursor_for_event: query 失败：{e}"))
+}
+
+fn page_for_events(
+    conn: &Connection,
+    task_id: &str,
+    events: Vec<AgentTimelineEvent>,
+) -> Result<TimelinePage, String> {
+    let before_cursor = events.first().map(encode_page_cursor);
+    let after_cursor = events.last().map(encode_page_cursor);
+    let has_more_before = events
+        .first()
+        .map(|event| has_event_before(conn, task_id, event))
+        .transpose()?
+        .unwrap_or(false);
+    let has_more_after = events
+        .last()
+        .map(|event| has_event_after(conn, task_id, event))
+        .transpose()?
+        .unwrap_or(false);
+    Ok(TimelinePage {
+        events,
+        before_cursor,
+        after_cursor,
+        has_more_before,
+        has_more_after,
+    })
+}
+
+fn has_event_before(
+    conn: &Connection,
+    task_id: &str,
+    event: &AgentTimelineEvent,
+) -> Result<bool, String> {
+    has_event_on_side(conn, task_id, event, "<")
+}
+
+fn has_event_after(
+    conn: &Connection,
+    task_id: &str,
+    event: &AgentTimelineEvent,
+) -> Result<bool, String> {
+    has_event_on_side(conn, task_id, event, ">")
+}
+
+fn has_event_on_side(
+    conn: &Connection,
+    task_id: &str,
+    event: &AgentTimelineEvent,
+    direction: &str,
+) -> Result<bool, String> {
+    let comparator = match direction {
+        "<" => {
+            r#"turn_seq < ?2
+               OR (turn_seq = ?2 AND intra_turn_order < ?3)
+               OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at < ?4)
+               OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at = ?4 AND id < ?5)"#
+        }
+        ">" => {
+            r#"turn_seq > ?2
+               OR (turn_seq = ?2 AND intra_turn_order > ?3)
+               OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at > ?4)
+               OR (turn_seq = ?2 AND intra_turn_order = ?3 AND created_at = ?4 AND id > ?5)"#
+        }
+        _ => unreachable!(),
+    };
+    let sql = format!(
+        r#"SELECT 1
+           FROM agent_timeline_events
+           WHERE task_id = ?1 AND ({comparator})
+           LIMIT 1"#
+    );
+    conn.query_row(
+        &sql,
+        params![
+            task_id,
+            event.turn_seq,
+            event.intra_turn_order,
+            event.created_at,
+            event.id
+        ],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|value| value.is_some())
+    .map_err(|e| format!("agent_timeline_has_event: query 失败：{e}"))
 }
 
 pub fn clear(conn: &Connection, task_id: &str) -> Result<usize, String> {
@@ -580,6 +847,133 @@ mod tests {
             .map(|e| e.id)
             .collect();
         assert_eq!(listed, vec!["t2-late", "t2-early", "t1-first", "t1-second"],);
+    }
+
+    #[test]
+    fn latest_page_returns_tail_in_forward_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn).unwrap();
+        for index in 0..5 {
+            insert(
+                &conn,
+                input(
+                    &format!("event-{index}"),
+                    "task-1",
+                    Some(&format!("turn-{index}")),
+                    "message",
+                    100 + index,
+                ),
+            )
+            .unwrap();
+        }
+
+        let page = list_latest_page(&conn, "task-1", 3).unwrap();
+
+        assert_eq!(
+            page.events
+                .iter()
+                .map(|event| event.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["event-2", "event-3", "event-4"],
+        );
+        assert!(page.has_more_before);
+        assert!(!page.has_more_after);
+        assert!(page.before_cursor.is_some());
+        assert!(page.after_cursor.is_some());
+    }
+
+    #[test]
+    fn before_page_returns_older_events_and_has_more_before() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn).unwrap();
+        for index in 0..5 {
+            insert(
+                &conn,
+                input(
+                    &format!("event-{index}"),
+                    "task-1",
+                    Some(&format!("turn-{index}")),
+                    "message",
+                    100 + index,
+                ),
+            )
+            .unwrap();
+        }
+        let latest = list_latest_page(&conn, "task-1", 2).unwrap();
+        let cursor = latest.before_cursor.unwrap();
+
+        let older = list_before_page(&conn, "task-1", &cursor, 2).unwrap();
+
+        assert_eq!(
+            older
+                .events
+                .iter()
+                .map(|event| event.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["event-1", "event-2"],
+        );
+        assert!(older.has_more_before);
+        assert!(older.has_more_after);
+    }
+
+    #[test]
+    fn after_event_returns_only_newer_events() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn).unwrap();
+        for index in 0..4 {
+            insert(
+                &conn,
+                input(
+                    &format!("event-{index}"),
+                    "task-1",
+                    Some(&format!("turn-{index}")),
+                    "message",
+                    100 + index,
+                ),
+            )
+            .unwrap();
+        }
+
+        let events = list_after_event(&conn, "task-1", "event-1", None).unwrap();
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["event-2", "event-3"],
+        );
+    }
+
+    #[test]
+    fn after_cursor_returns_only_newer_events() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn).unwrap();
+        for index in 0..4 {
+            insert(
+                &conn,
+                input(
+                    &format!("event-{index}"),
+                    "task-1",
+                    Some(&format!("turn-{index}")),
+                    "message",
+                    100 + index,
+                ),
+            )
+            .unwrap();
+        }
+        let latest = list_latest_page(&conn, "task-1", 3).unwrap();
+        let cursor = encode_page_cursor(&latest.events[0]);
+
+        let events = list_after_cursor(&conn, "task-1", &cursor, Some(2)).unwrap();
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["event-2", "event-3"],
+        );
     }
 
     #[test]
