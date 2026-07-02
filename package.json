@@ -14,8 +14,8 @@
     "pretauri:dev": "node scripts/check-package-manager.mjs",
     "tauri:dev": "yarn check:package-manager && node scripts/tauri-dev.mjs",
     "pretauri:build": "node scripts/check-package-manager.mjs",
-    "tauri:build": "yarn check:package-manager && yarn --cwd apps/desktop tauri build",
-    "tauri:build:no-bundle": "yarn check:package-manager && yarn --cwd apps/desktop tauri build --no-bundle",
+    "tauri:build": "yarn check:package-manager && node scripts/with-rust-cache.mjs yarn --cwd apps/desktop tauri build",
+    "tauri:build:no-bundle": "yarn check:package-manager && node scripts/with-rust-cache.mjs yarn --cwd apps/desktop tauri build --no-bundle",
     "tauri:install": "yarn check:package-manager && node scripts/tauri-install.mjs",
     "predev": "node scripts/check-package-manager.mjs",
     "dev": "yarn check:package-manager && yarn --cwd apps/desktop dev",
@@ -52,10 +52,10 @@
     "preverify:desktop:build": "node scripts/check-package-manager.mjs",
     "verify:desktop:build": "yarn check:package-manager && yarn --cwd apps/desktop build",
     "preverify:tauri": "node scripts/check-package-manager.mjs",
-    "verify:tauri": "yarn check:package-manager && cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "verify:tauri": "yarn check:package-manager && node scripts/with-rust-cache.mjs cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "preverify:contracts": "node scripts/check-package-manager.mjs",
     "verify:contracts": "yarn check:package-manager && node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json",
-    "verify:agent-debug": "yarn check:package-manager && node apps/desktop/agent-debug/verify-agent-debug.mjs"
+    "verify:agent-debug": "yarn check:package-manager && node scripts/with-rust-cache.mjs node apps/desktop/agent-debug/verify-agent-debug.mjs"
   },
   "devDependencies": {
     "@lilia/build": "portal:../LiliaUI/packages/build",
