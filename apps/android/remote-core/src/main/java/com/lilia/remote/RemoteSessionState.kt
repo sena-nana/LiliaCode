@@ -1,6 +1,8 @@
 package com.lilia.remote
 
-const val UNTRUSTED_PC_MESSAGE = "This PC no longer trusts this phone. Pair again."
+const val UNTRUSTED_PC_MESSAGE = "这台电脑已取消信任本手机，请重新配对。"
+
+private const val TASK_DEPENDENCY_CYCLE_MESSAGE = "检测到任务依赖循环，无法启动会话。"
 
 data class ActivePcSwitcherItem(
     val pc: SavedPc,
@@ -83,7 +85,7 @@ fun taskRunBlockInfo(
     val dependencyBlock = dependencyRunBlockInfo(task, byId, listOf(task), LinkedHashSet())
     if (task.status == "blocked") {
         return TaskRunBlockInfo(
-            reason = "This task is marked blocked and cannot start a session.",
+            reason = "此任务已标记为阻塞，无法启动会话。",
             chain = dependencyBlock?.chain ?: listOf(task),
         )
     }
@@ -98,7 +100,7 @@ private fun dependencyRunBlockInfo(
 ): TaskRunBlockInfo? {
     if (!visiting.add(task.taskId)) {
         return TaskRunBlockInfo(
-            reason = "Task dependency cycle detected; cannot start a session.",
+            reason = TASK_DEPENDENCY_CYCLE_MESSAGE,
             chain = chain,
         )
     }
@@ -107,13 +109,13 @@ private fun dependencyRunBlockInfo(
         val nextChain = chain + dependency
         if (visiting.contains(dependency.taskId)) {
             return TaskRunBlockInfo(
-                reason = "Task dependency cycle detected; cannot start a session.",
+                reason = TASK_DEPENDENCY_CYCLE_MESSAGE,
                 chain = nextChain,
             )
         }
         if (dependency.status != "done") {
             return TaskRunBlockInfo(
-                reason = "Cannot send until dependency is done: ${dependency.title} (${taskStatusLabel(dependency.status)}).",
+                reason = "依赖任务完成前无法发送：${dependency.title}（${taskStatusLabel(dependency.status)}）。",
                 chain = nextChain,
             )
         }
@@ -127,13 +129,13 @@ private fun dependencyRunBlockInfo(
 
 fun taskStatusLabel(status: String): String =
     when (status) {
-        "draft" -> "Draft"
-        "waiting" -> "Waiting"
-        "running" -> "Running"
-        "blocked" -> "Blocked"
-        "done" -> "Done"
-        "cancelled" -> "Cancelled"
-        else -> status.ifBlank { "Waiting" }.replaceFirstChar { it.uppercase() }
+        "draft" -> "草稿"
+        "waiting" -> "等待中"
+        "running" -> "运行中"
+        "blocked" -> "阻塞"
+        "done" -> "已完成"
+        "cancelled" -> "已取消"
+        else -> status.ifBlank { "等待中" }
     }
 
 data class InteractionOptionQuestion(
@@ -166,7 +168,7 @@ fun interactionOptionQuestion(interaction: PendingInteraction): InteractionOptio
             val option = options.optJSONObject(index) ?: continue
             val label = option.optString("label")
                 .ifBlank { option.optString("id") }
-                .ifBlank { "Option ${index + 1}" }
+                .ifBlank { "选项 ${index + 1}" }
             val id = option.optString("id")
                 .ifBlank { label }
             add(
@@ -178,7 +180,7 @@ fun interactionOptionQuestion(interaction: PendingInteraction): InteractionOptio
             )
         }
         if (question.optBoolean("allowOther")) {
-            add(InteractionOption(id = "other", label = "Other", description = null))
+            add(InteractionOption(id = "other", label = "其他", description = null))
         }
     }
     if (parsed.isEmpty()) return null
@@ -227,4 +229,4 @@ fun interactionCanSubmit(
 }
 
 fun taskInboxUnsupportedMessage(): String =
-    "Task inbox is not supported by this PC bridge."
+    "当前电脑桥接端不支持任务收件箱。"

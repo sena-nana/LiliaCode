@@ -69,7 +69,7 @@ class MainActivityStateTest {
 
         assertTrue(shouldClearActivePcForFailure(revoked))
         assertFalse(shouldClearActivePcForFailure(offline))
-        assertEquals("This PC no longer trusts this phone. Pair again.", UNTRUSTED_PC_MESSAGE)
+        assertEquals("这台电脑已取消信任本手机，请重新配对。", UNTRUSTED_PC_MESSAGE)
     }
 
     @Test
@@ -103,7 +103,7 @@ class MainActivityStateTest {
 
         val info = taskRunBlockInfo(task, listOf(task))
 
-        assertEquals("This task is marked blocked and cannot start a session.", info?.reason)
+        assertEquals("此任务已标记为阻塞，无法启动会话。", info?.reason)
         assertEquals(listOf("task-1"), info?.chain?.map { it.taskId })
     }
 
@@ -114,7 +114,7 @@ class MainActivityStateTest {
 
         val info = taskRunBlockInfo(current, listOf(current, dependency))
 
-        assertEquals("Cannot send until dependency is done: Design pass (Running).", info?.reason)
+        assertEquals("依赖任务完成前无法发送：Design pass（运行中）。", info?.reason)
         assertEquals(listOf("task-1", "dep-1"), info?.chain?.map { it.taskId })
     }
 
@@ -126,7 +126,7 @@ class MainActivityStateTest {
 
         val info = taskRunBlockInfo(current, listOf(current, doneDependency, runningDependency))
 
-        assertEquals("Cannot send until dependency is done: Design pass (Running).", info?.reason)
+        assertEquals("依赖任务完成前无法发送：Design pass（运行中）。", info?.reason)
         assertEquals(listOf("task-1", "dep-1", "dep-2"), info?.chain?.map { it.taskId })
     }
 
@@ -145,7 +145,7 @@ class MainActivityStateTest {
 
         val info = taskRunBlockInfo(current, listOf(current, dependency))
 
-        assertEquals("Task dependency cycle detected; cannot start a session.", info?.reason)
+        assertEquals("检测到任务依赖循环，无法启动会话。", info?.reason)
         assertEquals(listOf("task-1", "dep-1", "task-1"), info?.chain?.map { it.taskId })
     }
 

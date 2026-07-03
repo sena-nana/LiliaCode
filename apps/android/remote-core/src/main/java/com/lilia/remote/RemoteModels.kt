@@ -3,6 +3,8 @@ package com.lilia.remote
 import org.json.JSONArray
 import org.json.JSONObject
 
+const val DEFAULT_PC_DISPLAY_NAME = "Lilia 电脑"
+
 data class RemotePairingTicket(
     val protocolVersion: Int,
     val ticketId: String,
@@ -58,8 +60,8 @@ data class RemoteTimelinePage(
 )
 
 enum class RemoteSessionForkMode(val wireValue: String, val label: String) {
-    CONTINUE("continue", "Continue from selected turn"),
-    FORK("fork", "Fork from selected turn"),
+    CONTINUE("continue", "从选中轮次继续"),
+    FORK("fork", "从选中轮次分叉"),
 }
 
 data class RemoteBranchAnchor(

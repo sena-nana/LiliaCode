@@ -88,69 +88,69 @@ class VoiceRuntime {
         when (state.pageId) {
             VoicePageId.HUB -> VoicePageManifest(
                 pageId = VoicePageId.HUB,
-                title = "Home",
-                focus = VoiceFocus("hub", "project entry"),
+                title = "首页",
+                focus = VoiceFocus("hub", "项目入口"),
                 commands = listOf(
-                    VoiceCommand("open_project_selector", listOf("open", "open project", "打开", "打开项目")),
-                    VoiceCommand("open_search", listOf("search", "搜索", "查找")),
-                    VoiceCommand("show_running", listOf("running", "运行中", "查看运行中")),
+                    VoiceCommand("open_project_selector", listOf("打开", "打开项目", "open", "open project")),
+                    VoiceCommand("open_search", listOf("搜索", "查找", "search")),
+                    VoiceCommand("show_running", listOf("运行中", "查看运行中", "running")),
                 ),
             )
             VoicePageId.PROJECT_SELECTION -> VoicePageManifest(
                 pageId = VoicePageId.PROJECT_SELECTION,
-                title = "Select project",
-                focus = VoiceFocus("list", "project list"),
+                title = "选择项目",
+                focus = VoiceFocus("list", "项目列表"),
                 commands = selectionCommands(),
                 entities = taskEntities(state.tasks),
             )
             VoicePageId.SEARCH_DICTATION -> VoicePageManifest(
                 pageId = VoicePageId.SEARCH_DICTATION,
-                title = "Search projects",
-                focus = VoiceFocus("dictation", "search text"),
+                title = "搜索项目",
+                focus = VoiceFocus("dictation", "搜索内容"),
                 commands = globalCommands(),
             )
             VoicePageId.SEARCH_RESULTS -> VoicePageManifest(
                 pageId = VoicePageId.SEARCH_RESULTS,
-                title = "Search results",
-                focus = VoiceFocus("list", "matching projects"),
+                title = "搜索结果",
+                focus = VoiceFocus("list", "匹配项目"),
                 commands = selectionCommands(),
                 entities = taskEntities(state.searchResults),
             )
             VoicePageId.PROJECT_DETAIL -> VoicePageManifest(
                 pageId = VoicePageId.PROJECT_DETAIL,
-                title = state.selectedTask?.task?.title ?: "Project",
-                focus = VoiceFocus("object", state.selectedTask?.task?.title ?: "current project"),
+                title = state.selectedTask?.task?.title ?: "项目",
+                focus = VoiceFocus("object", state.selectedTask?.task?.title ?: "当前项目"),
                 commands = listOf(
-                    VoiceCommand("start_project", listOf("start", "启动", "运行")),
-                    VoiceCommand("stop_project", listOf("stop", "停止"), VoiceRisk.CONFIRM),
-                    VoiceCommand("show_logs", listOf("logs", "查看日志", "日志")),
-                    VoiceCommand("refresh", listOf("refresh", "刷新")),
+                    VoiceCommand("start_project", listOf("启动", "运行", "start")),
+                    VoiceCommand("stop_project", listOf("停止", "stop"), VoiceRisk.CONFIRM),
+                    VoiceCommand("show_logs", listOf("查看日志", "日志", "logs")),
+                    VoiceCommand("refresh", listOf("刷新", "refresh")),
                 ) + globalCommands(),
             )
             VoicePageId.LOG -> VoicePageManifest(
                 pageId = VoicePageId.LOG,
-                title = "Logs",
-                focus = VoiceFocus("stream", "current log stream"),
+                title = "日志",
+                focus = VoiceFocus("stream", "当前日志流"),
                 commands = listOf(
-                    VoiceCommand("pause_log", listOf("pause", "暂停")),
-                    VoiceCommand("resume_log", listOf("continue", "继续")),
-                    VoiceCommand("filter_errors", listOf("errors", "筛选错误", "错误")),
-                    VoiceCommand("summarize_log", listOf("summary", "总结")),
+                    VoiceCommand("pause_log", listOf("暂停", "pause")),
+                    VoiceCommand("resume_log", listOf("继续", "continue")),
+                    VoiceCommand("filter_errors", listOf("错误", "筛选错误", "errors")),
+                    VoiceCommand("summarize_log", listOf("总结", "summary")),
                 ) + globalCommands(),
             )
             VoicePageId.START_COMMAND_DICTATION -> VoicePageManifest(
                 pageId = VoicePageId.START_COMMAND_DICTATION,
-                title = "Start command",
-                focus = VoiceFocus("dictation", "process command"),
+                title = "启动命令",
+                focus = VoiceFocus("dictation", "进程命令"),
                 commands = globalCommands(),
             )
             VoicePageId.CONFIRM -> VoicePageManifest(
                 pageId = VoicePageId.CONFIRM,
-                title = "Confirm",
-                focus = VoiceFocus("confirm", "pending action"),
+                title = "确认",
+                focus = VoiceFocus("confirm", "待确认操作"),
                 commands = listOf(
-                    VoiceCommand("confirm", listOf("confirm", "yes", "确认", "执行", "是")),
-                    VoiceCommand("cancel_confirm", listOf("cancel", "no", "取消", "不要", "否")),
+                    VoiceCommand("confirm", listOf("确认", "执行", "是", "confirm", "yes")),
+                    VoiceCommand("cancel_confirm", listOf("取消", "不要", "否", "cancel", "no")),
                 ),
             )
         }
@@ -176,7 +176,7 @@ class VoiceRuntime {
                     state.copy(
                         pageId = confirmation.returnPage,
                         pendingConfirmation = null,
-                        notice = "Canceled.",
+                        notice = "已取消。",
                     ),
                 )
             }
@@ -197,7 +197,7 @@ class VoiceRuntime {
             VoicePageId.SEARCH_DICTATION,
             VoicePageId.START_COMMAND_DICTATION,
             VoicePageId.CONFIRM,
-            -> VoiceRuntimeResult(state.copy(notice = "Listening for input."))
+            -> VoiceRuntimeResult(state.copy(notice = "正在等待输入。"))
         }
     }
 
@@ -243,14 +243,14 @@ class VoiceRuntime {
                 VoiceRuntimeResult(
                     state.copy(
                         pageId = VoicePageId.SEARCH_RESULTS,
-                        searchQuery = "running",
+                        searchQuery = "运行中",
                         searchResults = running,
                         selectedIndex = 0,
-                        notice = if (running.isEmpty()) "No running projects." else "",
+                        notice = if (running.isEmpty()) "没有运行中的项目。" else "",
                     ),
                 )
             }
-            else -> VoiceRuntimeResult(state.copy(notice = "Command not available here."))
+            else -> VoiceRuntimeResult(state.copy(notice = "此处不能使用该命令。"))
         }
 
     private fun handleSelection(
@@ -259,7 +259,7 @@ class VoiceRuntime {
         normalized: String,
     ): VoiceRuntimeResult {
         if (candidates.isEmpty()) {
-            return VoiceRuntimeResult(state.copy(notice = "No projects available."))
+            return VoiceRuntimeResult(state.copy(notice = "没有可用项目。"))
         }
         if (hasAny(normalized, "next", "下一项", "下一个", "下一页", "更多")) {
             return VoiceRuntimeResult(state.copy(selectedIndex = (state.selectedIndex + 1).coerceAtMost(candidates.lastIndex)))
@@ -276,12 +276,12 @@ class VoiceRuntime {
         findTaskBySpokenName(candidates, normalized)?.let {
             return openCandidate(state, it)
         }
-        return VoiceRuntimeResult(state.copy(notice = "Project not found."))
+        return VoiceRuntimeResult(state.copy(notice = "未找到项目。"))
     }
 
     private fun openCandidate(state: VoiceRuntimeState, task: RemoteTaskSummary): VoiceRuntimeResult =
         VoiceRuntimeResult(
-            state.copy(notice = "Opening ${task.title}."),
+            state.copy(notice = "正在打开 ${task.title}。"),
             VoiceAction.OpenTask(task.taskId),
         )
 
@@ -291,13 +291,13 @@ class VoiceRuntime {
         normalized: String,
     ): VoiceRuntimeResult {
         val taskId = state.selectedTask?.task?.taskId
-            ?: return VoiceRuntimeResult(state.copy(notice = "No project selected."))
+            ?: return VoiceRuntimeResult(state.copy(notice = "尚未选择项目。"))
         return when {
             hasAny(normalized, "logs", "日志", "查看日志") -> VoiceRuntimeResult(
                 state.copy(pageId = VoicePageId.LOG, notice = ""),
             )
             hasAny(normalized, "refresh", "刷新") -> VoiceRuntimeResult(
-                state.copy(notice = "Refreshing."),
+                state.copy(notice = "正在刷新。"),
                 VoiceAction.RefreshInbox,
             )
             startsWithAny(normalized, "start", "启动", "运行") -> {
@@ -312,7 +312,7 @@ class VoiceRuntime {
                     )
                 } else {
                     VoiceRuntimeResult(
-                        state.copy(notice = "Starting process."),
+                        state.copy(notice = "正在启动进程。"),
                         VoiceAction.StartProcess(taskId, command),
                     )
                 }
@@ -321,32 +321,32 @@ class VoiceRuntime {
                 state.copy(
                     pageId = VoicePageId.CONFIRM,
                     pendingConfirmation = VoiceConfirmation(
-                        message = "Stop current process?",
+                        message = "停止当前进程？",
                         action = VoiceAction.StopProcess(taskId),
                         returnPage = VoicePageId.PROJECT_DETAIL,
                     ),
-                    notice = "Confirm stop.",
+                    notice = "请确认停止。",
                 ),
             )
-            else -> VoiceRuntimeResult(state.copy(notice = "Command not available for this project."))
+            else -> VoiceRuntimeResult(state.copy(notice = "此项目不能使用该命令。"))
         }
     }
 
     private fun handleLog(state: VoiceRuntimeState, normalized: String): VoiceRuntimeResult =
         when {
             hasAny(normalized, "pause", "暂停") -> VoiceRuntimeResult(
-                state.copy(logPaused = true, notice = "Log updates paused."),
+                state.copy(logPaused = true, notice = "已暂停日志更新。"),
             )
             hasAny(normalized, "continue", "resume", "继续") -> VoiceRuntimeResult(
-                state.copy(logPaused = false, notice = "Log updates resumed."),
+                state.copy(logPaused = false, notice = "已恢复日志更新。"),
             )
             hasAny(normalized, "errors", "错误", "筛选错误") -> VoiceRuntimeResult(
-                state.copy(logErrorsOnly = true, notice = "Showing errors only."),
+                state.copy(logErrorsOnly = true, notice = "仅显示错误。"),
             )
             hasAny(normalized, "summary", "总结") -> VoiceRuntimeResult(
                 state.copy(notice = summarizeLog(state.selectedTask)),
             )
-            else -> VoiceRuntimeResult(state.copy(notice = "Command not available for logs."))
+            else -> VoiceRuntimeResult(state.copy(notice = "日志页不能使用该命令。"))
         }
 
     private fun handleDictation(state: VoiceRuntimeState, text: String): VoiceRuntimeResult =
@@ -360,7 +360,7 @@ class VoiceRuntime {
                         searchQuery = text,
                         searchResults = results,
                         selectedIndex = 0,
-                        notice = if (results.isEmpty()) "No matching projects." else "",
+                        notice = if (results.isEmpty()) "没有匹配的项目。" else "",
                     ),
                 )
             }
@@ -373,7 +373,7 @@ class VoiceRuntime {
                     state.copy(
                         pageId = VoicePageId.PROJECT_DETAIL,
                         inputMode = VoiceInputMode.COMMAND,
-                        notice = "Starting process.",
+                        notice = "正在启动进程。",
                     ),
                     VoiceAction.StartProcess(taskId, text.trim()),
                 )
@@ -384,7 +384,7 @@ class VoiceRuntime {
     private fun handleGlobalCommand(state: VoiceRuntimeState, normalized: String): VoiceRuntimeResult? {
         if (isCancel(normalized) || hasAny(normalized, "back", "返回")) {
             return when (state.pageId) {
-                VoicePageId.HUB -> VoiceRuntimeResult(state.copy(notice = "Already home."))
+                VoicePageId.HUB -> VoiceRuntimeResult(state.copy(notice = "已经在首页。"))
                 VoicePageId.LOG -> VoiceRuntimeResult(state.copy(pageId = VoicePageId.PROJECT_DETAIL, notice = ""))
                 VoicePageId.PROJECT_DETAIL -> VoiceRuntimeResult(state.copy(pageId = VoicePageId.HUB, notice = ""))
                 else -> VoiceRuntimeResult(
@@ -421,16 +421,16 @@ class VoiceRuntime {
 
     private fun selectionCommands(): List<VoiceCommand> =
         listOf(
-            VoiceCommand("open_project", listOf("open {project}", "打开 {project}", "选择 {project}")),
-            VoiceCommand("open_project_by_index", listOf("open first", "打开第一个", "选择第一个")),
-            VoiceCommand("next_item", listOf("next", "下一项", "下一个")),
-            VoiceCommand("previous_item", listOf("previous", "上一项", "上一个")),
+            VoiceCommand("open_project", listOf("打开 {project}", "选择 {project}", "open {project}")),
+            VoiceCommand("open_project_by_index", listOf("打开第一个", "选择第一个", "open first")),
+            VoiceCommand("next_item", listOf("下一项", "下一个", "next")),
+            VoiceCommand("previous_item", listOf("上一项", "上一个", "previous")),
         ) + globalCommands()
 
     private fun globalCommands(): List<VoiceCommand> =
         listOf(
-            VoiceCommand("go_back", listOf("back", "cancel", "返回", "取消")),
-            VoiceCommand("go_home", listOf("home", "首页", "主页")),
+            VoiceCommand("go_back", listOf("返回", "取消", "back", "cancel")),
+            VoiceCommand("go_home", listOf("首页", "主页", "home")),
         )
 }
 
@@ -495,12 +495,12 @@ private fun startCommandFromTranscript(transcript: String): String {
 
 private fun summarizeLog(detail: RemoteTaskDetail?): String {
     val timeline = detail?.timeline.orEmpty()
-    if (timeline.isEmpty()) return "No log events yet."
+    if (timeline.isEmpty()) return "还没有日志事件。"
     val failed = timeline.count { item ->
         val status = normalize(item.status)
         status.contains("fail") || status.contains("error") || status.contains("cancel")
     }
-    return "${timeline.size} events, $failed need attention."
+    return "${timeline.size} 个事件，$failed 个需要关注。"
 }
 
 private fun hasAny(normalized: String, vararg tokens: String): Boolean =

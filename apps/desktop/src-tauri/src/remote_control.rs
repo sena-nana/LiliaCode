@@ -310,7 +310,7 @@ fn pc_name(conn: &Connection) -> Result<String, String> {
     Ok(setting(conn, PC_NAME_KEY)?
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "Lilia PC".to_string()))
+        .unwrap_or_else(|| "Lilia 电脑".to_string()))
 }
 
 fn endpoint_id(conn: &Connection) -> Result<String, String> {
@@ -539,7 +539,7 @@ pub fn remote_control_set_pc_name(
         &conn,
         PC_NAME_KEY,
         if normalized.is_empty() {
-            "Lilia PC"
+            "Lilia 电脑"
         } else {
             normalized
         },
@@ -660,7 +660,7 @@ fn pair_device(
     let device_id = format!("android-{}", Uuid::new_v4());
     let display_name = input.device_name.trim();
     let display_name = if display_name.is_empty() {
-        "Android device"
+        "Android 设备"
     } else {
         display_name
     };
@@ -1651,7 +1651,7 @@ fn handle_http_request(app: AppHandle, request: HttpRequest) -> String {
             let Some(store) = app.try_state::<LiliaStore>() else {
                 return http_json_response(
                     503,
-                    http_error_payload("unavailable", "store unavailable", true),
+                    http_error_payload("unavailable", "存储不可用", true),
                 );
             };
             match store.conn().and_then(|conn| remote_status(&conn)) {
@@ -1672,7 +1672,7 @@ fn handle_http_request(app: AppHandle, request: HttpRequest) -> String {
             let Some(store) = app.try_state::<LiliaStore>() else {
                 return http_json_response(
                     503,
-                    http_error_payload("unavailable", "store unavailable", true),
+                    http_error_payload("unavailable", "存储不可用", true),
                 );
             };
             match store.conn().and_then(|conn| pair_device(&conn, input)) {
@@ -1700,7 +1700,7 @@ fn handle_http_request(app: AppHandle, request: HttpRequest) -> String {
         }
         _ => http_json_response(
             404,
-            http_error_payload("unsupported", "unknown route", false),
+            http_error_payload("unsupported", "未知路由", false),
         ),
     }
 }
@@ -2271,7 +2271,7 @@ mod tests {
 
         assert_eq!(wire["hostEnabled"], true);
         assert_eq!(wire["state"], "listening");
-        assert_eq!(wire["pcName"], "Lilia PC");
+        assert_eq!(wire["pcName"], "Lilia 电脑");
         assert_eq!(wire["keepAwakeEnabled"], true);
         assert!(wire["endpoint"]["endpointId"]
             .as_str()

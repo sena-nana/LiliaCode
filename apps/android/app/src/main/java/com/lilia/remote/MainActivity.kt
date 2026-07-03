@@ -57,7 +57,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
-private const val DETAIL_LIVE_UPDATE_ERROR_MESSAGE = "Live update temporarily unavailable; showing the last loaded task."
+private const val DETAIL_LIVE_UPDATE_ERROR_MESSAGE = "实时更新暂时不可用，正在显示上次加载的任务。"
 private const val DETAIL_SUBSCRIBE_INTERVAL_MS = 1_500L
 private const val DETAIL_SNAPSHOT_FALLBACK_BASE_MS = 5_000L
 private const val DETAIL_SNAPSHOT_FALLBACK_MAX_MS = 15_000L
@@ -119,7 +119,7 @@ fun LiliaRemoteApp(
     var inboxLoading by remember { mutableStateOf(false) }
     var detailLoading by remember { mutableStateOf(false) }
     var remoteError by remember { mutableStateOf("") }
-    var bridgeTone by remember { mutableStateOf("Listening") }
+    var bridgeTone by remember { mutableStateOf("监听中") }
     var bridgeStatus by remember { mutableStateOf<RemoteBridgeStatus?>(null) }
     var providerStatus by remember { mutableStateOf<RemoteProviderStatus?>(null) }
     var pairingBusy by remember { mutableStateOf(false) }
@@ -146,7 +146,7 @@ fun LiliaRemoteApp(
         savedPcs = fallbackRepository?.savedPcs() ?: listOf(pc)
         activePc = pc
         resetActivePcDerivedState()
-        bridgeTone = "Listening"
+        bridgeTone = "监听中"
         pairingError = ""
     }
 
@@ -159,7 +159,7 @@ fun LiliaRemoteApp(
         fallbackRepository?.setActiveTaskId(taskIdToRefresh)
         pendingPcSwitchTaskId = taskIdToRefresh
         pendingColdRestoreTaskId = taskIdToRefresh
-        bridgeTone = "Listening"
+        bridgeTone = "监听中"
         remoteError = ""
         pairingError = ""
     }
@@ -187,7 +187,7 @@ fun LiliaRemoteApp(
             remoteClient.pair(ticket)
                 .onSuccess { acceptPairedPc(it) }
                 .onFailure {
-                    val message = it.message ?: "Pairing failed"
+                    val message = it.message ?: "配对失败"
                     pairingError = message
                     remoteError = message
                 }
@@ -203,7 +203,7 @@ fun LiliaRemoteApp(
         savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
         activePc = null
         resetActivePcDerivedState()
-        bridgeTone = "Pair again"
+        bridgeTone = "重新配对"
         remoteError = message
         pairingError = message
     }
@@ -283,7 +283,7 @@ fun LiliaRemoteApp(
                     if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
                     applyOlderTimelinePage(taskId, it)
                 }
-                .onFailure { handleRemoteFailure(it, "Failed to load earlier timeline", pc) }
+                .onFailure { handleRemoteFailure(it, "加载更早时间线失败", pc) }
             if (!shouldIgnorePcResult(activePc, pc)) {
                 timelineLoadingOlder = false
             }
@@ -364,8 +364,8 @@ fun LiliaRemoteApp(
     suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteGateway): Boolean {
         val accepted = remoteClient.resume(pc).getOrElse {
             if (shouldIgnorePcResult(activePc, pc)) return false
-            bridgeTone = "Offline"
-            handleRemoteFailure(it, "Failed to resume remote session", pc)
+            bridgeTone = "离线"
+            handleRemoteFailure(it, "恢复远程会话失败", pc)
             return false
         }
         if (shouldIgnorePcResult(activePc, pc)) return false
@@ -382,7 +382,7 @@ fun LiliaRemoteApp(
             .onFailure {
                 if (shouldIgnorePcResult(activePc, pc)) return@onFailure
                 bridgeStatus = null
-                bridgeTone = "Offline"
+                bridgeTone = "离线"
             }
             .getOrNull()
         if (shouldIgnorePcResult(activePc, pc)) return false
@@ -399,7 +399,7 @@ fun LiliaRemoteApp(
                 val detail = selectedTask
                 inboxTasks = if (detail == null) it else syncInboxTaskStatus(it, detail)
             }
-            .onFailure { handleRemoteFailure(it, "Failed to load tasks", pc) }
+            .onFailure { handleRemoteFailure(it, "加载任务失败", pc) }
         return true
     }
 
@@ -415,7 +415,7 @@ fun LiliaRemoteApp(
                     if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
                     applyTaskDetail(it.withRelatedTasks(inboxTasks))
                 }
-                .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
+                .onFailure { handleRemoteFailure(it, "加载任务失败", pc) }
             if (!shouldIgnorePcResult(activePc, pc)) {
                 detailLoading = false
             }
@@ -445,7 +445,7 @@ fun LiliaRemoteApp(
                         if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
                         applyTaskDetail(it.withRelatedTasks(inboxTasks))
                     }
-                    .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
+                    .onFailure { handleRemoteFailure(it, "加载任务失败", pc) }
             }
             if (!shouldIgnorePcResult(activePc, pc)) {
                 detailLoading = false
@@ -507,7 +507,7 @@ fun LiliaRemoteApp(
                         applyTaskDetail(it.withRelatedTasks(inboxTasks))
                         clearLiveUpdateError()
                     }
-                    .onFailure { handleRemoteFailure(it, "Failed to refresh task", pc) }
+                    .onFailure { handleRemoteFailure(it, "刷新任务失败", pc) }
             }
             if (!shouldIgnorePcResult(activePc, pc)) {
                 inboxLoading = false
@@ -523,7 +523,7 @@ fun LiliaRemoteApp(
         PairingUriParser.parse(uri)
             .onSuccess { pairWithTicket(it) }
             .onFailure {
-                val message = it.message ?: "Invalid pairing URI"
+                val message = it.message ?: "配对链接无效"
                 pairingError = message
                 remoteError = message
             }
@@ -639,21 +639,21 @@ fun LiliaRemoteApp(
                     onInterrupt = {
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
-                        runTaskAction(pc, taskId, "Interrupt failed", clearError = false) { remoteClient ->
+                        runTaskAction(pc, taskId, "中断失败", clearError = false) { remoteClient ->
                             remoteClient.interrupt(pc, taskId)
                         }
                     },
                     onRetry = { eventId ->
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
-                        runTaskAction(pc, taskId, "Retry failed") { remoteClient ->
+                        runTaskAction(pc, taskId, "重试失败") { remoteClient ->
                             remoteClient.retry(pc, taskId, eventId)
                         }
                     },
                     onResolveInteraction = { interaction, approve, responseText, selectedOptions ->
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
-                        runTaskAction(pc, taskId, "Interaction response failed") { remoteClient ->
+                        runTaskAction(pc, taskId, "回复交互失败") { remoteClient ->
                             remoteClient.resolveInteraction(
                                 pc,
                                 interaction,
@@ -679,7 +679,7 @@ fun LiliaRemoteApp(
                             runTaskAction(
                                 pc,
                                 taskId,
-                                "Send failed",
+                                "发送失败",
                                 onSuccess = {
                                     if (pendingBranchAnchor == branchAnchor) {
                                         pendingBranchAnchor = null
@@ -700,20 +700,20 @@ fun LiliaRemoteApp(
                     onStartProcess = { command ->
                         sendProcessCommand(
                             RemoteRuntimeCommandAdapter.processSpawn(command),
-                            "Start process failed",
+                            "启动进程失败",
                         )
                     },
                     onSendProcessStdin = { stdin ->
                         sendProcessCommand(
                             RemoteRuntimeCommandAdapter.processWriteStdin(stdin),
-                            "Send stdin failed",
+                            "发送标准输入失败",
                             clearError = false,
                         )
                     },
                     onStopProcess = {
                         sendProcessCommand(
                             RemoteRuntimeCommandAdapter.processKill(),
-                            "Stop process failed",
+                            "停止进程失败",
                             clearError = false,
                         )
                     },
@@ -767,7 +767,7 @@ private fun PairingScreen(
             scannerVisible = true
             error = ""
         } else {
-            error = "Camera permission is required to scan the pairing QR code."
+            error = "需要相机权限才能扫描配对二维码。"
         }
     }
 
@@ -785,25 +785,25 @@ private fun PairingScreen(
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                RemoteHeader(title = "Active PC", subtitle = "Not connected", tone = "Ready")
+                RemoteHeader(title = "当前电脑", subtitle = "未连接", tone = "就绪")
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Lilia Remote",
+                        text = "Lilia 远控",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onBackground,
                     )
                     Text(
-                        text = "Pair this phone with a trusted PC to review tasks, continue chats, and handle approvals.",
+                        text = "将这台手机与受信任电脑配对，用手机查看任务、继续对话并处理审批。",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Muted,
                     )
                 }
                 StatusPanel(
                     rows = listOf(
-                        "Android shell" to "Compose remote client",
-                        "Transport" to "LAN HTTP bridge",
-                        "Remote protocol" to "Awaiting pairing",
+                        "Android 壳" to "Compose 远控客户端",
+                        "传输方式" to "局域网 HTTP 桥接",
+                        "远控协议" to "等待配对",
                     ),
                 )
             }
@@ -817,7 +817,7 @@ private fun PairingScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
-                    label = { Text("Pairing URI") },
+                    label = { Text("配对链接") },
                     placeholder = { Text("lilia-remote://pair?...") },
                 )
                 val displayError = error.ifBlank { externalError }
@@ -840,13 +840,13 @@ private fun PairingScreen(
                     enabled = !busy,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Scan QR")
+                    Text("扫描二维码")
                 }
                 Button(
                     onClick = {
                         PairingUriParser.parse(pairingUri)
                             .onSuccess { onPair(it) }
-                            .onFailure { error = it.message ?: "Invalid pairing URI" }
+                            .onFailure { error = it.message ?: "配对链接无效" }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !busy,
@@ -856,7 +856,7 @@ private fun PairingScreen(
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                 ) {
-                    Text(if (busy) "Pairing..." else "Pair PC")
+                    Text(if (busy) "配对中…" else "配对电脑")
                 }
             }
         }
@@ -868,7 +868,7 @@ private fun PairingScreen(
                     pairingUri = uri
                     PairingUriParser.parse(uri)
                         .onSuccess { onPair(it) }
-                        .onFailure { error = it.message ?: "Invalid pairing QR code" }
+                        .onFailure { error = it.message ?: "配对二维码无效" }
                 },
                 onClose = { scannerVisible = false },
                 onError = { error = it },
@@ -897,7 +897,7 @@ private fun InboxScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         RemoteHeader(
-            title = "Active PC",
+            title = "当前电脑",
             subtitle = pc.displayName,
             tone = bridgeTone,
             activePc = pc,
@@ -906,16 +906,16 @@ private fun InboxScreen(
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onForgetPc, shape = RoundedCornerShape(8.dp)) {
-                Text("Forget PC")
+                Text("移除电脑")
             }
             OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(8.dp)) {
-                Text(if (loading) "Refreshing" else "Refresh")
+                Text(if (loading) "刷新中" else "刷新")
             }
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 Text(
-                    text = "Task Inbox",
+                    text = "任务收件箱",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onBackground,
@@ -925,10 +925,10 @@ private fun InboxScreen(
                 item { Text(error, color = Danger, style = MaterialTheme.typography.bodySmall) }
             }
             if (loading && tasks.isEmpty()) {
-                item { Text("Loading tasks...", color = Muted, style = MaterialTheme.typography.bodyMedium) }
+                item { Text("正在加载任务…", color = Muted, style = MaterialTheme.typography.bodyMedium) }
             }
             if (!loading && tasks.isEmpty() && error.isBlank()) {
-                item { Text("No tasks from the active PC.", color = Muted, style = MaterialTheme.typography.bodyMedium) }
+                item { Text("当前电脑还没有可显示的任务。", color = Muted, style = MaterialTheme.typography.bodyMedium) }
             }
             items(tasks, key = { it.taskId }) { task ->
                 TaskCard(
@@ -1022,30 +1022,30 @@ private fun TaskDetailScreen(
             onSelectPc = onSelectPc,
         )
         OutlinedButton(onClick = onBack, shape = RoundedCornerShape(8.dp)) {
-            Text("Back")
+            Text("返回")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(8.dp)) {
-                Text(if (loading) "Refreshing" else "Refresh")
+                Text(if (loading) "刷新中" else "刷新")
             }
             OutlinedButton(
                 onClick = onInterrupt,
                 enabled = !loading && capabilities.supportsInterrupt,
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text("Interrupt")
+                Text("中断")
             }
             OutlinedButton(
                 onClick = { onRetry(null) },
                 enabled = retryEnabled && hasRetryableError,
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text("Retry")
+                Text("重试")
             }
         }
         providerStatus?.let {
             Text(
-                text = "Provider ${it.backend}: ${if (it.ready) "ready" else "not ready"}",
+                text = "模型后端 ${it.backend}：${if (it.ready) "就绪" else "未就绪"}",
                 color = if (it.ready) MaterialTheme.colorScheme.primary else Danger,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1133,7 +1133,7 @@ private fun TaskDetailScreen(
                         onValueChange = { interactionResponse = it },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
-                        label = { Text("Response") },
+                        label = { Text("回复") },
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1172,7 +1172,7 @@ private fun TaskDetailScreen(
             if (timelineLoadingOlder) {
                 item(key = "timeline-loading-older") {
                     Text(
-                        "Loading earlier events...",
+                        "正在加载更早事件…",
                         color = Muted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -1181,7 +1181,7 @@ private fun TaskDetailScreen(
             if (detail.timeline.isEmpty()) {
                 item {
                     Text(
-                        "No timeline events yet.",
+                        "还没有时间线事件。",
                         color = Muted,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -1222,7 +1222,7 @@ private fun TaskDetailScreen(
                         enabled = !loading,
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        Text("Clear")
+                        Text("清除")
                     }
                 }
             }
@@ -1232,8 +1232,8 @@ private fun TaskDetailScreen(
             onValueChange = { draft = it },
             modifier = Modifier.fillMaxWidth(),
             enabled = taskRunBlockInfo == null,
-            label = { Text("Message") },
-            placeholder = { Text("Send through the PC runner") },
+            label = { Text("消息") },
+            placeholder = { Text("通过电脑端运行器发送") },
         )
         Button(
             onClick = {
@@ -1255,11 +1255,11 @@ private fun TaskDetailScreen(
         ) {
             Text(
                 when {
-                    loading -> "Working..."
-                    !providerReady -> "Provider not ready"
-                    !capabilities.supportsChatSend -> "Send unsupported"
-                    taskRunBlockInfo != null -> "Blocked"
-                    else -> "Send"
+                    loading -> "处理中…"
+                    !providerReady -> "模型后端未就绪"
+                    !capabilities.supportsChatSend -> "不支持发送"
+                    taskRunBlockInfo != null -> "已阻塞"
+                    else -> "发送"
                 },
             )
         }
@@ -1281,9 +1281,9 @@ private fun ProcessSessionPanel(
     onStop: () -> Unit,
 ) {
     Panel {
-        Text("Process session", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+        Text("进程会话", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
         Text(
-            text = if (running) "Running ${processSessionId.orEmpty()}" else "Idle",
+            text = if (running) "运行中 ${processSessionId.orEmpty()}" else "空闲",
             color = if (running) MaterialTheme.colorScheme.primary else Muted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -1302,14 +1302,14 @@ private fun ProcessSessionPanel(
                     enabled = !loading && stdin.isNotEmpty(),
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Send stdin")
+                    Text("发送 stdin")
                 }
                 OutlinedButton(
                     onClick = onStop,
                     enabled = !loading,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Stop")
+                    Text("停止")
                 }
             }
         } else {
@@ -1322,7 +1322,7 @@ private fun ProcessSessionPanel(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = startBlockReason == null,
                 minLines = 1,
-                label = { Text("Command") },
+                label = { Text("命令") },
                 placeholder = { Text("npm test -- --watch") },
             )
             Button(
@@ -1333,9 +1333,9 @@ private fun ProcessSessionPanel(
             ) {
                 Text(
                     when {
-                        loading -> "Working..."
-                        startBlockReason != null -> "Blocked"
-                        else -> "Start process"
+                        loading -> "处理中…"
+                        startBlockReason != null -> "已阻塞"
+                        else -> "启动进程"
                     },
                 )
             }
@@ -1346,10 +1346,10 @@ private fun ProcessSessionPanel(
 @Composable
 private fun BlockedTaskPanel(info: TaskRunBlockInfo) {
     Panel {
-        Text("Blocked task", color = Danger, fontWeight = FontWeight.SemiBold)
+        Text("阻塞任务", color = Danger, fontWeight = FontWeight.SemiBold)
         Text(info.reason, color = Muted, style = MaterialTheme.typography.bodyMedium)
         if (info.chain.isNotEmpty()) {
-            Text("Blocking chain", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text("阻塞链路", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
             info.chain.forEachIndexed { index, task ->
                 Text(
                     text = "${index + 1}. ${task.title} (${taskStatusLabel(task.status)})",
@@ -1397,7 +1397,7 @@ private fun RemoteHeader(
                         shape = RoundedCornerShape(8.dp),
                     ) {
                         Text(
-                            activePc?.displayName ?: "PC",
+                            activePc?.displayName ?: "电脑",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1411,7 +1411,7 @@ private fun RemoteHeader(
                                 text = {
                                     Column {
                                         Text(
-                                            if (item.active) "${item.pc.displayName} (Active)" else item.pc.displayName,
+                                            if (item.active) "${item.pc.displayName}（当前）" else item.pc.displayName,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
@@ -1504,7 +1504,7 @@ private fun TaskCard(task: RemoteTaskSummary, blockInfo: TaskRunBlockInfo?, onCl
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
-            Text(task.projectName ?: "Standalone chat", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text(task.projectName ?: "独立对话", color = Muted, style = MaterialTheme.typography.bodySmall)
             if (blockInfo != null) {
                 Text(blockInfo.reason, color = Danger, style = MaterialTheme.typography.bodySmall)
                 val chainText = blockInfo.chain.joinToString(" -> ") { it.title }
@@ -1550,11 +1550,11 @@ private fun TimelineRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     TimelineChip(text = item.kind, color = Muted)
                     item.role?.let { role ->
-                        TimelineChip(text = role.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.primary)
+                        TimelineChip(text = timelineRoleLabel(role), color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
-            TimelineChip(text = item.status, color = statusColor)
+            TimelineChip(text = timelineStatusLabel(item.status), color = statusColor)
         }
         if (item.summary.isNotBlank()) {
             Text(
@@ -1576,7 +1576,7 @@ private fun TimelineRow(
                 enabled = retryEnabled,
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text("Retry")
+                Text("重试")
             }
         }
         if (item.branchSourceTurnId != null) {
@@ -1589,14 +1589,14 @@ private fun TimelineRow(
                     enabled = !loading && blockReason == null,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Continue")
+                    Text("继续")
                 }
                 OutlinedButton(
                     onClick = { onStartBranch(RemoteSessionForkMode.FORK) },
                     enabled = !loading && blockReason == null,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Fork")
+                    Text("分叉")
                 }
             }
         }
@@ -1654,14 +1654,34 @@ private val Muted = Color(0xFFB8C2BC)
 private val Danger = Color(0xFFE07A6F)
 
 private fun bridgeToneLabel(status: RemoteBridgeStatus): String {
-    if (!status.hostEnabled) return "Disabled"
+    if (!status.hostEnabled) return "已禁用"
     return when (status.state) {
-        "pairing" -> "Pairing"
-        "listening", "connected" -> "Listening"
-        "disconnected" -> "Offline"
-        else -> status.state.replaceFirstChar { it.uppercase() }
+        "pairing" -> "配对中"
+        "listening", "connected" -> "监听中"
+        "disconnected" -> "离线"
+        else -> status.state
     }
 }
+
+private fun timelineRoleLabel(role: String): String =
+    when (role) {
+        "assistant" -> "助手"
+        "user" -> "用户"
+        "system" -> "系统"
+        else -> role
+    }
+
+private fun timelineStatusLabel(status: String): String =
+    when (status) {
+        "success", "completed", "done" -> "已完成"
+        "failed", "error" -> "失败"
+        "cancelled" -> "已取消"
+        "requires_action" -> "需要操作"
+        "running", "started", "in_progress" -> "运行中"
+        "pending" -> "等待中"
+        "info" -> "信息"
+        else -> status
+    }
 
 private fun interactionAcceptsTextResponse(interaction: PendingInteraction): Boolean {
     if (interaction.kind != "ask_user" && interaction.kind != "plan_approval") return false
@@ -1684,7 +1704,7 @@ private fun interactionPrimaryActionLabel(interaction: PendingInteraction, respo
         ?.optJSONObject(0)
         ?: return interaction.approveLabel
     if (question.optString("mode") != "confirm") return interaction.approveLabel
-    return if (interaction.kind == "plan_approval") "Send revision" else "Send response"
+    return if (interaction.kind == "plan_approval") "发送修改意见" else "发送回复"
 }
 
 @Preview

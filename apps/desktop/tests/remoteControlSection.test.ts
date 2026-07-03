@@ -26,7 +26,7 @@ describe("RemoteControlSection", () => {
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === REMOTE_CONTROL_START_PAIRING_COMMAND)).toBe(true);
-      expect(view.getByAltText("Lilia Android pairing QR code")).toBeInTheDocument();
+      expect(view.getByAltText("Lilia Android 配对二维码")).toBeInTheDocument();
     });
 
     const generatedUri = vi.mocked(toDataURL).mock.calls.at(-1)?.[0] as string | undefined;
@@ -48,7 +48,7 @@ describe("RemoteControlSection", () => {
       await fireEvent.click(view.getByRole("button", { name: "生成二维码" }));
 
       await waitFor(() => {
-        expect(view.getByAltText("Lilia Android pairing QR code")).toBeInTheDocument();
+        expect(view.getByAltText("Lilia Android 配对二维码")).toBeInTheDocument();
       });
 
       await mockInvoke(REMOTE_CONTROL_PAIR_DEVICE_COMMAND, {
@@ -65,7 +65,7 @@ describe("RemoteControlSection", () => {
       await waitFor(() => {
         expect(view.getByRole("switch", { name: "远控服务" })).toBeChecked();
         expect(view.getByText("Pixel")).toBeInTheDocument();
-        expect(view.queryByAltText("Lilia Android pairing QR code")).not.toBeInTheDocument();
+        expect(view.queryByAltText("Lilia Android 配对二维码")).not.toBeInTheDocument();
       });
     } finally {
       view.unmount();
@@ -83,7 +83,7 @@ describe("RemoteControlSection", () => {
     await fireEvent.click(view.getByRole("button", { name: "生成二维码" }));
 
     await waitFor(() => {
-      expect(view.getByAltText("Lilia Android pairing QR code")).toBeInTheDocument();
+      expect(view.getByAltText("Lilia Android 配对二维码")).toBeInTheDocument();
     });
     expect(view.getByRole("switch", { name: "远控服务" })).toBeChecked();
 
@@ -91,7 +91,7 @@ describe("RemoteControlSection", () => {
 
     await waitFor(() => {
       expect(view.getByRole("switch", { name: "远控服务" })).not.toBeChecked();
-      expect(view.queryByAltText("Lilia Android pairing QR code")).not.toBeInTheDocument();
+      expect(view.queryByAltText("Lilia Android 配对二维码")).not.toBeInTheDocument();
     });
   });
 });

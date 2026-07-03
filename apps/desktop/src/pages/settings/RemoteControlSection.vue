@@ -231,15 +231,15 @@ onBeforeUnmount(stopRemoteControlPolling);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">PC 名称</div>
+      <div class="settings-row__label">电脑名称</div>
       <div class="settings-row__control">
-        <input v-model="pcNameDraft" type="text" class="ui-input" data-agent-id="settings.remote-control.pc-name" placeholder="Lilia PC" />
+        <input v-model="pcNameDraft" type="text" class="ui-input" data-agent-id="settings.remote-control.pc-name" placeholder="Lilia 电脑" />
         <button
           type="button"
           class="ui-button ui-button--ghost"
           data-agent-id="settings.remote-control.pc-name.save"
           :disabled="savingName"
-          aria-label="保存 PC 名称"
+          aria-label="保存电脑名称"
           @click="savePcName"
         >
           保存
@@ -251,7 +251,7 @@ onBeforeUnmount(stopRemoteControlPolling);
       <div class="settings-row__label">扫码配对</div>
       <div class="remote-pairing">
         <div class="remote-pairing__qr">
-          <img v-if="qrDataUrl" :src="qrDataUrl" alt="Lilia Android pairing QR code" />
+          <img v-if="qrDataUrl" :src="qrDataUrl" alt="Lilia Android 配对二维码" />
           <QrCode v-else :size="72" aria-hidden="true" />
         </div>
         <div class="remote-pairing__body">
@@ -263,7 +263,7 @@ onBeforeUnmount(stopRemoteControlPolling);
               过期时间：{{ formatTime(activeTicket.expiresAt) }}
             </template>
             <template v-else>
-              二维码只用于建立 trusted device，后续重连不需要重新扫码。
+              二维码只用于建立可信设备，后续重连不需要重新扫码。
             </template>
           </div>
           <div class="remote-pairing__actions">

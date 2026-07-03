@@ -298,7 +298,7 @@ class RemoteHttpClientTest {
             .listTasks(savedPc(server))
             .exceptionOrNull()
 
-        assertEquals("Remote bridge returned an empty response (HTTP 500).", err?.message)
+        assertEquals("远控桥接返回空响应（HTTP 500）。", err?.message)
     }
 
     @Test

@@ -17,7 +17,7 @@ class RemoteHttpResponseAdapterTest {
             RemoteHttpResponseAdapter.parseJson(502, "   ")
         }.exceptionOrNull()
 
-        assertEquals("Remote bridge returned an empty response (HTTP 502).", err?.message)
+        assertEquals("远控桥接返回空响应（HTTP 502）。", err?.message)
     }
 
     @Test
@@ -27,7 +27,7 @@ class RemoteHttpResponseAdapterTest {
         }.exceptionOrNull()
 
         assertEquals(
-            "Remote bridge returned a non-JSON response (HTTP 404): <html> <body>Not Found</body> </html>",
+            "远控桥接返回了非 JSON 响应（HTTP 404）：<html> <body>Not Found</body> </html>",
             err?.message,
         )
     }

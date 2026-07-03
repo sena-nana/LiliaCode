@@ -54,6 +54,7 @@ import com.lilia.remote.taskRunBlockInfo
 import com.lilia.remote.taskStatusLabel
 import com.lilia.remote.withRelatedTasks
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private var pairingIntentUri by mutableStateOf<String?>(null)
@@ -100,14 +101,14 @@ fun LiliaVoiceApp(
     ) { granted ->
         recordAudioGranted = granted
         listening = granted
-        if (!granted) error = "Microphone permission is required for voice commands."
+        if (!granted) error = "需要麦克风权限才能使用语音命令。"
     }
 
     fun clearTrustedPcIfNeeded(err: Throwable): Boolean {
         if (!shouldClearActivePcForFailure(err)) return false
         gateway?.clearActivePc()
         activePc = null
-        voiceState = VoiceRuntimeState(notice = "Pair this device again.")
+        voiceState = VoiceRuntimeState(notice = "请重新配对此设备。")
         return true
     }
 
@@ -117,14 +118,14 @@ fun LiliaVoiceApp(
         error = ""
         scope.launch {
             val accepted = remoteGateway.resume(pc).getOrElse {
-                if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "Remote session unavailable."
+                if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "远程会话不可用。"
                 loading = false
                 return@launch
             }
             if (!accepted) {
                 remoteGateway.clearActivePc()
                 activePc = null
-                voiceState = VoiceRuntimeState(notice = "Pair this device again.")
+                voiceState = VoiceRuntimeState(notice = "请重新配对此设备。")
                 loading = false
                 return@launch
             }
@@ -133,7 +134,7 @@ fun LiliaVoiceApp(
                     voiceState = runtime.withTasks(voiceState, tasks)
                 }
                 .onFailure {
-                    if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "Failed to load projects."
+                    if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "加载项目失败。"
                 }
             loading = false
         }
@@ -154,7 +155,7 @@ fun LiliaVoiceApp(
                     )
                 }
                 .onFailure {
-                    if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "Failed to refresh project."
+                    if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "刷新项目失败。"
                 }
             loading = false
         }
@@ -175,7 +176,7 @@ fun LiliaVoiceApp(
                     )
                 }
                 .onFailure {
-                    if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "Failed to open project."
+                    if (!clearTrustedPcIfNeeded(it)) error = it.message ?: "打开项目失败。"
                 }
             loading = false
         }
@@ -198,7 +199,7 @@ fun LiliaVoiceApp(
                 scope.launch {
                     remoteGateway.startProcess(pc, detail, action.command)
                         .onSuccess { refreshSelectedTask() }
-                        .onFailure { error = it.message ?: "Failed to start process." }
+                        .onFailure { error = it.message ?: "启动进程失败。" }
                     loading = false
                 }
             }
@@ -208,7 +209,7 @@ fun LiliaVoiceApp(
                 scope.launch {
                     remoteGateway.stopProcess(pc, action.taskId)
                         .onSuccess { refreshSelectedTask() }
-                        .onFailure { error = it.message ?: "Failed to stop process." }
+                        .onFailure { error = it.message ?: "停止进程失败。" }
                     loading = false
                 }
             }
@@ -228,7 +229,7 @@ fun LiliaVoiceApp(
         error = ""
         PairingUriParser.parse(uri)
             .onFailure {
-                error = it.message ?: "Invalid pairing link."
+                error = it.message ?: "配对链接无效。"
                 pairingBusy = false
             }
             .onSuccess { ticket ->
@@ -239,7 +240,7 @@ fun LiliaVoiceApp(
                             voiceState = VoiceRuntimeState()
                             loadInbox(pc)
                         }
-                        .onFailure { error = it.message ?: "Pairing failed." }
+                        .onFailure { error = it.message ?: "配对失败。" }
                     pairingBusy = false
                 }
             }
@@ -348,9 +349,9 @@ private fun VoiceSpeechRecognizer(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No command heard."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening timed out."
-                            else -> "Voice recognition failed."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "没有听到命令。"
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "聆听超时。"
+                            else -> "语音识别失败。"
                         }
                         onError(message)
                     }
@@ -361,7 +362,7 @@ private fun VoiceSpeechRecognizer(
                             ?.firstOrNull()
                             .orEmpty()
                         if (text.isBlank()) {
-                            onError("No command heard.")
+                            onError("没有听到命令。")
                         } else {
                             onTranscript(text)
                         }
@@ -377,6 +378,8 @@ private fun VoiceSpeechRecognizer(
         if (!active || recognizer == null) return@LaunchedEffect
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.SIMPLIFIED_CHINESE.toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale.SIMPLIFIED_CHINESE.toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         }
         recognizer.startListening(intent)
@@ -398,8 +401,8 @@ private fun PairingScreen(
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("LiliaVoice", color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
-            Text("Pair this device with a trusted PC to control Lilia projects by voice.", color = Muted)
+            Text("Lilia 语音", color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
+            Text("将此设备与受信任电脑配对，用中文语音控制 Lilia 项目。", color = Muted)
         }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(
@@ -407,7 +410,7 @@ private fun PairingScreen(
                 onValueChange = onPairingUriChange,
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
-                label = { Text("Pairing link") },
+                label = { Text("配对链接") },
                 placeholder = { Text("lilia-remote://pair?...") },
             )
             if (error.isNotBlank()) {
@@ -419,7 +422,7 @@ private fun PairingScreen(
                 enabled = !busy && pairingUri.isNotBlank(),
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text(if (busy) "Pairing..." else "Pair PC")
+                Text(if (busy) "配对中…" else "配对电脑")
             }
         }
     }
@@ -453,7 +456,7 @@ private fun VoiceRuntimeScreen(
             Text(state.notice, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
         }
         if (lastTranscript.isNotBlank()) {
-            Text("Heard: $lastTranscript", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text("识别到：$lastTranscript", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
@@ -463,25 +466,25 @@ private fun VoiceRuntimeScreen(
             ) {
                 Text(
                     when {
-                        listening -> "Listening"
-                        !recordAudioGranted -> "Enable voice"
-                        else -> "Listen"
+                        listening -> "聆听中"
+                        !recordAudioGranted -> "启用语音"
+                        else -> "聆听"
                     },
                 )
             }
             OutlinedButton(onClick = onRefresh, enabled = !loading, shape = RoundedCornerShape(8.dp)) {
-                Text(if (loading) "Refreshing" else "Refresh")
+                Text(if (loading) "刷新中" else "刷新")
             }
         }
         FocusPanel(manifest)
         when (state.pageId) {
             VoicePageId.HUB -> HubContent(state.tasks)
             VoicePageId.PROJECT_SELECTION -> TaskListContent(state.tasks, state.selectedIndex)
-            VoicePageId.SEARCH_DICTATION -> DictationContent("Say the project name or search text.")
+            VoicePageId.SEARCH_DICTATION -> DictationContent("说出项目名称或搜索内容。")
             VoicePageId.SEARCH_RESULTS -> TaskListContent(state.searchResults, state.selectedIndex)
             VoicePageId.PROJECT_DETAIL -> detail?.let { ProjectDetailContent(it) }
             VoicePageId.LOG -> detail?.let { LogContent(it, state.logErrorsOnly, state.logPaused) }
-            VoicePageId.START_COMMAND_DICTATION -> DictationContent("Say the command to start.")
+            VoicePageId.START_COMMAND_DICTATION -> DictationContent("说出要启动的命令。")
             VoicePageId.CONFIRM -> ConfirmContent(state.pendingConfirmation?.message.orEmpty())
         }
     }
@@ -517,8 +520,8 @@ private fun FocusPanel(manifest: VoicePageManifest) {
 private fun HubContent(tasks: List<RemoteTaskSummary>) {
     val running = tasks.count { it.status == "running" }
     Panel {
-        Text("${tasks.size} projects, $running running", color = MaterialTheme.colorScheme.onSurface)
-        Text("Open, search, or review running projects.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text("${tasks.size} 个项目，$running 个运行中", color = MaterialTheme.colorScheme.onSurface)
+        Text("可打开、搜索或查看运行中的项目。", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -526,7 +529,7 @@ private fun HubContent(tasks: List<RemoteTaskSummary>) {
 private fun TaskListContent(tasks: List<RemoteTaskSummary>, selectedIndex: Int) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (tasks.isEmpty()) {
-            item { Text("No projects available.", color = Muted) }
+            item { Text("没有可用项目。", color = Muted) }
         }
         itemsIndexed(tasks) { index, task ->
             val selected = index == selectedIndex
@@ -534,7 +537,7 @@ private fun TaskListContent(tasks: List<RemoteTaskSummary>, selectedIndex: Int) 
                 selected = selected,
             ) {
                 Text("${index + 1}. ${task.title}", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-                Text(task.projectName ?: "Standalone", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text(task.projectName ?: "独立对话", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Text(taskStatusLabel(task.status), color = if (task.status == "blocked") Danger else MaterialTheme.colorScheme.secondary)
             }
         }
@@ -546,10 +549,10 @@ private fun ProjectDetailContent(detail: RemoteTaskDetail) {
     val blockInfo = taskRunBlockInfo(detail.task, detail.relatedTasks)
     Panel {
         Text(detail.task.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-        Text("Status: ${taskStatusLabel(detail.task.status)}", color = Muted)
-        Text("Runtime: ${detail.runtimePhase}", color = Muted)
+        Text("状态：${taskStatusLabel(detail.task.status)}", color = Muted)
+        Text("运行阶段：${detail.runtimePhase}", color = Muted)
         if (detail.processSessionId != null) {
-            Text("Process running", color = MaterialTheme.colorScheme.primary)
+            Text("进程运行中", color = MaterialTheme.colorScheme.primary)
         }
         if (blockInfo != null) {
             Text(blockInfo.reason, color = Danger, style = MaterialTheme.typography.bodySmall)
@@ -569,10 +572,10 @@ private fun LogContent(detail: RemoteTaskDetail, errorsOnly: Boolean, paused: Bo
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Text(if (paused) "Paused" else "Live", color = MaterialTheme.colorScheme.secondary)
+            Text(if (paused) "已暂停" else "实时", color = MaterialTheme.colorScheme.secondary)
         }
         if (timeline.isEmpty()) {
-            item { Text("No log events.", color = Muted) }
+            item { Text("没有日志事件。", color = Muted) }
         }
         itemsIndexed(timeline) { _, item ->
             Panel {
@@ -594,7 +597,7 @@ private fun DictationContent(text: String) {
 private fun ConfirmContent(message: String) {
     Panel(selected = true) {
         Text(message, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-        Text("Say confirm or cancel.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text("请说确认或取消。", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

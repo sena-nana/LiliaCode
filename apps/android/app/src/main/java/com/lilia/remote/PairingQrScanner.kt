@@ -78,9 +78,9 @@ fun PairingQrScanner(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("Camera lifecycle is unavailable.", color = Color(0xFFE07A6F))
+                Text("当前无法使用相机生命周期。", color = Color(0xFFE07A6F))
                 Button(onClick = onClose, modifier = Modifier.padding(top = 12.dp)) {
-                    Text("Close")
+                    Text("关闭")
                 }
             }
             return@Box
@@ -120,7 +120,7 @@ fun PairingQrScanner(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "Scan the Lilia Remote pairing QR code",
+                "扫描 Lilia 远控配对二维码",
                 color = MaterialTheme.colorScheme.onBackground,
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -129,7 +129,7 @@ fun PairingQrScanner(
                     onClick = onClose,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Cancel")
+                    Text("取消")
                 }
             }
         }
@@ -150,7 +150,7 @@ private fun startCamera(
             runCatching {
                 val cameraProvider = cameraProviderFuture.get()
                 if (!cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
-                    error("No back camera is available on this device.")
+                    error("此设备没有可用的后置相机。")
                 }
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
@@ -169,7 +169,7 @@ private fun startCamera(
                     analysis,
                 )
             }.onFailure { error ->
-                onError(error.message ?: "Failed to start camera")
+                onError(error.message ?: "启动相机失败")
             }
         },
         ContextCompat.getMainExecutor(context),
@@ -215,7 +215,7 @@ private fun scanImage(
             }
         }
         .addOnFailureListener { error ->
-            onError(error.message ?: "Failed to scan QR code")
+            onError(error.message ?: "扫描二维码失败")
         }
         .addOnCompleteListener {
             imageProxy.close()

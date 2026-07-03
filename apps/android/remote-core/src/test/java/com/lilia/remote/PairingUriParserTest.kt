@@ -39,7 +39,7 @@ class PairingUriParserTest {
                 "&endpoint=pc-1&bridge=http%3A%2F%2F192.168.1.5%3A41478",
         ).getOrThrow()
 
-        assertEquals("Lilia PC", ticket.pcName)
+        assertEquals("Lilia 电脑", ticket.pcName)
     }
 
     @Test
@@ -49,7 +49,7 @@ class PairingUriParserTest {
         )
 
         assertTrue(result.isFailure)
-        assertEquals("Pairing URI missing bridge", result.exceptionOrNull()?.message)
+        assertEquals("配对链接缺少桥接地址", result.exceptionOrNull()?.message)
     }
 
     @Test
@@ -68,7 +68,7 @@ class PairingUriParserTest {
         )
 
         assertTrue(result.isFailure)
-        assertEquals("Unsupported remote protocol version: 2", result.exceptionOrNull()?.message)
+        assertEquals("不支持的远控协议版本：2", result.exceptionOrNull()?.message)
     }
 
     @Test
@@ -79,7 +79,7 @@ class PairingUriParserTest {
         )
 
         assertTrue(result.isFailure)
-        assertEquals("Pairing bridge must use HTTP(S)", result.exceptionOrNull()?.message)
+        assertEquals("配对桥接地址必须使用 HTTP(S)", result.exceptionOrNull()?.message)
     }
 
     @Test
@@ -90,7 +90,7 @@ class PairingUriParserTest {
         )
 
         assertTrue(result.isFailure)
-        assertEquals("Pairing bridge URL missing port", result.exceptionOrNull()?.message)
+        assertEquals("配对桥接地址缺少端口", result.exceptionOrNull()?.message)
     }
 
     @Test
@@ -101,7 +101,7 @@ class PairingUriParserTest {
         )
 
         assertTrue(result.isFailure)
-        assertEquals("Pairing bridge URL must not include a path", result.exceptionOrNull()?.message)
+        assertEquals("配对桥接地址不能包含路径", result.exceptionOrNull()?.message)
     }
 
     @Test
@@ -112,6 +112,6 @@ class PairingUriParserTest {
         )
 
         assertTrue(result.isFailure)
-        assertEquals("Pairing bridge URL must not include query or fragment", result.exceptionOrNull()?.message)
+        assertEquals("配对桥接地址不能包含查询参数或片段", result.exceptionOrNull()?.message)
     }
 }
