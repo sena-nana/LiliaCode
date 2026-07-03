@@ -1,6 +1,6 @@
 ---
 name: lilia-app-validation
-description: Validation strategy for final Lilia desktop application changes. Use when Codex needs to choose or report checks after app code, routes, commands, UI, Tauri Rust, dependencies, build config, documentation, tests, or LiliaUI dependency updates change.
+description: Validation strategy for final Lilia desktop application changes. Use when Codex needs to choose or report checks after app code, routes, commands, UI, Tauri Rust, dependencies, build config, documentation, tests, local LiliaUI dependency switching, or LiliaUI dependency updates change.
 ---
 
 # Lilia App Validation
@@ -27,6 +27,15 @@ Run checks that validate real behavior affected by the change. Prefer targeted f
 - Keep tests focused on the changed capability and existing public behavior.
 
 ## LiliaUI Dependency Changes
+
+When changing Lilia's local LiliaUI dependency switch, package scripts, or documentation:
+
+- Treat the switch itself as the behavior under test. Do not add low-value tests that hard-match script output.
+- Run `node --check scripts/lilia-ui-deps.mjs` after editing the switch script.
+- Run `yarn liliaui:local`, confirm the four `@lilia/*` packages report local `portal:` sources, then run `yarn liliaui:remote` and confirm `yarn liliaui:status` reports remote again.
+- Confirm `package.json` and `yarn.lock` do not retain `resolutions` or `portal:../LiliaUI` entries after switching back.
+- Run `yarn install --immutable` to prove the committed default dependency state still uses the pinned GitHub lockfile.
+- Skip broader desktop or Agent validation unless the change also affects app runtime behavior, build wrappers, UI, commands, or the Agent debug harness.
 
 When a final app consumes a changed LiliaUI package:
 
