@@ -10,12 +10,24 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const distRoot = path.join(repoRoot, "apps", "desktop", "dist");
 const assetsRoot = path.join(distRoot, "assets");
 const warningLimitBytes = 500 * 1024;
+const checkMode = process.argv.includes("--check");
+
+const oversizedAllowedGroups = new Set(["Mermaid lazy path"]);
+const kib = (value) => value * 1024;
+const budget = (totalBytes, totalGzipBytes, maxFileBytes, maxFileGzipBytes) => ({
+  totalBytes: kib(totalBytes),
+  totalGzipBytes: kib(totalGzipBytes),
+  maxFileBytes: kib(maxFileBytes),
+  maxFileGzipBytes: kib(maxFileGzipBytes),
+});
 
 const groups = [
   {
     label: "main entry",
+    budget: budget(220, 75, 90, 35),
     patterns: [
       /^index\.html$/,
+      /^index-/,
       /^mainBootstrap-/,
       /^AppShell-/,
       /^router-/,
@@ -25,6 +37,7 @@ const groups = [
   },
   {
     label: "chat path",
+    budget: budget(380, 115, 90, 28),
     patterns: [
       /^TaskDetail/,
       /^Chat(?:Transcript|Composer|SidebarHost|ScrollMap|Suggestions)/,
@@ -36,6 +49,8 @@ const groups = [
   },
   {
     label: "Mermaid lazy path",
+    lazy: true,
+    budget: budget(3400, 950, 720, 170),
     patterns: [
       /mermaid/i,
       /diagram/i,
@@ -46,6 +61,8 @@ const groups = [
   },
   {
     label: "KaTeX lazy path",
+    lazy: true,
+    budget: budget(1550, 1080, 300, 95),
     patterns: [
       /^KaTeX_/,
       /katex/i,
@@ -56,6 +73,8 @@ const groups = [
   },
   {
     label: "VueFlow lazy path",
+    lazy: true,
+    budget: budget(190, 65, 175, 58),
     patterns: [
       /vue-flow/i,
       /^AutomationCanvasPane-/,
@@ -84,20 +103,50 @@ function readFiles() {
     });
 }
 
+function readInitialAssetNames() {
+  const indexHtml = readFileSync(path.join(distRoot, "index.html"), "utf8");
+  const assetNames = new Set();
+  for (const match of indexHtml.matchAll(/\b(?:src|href)=["']([^"']+)["']/g)) {
+    const assetMatch = match[1].match(/(?:^|\/)assets\/([^/?#]+)/);
+    if (assetMatch) {
+      assetNames.add(decodeURIComponent(assetMatch[1]));
+    }
+  }
+  return assetNames;
+}
+
 function matchesGroup(file, group) {
   return group.patterns.some((pattern) => pattern.test(file.baseName));
+}
+
+function findGroups(file) {
+  return groups.filter((group) => matchesGroup(file, group));
 }
 
 function formatSize(bytes) {
   return `${(bytes / 1024).toFixed(2)} KiB`;
 }
 
-function printGroup(group, files) {
+function summarizeGroup(files) {
   const totalBytes = files.reduce((sum, file) => sum + file.bytes, 0);
   const totalGzipBytes = files.reduce((sum, file) => sum + file.gzipBytes, 0);
+  const largestFile = files.reduce((largest, file) => (
+    !largest || file.bytes > largest.bytes ? file : largest
+  ), null);
+  const largestGzipFile = files.reduce((largest, file) => (
+    !largest || file.gzipBytes > largest.gzipBytes ? file : largest
+  ), null);
+  return { totalBytes, totalGzipBytes, largestFile, largestGzipFile };
+}
+
+function printGroup(group, files, summary) {
   console.log(`\n${group.label}`);
   console.log(`  files: ${files.length}`);
-  console.log(`  total: ${formatSize(totalBytes)} / gzip ${formatSize(totalGzipBytes)}`);
+  console.log(`  total: ${formatSize(summary.totalBytes)} / gzip ${formatSize(summary.totalGzipBytes)}`);
+  if (checkMode && group.budget) {
+    console.log(`  budget: total <= ${formatSize(group.budget.totalBytes)} / gzip <= ${formatSize(group.budget.totalGzipBytes)}`);
+    console.log(`  budget: largest <= ${formatSize(group.budget.maxFileBytes)} / gzip <= ${formatSize(group.budget.maxFileGzipBytes)}`);
+  }
 
   for (const file of files.slice(0, 8)) {
     console.log(`  ${formatSize(file.bytes).padStart(10)} gzip ${formatSize(file.gzipBytes).padStart(10)}  ${file.name}`);
@@ -107,9 +156,45 @@ function printGroup(group, files) {
   }
 }
 
+function collectBudgetFailures(group, summary) {
+  if (!group.budget || summary.totalBytes === 0) {
+    return [];
+  }
+  const failures = [];
+  const checks = [
+    ["total", summary.totalBytes, group.budget.totalBytes, null],
+    ["total gzip", summary.totalGzipBytes, group.budget.totalGzipBytes, null],
+    ["largest file", summary.largestFile?.bytes ?? 0, group.budget.maxFileBytes, summary.largestFile],
+    ["largest gzip file", summary.largestGzipFile?.gzipBytes ?? 0, group.budget.maxFileGzipBytes, summary.largestGzipFile],
+  ];
+  for (const [label, actual, limit, file] of checks) {
+    if (actual > limit) {
+      const fileText = file ? ` (${file.name})` : "";
+      failures.push(`${group.label} ${label}${fileText} is ${formatSize(actual)}, limit ${formatSize(limit)}`);
+    }
+  }
+  return failures;
+}
+
+function collectInitialLazyFailures(allFiles, initialAssetNames) {
+  return allFiles
+    .filter((file) => initialAssetNames.has(file.baseName))
+    .flatMap((file) => findGroups(file)
+      .filter((group) => group.lazy)
+      .map((group) => `${file.name} matches ${group.label} but is referenced by index.html`));
+}
+
+function collectUnexpectedOversizedFailures(oversized) {
+  return oversized
+    .filter((file) => !findGroups(file).some((group) => oversizedAllowedGroups.has(group.label)))
+    .map((file) => `${file.name} is ${formatSize(file.bytes)} and is not an allowed lazy oversized chunk`);
+}
+
 function main() {
   const allFiles = readFiles();
+  const initialAssetNames = readInitialAssetNames();
   const missingGroups = [];
+  const failures = [];
 
   console.log("Desktop bundle baseline");
   console.log(`dist: ${path.relative(repoRoot, distRoot).replace(/\\/g, "/")}`);
@@ -121,7 +206,9 @@ function main() {
     if (files.length === 0) {
       missingGroups.push(group.label);
     }
-    printGroup(group, files);
+    const summary = summarizeGroup(files);
+    printGroup(group, files, summary);
+    failures.push(...collectBudgetFailures(group, summary));
   }
 
   const oversized = allFiles
@@ -136,8 +223,25 @@ function main() {
     }
   }
 
+  failures.push(...collectInitialLazyFailures(allFiles, initialAssetNames));
+  failures.push(...collectUnexpectedOversizedFailures(oversized));
+
   if (missingGroups.length > 0) {
-    console.error(`\nMissing expected lazy bundle groups: ${missingGroups.join(", ")}`);
+    failures.unshift(`Missing expected bundle groups: ${missingGroups.join(", ")}`);
+  }
+
+  if (checkMode && failures.length > 0) {
+    console.error("\nDesktop bundle regression gate failed:");
+    for (const failure of failures) {
+      console.error(`  - ${failure}`);
+    }
+    process.exit(1);
+  }
+
+  if (checkMode) {
+    console.log("\nDesktop bundle regression gate passed.");
+  } else if (missingGroups.length > 0) {
+    console.error(`\nMissing expected bundle groups: ${missingGroups.join(", ")}`);
     process.exit(1);
   }
 }
