@@ -152,7 +152,7 @@ class RemotePayloadParserTest {
             ),
         )
 
-        assertEquals("Untitled task", tasks[0].title)
+        assertEquals("未命名任务", tasks[0].title)
         assertEquals("waiting", tasks[0].status)
     }
 
@@ -256,8 +256,8 @@ class RemotePayloadParserTest {
         assertNotNull(detail.pendingInteraction)
         assertEquals("task-1", detail.pendingInteraction?.taskId)
         assertEquals("Continue?", detail.pendingInteraction?.body)
-        assertEquals("Answer", detail.pendingInteraction?.approveLabel)
-        assertEquals("Decline", detail.pendingInteraction?.declineLabel)
+        assertEquals("回答", detail.pendingInteraction?.approveLabel)
+        assertEquals("拒绝", detail.pendingInteraction?.declineLabel)
     }
 
     @Test
@@ -367,7 +367,7 @@ class RemotePayloadParserTest {
             pendingPayload = JSONObject("""{ "interactions": [] }"""),
         )
 
-        assertEquals("Untitled task", detail.task.title)
+        assertEquals("未命名任务", detail.task.title)
         assertEquals("waiting", detail.task.status)
         assertEquals("waiting", detail.runtimePhase)
         assertEquals(null, detail.processSessionId)
@@ -400,9 +400,9 @@ class RemotePayloadParserTest {
         )
 
         assertEquals("shell", detail.pendingInteraction?.title)
-        assertEquals("Tool input: yarn android:verify", detail.pendingInteraction?.body)
-        assertEquals("Allow", detail.pendingInteraction?.approveLabel)
-        assertEquals("Deny", detail.pendingInteraction?.declineLabel)
+        assertEquals("工具输入：yarn android:verify", detail.pendingInteraction?.body)
+        assertEquals("允许", detail.pendingInteraction?.approveLabel)
+        assertEquals("拒绝", detail.pendingInteraction?.declineLabel)
     }
 
     @Test
@@ -485,7 +485,7 @@ class RemotePayloadParserTest {
             pendingPayload = JSONObject("""{ "interactions": [] }"""),
         )
 
-        assertEquals("Message", detail.timeline[0].title)
+        assertEquals("消息", detail.timeline[0].title)
         assertEquals("Hello from the runner", detail.timeline[0].summary)
         assertEquals("info", detail.timeline[0].status)
     }
@@ -509,11 +509,11 @@ class RemotePayloadParserTest {
             pendingPayload = JSONObject("""{ "interactions": [] }"""),
         )
 
-        assertEquals("Assistant", detail.timeline[0].title)
+        assertEquals("助手", detail.timeline[0].title)
         assertEquals("Done", detail.timeline[0].summary)
-        assertEquals("User", detail.timeline[1].title)
+        assertEquals("用户", detail.timeline[1].title)
         assertEquals("Continue", detail.timeline[1].summary)
-        assertEquals("Tool result", detail.timeline[2].title)
+        assertEquals("工具结果", detail.timeline[2].title)
         assertEquals("Tests passed", detail.timeline[2].summary)
     }
 
@@ -564,15 +564,15 @@ class RemotePayloadParserTest {
             pendingPayload = JSONObject("""{ "interactions": [] }"""),
         )
 
-        assertEquals("Assistant", detail.timeline[0].title)
+        assertEquals("助手", detail.timeline[0].title)
         assertEquals("assistant", detail.timeline[0].role)
-        assertEquals("turn", detail.timeline[0].details.single().label)
+        assertEquals("轮次", detail.timeline[0].details.single().label)
         assertEquals("turn-1", detail.timeline[0].details.single().value)
-        assertEquals(listOf("tool", "input", "output"), detail.timeline[1].details.map { it.label })
+        assertEquals(listOf("工具", "输入", "输出"), detail.timeline[1].details.map { it.label })
         assertEquals("shell", detail.timeline[1].details[0].value)
         assertEquals("""{"cmd":"yarn test"}""", detail.timeline[1].details[1].value)
         assertEquals("passed", detail.timeline[1].details[2].value)
-        assertEquals(listOf("error", "code"), detail.timeline[2].details.map { it.label })
+        assertEquals(listOf("错误", "代码"), detail.timeline[2].details.map { it.label })
         assertEquals("boom", detail.timeline[2].details[0].value)
         assertEquals("E_RUN", detail.timeline[2].details[1].value)
     }

@@ -52,8 +52,8 @@ class RemoteKeepAliveService : Service() {
 
         return builder
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Lilia Remote is connected")
-            .setContentText("Keeping ${pc.displayName} ready for resume.")
+            .setContentTitle("Lilia 远控已连接")
+            .setContentText("正在保持 ${pc.displayName} 可随时恢复。")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setShowWhen(false)
@@ -64,10 +64,10 @@ class RemoteKeepAliveService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             NOTIFICATION_CHANNEL_ID,
-            "Remote connection",
+            "远控连接",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Keeps the active Lilia Remote PC session ready in the background."
+            description = "在后台保持当前 Lilia 远控电脑会话可用。"
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)

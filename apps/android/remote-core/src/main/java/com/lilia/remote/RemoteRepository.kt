@@ -117,7 +117,7 @@ class RemoteRepository internal constructor(
 
     private fun readActivePcFromPrefs(): SavedPc? {
         val endpointId = prefs.getString("active.endpointId", null) ?: return null
-        val displayName = prefs.getString("active.displayName", null) ?: "Lilia PC"
+        val displayName = prefs.getString("active.displayName", null) ?: DEFAULT_PC_DISPLAY_NAME
         val pairingUri = prefs.getString("active.pairingUri", null) ?: ""
         val bridgeUrl = prefs.getString("active.bridgeUrl", null)?.takeIf { it.isNotBlank() }
             ?: run {
@@ -148,7 +148,7 @@ class RemoteRepository internal constructor(
                     add(
                         SavedPc(
                             endpointId = endpointId,
-                            displayName = item.optString("displayName", "Lilia PC"),
+                            displayName = item.optString("displayName", DEFAULT_PC_DISPLAY_NAME),
                             protocolVersion = item.optInt("protocolVersion", 1),
                             pairingUri = item.optString("pairingUri", ""),
                             bridgeUrl = bridgeUrl,

@@ -10,23 +10,23 @@ object PairingUriParser {
     fun parse(value: String): Result<RemotePairingTicket> = runCatching {
         val trimmed = value.trim()
         val uri = URI(trimmed)
-        require(uri.scheme in SUPPORTED_SCHEMES) { "Expected Lilia pairing URI" }
-        require(uri.host == "pair") { "Expected Lilia pairing URI" }
+        require(uri.scheme in SUPPORTED_SCHEMES) { "请输入 Lilia 配对链接" }
+        require(uri.host == "pair") { "请输入 Lilia 配对链接" }
         val query = parseQuery(uri.rawQuery)
         val version = query["v"]?.toIntOrNull()
-            ?: error("Pairing URI missing protocol version")
+            ?: error("配对链接缺少协议版本")
         require(version == SUPPORTED_PROTOCOL_VERSION) {
-            "Unsupported remote protocol version: $version"
+            "不支持的远控协议版本：$version"
         }
         val ticket = query["ticket"]?.takeIf { it.isNotBlank() }
-            ?: error("Pairing URI missing ticket")
+            ?: error("配对链接缺少票据")
         val challenge = query["challenge"]?.takeIf { it.isNotBlank() }
-            ?: error("Pairing URI missing challenge")
+            ?: error("配对链接缺少验证信息")
         val endpoint = query["endpoint"]?.takeIf { it.isNotBlank() }
-            ?: error("Pairing URI missing endpoint")
-        val name = query["name"]?.takeIf { it.isNotBlank() } ?: "Lilia PC"
+            ?: error("配对链接缺少电脑端点")
+        val name = query["name"]?.takeIf { it.isNotBlank() } ?: DEFAULT_PC_DISPLAY_NAME
         val bridge = query["bridge"]?.takeIf { it.isNotBlank() }
-            ?: error("Pairing URI missing bridge")
+            ?: error("配对链接缺少桥接地址")
         validateBridgeUrl(bridge)
         RemotePairingTicket(
             protocolVersion = version,
@@ -61,19 +61,19 @@ object PairingUriParser {
         val bridgeUri = URI(value)
         val scheme = bridgeUri.scheme?.lowercase()
         require(scheme == "http" || scheme == "https") {
-            "Pairing bridge must use HTTP(S)"
+            "配对桥接地址必须使用 HTTP(S)"
         }
         require(!bridgeUri.host.isNullOrBlank()) {
-            "Pairing bridge URL missing host"
+            "配对桥接地址缺少主机"
         }
         require(bridgeUri.port > 0) {
-            "Pairing bridge URL missing port"
+            "配对桥接地址缺少端口"
         }
         require(bridgeUri.rawPath.isNullOrBlank() || bridgeUri.rawPath == "/") {
-            "Pairing bridge URL must not include a path"
+            "配对桥接地址不能包含路径"
         }
         require(bridgeUri.rawQuery.isNullOrBlank() && bridgeUri.rawFragment.isNullOrBlank()) {
-            "Pairing bridge URL must not include query or fragment"
+            "配对桥接地址不能包含查询参数或片段"
         }
     }
 }

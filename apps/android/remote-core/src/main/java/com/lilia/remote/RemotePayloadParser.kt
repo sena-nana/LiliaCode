@@ -9,12 +9,12 @@ object RemotePayloadParser {
     private const val TIMELINE_DETAIL_VALUE_MAX_LENGTH = 600
 
     fun parseBridgeStatus(response: JSONObject): RemoteBridgeStatus {
-        RemoteEnvelopeAdapter.throwIfError(response, "Bridge status failed")
-        val status = response.optJSONObject("status") ?: error("Bridge status missing status")
+        RemoteEnvelopeAdapter.throwIfError(response, "读取桥接状态失败")
+        val status = response.optJSONObject("status") ?: error("桥接状态缺少 status")
         return RemoteBridgeStatus(
             hostEnabled = status.optBoolean("hostEnabled"),
             state = status.optString("state", "disconnected"),
-            pcName = status.optString("pcName", "Lilia PC"),
+            pcName = status.optString("pcName", DEFAULT_PC_DISPLAY_NAME),
             capabilities = parseCapabilities(status.optJSONObject("capabilities")),
         )
     }
@@ -129,7 +129,7 @@ object RemotePayloadParser {
     private fun parseTaskSummary(taskId: String, task: JSONObject?): RemoteTaskSummary =
         RemoteTaskSummary(
             taskId = task?.firstNonBlankString("taskId", "id") ?: taskId,
-            title = task?.nonBlankString("title", "Untitled task") ?: "Untitled task",
+            title = task?.nonBlankString("title", "未命名任务") ?: "未命名任务",
             projectName = task?.firstNonBlankString("projectName", "projectId"),
             status = task?.nonBlankString("status", "waiting") ?: "waiting",
             dependsOn = parseStringArray(task?.optJSONArray("dependsOn")),
@@ -204,8 +204,8 @@ object RemotePayloadParser {
         if (title != null) return title
         if (event.optString("kind") == "message") {
             when (timelineRole(event)) {
-                "assistant" -> return "Assistant"
-                "user" -> return "User"
+                "assistant" -> return "助手"
+                "user" -> return "用户"
             }
         }
         return timelineKindLabel(event.optString("kind"))
@@ -247,22 +247,22 @@ object RemotePayloadParser {
         val payload = event.optJSONObject("payload") ?: JSONObject()
         return listOfNotNull(
             timelineDetail(
-                "tool",
+                "工具",
                 payload.firstNonBlankString("toolName", "name", "tool", "function", "hookName"),
             ),
-            timelineDetail("command", payload.firstNonBlankString("command", "cmd", "shellCommand")),
-            timelineDetail("path", payload.firstNonBlankString("file", "filePath", "path")),
-            timelineDetail("query", payload.firstNonBlankString("query", "url")),
+            timelineDetail("命令", payload.firstNonBlankString("command", "cmd", "shellCommand")),
+            timelineDetail("路径", payload.firstNonBlankString("file", "filePath", "path")),
+            timelineDetail("查询", payload.firstNonBlankString("query", "url")),
             timelineDetail(
-                "input",
+                "输入",
                 payload.timelineValueString("input", "arguments", "args", "parameters", "params", "request"),
             ),
             timelineDetail(
-                if (isFailureStatus(event.optString("status"))) "error" else "output",
+                if (isFailureStatus(event.optString("status"))) "错误" else "输出",
                 payload.timelineValueString("result", "response", "output", "stdout", "stderr"),
             ),
-            timelineDetail("code", payload.firstNonBlankString("code", "exitCode", "statusCode")),
-            timelineDetail("turn", event.optString("turnId").takeIf { it.isNotBlank() }),
+            timelineDetail("代码", payload.firstNonBlankString("code", "exitCode", "statusCode")),
+            timelineDetail("轮次", event.optString("turnId").takeIf { it.isNotBlank() }),
         )
     }
 
@@ -297,32 +297,32 @@ object RemotePayloadParser {
 
     private fun timelineKindLabel(kind: String): String =
         when (kind) {
-            "message" -> "Message"
-            "assistant_message" -> "Assistant"
-            "user_message" -> "User"
-            "reasoning" -> "Reasoning"
-            "plan" -> "Plan"
-            "goal" -> "Goal"
-            "todo_list" -> "Todo list"
-            "tool" -> "Tool"
-            "tool_call" -> "Tool call"
-            "tool_result" -> "Tool result"
-            "tool_consent" -> "Tool request"
-            "ask_user" -> "Question"
-            "architecture_change" -> "Architecture change"
-            "command" -> "Command"
-            "subagent" -> "Subagent"
-            "file_change" -> "File change"
-            "file_read" -> "File read"
-            "search" -> "Search"
-            "web_fetch" -> "Web fetch"
+            "message" -> "消息"
+            "assistant_message" -> "助手"
+            "user_message" -> "用户"
+            "reasoning" -> "推理"
+            "plan" -> "计划"
+            "goal" -> "目标"
+            "todo_list" -> "待办列表"
+            "tool" -> "工具"
+            "tool_call" -> "工具调用"
+            "tool_result" -> "工具结果"
+            "tool_consent" -> "工具请求"
+            "ask_user" -> "问题"
+            "architecture_change" -> "架构变更"
+            "command" -> "命令"
+            "subagent" -> "子代理"
+            "file_change" -> "文件变更"
+            "file_read" -> "文件读取"
+            "search" -> "搜索"
+            "web_fetch" -> "网页获取"
             "mcp" -> "MCP"
-            "web_search" -> "Web search"
-            "diagnostic" -> "Diagnostic"
-            "title_update" -> "Title update"
-            "error" -> "Error"
-            "turn" -> "Turn"
-            else -> kind.ifBlank { "Event" }
+            "web_search" -> "网页搜索"
+            "diagnostic" -> "诊断"
+            "title_update" -> "标题更新"
+            "error" -> "错误"
+            "turn" -> "轮次"
+            else -> kind.ifBlank { "事件" }
         }
 
     private fun parsePending(taskId: String, interactions: JSONArray): PendingInteraction? {
@@ -359,13 +359,13 @@ object RemotePayloadParser {
             .ifBlank { payload.optString("toolName") }
             .ifBlank {
                 when (kind) {
-                    "permission_approval" -> "Permission request"
-                    "architecture_change" -> "Architecture change"
-                    "mcp_elicitation" -> "MCP request"
-                    "plan_approval" -> "Plan approval"
-                    "ask_user" -> "Question"
-                    "tool_consent" -> "Tool request"
-                    else -> "Pending action"
+                    "permission_approval" -> "权限请求"
+                    "architecture_change" -> "架构变更"
+                    "mcp_elicitation" -> "MCP 请求"
+                    "plan_approval" -> "计划审批"
+                    "ask_user" -> "问题"
+                    "tool_consent" -> "工具请求"
+                    else -> "待处理操作"
                 }
             }
 
@@ -380,9 +380,9 @@ object RemotePayloadParser {
             .ifBlank {
                 when (kind) {
                     "tool_consent" -> toolConsentSummary(payload)
-                    "mcp_elicitation" -> "The PC runner is requesting input from ${payload.optString("serverName", "an MCP server")}."
-                    "permission_approval" -> "The PC runner is requesting additional access."
-                    else -> "Waiting for a decision on the PC runner."
+                    "mcp_elicitation" -> "电脑端运行器正在请求来自 ${payload.optString("serverName", "MCP 服务")} 的输入。"
+                    "permission_approval" -> "电脑端运行器正在请求额外访问权限。"
+                    else -> "正在等待电脑端运行器的决定。"
                 }
             }
     }
@@ -391,12 +391,12 @@ object RemotePayloadParser {
         val firstQuestion = payload.optJSONArray("questions")?.optJSONObject(0)
         return firstQuestion?.optString("confirmLabel")?.takeIf { it.isNotBlank() }
             ?: when (kind) {
-                "permission_approval", "tool_consent" -> "Allow"
-                "architecture_change" -> "Apply"
-                "mcp_elicitation" -> "Accept"
-                "plan_approval" -> "Approve plan"
-                "ask_user" -> "Answer"
-                else -> "Approve"
+                "permission_approval", "tool_consent" -> "允许"
+                "architecture_change" -> "应用"
+                "mcp_elicitation" -> "接受"
+                "plan_approval" -> "批准计划"
+                "ask_user" -> "回答"
+                else -> "批准"
             }
     }
 
@@ -404,23 +404,23 @@ object RemotePayloadParser {
         val firstQuestion = payload.optJSONArray("questions")?.optJSONObject(0)
         return firstQuestion?.optString("cancelLabel")?.takeIf { it.isNotBlank() }
             ?: when (kind) {
-                "permission_approval", "tool_consent" -> "Deny"
-                "mcp_elicitation" -> "Decline"
-                "plan_approval" -> "Decline plan"
-                else -> "Decline"
+                "permission_approval", "tool_consent" -> "拒绝"
+                "mcp_elicitation" -> "拒绝"
+                "plan_approval" -> "拒绝计划"
+                else -> "拒绝"
             }
     }
 
     private fun toolConsentSummary(payload: JSONObject): String {
         val command = payload.optJSONObject("input")?.optString("cmd")?.takeIf { it.isNotBlank() }
             ?: payload.optString("blockedPath").takeIf { it.isNotBlank() }
-        return command?.let { "Tool input: $it" } ?: "The PC runner wants to use a tool."
+        return command?.let { "工具输入：$it" } ?: "电脑端运行器想要使用工具。"
     }
 
     private fun architectureChangeSummary(payload: JSONObject): String {
         val changes = payload.optJSONArray("changes") ?: return ""
         if (changes.length() == 0) return ""
-        return "${changes.length()} architecture change(s) requested"
+        return "请求 ${changes.length()} 项架构变更"
     }
 
     private fun JSONObject.optNullableString(name: String): String? {
@@ -442,11 +442,11 @@ object RemotePayloadParser {
 
     private fun String.truncate(maxLength: Int): String {
         if (length <= maxLength) return this
-        return take(maxLength).trimEnd() + "..."
+        return take(maxLength).trimEnd() + "…"
     }
 
     private fun formatRemoteTime(value: Long): String {
-        if (value <= 0L) return "No activity timestamp"
+        if (value <= 0L) return "暂无活动时间"
         return java.text.DateFormat.getDateTimeInstance(
             java.text.DateFormat.SHORT,
             java.text.DateFormat.SHORT,

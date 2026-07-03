@@ -25,18 +25,18 @@ object RemoteEnvelopeAdapter {
 
     fun payloadOrThrow(response: JSONObject): JSONObject {
         if (!response.optBoolean("ok")) {
-            throw remoteError(response, "Remote request failed")
+            throw remoteError(response, "远控请求失败")
         }
         return response.getJSONObject("payload")
     }
 
-    fun throwIfError(response: JSONObject, fallback: String = "Remote request failed") {
+    fun throwIfError(response: JSONObject, fallback: String = "远控请求失败") {
         if (!response.optBoolean("ok")) {
             throw remoteError(response, fallback)
         }
     }
 
-    private fun errorMessage(response: JSONObject, fallback: String = "Remote request failed"): String {
+    private fun errorMessage(response: JSONObject, fallback: String = "远控请求失败"): String {
         val error = response.opt("error")
         if (error is JSONObject) {
             return error.optString("message", fallback)

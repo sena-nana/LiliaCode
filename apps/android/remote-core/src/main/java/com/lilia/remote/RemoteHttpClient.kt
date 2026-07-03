@@ -25,7 +25,7 @@ class RemoteHttpClient(
             val body = JSONObject()
                 .put("ticketId", ticket.ticketId)
                 .put("challenge", ticket.challenge)
-                .put("deviceName", android.os.Build.MODEL ?: "Android device")
+                .put("deviceName", android.os.Build.MODEL ?: "Android 手机")
                 .put("protocolVersion", ticket.protocolVersion)
                 .put(
                     "androidEndpoint",
@@ -35,7 +35,7 @@ class RemoteHttpClient(
                         .put("directAddresses", JSONArray()),
                 )
             val response = postJson("${bridgeUrl(ticket)}/pair", body)
-            RemoteEnvelopeAdapter.throwIfError(response, "Pairing failed")
+            RemoteEnvelopeAdapter.throwIfError(response, "配对失败")
             repository.savePairing(ticket)
         }
     }

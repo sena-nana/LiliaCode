@@ -85,7 +85,7 @@ class RemoteInteractionUiStateTest {
             maxSelections = null,
             options = listOf(
                 InteractionOption("first", "First", null),
-                InteractionOption("other", "Other", null),
+                InteractionOption("other", "其他", null),
             ),
         )
 
@@ -116,7 +116,7 @@ class RemoteInteractionUiStateTest {
     @Test
     fun taskInboxUnsupportedMessageIsActionable() {
         assertEquals(
-            "Task inbox is not supported by this PC bridge.",
+            "当前电脑桥接端不支持任务收件箱。",
             taskInboxUnsupportedMessage(),
         )
     }
