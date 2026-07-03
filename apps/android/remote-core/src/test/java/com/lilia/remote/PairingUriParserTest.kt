@@ -21,6 +21,18 @@ class PairingUriParserTest {
     }
 
     @Test
+    fun parsesVoicePairingUriAliasWithSameProtocol() {
+        val ticket = PairingUriParser.parse(
+            "lilia-voice://pair?v=1&ticket=ticket-1&challenge=challenge-1" +
+                "&endpoint=pc-1&bridge=http%3A%2F%2F192.168.1.5%3A41478",
+        ).getOrThrow()
+
+        assertEquals("ticket-1", ticket.ticketId)
+        assertEquals("pc-1", ticket.endpointId)
+        assertEquals("http://192.168.1.5:41478", ticket.bridgeUrl)
+    }
+
+    @Test
     fun defaultsPcNameWhenNameIsMissing() {
         val ticket = PairingUriParser.parse(
             "lilia-remote://pair?v=1&ticket=ticket-1&challenge=challenge-1" +

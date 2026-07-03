@@ -57,7 +57,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
-internal const val UNTRUSTED_PC_MESSAGE = "This PC no longer trusts this phone. Pair again."
 private const val DETAIL_LIVE_UPDATE_ERROR_MESSAGE = "Live update temporarily unavailable; showing the last loaded task."
 private const val DETAIL_SUBSCRIBE_INTERVAL_MS = 1_500L
 private const val DETAIL_SNAPSHOT_FALLBACK_BASE_MS = 5_000L
@@ -104,7 +103,7 @@ fun LiliaRemoteApp(
     foregroundResumeToken: Long = 0L,
 ) {
     val fallbackRepository = remember { repository }
-    val client = remember(fallbackRepository) { fallbackRepository?.let { RemoteHttpClient(it) } }
+    val gateway = remember(fallbackRepository) { fallbackRepository?.let { RemoteGateway(it) } }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val initialSavedPcs = remember { fallbackRepository?.savedPcs().orEmpty() }
@@ -166,7 +165,7 @@ fun LiliaRemoteApp(
     }
 
     fun pairWithTicket(ticket: RemotePairingTicket) {
-        val remoteClient = client
+        val remoteClient = gateway
         pairingBusy = true
         pairingError = ""
         remoteError = ""
@@ -256,7 +255,7 @@ fun LiliaRemoteApp(
 
     suspend fun refreshTaskSnapshot(
         pc: SavedPc,
-        remoteClient: RemoteHttpClient,
+        remoteClient: RemoteGateway,
         taskId: String,
     ): Boolean {
         val result = remoteClient.taskDetail(pc, taskId)
@@ -273,7 +272,7 @@ fun LiliaRemoteApp(
     }
 
     fun loadOlderTimeline(pc: SavedPc, taskId: String) {
-        val remoteClient = client ?: return
+        val remoteClient = gateway ?: return
         val detail = selectedTask ?: return
         val beforeCursor = detail.timelinePage.beforeCursor ?: return
         if (!detail.timelinePage.hasMoreBefore || timelineLoadingOlder) return
@@ -294,7 +293,7 @@ fun LiliaRemoteApp(
     suspend fun recoverLiveTaskUpdate(
         err: Throwable,
         pc: SavedPc,
-        remoteClient: RemoteHttpClient,
+        remoteClient: RemoteGateway,
         taskId: String,
     ): Boolean {
         if (shouldClearActivePcForFailure(err)) {
@@ -306,7 +305,7 @@ fun LiliaRemoteApp(
 
     suspend fun refreshTaskSubscription(
         pc: SavedPc,
-        remoteClient: RemoteHttpClient,
+        remoteClient: RemoteGateway,
         taskId: String,
     ): Boolean {
         val current = selectedTask
@@ -350,7 +349,7 @@ fun LiliaRemoteApp(
         return true
     }
 
-    suspend fun refreshProviderStatus(pc: SavedPc, remoteClient: RemoteHttpClient) {
+    suspend fun refreshProviderStatus(pc: SavedPc, remoteClient: RemoteGateway) {
         remoteClient.providerStatus(pc)
             .onSuccess {
                 if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
@@ -362,7 +361,7 @@ fun LiliaRemoteApp(
             }
     }
 
-    suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteHttpClient): Boolean {
+    suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteGateway): Boolean {
         val accepted = remoteClient.resume(pc).getOrElse {
             if (shouldIgnorePcResult(activePc, pc)) return false
             bridgeTone = "Offline"
@@ -405,7 +404,7 @@ fun LiliaRemoteApp(
     }
 
     fun openTask(pc: SavedPc, taskId: String) {
-        val remoteClient = client ?: return
+        val remoteClient = gateway ?: return
         detailLoading = true
         remoteError = ""
         fallbackRepository?.setActiveTaskId(taskId)
@@ -429,9 +428,9 @@ fun LiliaRemoteApp(
         failureMessage: String,
         clearError: Boolean = true,
         onSuccess: () -> Unit = {},
-        action: suspend (RemoteHttpClient) -> Result<Unit>,
+        action: suspend (RemoteGateway) -> Result<Unit>,
     ) {
-        val remoteClient = client ?: return
+        val remoteClient = gateway ?: return
         detailLoading = true
         if (clearError) remoteError = ""
         scope.launch {
@@ -477,7 +476,7 @@ fun LiliaRemoteApp(
     }
 
     fun refreshInbox(pc: SavedPc) {
-        val remoteClient = client ?: return
+        val remoteClient = gateway ?: return
         inboxLoading = true
         remoteError = ""
         scope.launch {
@@ -489,7 +488,7 @@ fun LiliaRemoteApp(
     }
 
     fun resumeActivePcFromForeground(pc: SavedPc) {
-        val remoteClient = client ?: return
+        val remoteClient = gateway ?: return
         val taskId = selectedTask?.task?.taskId ?: fallbackRepository?.activeTaskId()
         inboxLoading = true
         detailLoading = taskId != null
@@ -532,7 +531,7 @@ fun LiliaRemoteApp(
 
     LaunchedEffect(activePc?.endpointId, activePc?.bridgeUrl) {
         val pc = activePc ?: return@LaunchedEffect
-        val remoteClient = client ?: return@LaunchedEffect
+        val remoteClient = gateway ?: return@LaunchedEffect
         inboxLoading = true
         remoteError = ""
         loadInbox(pc, remoteClient)
@@ -574,7 +573,7 @@ fun LiliaRemoteApp(
         bridgeStatus?.capabilities?.supportsTimelineSubscription,
     ) {
         val pc = activePc ?: return@LaunchedEffect
-        val remoteClient = client ?: return@LaunchedEffect
+        val remoteClient = gateway ?: return@LaunchedEffect
         val taskId = selectedTask?.task?.taskId ?: return@LaunchedEffect
         var fallbackDelayMs: Long? = null
         while (true) {
@@ -743,72 +742,6 @@ fun LiliaRemoteApp(
         }
     }
 }
-
-internal fun savedPcConnectionMatches(current: SavedPc?, candidate: SavedPc): Boolean =
-    current != null && activePcConnectionMatches(current, candidate)
-
-internal fun shouldIgnorePcResult(current: SavedPc?, candidate: SavedPc): Boolean =
-    current == null || !savedPcConnectionMatches(current, candidate)
-
-internal fun shouldClearActivePcForFailure(err: Throwable): Boolean =
-    err is RemoteBridgeException && err.code == "unauthorized"
-
-internal data class ActivePcSwitcherItem(
-    val pc: SavedPc,
-    val active: Boolean,
-)
-
-internal fun activePcSwitcherItems(
-    activePc: SavedPc?,
-    savedPcs: List<SavedPc>,
-): List<ActivePcSwitcherItem> {
-    val pcs = buildList {
-        activePc?.let { add(it) }
-        savedPcs.forEach { pc ->
-            if (none { activePcConnectionMatches(it, pc) }) {
-                add(pc)
-            }
-        }
-    }
-    return pcs.map { pc ->
-        ActivePcSwitcherItem(
-            pc = pc,
-            active = activePc != null && activePcConnectionMatches(activePc, pc),
-        )
-    }
-}
-
-private fun RemoteTaskDetail.withRelatedTasks(tasks: List<RemoteTaskSummary>): RemoteTaskDetail {
-    val byId = LinkedHashMap<String, RemoteTaskSummary>()
-    tasks.forEach { byId[it.taskId] = it }
-    byId[task.taskId] = task
-    return copy(relatedTasks = byId.values.toList())
-}
-
-internal fun RemoteTaskDetail.withOlderTimelinePage(page: RemoteTimelinePage): RemoteTaskDetail {
-    val mergedTimeline = RemotePayloadParser.prependTimeline(timeline, page.events)
-    val mergedPage = timelinePage.copy(
-        events = mergedTimeline,
-        beforeCursor = page.beforeCursor,
-        hasMoreBefore = page.hasMoreBefore,
-    )
-    return copy(timeline = mergedTimeline, timelinePage = mergedPage)
-}
-
-internal fun syncInboxTaskStatus(
-    tasks: List<RemoteTaskSummary>,
-    detail: RemoteTaskDetail,
-): List<RemoteTaskSummary> =
-    tasks.map { task ->
-        if (task.taskId == detail.task.taskId) {
-            task.copy(
-                status = detail.task.status,
-                pendingAction = detail.pendingInteraction?.title,
-            )
-        } else {
-            task
-        }
-    }
 
 private fun nextLiveUpdateDelay(currentDelayMs: Long?): Long =
     minOf(
@@ -1163,12 +1096,13 @@ private fun TaskDetailScreen(
                         optionQuestion.options.forEach { option ->
                             val selected = selectedInteractionOptions.contains(option.id)
                             val onClick = {
+                                val maxSelections = optionQuestion.maxSelections
                                 selectedInteractionOptions = if (optionQuestion.mode == "multi") {
                                     if (selected) {
                                         selectedInteractionOptions - option.id
                                     } else if (
-                                        optionQuestion.maxSelections != null &&
-                                        selectedInteractionOptions.size >= optionQuestion.maxSelections
+                                        maxSelections != null &&
+                                        selectedInteractionOptions.size >= maxSelections
                                     ) {
                                         selectedInteractionOptions
                                     } else {
@@ -1669,74 +1603,6 @@ private fun TimelineRow(
     }
 }
 
-internal data class TaskRunBlockInfo(
-    val reason: String,
-    val chain: List<RemoteTaskSummary>,
-)
-
-internal fun taskRunBlockInfo(
-    task: RemoteTaskSummary,
-    tasks: List<RemoteTaskSummary>,
-): TaskRunBlockInfo? {
-    val byId = LinkedHashMap<String, RemoteTaskSummary>()
-    tasks.forEach { byId[it.taskId] = it }
-    byId[task.taskId] = task
-    val dependencyBlock = dependencyRunBlockInfo(task, byId, listOf(task), LinkedHashSet())
-    if (task.status == "blocked") {
-        return TaskRunBlockInfo(
-            reason = "This task is marked blocked and cannot start a session.",
-            chain = dependencyBlock?.chain ?: listOf(task),
-        )
-    }
-    return dependencyBlock
-}
-
-private fun dependencyRunBlockInfo(
-    task: RemoteTaskSummary,
-    byId: Map<String, RemoteTaskSummary>,
-    chain: List<RemoteTaskSummary>,
-    visiting: MutableSet<String>,
-): TaskRunBlockInfo? {
-    if (!visiting.add(task.taskId)) {
-        return TaskRunBlockInfo(
-            reason = "Task dependency cycle detected; cannot start a session.",
-            chain = chain,
-        )
-    }
-    for (dependencyId in task.dependsOn) {
-        val dependency = byId[dependencyId] ?: continue
-        val nextChain = chain + dependency
-        if (visiting.contains(dependency.taskId)) {
-            return TaskRunBlockInfo(
-                reason = "Task dependency cycle detected; cannot start a session.",
-                chain = nextChain,
-            )
-        }
-        if (dependency.status != "done") {
-            return TaskRunBlockInfo(
-                reason = "Cannot send until dependency is done: ${dependency.title} (${taskStatusLabel(dependency.status)}).",
-                chain = nextChain,
-            )
-        }
-        dependencyRunBlockInfo(dependency, byId, nextChain, visiting)?.let {
-            return it
-        }
-    }
-    visiting.remove(task.taskId)
-    return null
-}
-
-internal fun taskStatusLabel(status: String): String =
-    when (status) {
-        "draft" -> "Draft"
-        "waiting" -> "Waiting"
-        "running" -> "Running"
-        "blocked" -> "Blocked"
-        "done" -> "Done"
-        "cancelled" -> "Cancelled"
-        else -> status.ifBlank { "Waiting" }.replaceFirstChar { it.uppercase() }
-    }
-
 @Composable
 private fun TimelineChip(text: String, color: Color) {
     Text(
@@ -1820,99 +1686,6 @@ private fun interactionPrimaryActionLabel(interaction: PendingInteraction, respo
     if (question.optString("mode") != "confirm") return interaction.approveLabel
     return if (interaction.kind == "plan_approval") "Send revision" else "Send response"
 }
-
-internal data class InteractionOptionQuestion(
-    val questionId: String,
-    val mode: String,
-    val minSelections: Int,
-    val maxSelections: Int?,
-    val options: List<InteractionOption>,
-)
-
-internal data class InteractionOption(
-    val id: String,
-    val label: String,
-    val description: String?,
-)
-
-internal fun interactionOptionQuestion(interaction: PendingInteraction): InteractionOptionQuestion? {
-    if (interaction.kind != "ask_user" && interaction.kind != "plan_approval") return null
-    val question = interaction.raw
-        .optJSONObject("payload")
-        ?.optJSONArray("questions")
-        ?.optJSONObject(0)
-        ?: return null
-    val options = question.optJSONArray("options") ?: return null
-    if (options.length() == 0) return null
-    val mode = question.optString("mode").ifBlank { "single" }
-    if (mode != "single" && mode != "multi") return null
-    val parsed = buildList {
-        for (index in 0 until options.length()) {
-            val option = options.optJSONObject(index) ?: continue
-            val label = option.optString("label")
-                .ifBlank { option.optString("id") }
-                .ifBlank { "Option ${index + 1}" }
-            val id = option.optString("id")
-                .ifBlank { label }
-            add(
-                InteractionOption(
-                    id = id,
-                    label = label,
-                    description = option.optString("description").takeIf { it.isNotBlank() },
-                ),
-            )
-        }
-        if (question.optBoolean("allowOther")) {
-            add(InteractionOption(id = "other", label = "Other", description = null))
-        }
-    }
-    if (parsed.isEmpty()) return null
-    val questionId = question.optString("id").ifBlank { "question-0" }
-    val minSelections = if (mode == "multi") {
-        question.optInt("minSelections", 1).coerceAtLeast(0)
-    } else {
-        1
-    }
-    val maxSelections = if (mode == "multi" && question.has("maxSelections")) {
-        question.optInt("maxSelections", parsed.size).coerceAtLeast(minSelections)
-    } else {
-        null
-    }
-    return InteractionOptionQuestion(
-        questionId = questionId,
-        mode = mode,
-        minSelections = minSelections,
-        maxSelections = maxSelections,
-        options = parsed,
-    )
-}
-
-internal fun selectedOptionsByQuestion(
-    question: InteractionOptionQuestion?,
-    selectedOptions: Set<String>,
-): Map<String, List<String>> {
-    if (question == null || selectedOptions.isEmpty()) return emptyMap()
-    val ordered = question.options
-        .map { it.id }
-        .filter { selectedOptions.contains(it) }
-    if (ordered.isEmpty()) return emptyMap()
-    return mapOf(question.questionId to ordered)
-}
-
-internal fun interactionCanSubmit(
-    question: InteractionOptionQuestion?,
-    selectedOptions: Set<String>,
-    responseText: String,
-): Boolean {
-    if (question == null) return true
-    if (selectedOptions.size < question.minSelections) return false
-    if (question.maxSelections != null && selectedOptions.size > question.maxSelections) return false
-    if (selectedOptions.contains("other") && responseText.trim().isEmpty()) return false
-    return true
-}
-
-internal fun taskInboxUnsupportedMessage(): String =
-    "Task inbox is not supported by this PC bridge."
 
 @Preview
 @Composable

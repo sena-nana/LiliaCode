@@ -161,7 +161,7 @@ class RemoteRepository internal constructor(
     }
 }
 
-internal fun activePcConnectionMatches(current: SavedPc, candidate: SavedPc): Boolean =
+fun activePcConnectionMatches(current: SavedPc, candidate: SavedPc): Boolean =
     current.endpointId == candidate.endpointId && current.bridgeUrl == candidate.bridgeUrl
 
 private fun upsertSavedPc(savedPcs: List<SavedPc>, pc: SavedPc): List<SavedPc> =

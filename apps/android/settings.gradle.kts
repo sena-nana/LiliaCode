@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LiliaRemoteAndroid"
-include(":app")
+rootProject.name = "LiliaAndroid"
+include(":remote-core", ":app", ":voice-app")
