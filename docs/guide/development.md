@@ -62,6 +62,33 @@ yarn verify
 TAURI_TEMPLATE_INSTALL_DRY_RUN=1 yarn tauri:install
 ```
 
+## LiliaUI 本地联调
+
+默认 `package.json` 和提交版 `yarn.lock` 固定使用 GitHub 上同一个 LiliaUI commit 的 `@lilia/build`、`@lilia/config`、`@lilia/tools` 和 `@lilia/ui`。普通 `yarn install` 不依赖本机存在 `C:\Files\workspace\LiliaUI`。
+
+需要同时修改 LiliaUI 时，从 Lilia 仓库根目录运行：
+
+```bash
+yarn liliaui:local
+```
+
+该命令会通过 `yarn link --relative` 临时维护项目级 `resolutions`，把四个目标 `@lilia/*` 包切到默认的 `../LiliaUI/packages/*` `portal:` 依赖，并刷新 `node_modules`。如果 LiliaUI 不在相邻目录，可用 `LILIA_UI_LOCAL_PATH` 指定路径：
+
+```powershell
+$env:LILIA_UI_LOCAL_PATH = "C:\Files\workspace\LiliaUI"
+yarn liliaui:local
+Remove-Item Env:LILIA_UI_LOCAL_PATH
+```
+
+提交 Lilia 依赖或锁文件变更前，先切回固定 GitHub 依赖：
+
+```bash
+yarn liliaui:remote
+yarn liliaui:status
+```
+
+`yarn liliaui:status` 只检查当前四个 LiliaUI 包来自本地 `portal:` 还是固定 GitHub commit。提交策略是：默认远端 manifest 和锁文件可以入库，本地 `resolutions` / `portal:` lockfile 只作为个人联调状态，不随普通业务提交一起提交。
+
 ## Rust 构建缓存
 
 根脚本会在 Rust 编译入口自动复用本机已有的 `sccache`：`yarn verify:tauri`、`yarn tauri:build`、`yarn tauri:build:no-bundle` 和 `yarn verify:agent-debug` 都会先检查 `RUSTC_WRAPPER`，如果用户已经设置则保持原值；如果未设置且当前 `PATH` 中能执行 `sccache --version`，脚本会只给本次子进程注入 `RUSTC_WRAPPER=sccache`。

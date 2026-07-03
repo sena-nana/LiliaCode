@@ -50,6 +50,33 @@ yarn verify
 
 If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts and workspace scripts enforce the same package-manager check so contributors hit one Corepack-managed Yarn path.
 
+## Local LiliaUI Development
+
+The committed `package.json` files and default `yarn.lock` pin `@lilia/build`, `@lilia/config`, `@lilia/tools`, and `@lilia/ui` to the same GitHub LiliaUI commit. A normal `yarn install` does not require a local `C:\Files\workspace\LiliaUI` checkout.
+
+When changing LiliaUI and Lilia together, run this from the Lilia repository root:
+
+```bash
+yarn liliaui:local
+```
+
+The command uses `yarn link --relative` to temporarily maintain project-level `resolutions` so the four target `@lilia/*` packages resolve to the default `../LiliaUI/packages/*` `portal:` dependencies, then refreshes `node_modules`. If the LiliaUI checkout is elsewhere, pass it through `LILIA_UI_LOCAL_PATH`:
+
+```powershell
+$env:LILIA_UI_LOCAL_PATH = "C:\Files\workspace\LiliaUI"
+yarn liliaui:local
+Remove-Item Env:LILIA_UI_LOCAL_PATH
+```
+
+Before committing Lilia dependency or lockfile changes, switch back to the pinned GitHub dependencies:
+
+```bash
+yarn liliaui:remote
+yarn liliaui:status
+```
+
+`yarn liliaui:status` only reports whether the four LiliaUI packages currently resolve from local `portal:` paths or from the pinned GitHub commit. The lockfile policy is: the default remote manifest and lockfile are commit-ready, while local `resolutions` / `portal:` lockfile state is for personal cross-repository development and should not be bundled with ordinary app changes.
+
 ## Documentation Site
 
 ```bash
