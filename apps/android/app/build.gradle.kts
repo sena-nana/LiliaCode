@@ -57,6 +57,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":remote-core"))
     implementation(platform("androidx.compose:compose-bom:2026.05.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.camera:camera-camera2:1.4.2")
@@ -67,6 +68,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("computer.iroh:iroh:1.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     compileOnly("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling-preview")

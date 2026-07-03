@@ -5,12 +5,13 @@ import java.net.URLDecoder
 
 object PairingUriParser {
     private const val SUPPORTED_PROTOCOL_VERSION = 1
+    private val SUPPORTED_SCHEMES = setOf("lilia-remote", "lilia-voice")
 
     fun parse(value: String): Result<RemotePairingTicket> = runCatching {
         val trimmed = value.trim()
         val uri = URI(trimmed)
-        require(uri.scheme == "lilia-remote") { "Expected lilia-remote:// pairing URI" }
-        require(uri.host == "pair") { "Expected lilia-remote://pair URI" }
+        require(uri.scheme in SUPPORTED_SCHEMES) { "Expected Lilia pairing URI" }
+        require(uri.host == "pair") { "Expected Lilia pairing URI" }
         val query = parseQuery(uri.rawQuery)
         val version = query["v"]?.toIntOrNull()
             ?: error("Pairing URI missing protocol version")
