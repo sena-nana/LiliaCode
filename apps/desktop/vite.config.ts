@@ -192,6 +192,7 @@ export default defineConfig(async ({ command, mode }) => ({
   },
   test: {
     environment: "jsdom",
+    execArgv: ["--no-experimental-webstorage"],
     setupFiles: ["./tests/setupTests.ts"],
   },
   build: {

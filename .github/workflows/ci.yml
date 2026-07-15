@@ -32,10 +32,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
+      - name: Set up Node.js and Yarn
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,12 +45,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install dependencies
-        run: corepack yarn install --immutable
 
       - name: Verify workspace
         run: corepack yarn verify
@@ -70,16 +62,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install dependencies
-        run: corepack yarn install --immutable
+      - name: Set up Node.js and Yarn
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
 
       - name: Build docs
         run: corepack yarn docs:build

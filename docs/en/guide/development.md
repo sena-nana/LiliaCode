@@ -28,12 +28,12 @@ Lilia/
 
 ## Local Development
 
-This repository uses Yarn 4.14.1 through Corepack. Enable Corepack first, then run contributor commands from the repository root through the root `yarn ...` scripts. `npm`, `pnpm`, global Yarn 1.x, and direct workspace script entrypoints are guarded and not supported as the contributor path.
+This repository uses Node.js 26 and Yarn 4.17.1 through an explicitly installed Corepack. Run contributor commands from the repository root through the root `yarn ...` scripts. `npm`, `pnpm`, other Yarn releases, and direct workspace script entrypoints are guarded and not supported as the contributor path. The committed `.env.yarn` enables Node's portable module compile cache for repeated tooling runs.
 
 ```bash
-# 1. Enable Corepack and activate the repository Yarn version
-corepack enable
-corepack prepare yarn@4.14.1 --activate
+# 1. Install Corepack and enable its Yarn shim
+npm install --global corepack@0.35.0
+corepack enable yarn
 
 # 2. Install dependencies
 yarn install
@@ -48,7 +48,7 @@ yarn tauri:dev
 yarn verify
 ```
 
-If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts and workspace scripts enforce the same package-manager check so contributors hit one Corepack-managed Yarn path.
+If `yarn --version` does not report `4.17.1` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts and workspace scripts enforce Node.js 26 and the pinned Yarn release through the same toolchain check.
 
 ## Local LiliaUI Development
 
@@ -129,4 +129,3 @@ yarn icons:generate
 ```bash
 yarn icons:tauri
 ```
-
