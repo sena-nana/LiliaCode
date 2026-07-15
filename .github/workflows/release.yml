@@ -59,7 +59,7 @@ jobs:
           ref: ${{ steps.release_ref.outputs.ref || github.ref }}
 
       - name: Set up Node.js and Yarn
-        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@8cdf9fce6f86b903a475ac852bce0627f237baf5
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -123,7 +123,7 @@ jobs:
           ref: ${{ steps.release_ref.outputs.ref || github.ref }}
 
       - name: Set up Node.js and Yarn
-        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@8cdf9fce6f86b903a475ac852bce0627f237baf5
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -264,7 +264,7 @@ jobs:
           ref: ${{ steps.release_ref.outputs.ref || github.ref }}
 
       - name: Set up Node.js and Yarn
-        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@8cdf9fce6f86b903a475ac852bce0627f237baf5
 
       - name: Smoke draft Windows installer
         env:
