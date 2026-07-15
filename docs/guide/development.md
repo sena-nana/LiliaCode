@@ -28,12 +28,12 @@ Lilia/
 
 ## 本地运行
 
-本仓库通过 Corepack 使用 Yarn 4.14.1。先启用 Corepack，再从仓库根目录通过根 `yarn ...` 脚本运行贡献命令。`npm`、`pnpm`、全局 Yarn 1.x 和直接进入 workspace 运行脚本都会被检查拦住，不作为贡献路径支持。
+本仓库贡献者工具链统一使用 Node.js 26，并通过显式安装的 Corepack 使用 Yarn 4.17.1。请从仓库根目录通过根 `yarn ...` 脚本运行贡献命令；`npm`、`pnpm`、其他 Yarn 版本和直接进入 workspace 运行脚本都会被检查拦住。仓库提交的 `.env.yarn` 会为重复工具调用启用 Node 可移植模块编译缓存。
 
 ```bash
-# 1. 启用 Corepack 并激活仓库要求的 Yarn 版本
-corepack enable
-corepack prepare yarn@4.14.1 --activate
+# 1. 安装 Corepack 并启用 Yarn shim
+npm install --global corepack@0.35.0
+corepack enable yarn
 
 # 2. 首次安装依赖
 yarn install
@@ -50,7 +50,7 @@ yarn verify
 
 `yarn tauri:build:no-bundle` 会执行发布级别编译但跳过安装包生成，适合发布前快速验证本机打包链路。
 
-如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本和 workspace 脚本都会执行同一个包管理器检查，让贡献者统一走 Corepack 管理的 Yarn 路径。
+如果启用 Corepack 后 `yarn --version` 不是 `4.17.1`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本和 workspace 脚本都会通过同一工具链检查强制使用 Node.js 26 和固定的 Yarn 版本。
 
 `yarn dev` 是普通浏览器预览模式，Vite 会为 `@tauri-apps/api/*` 接入内存态轻量 mock，让页面可以在没有 Tauri shell 的情况下浏览基础项目、对话、设置和插件页面。`yarn tauri:dev`、`yarn build`、`yarn tauri:build`、`yarn tauri:build:no-bundle` 不启用这套 mock，仍然通过现有 Tauri command 与 Rust/SQLite 后端通信。
 
@@ -163,4 +163,3 @@ yarn icons:generate
 ```bash
 yarn icons:tauri
 ```
-
