@@ -22,8 +22,9 @@ import {
   REMOTE_CONTROL_STATUS_COMMAND,
   SYSTEM_OPEN_URL_COMMAND,
 } from "@lilia/contracts";
-import { SETTINGS_TABS, setLiliaAppConfig } from "@lilia/ui";
-import { appConfig } from "../src/app.config";
+import { liliaSettingsKey } from "@lilia/ui/settings";
+import { setLiliaUiConfig } from "@lilia/ui/shell";
+import { appConfig, settingsModel } from "../src/app.config";
 import Settings from "../src/pages/Settings.vue";
 import { createLiliaRouter } from "../src/router";
 import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../src/tauri/pluginCommands";
@@ -40,7 +41,7 @@ import {
 } from "./tauriMock";
 
 async function renderSettings(initialRoute = "/settings") {
-  setLiliaAppConfig(appConfig);
+  setLiliaUiConfig(appConfig);
   const router = createLiliaRouter(createMemoryHistory());
   await router.push(initialRoute);
   await router.isReady();
@@ -48,6 +49,9 @@ async function renderSettings(initialRoute = "/settings") {
   const view = render(Settings, {
     global: {
       plugins: [router],
+      provide: {
+        [liliaSettingsKey as symbol]: settingsModel,
+      },
     },
   });
   if (typeof vi.dynamicImportSettled === "function") {
@@ -1190,7 +1194,7 @@ describe("Settings provider switch", () => {
   it("设置侧边栏将辅助能力改为 Provider 配置并拆分插件资源入口", async () => {
     const view = await renderSettings("/settings?tab=assistant");
 
-    expect(SETTINGS_TABS).toEqual(expect.arrayContaining([
+    expect(settingsModel.tabs).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "assistant", label: "Provider 配置" }),
       expect.objectContaining({ key: "model-config", label: "模型配置" }),
       expect.objectContaining({ key: "plugin-skills", label: "技能" }),
@@ -1198,7 +1202,7 @@ describe("Settings provider switch", () => {
       expect.objectContaining({ key: "plugin-hooks", label: "Hooks" }),
       expect.objectContaining({ key: "plugin-mcp", label: "MCP" }),
     ]));
-    expect(SETTINGS_TABS).not.toEqual(expect.arrayContaining([
+    expect(settingsModel.tabs).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "plugins" }),
     ]));
     expect(view.getByRole("heading", { level: 2, name: "Provider 配置" })).toBeInTheDocument();
@@ -1441,4 +1445,3 @@ describe("Settings provider switch", () => {
     ).toBe(true);
   });
 });
-

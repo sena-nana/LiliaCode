@@ -57,7 +57,7 @@ import {
   pendingAskInteractionKey,
   type PendingAsk,
 } from "../../composables/useAskUser";
-import { withComponentEpoch } from "@lilia/ui";
+import { withComponentEpoch } from "@lilia/ui/composables/useComponentEpoch";
 import type { SearchResult } from "../../services/sessionSearch";
 import type {
   PromptOptimizeRoute,
@@ -89,14 +89,8 @@ import type {
   ComposerSlashTargetItem,
   ComposerWorkflowSlashKind,
 } from "./useComposerSlashCommands";
-import {
-  cancelIdleRun,
-  measurePerfAsync,
-  measurePerfSync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { cancelIdleRun, measurePerfAsync, measurePerfSync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const composerContextPanelLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(
@@ -1897,4 +1891,3 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
     </Transition>
   </div>
 </template>
-

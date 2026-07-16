@@ -8,11 +8,8 @@ import {
   type EffectScope,
   type WritableComputedRef,
 } from "vue";
-import {
-  measurePerfAsync,
-  measurePerfSync,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync, measurePerfSync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import type {
   ComposerPendingInteractionController,
   ComposerPendingEntryActionsMode,
@@ -237,4 +234,3 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
     toolSubtitle,
   };
 }
-

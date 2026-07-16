@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterView, useRoute } from "vue-router";
-import { PopupShell as LiliaPopupShell } from "@lilia/ui";
+import LiliaPopupShell from "@lilia/ui/layouts/PopupShell";
 import PopupTitleBar from "../components/PopupTitleBar.vue";
 
 const route = useRoute();
@@ -16,4 +16,3 @@ const isStatusFloat = computed(() => route.path === "/popup/status");
     <RouterView />
   </LiliaPopupShell>
 </template>
-

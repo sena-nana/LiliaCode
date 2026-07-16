@@ -8,13 +8,7 @@ import {
   listProjectConversations,
 } from "../../services/tasksStore";
 import type { Task } from "@lilia/contracts";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
 
 const props = defineProps<{ projectId: string }>();
 
@@ -140,4 +134,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

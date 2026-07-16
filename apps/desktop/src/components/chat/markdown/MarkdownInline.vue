@@ -2,8 +2,8 @@
 import { defineAsyncComponent } from "vue";
 import type { ChatImageViewerSource } from "../imageViewer";
 import type { InlineToken } from "./markdownParser";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const markdownMathInlineLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -78,4 +78,3 @@ function openMarkdownImage(token: InlineToken) {
     <template v-else>{{ token.text }}</template>
   </template>
 </template>
-

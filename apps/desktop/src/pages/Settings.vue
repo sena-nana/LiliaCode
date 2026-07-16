@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LiliaSettingsPage } from "@lilia/ui";
+import { LiliaSettingsPage } from "@lilia/ui/settings";
 </script>
 
 <template>

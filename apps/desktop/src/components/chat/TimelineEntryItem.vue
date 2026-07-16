@@ -30,8 +30,8 @@ import {
   timelineStatusClass,
   type TimelineDisplayContext,
 } from "./timelineDisplay";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const timelineDeclaredEventLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -472,4 +472,3 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
     </article>
   </li>
 </template>
-

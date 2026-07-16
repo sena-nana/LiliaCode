@@ -98,13 +98,10 @@ import {
   pendingInteractionRequestIdsToKeepAfterLoad,
   syncPendingInteractionsForTimelineEvents,
 } from "./usePendingInteractionActions";
-import {
-  createLazyLoadState,
-  installUnlistenFns,
-  measurePerfAsync,
-  scheduleAfterPaint,
-  singleFlight,
-} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { installUnlistenFns } from "@lilia/ui/utils/eventListeners";
+import { measurePerfAsync, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { singleFlight } from "@lilia/ui/utils/singleFlight";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
 
@@ -1365,4 +1362,3 @@ function stripRestoredReferences(
   next = stripSerializedConversationReferences(next, conversationReferences);
   return next.replace(/[ \t]{2,}/g, " ").trim();
 }
-

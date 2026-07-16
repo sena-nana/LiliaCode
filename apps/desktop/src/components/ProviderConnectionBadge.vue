@@ -21,10 +21,10 @@ import {
   ROUTER_MODES_USING_CODEX_ACCOUNT,
   UNCONFIGURED_CONNECTION_MODES,
 } from "@lilia/contracts/chatBackendsContract.mjs";
-import { useAnchoredOverlay } from "@lilia/ui";
+import { useAnchoredOverlay } from "@lilia/ui/composables/useAnchoredOverlay";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus, startCodexAccountLogin } from "../services/chat";
-import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "@lilia/ui";
+import { cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
 import {
   codexAccountNeedsLogin,
   codexQuotaUnavailableStatus,
@@ -747,4 +747,3 @@ onBeforeUnmount(() => {
     </span>
   </Teleport>
 </template>
-

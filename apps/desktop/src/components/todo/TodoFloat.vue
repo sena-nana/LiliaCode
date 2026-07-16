@@ -20,7 +20,7 @@ import {
   listTodos,
   onTodoChanged,
 } from "../../services/todos";
-import { runUnlistenFns } from "@lilia/ui";
+import { runUnlistenFns } from "@lilia/ui/utils/eventListeners";
 import {
   PENDING_TASK_TODO_GUIDE_STATUS,
   QUEUED_TASK_TODO_GUIDE_STATUS,
@@ -304,4 +304,3 @@ onUnmounted(() => {
     </p>
   </div>
 </template>
-

@@ -13,9 +13,9 @@ import Pin from "@lucide/vue/dist/esm/icons/pin.mjs";
 import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
-import type { ContextMenuItem } from "@lilia/ui";
+import type { ContextMenuItem } from "@lilia/ui/composables/useContextMenu";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
-import { withComponentEpoch } from "@lilia/ui";
+import { withComponentEpoch } from "@lilia/ui/composables/useComponentEpoch";
 import { scheduleTaskDetailPreload } from "../../router";
 import { archiveTask, removeArchivedTaskFromLists, toggleTaskPin } from "../../services/tasksStore";
 import { openPopupChildQuestion, openPopupTask } from "../../services/popupWindows";
@@ -354,4 +354,3 @@ watch(() => props.task.id, refreshWorktreeBinding);
     </div>
   </component>
 </template>
-

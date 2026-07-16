@@ -1,13 +1,7 @@
 import "katex/dist/katex.min.css";
 import { onBeforeUnmount, ref, watch } from "vue";
-import {
-  cancelIdleRun,
-  measurePerfAsync,
-  measurePerfSync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { cancelIdleRun, measurePerfAsync, measurePerfSync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import { useDeferredVisibility } from "./useDeferredVisibility";
 
 const mathRenderModuleLoad = createLazyLoadState(() =>
@@ -103,4 +97,3 @@ export function useDeferredMathRender(options: {
     renderedHtml,
   };
 }
-

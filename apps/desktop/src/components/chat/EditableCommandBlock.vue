@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useFocusOnActivation } from "@lilia/ui";
+import { useFocusOnActivation } from "@lilia/ui/composables/useFocusOnActivation";
 
 const props = defineProps<{
   modelValue: string;
@@ -54,4 +54,3 @@ function updateCommand(event: Event) {
     </p>
   </section>
 </template>
-

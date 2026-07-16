@@ -20,7 +20,7 @@ import {
   type AgentTimelinePayload,
   type TimelineDeclaredGroupUnit,
 } from "@lilia/contracts";
-import { measurePerfSync } from "@lilia/ui";
+import { measurePerfSync } from "@lilia/ui/diagnostics";
 
 export {
   aggregateTimelineStatus,
@@ -253,4 +253,3 @@ export function truncateTimelineText(
 function toSingleLineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
-

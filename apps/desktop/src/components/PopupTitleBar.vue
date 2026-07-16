@@ -7,11 +7,9 @@ import MessageSquarePlus from "@lucide/vue/dist/esm/icons/message-square-plus.mj
 import RefreshCw from "@lucide/vue/dist/esm/icons/refresh-cw.mjs";
 import X from "@lucide/vue/dist/esm/icons/x.mjs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  createLazyLoadState,
-  measurePerfAsync,
-  PopupTitleBarFrame,
-} from "@lilia/ui";
+import PopupTitleBarFrame from "@lilia/ui/components/PopupTitleBarFrame";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 import { invalidateConversationContextSnapshot } from "../services/conversationContextInvalidation";
 import { focusMainWindow } from "../services/popupWindows";
 
@@ -280,4 +278,3 @@ onBeforeUnmount(() => {
     </template>
   </PopupTitleBarFrame>
 </template>
-

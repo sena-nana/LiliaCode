@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
 import type { ChatImageViewerSource } from "./imageViewer";
-import { addDomEventListener } from "@lilia/ui";
+import { addDomEventListener } from "@lilia/ui/utils/eventListeners";
 
 const props = defineProps<{
   image: ChatImageViewerSource;
@@ -269,4 +269,3 @@ function formatFileSize(size: number | null | undefined): string {
     </figure>
   </div>
 </template>
-

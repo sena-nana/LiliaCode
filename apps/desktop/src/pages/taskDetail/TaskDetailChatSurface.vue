@@ -21,18 +21,12 @@ import type {
 import type { LiliaBatchApplyInput } from "@lilia/contracts";
 import { TITLE_UPDATE_ACTION_KIND } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "../../components/chat/imageViewer";
-import {
-  cancelIdleRun,
-  measurePerfAsync,
-  measurePerfSync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { cancelIdleRun, measurePerfAsync, measurePerfSync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import { loadChatComposer, loadChatTranscript } from "./taskDetailLazyLoaders";
 import type { PendingAsk } from "../../composables/useAskUser";
 import { useChatSidebar } from "../../composables/useChatSidebar";
-import { withComponentEpoch } from "@lilia/ui";
+import { withComponentEpoch } from "@lilia/ui/composables/useComponentEpoch";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
@@ -599,4 +593,3 @@ function selectSuggestion(suggestion: SuggestionItem) {
     <div class="empty-state">未找到任务 <code>{{ taskId }}</code></div>
   </section>
 </template>
-

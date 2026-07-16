@@ -94,11 +94,12 @@ beforeEach(async () => {
   ]);
   const { useSidebarDisplayMode } = await import("../src/composables/useSidebarDisplayMode");
   useSidebarDisplayMode().setSidebarDisplayMode("grouped");
-  const [{ setLiliaAppConfig, useCornerStyle }, { appConfig }] = await Promise.all([
-    import("@lilia/ui"),
+  const [{ setLiliaUiConfig }, { useCornerStyle }, { appConfig }] = await Promise.all([
+    import("@lilia/ui/shell"),
+    import("@lilia/ui/composables/useCornerStyle"),
     import("../src/app.config"),
   ]);
-  setLiliaAppConfig(appConfig);
+  setLiliaUiConfig(appConfig);
   const { setCornerRadius, setCornerStyle } = useCornerStyle();
   setCornerStyle("smooth");
   setCornerRadius(8);
@@ -131,4 +132,3 @@ afterEach(() => {
   bindMockProjectPinUpdater(null);
   cleanup();
 });
-

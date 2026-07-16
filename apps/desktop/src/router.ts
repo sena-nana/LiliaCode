@@ -5,14 +5,8 @@ import {
   type RouterHistory,
 } from "vue-router";
 import { defineComponent, h } from "vue";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-  createLazyLoadState,
-} from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 function loadRouteComponent<T>(name: string, loader: () => Promise<T>): () => Promise<T> {
   const state = createLazyLoadState(() =>
@@ -263,4 +257,3 @@ export function cancelTaskDetailPreloadSchedule(): void {
 }
 
 export const router = createLiliaRouter();
-

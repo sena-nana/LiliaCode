@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { useFocusOnActivation } from "@lilia/ui";
+import { useFocusOnActivation } from "@lilia/ui/composables/useFocusOnActivation";
 
 export interface InlineRenameOptions {
   commit: (id: string, value: string) => void;
@@ -60,4 +60,3 @@ export function useInlineRename(options: InlineRenameOptions) {
     bindEditingInput,
   };
 }
-

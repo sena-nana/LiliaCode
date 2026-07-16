@@ -7,7 +7,7 @@ import {
   reparentTask,
   type OrphanConversation,
 } from "../services/tasksStore";
-import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
 
 export type TreeDragKind = "project" | "task";
 export type TreeDropPosition = "before" | "after" | "inside";
@@ -398,4 +398,3 @@ export function useSidebarTreeDrag(
     treeRowStateClass,
   };
 }
-

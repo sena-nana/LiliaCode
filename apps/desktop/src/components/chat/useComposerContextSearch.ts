@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatAttachment, ChatContextSearchResult } from "@lilia/contracts";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import { attachmentPart, textPart, type MentionRange } from "./composerParts";
 import {
   compactPathLabel,
@@ -321,4 +321,3 @@ export function useComposerContextSearch(options: {
     noteInputChanged,
   };
 }
-

@@ -9,8 +9,8 @@ import {
   type LiliaTaskWorkflowKind,
   type LiliaReviewTarget,
 } from "@lilia/contracts";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import { textPart, type MentionRange } from "./composerParts";
 import { readSlashCommandRange } from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";
@@ -319,4 +319,3 @@ export function useComposerSlashCommands(options: {
     noteInputChanged,
   };
 }
-

@@ -23,15 +23,8 @@ import {
   listSidebarConversations,
 } from "../services/sidebarConversations";
 import { scheduleTaskDetailPreload } from "../router";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  installPerfObservers,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const sidebarSearchLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -249,7 +242,6 @@ watch(
 
 onMounted(() => {
   disposed = false;
-  installPerfObservers();
   const stage = beginPerfStage("sidebar.mount", { detail: route.fullPath });
   mountIdleMeasureHandle = runWhenIdle(() => {
     mountIdleMeasureHandle = null;
@@ -334,4 +326,3 @@ function prefetchTaskDetailIntent(detail: string) {
     <SidebarConnectionFooter />
   </aside>
 </template>
-

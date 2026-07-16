@@ -15,8 +15,8 @@ import {
   onDone,
   onTurnStarted,
 } from "../services/chat";
-import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 
 export type ConversationActivity = "running" | "requires_action" | "completed" | "error";
 
@@ -361,4 +361,3 @@ export async function installConversationActivityBridge(): Promise<() => void> {
     installed = false;
   };
 }
-

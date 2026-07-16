@@ -98,7 +98,7 @@ import {
   REMOTE_CONTROL_STATUS_COMMAND,
 } from "@lilia/contracts/remoteControlCommandsContract.mjs";
 import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../tauri/pluginCommands";
-import { installCombinedUnlisten } from "@lilia/ui";
+import { installCombinedUnlisten } from "@lilia/ui/utils/eventListeners";
 import type {
   AgentInteractionSettings,
   AgentInteractionKind,
@@ -709,4 +709,3 @@ export function respondTitleUpdate(
 ): Promise<void> {
   return invoke<void>(CHAT_RESPOND_TITLE_UPDATE_COMMAND, { taskId, requestId, decision });
 }
-

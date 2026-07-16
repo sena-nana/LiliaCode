@@ -4,7 +4,7 @@ import { shallowRef } from "vue";
 import type { ProjectDashboardSummary } from "@lilia/contracts";
 import { PROJECT_DASHBOARD_LIST_COMMAND } from "@lilia/contracts/projectCommandsContract.mjs";
 import { TASKS_CHANGED_EVENT_NAME } from "@lilia/contracts/taskEventsContract.mjs";
-import { addDomEventListener } from "@lilia/ui";
+import { addDomEventListener } from "@lilia/ui/utils/eventListeners";
 
 export const PROJECT_DASHBOARD_SUMMARIES = shallowRef<ProjectDashboardSummary[]>([]);
 
@@ -79,4 +79,3 @@ export function ensureProjectDashboardLoaded(
   });
   return loadPromise;
 }
-

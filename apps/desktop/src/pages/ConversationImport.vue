@@ -25,13 +25,8 @@ import {
   searchHistoryImports,
 } from "../services/chat";
 import { ensureOrphansLoaded, ensureProjectTasksLoaded } from "../services/tasksStore";
-import {
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const agentTimelineLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -730,4 +725,3 @@ watch(
     </div>
   </section>
 </template>
-

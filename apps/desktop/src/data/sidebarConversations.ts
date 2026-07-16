@@ -4,8 +4,8 @@ import { shallowRef } from "vue";
 import type { SidebarConversationSummary } from "@lilia/contracts";
 import { TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND } from "@lilia/contracts/taskCommandsContract.mjs";
 import { TASKS_CHANGED_EVENT_NAME } from "@lilia/contracts/taskEventsContract.mjs";
-import { addDomEventListener } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
+import { addDomEventListener } from "@lilia/ui/utils/eventListeners";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 
 export const SIDEBAR_CONVERSATIONS = shallowRef<SidebarConversationSummary[]>([]);
 const SIDEBAR_CONVERSATIONS_BY_KEY = shallowRef<Map<string, SidebarConversationSummary>>(new Map());
@@ -116,4 +116,3 @@ export function ensureSidebarConversationsLoaded(force = false): Promise<Sidebar
   });
   return loadPromise;
 }
-

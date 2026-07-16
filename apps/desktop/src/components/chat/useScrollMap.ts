@@ -6,7 +6,7 @@ import {
   readScrollbarMetrics,
   scrollOffsetForThumbDrag,
 } from "../../utils/scrollbarMetrics";
-import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
 
 export { clamp } from "../../utils/scrollbarMetrics";
 
@@ -493,4 +493,3 @@ function readDefaultGeometry(scroller: HTMLElement): ScrollMapGeometry {
 function maxScrollTop(scroller: HTMLElement): number {
   return maxScrollOffset(scroller.scrollHeight, scroller.clientHeight);
 }
-

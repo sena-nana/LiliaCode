@@ -10,12 +10,10 @@ import {
   ensureFolderProjects,
 } from "../../services/projectsStore";
 import { pickFolder } from "../../services/projects";
-import {
-  ActionMenuItem,
-  AnchoredActionMenu,
-  type AnchoredMenuPosition,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import ActionMenuItem from "@lilia/ui/components/ActionMenuItem";
+import AnchoredActionMenu from "@lilia/ui/components/AnchoredActionMenu";
+import type { AnchoredMenuPosition } from "@lilia/ui/composables/menuMotion";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 withDefaults(defineProps<{
   open: boolean;
@@ -140,4 +138,3 @@ onBeforeUnmount(() => {
     @confirm="confirmCategory"
   />
 </template>
-

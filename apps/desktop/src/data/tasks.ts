@@ -25,8 +25,8 @@ import {
   listProjects,
   registerProjectRemovalHandler,
 } from "./projects";
-import { addDomEventListener } from "@lilia/ui";
-import { singleFlight } from "@lilia/ui";
+import { addDomEventListener } from "@lilia/ui/utils/eventListeners";
+import { singleFlight } from "@lilia/ui/utils/singleFlight";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
 export interface OrphanConversation {
@@ -561,4 +561,3 @@ export async function updateTaskDependencies(
     await refreshOrphans();
   }
 }
-

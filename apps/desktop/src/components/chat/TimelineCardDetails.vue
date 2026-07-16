@@ -6,8 +6,8 @@ import type {
   AgentTimelineDisplayListItem,
 } from "@lilia/contracts";
 import type { TimelineMarkdownView } from "./timelineDisplay";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const markdownBlockLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -146,4 +146,3 @@ function visibleItems(detail: AgentTimelineDisplayDetail): AgentTimelineDisplayL
     {{ emptyText || "暂无摘要。" }}
   </p>
 </template>
-

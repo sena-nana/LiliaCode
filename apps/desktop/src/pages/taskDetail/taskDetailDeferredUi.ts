@@ -8,8 +8,8 @@ import {
   type SuggestionStatus,
 } from "@lilia/contracts";
 import type { Router } from "vue-router";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const suggestionDepsLoad = createLazyLoadState<{
   getConversationSuggestions: typeof import("../../services/chat").getConversationSuggestions;
@@ -135,4 +135,3 @@ export async function moveTaskDetailDraftToProject(options: {
   if (!isTargetCurrent(draft.id)) return;
   restoreDraft(snapshot.content, nextAttachments);
 }
-

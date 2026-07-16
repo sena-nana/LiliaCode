@@ -28,14 +28,8 @@ import {
   ensureSidebarConversationsLoaded,
   listSidebarConversations,
 } from "../services/sidebarConversations";
-import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
-import {
-  cancelIdleRun,
-  installPerfObservers,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
+import { cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
 
 const ALWAYS_ON_TOP_STORAGE_KEY = "lilia.conversationStatus.alwaysOnTop";
 const OPACITY_STORAGE_KEY = "lilia.conversationStatus.opacity";
@@ -341,7 +335,6 @@ watch(
 
 onMounted(() => {
   disposed = false;
-  installPerfObservers();
   document.body.classList.add(TRANSPARENT_BODY_CLASS);
   void initializeGeometryPersistence();
   void applyAlwaysOnTop(alwaysOnTop.value);
@@ -467,4 +460,3 @@ onUnmounted(() => {
     />
   </section>
 </template>
-

@@ -10,7 +10,7 @@ import {
   type ModelSelectionExplanation,
   type ReasoningEffort,
 } from "@lilia/contracts";
-import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
 
 const props = defineProps<{
   state: ChatComposerState;
@@ -304,4 +304,3 @@ onBeforeUnmount(() => {
   background: var(--bg-hover);
 }
 </style>
-

@@ -1,12 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ContextMenuHost } from "@lilia/ui";
-import {
-  closeContextMenu,
-  openContextMenuAt,
-  installContextMenu,
-  SB_MENU_POP_TRANSITION_MS,
-} from "@lilia/ui";
+import ContextMenuHost from "@lilia/ui/components/ContextMenuHost";
+import { closeContextMenu, openContextMenuAt, installContextMenu } from "@lilia/ui/composables/useContextMenu";
+import { SB_MENU_POP_TRANSITION_MS } from "@lilia/ui/composables/menuMotion";
 
 async function waitForMenuLeave() {
   await vi.advanceTimersByTimeAsync(SB_MENU_POP_TRANSITION_MS + 50);
@@ -80,4 +76,3 @@ describe("ContextMenuHost", () => {
     expect(screen.getByRole("menuitem", { name: "新菜单" })).toBeInTheDocument();
   });
 });
-

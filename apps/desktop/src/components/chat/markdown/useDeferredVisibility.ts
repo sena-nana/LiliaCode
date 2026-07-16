@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { beginPerfStage } from "@lilia/ui";
+import { beginPerfStage } from "@lilia/ui/diagnostics";
 
 type ElementGetter = () => Element | null;
 
@@ -78,4 +78,3 @@ export function useDeferredVisibility(options: {
     activated,
   };
 }
-
