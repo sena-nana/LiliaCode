@@ -8,10 +8,10 @@ import {
   useChatSidebar,
   type ChatSidebarContext,
 } from "../../composables/useChatSidebar";
-import { useResizablePane } from "@lilia/ui";
-import { withComponentEpoch } from "@lilia/ui";
-import { createLazyLoadState, type LazyLoadState } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
+import { useResizablePane } from "@lilia/ui/composables/useResizablePane";
+import { withComponentEpoch } from "@lilia/ui/composables/useComponentEpoch";
+import { createLazyLoadState, type LazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 
 const props = defineProps<ChatSidebarContext>();
 
@@ -210,4 +210,3 @@ watch(
   cursor: pointer;
 }
 </style>
-

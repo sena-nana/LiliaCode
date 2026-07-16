@@ -19,7 +19,8 @@ import {
   type Task,
 } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
-import { ContextMenuHost, vContextMenu } from "@lilia/ui";
+import ContextMenuHost from "@lilia/ui/components/ContextMenuHost";
+import { vContextMenu } from "@lilia/ui/directives/contextMenu";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
@@ -1103,4 +1104,3 @@ describe("SecondaryPanel project tree drag", () => {
     });
   });
 });
-

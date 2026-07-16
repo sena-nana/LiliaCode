@@ -20,15 +20,9 @@ import type { SidebarRunningProcessItem } from "../components/sidebar/sidebarTyp
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
 import { useSidebarFolderDrop } from "../composables/useSidebarFolderDrop";
 import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  installPerfObservers,
-  measurePerfAsync,
-  runWhenIdle,
-  useAnchoredActionMenu,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle } from "@lilia/ui/diagnostics";
+import { useAnchoredActionMenu } from "@lilia/ui/composables/useAnchoredActionMenu";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const sidebarProjectsSectionLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -225,7 +219,6 @@ watch(
 
 onMounted(() => {
   disposed = false;
-  installPerfObservers();
   const stage = beginPerfStage("sidebar.grouped.mount", { detail: route.fullPath });
   mountIdleMeasureHandle = runWhenIdle(() => {
     mountIdleMeasureHandle = null;
@@ -337,4 +330,3 @@ function onProjectCreated(project: Project) {
     />
   </div>
 </template>
-

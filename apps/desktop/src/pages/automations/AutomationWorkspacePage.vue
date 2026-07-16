@@ -31,16 +31,9 @@ import {
 import { useAutomationGraph } from "./useAutomationGraph";
 import { useAutomationRuns } from "./useAutomationRuns";
 import { useAutomationWorkspace } from "./useAutomationWorkspace";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  measurePerfSync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, measurePerfSync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const automationInspectorPanelLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(
@@ -651,4 +644,3 @@ onBeforeUnmount(() => {
     </aside>
   </section>
 </template>
-

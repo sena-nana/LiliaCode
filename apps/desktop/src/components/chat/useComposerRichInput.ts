@@ -17,7 +17,7 @@ import {
   type ComposerPart,
 } from "./composerParts";
 import { isImageAttachment } from "./imageViewer";
-import { measurePerfSync } from "@lilia/ui";
+import { measurePerfSync } from "@lilia/ui/diagnostics";
 
 type InlineIconName = "file" | "folder" | "image" | "paperclip" | "x";
 
@@ -632,4 +632,3 @@ export function useComposerRichInput(options: {
     hasConversationReference,
   };
 }
-

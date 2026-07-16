@@ -20,7 +20,7 @@ import {
   pluginMcpTransportLabel,
   pluginToggleActionLabel,
 } from "@lilia/contracts";
-import { ConfirmDialog } from "@lilia/ui";
+import ConfirmDialog from "@lilia/ui/components/ConfirmDialog";
 import {
   createHookSource,
   createSkill,
@@ -40,11 +40,11 @@ import {
   type PluginPackage,
   type PluginSkill,
 } from "../services/plugins";
-import { measurePerfAsync } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useHookSourceEditor } from "./plugins/useHookSourceEditor";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
-import { createLazyLoadState } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 type PluginsSection = "skills" | "packages" | "hooks" | "mcp";
 
@@ -1202,4 +1202,3 @@ function canOpenConfig(entry: PluginEntry) {
     />
   </section>
 </template>
-

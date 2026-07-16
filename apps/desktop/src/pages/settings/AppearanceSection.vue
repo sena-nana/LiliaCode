@@ -7,12 +7,8 @@ import PanelsTopLeft from "@lucide/vue/dist/esm/icons/panels-top-left.mjs";
 import Radius from "@lucide/vue/dist/esm/icons/radius.mjs";
 import SquareRoundCorner from "@lucide/vue/dist/esm/icons/square-round-corner.mjs";
 import Sun from "@lucide/vue/dist/esm/icons/sun.mjs";
-import {
-  CORNER_RADIUS_MAX,
-  CORNER_RADIUS_MIN,
-  useCornerStyle,
-  useTheme,
-} from "@lilia/ui";
+import { CORNER_RADIUS_MAX, CORNER_RADIUS_MIN, useCornerStyle } from "@lilia/ui/composables/useCornerStyle";
+import { useTheme } from "@lilia/ui/composables/useTheme";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
 
@@ -225,4 +221,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

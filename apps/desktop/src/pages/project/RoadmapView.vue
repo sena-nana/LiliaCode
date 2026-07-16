@@ -23,14 +23,8 @@ import {
   type Milestone,
   type Task,
 } from "@lilia/contracts";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const props = defineProps<{ projectId: string }>();
 const roadmapMilestoneInsightsLoad = createLazyLoadState<Component>(() =>
@@ -302,4 +296,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

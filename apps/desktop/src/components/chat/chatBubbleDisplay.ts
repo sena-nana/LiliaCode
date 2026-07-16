@@ -5,7 +5,7 @@ import {
   type ChatMessage,
   type ChatMessageDisplay,
 } from "@lilia/contracts";
-import { measurePerfSync } from "@lilia/ui";
+import { measurePerfSync } from "@lilia/ui/diagnostics";
 
 export type ChatBubbleMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
 export type ChatBubbleDisplay = ChatMessageDisplay;
@@ -74,4 +74,3 @@ function createConversationReferenceSignature(conversationReferences: ChatConver
       ].join("\u0001"))
     .join("\u0002");
 }
-

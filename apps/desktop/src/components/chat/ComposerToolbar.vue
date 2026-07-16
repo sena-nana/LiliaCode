@@ -24,15 +24,12 @@ import type {
   PermissionMode,
 } from "@lilia/contracts";
 import { attachmentImageSrc } from "./imageViewer";
-import {
-  addDomEventListener,
-  createLazyLoadState,
-  Dropdown,
-  measurePerfAsync,
-  runUnlistenFns,
-  SB_MENU_POP_TRANSITION_MS,
-  useAnchoredMenuMotion,
-} from "@lilia/ui";
+import Dropdown from "@lilia/ui/components/Dropdown";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { SB_MENU_POP_TRANSITION_MS } from "@lilia/ui/composables/menuMotion";
+import { useAnchoredMenuMotion } from "@lilia/ui/composables/useAnchoredMenuMotion";
 
 const composerModelPickerLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(
@@ -516,4 +513,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

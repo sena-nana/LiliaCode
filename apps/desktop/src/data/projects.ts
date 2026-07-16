@@ -15,7 +15,7 @@ import {
   PROJECT_REORDER_COMMAND,
   PROJECT_TOGGLE_PIN_COMMAND,
 } from "@lilia/contracts/projectCommandsContract.mjs";
-import { singleFlight } from "@lilia/ui";
+import { singleFlight } from "@lilia/ui/utils/singleFlight";
 
 interface ProjectRow {
   id: string;
@@ -175,4 +175,3 @@ export async function reorderProjects(orderedIds: string[]): Promise<void> {
     return reordered[nextIndex++] ?? project;
   });
 }
-

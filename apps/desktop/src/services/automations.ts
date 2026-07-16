@@ -25,7 +25,7 @@ import {
   AUTOMATION_SAVE_DRAFT_COMMAND,
   AUTOMATION_SET_ENABLED_COMMAND,
 } from "@lilia/contracts";
-import { installUnlistenFns } from "@lilia/ui";
+import { installUnlistenFns } from "@lilia/ui/utils/eventListeners";
 
 export type {
   AutomationRun,
@@ -127,4 +127,3 @@ export function automationRunToSummary(run: AutomationRun): AutomationRunSummary
     error: run.error,
   };
 }
-

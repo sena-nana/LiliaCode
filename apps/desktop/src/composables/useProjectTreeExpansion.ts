@@ -16,13 +16,7 @@ import {
   ensureOrphansLoaded,
   ensureProjectTasksLoaded,
 } from "../services/tasksStore";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
 
 const TREE_EXPANSION_KEY = "lilia.projectTree.expansion";
 
@@ -347,4 +341,3 @@ export function useProjectTreeExpansion(
     toggleOrphans,
   };
 }
-

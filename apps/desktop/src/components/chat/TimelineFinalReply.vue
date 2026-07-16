@@ -11,8 +11,8 @@ import {
   type SessionForkMode,
 } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import { isTimelineMessageEvent, timelineFinalText } from "./timelineDisplay";
 
 const markdownBlockLoad = createLazyLoadState(() =>
@@ -143,4 +143,3 @@ function startBranchAnchor(mode: SessionForkMode) {
     </div>
   </section>
 </template>
-

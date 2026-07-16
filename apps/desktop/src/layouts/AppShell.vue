@@ -3,16 +3,11 @@ import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue
 import { RouterView, useRoute, useRouter } from "vue-router";
 import ArrowLeft from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
 import SettingsSidebar from "@lilia/ui/layouts/SettingsSidebar";
-import {
-  SETTINGS_TABS,
-  beginPerfStage,
-  createLazyLoadState,
-  installPerfObservers,
-  measurePerfAsync,
-  normalizeSettingsTab,
-  scheduleAfterPaint,
-  useShellSidebar,
-} from "@lilia/ui";
+import { beginPerfStage, measurePerfAsync, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { useShellSidebar } from "@lilia/ui/composables/useShellSidebar";
+import { normalizeSettingsTab } from "@lilia/ui/settings";
+import { settingsModel } from "../app.config";
 import TitleBar from "../components/TitleBar.vue";
 
 const secondaryPanelLoad = createLazyLoadState(() =>
@@ -29,7 +24,7 @@ const SecondaryPanel = defineAsyncComponent({
 const route = useRoute();
 const router = useRouter();
 const isSettingsRoute = computed(() => route.path === "/settings");
-const activeSettingsTab = computed(() => normalizeSettingsTab(route.query.tab));
+const activeSettingsTab = computed(() => normalizeSettingsTab(settingsModel, route.query.tab));
 const isAutomationsRoute = computed(() => route.path === "/automations");
 const isSidebarReplacementRoute = computed(() =>
   isSettingsRoute.value || isAutomationsRoute.value
@@ -70,8 +65,6 @@ const removeBeforeEach = router.beforeEach((to, from) => {
 function goBackFromAutomation() {
   router.push(sidebarReturnTo.value);
 }
-
-installPerfObservers();
 
 function cancelPendingRoutePaintMeasure(stage: "cancelled" | "replaced") {
   pendingRoutePaintMeasure?.cancelPaint();
@@ -127,7 +120,7 @@ onBeforeUnmount(() => {
     />
     <SettingsSidebar
       v-if="isSettingsRoute"
-      :tabs="SETTINGS_TABS"
+      :tabs="settingsModel.tabs"
       :active-key="activeSettingsTab"
       :return-to="sidebarReturnTo"
     />
@@ -172,4 +165,3 @@ onBeforeUnmount(() => {
     </main>
   </div>
 </template>
-

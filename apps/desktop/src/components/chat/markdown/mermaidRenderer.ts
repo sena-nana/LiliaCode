@@ -1,5 +1,5 @@
-import { createLazyLoadState } from "@lilia/ui";
-import { measurePerfAsync } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 
 type MermaidApi = typeof import("mermaid")["default"];
 
@@ -70,4 +70,3 @@ export async function renderMermaidDiagram(
     { detail: `${source.length} chars` },
   );
 }
-

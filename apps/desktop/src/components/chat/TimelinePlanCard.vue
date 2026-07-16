@@ -15,8 +15,8 @@ import type {
   PendingAgentActionResolution,
 } from "../../composables/pendingAgentActions";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,
@@ -267,4 +267,3 @@ function stringPayload(value: unknown): string {
     </section>
   </article>
 </template>
-

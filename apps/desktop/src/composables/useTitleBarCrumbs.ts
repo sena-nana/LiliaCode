@@ -6,13 +6,8 @@ import {
   ensureSidebarConversationsLoaded,
   findSidebarConversation,
 } from "../services/sidebarConversations";
-import {
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const titlebarTasksStoreLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -192,4 +187,3 @@ export function useTitleBarCrumbs() {
     crumbs,
   };
 }
-

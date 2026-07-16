@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
-import { ConfirmDialog } from "@lilia/ui";
+import ConfirmDialog from "@lilia/ui/components/ConfirmDialog";
 import { useDesktopAppUpdater } from "../composables/useDesktopAppUpdater";
 
 const props = withDefaults(defineProps<{

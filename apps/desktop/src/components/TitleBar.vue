@@ -4,7 +4,7 @@ import { useRoute } from "vue-router";
 import ChevronRight from "@lucide/vue/dist/esm/icons/chevron-right.mjs";
 import PanelRightClose from "@lucide/vue/dist/esm/icons/panel-right-close.mjs";
 import PanelRightOpen from "@lucide/vue/dist/esm/icons/panel-right-open.mjs";
-import { TitleBar as LiliaTitleBar } from "@lilia/ui";
+import LiliaTitleBar from "@lilia/ui/components/TitleBar";
 import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar";
 import { useTitleBarCrumbs } from "../composables/useTitleBarCrumbs";
 

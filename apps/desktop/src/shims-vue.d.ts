@@ -1,4 +1,4 @@
-import type { vContextMenu } from "@lilia/ui";
+import type { vContextMenu } from "@lilia/ui/directives/contextMenu";
 
 declare module "*.vue" {
   import type { DefineComponent } from "vue";
@@ -11,4 +11,3 @@ declare module "vue" {
     vContextMenu: typeof vContextMenu;
   }
 }
-

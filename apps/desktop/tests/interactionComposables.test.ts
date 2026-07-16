@@ -2,7 +2,7 @@ import { fireEvent, render } from "@testing-library/vue";
 import { computed, defineComponent, h, nextTick, reactive, ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolConsentRequest } from "@lilia/contracts";
-import { useFocusOnActivation } from "@lilia/ui";
+import { useFocusOnActivation } from "@lilia/ui/composables/useFocusOnActivation";
 import { useInlineRename } from "../src/composables/useInlineRename";
 import { useEditableToolCommand } from "../src/composables/useEditableToolCommand";
 import { toolConsentRequestFixture as toolConsentRequest } from "./interactionTestHelpers";
@@ -139,4 +139,3 @@ describe("interaction composables", () => {
     expect(editor.commandDraft.value).toBe("git status");
   });
 });
-

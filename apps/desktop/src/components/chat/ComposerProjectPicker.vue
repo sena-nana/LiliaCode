@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import FolderPlus from "@lucide/vue/dist/esm/icons/folder-plus.mjs";
 import type { Project } from "@lilia/contracts";
-import { useAnchoredActionMenu } from "@lilia/ui";
+import { useAnchoredActionMenu } from "@lilia/ui/composables/useAnchoredActionMenu";
 import SidebarProjectAddMenu from "../sidebar/SidebarProjectAddMenu.vue";
 
 defineProps<{
@@ -69,4 +69,3 @@ function onSelect(event: Event) {
     />
   </div>
 </template>
-

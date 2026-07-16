@@ -5,12 +5,7 @@ const MAX_MERMAID_SOURCE_LENGTH = 20_000;
 
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
 import { useDeferredVisibility } from "./markdown/useDeferredVisibility";
 import {
   MERMAID_EXPLICIT_RENDER_LENGTH,
@@ -207,4 +202,3 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 </style>
-

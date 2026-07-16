@@ -26,8 +26,8 @@ import {
 } from "./timelinePendingActions";
 import { useAgentTimelineEntries } from "./useAgentTimelineEntries";
 import { useTimelineRailMask } from "./useTimelineRailMask";
-import { measurePerfAsync } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const timelineEntryItemLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -330,4 +330,3 @@ function processAnchorIdsForEntry(entry: TimelineEntry): string[] {
     </ol>
   </section>
 </template>
-

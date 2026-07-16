@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
-import {
-  beginPerfStage,
-  installPerfObservers,
-  measurePerfAsync,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, measurePerfAsync, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const automationWorkspacePageLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -48,7 +43,6 @@ function scheduleWorkspaceMount() {
 }
 
 onMounted(() => {
-  installPerfObservers();
   scheduleWorkspaceMount();
 });
 
@@ -138,4 +132,3 @@ onBeforeUnmount(() => {
   }
 }
 </style>
-

@@ -10,7 +10,9 @@ import {
   type Task,
 } from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
-import { ContextMenuHost, installContextMenu, vContextMenu } from "@lilia/ui";
+import ContextMenuHost from "@lilia/ui/components/ContextMenuHost";
+import { installContextMenu } from "@lilia/ui/composables/useContextMenu";
+import { vContextMenu } from "@lilia/ui/directives/contextMenu";
 import { TASKS } from "../src/data/tasks";
 import { mockInvoke } from "./tauriMock";
 
@@ -302,4 +304,3 @@ describe("ProjectTreeItem", () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(29);
   });
 });
-

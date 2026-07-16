@@ -14,10 +14,7 @@ import Plus from "@lucide/vue/dist/esm/icons/plus.mjs";
 import Trash2 from "@lucide/vue/dist/esm/icons/trash-2.mjs";
 import type { Project } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
-import {
-  openContextMenuAt,
-  type ContextMenuItem,
-} from "@lilia/ui";
+import { openContextMenuAt, type ContextMenuItem } from "@lilia/ui/composables/useContextMenu";
 import {
   archiveProjectConversations,
   removeProject,
@@ -32,14 +29,8 @@ import type {
 } from "../../composables/useSidebarTreeDrag";
 import { openInFileManager, openInVSCode } from "../../services/projects";
 import { openPopupNewChat } from "../../services/popupWindows";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 import { useInlineRename } from "../../composables/useInlineRename";
 
 const projectTreeConversationListLoad = createLazyLoadState<Component>(() =>
@@ -425,4 +416,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

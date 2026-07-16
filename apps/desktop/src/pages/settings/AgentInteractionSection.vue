@@ -18,14 +18,8 @@ import {
   useAgentInteractionSettings,
 } from "../../composables/useAgentInteractionSettings";
 import SettingsCollapsibleCard from "@lilia/ui/components/SettingsCollapsibleCard";
-import {
-  beginPerfStage,
-  cancelIdleRun,
-  measurePerfAsync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { beginPerfStage, cancelIdleRun, measurePerfAsync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const subagentCatalogSectionLoad = createLazyLoadState<Component>(() =>
   measurePerfAsync(
@@ -883,4 +877,3 @@ onBeforeUnmount(() => {
   opacity: 0.78;
 }
 </style>
-

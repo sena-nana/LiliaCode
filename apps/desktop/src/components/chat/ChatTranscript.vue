@@ -19,15 +19,9 @@ import type {
 } from "../../composables/pendingAgentActions";
 import type { LiliaBatchApplyInput } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
-import {
-  cancelIdleRun,
-  measurePerfAsync,
-  measurePerfSync,
-  runWhenIdle,
-  scheduleAfterPaint,
-} from "@lilia/ui";
-import { addDomEventListener, runUnlistenFns } from "@lilia/ui";
-import { createLazyLoadState } from "@lilia/ui";
+import { cancelIdleRun, measurePerfAsync, measurePerfSync, runWhenIdle, scheduleAfterPaint } from "@lilia/ui/diagnostics";
+import { addDomEventListener, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const agentTimelineLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -571,4 +565,3 @@ watch(
     />
   </div>
 </template>
-

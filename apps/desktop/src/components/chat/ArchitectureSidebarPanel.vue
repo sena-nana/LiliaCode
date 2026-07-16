@@ -11,7 +11,7 @@ import {
   rollbackProjectArchitecture,
 } from "../../services/chat";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
-import { withComponentEpoch } from "@lilia/ui";
+import { withComponentEpoch } from "@lilia/ui/composables/useComponentEpoch";
 import MarkdownMermaid from "./MarkdownMermaid.vue";
 
 const props = defineProps<{
@@ -225,4 +225,3 @@ watch(() => props.projectId, loadArchitecture);
     </div>
   </div>
 </template>
-

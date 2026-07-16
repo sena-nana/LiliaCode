@@ -14,12 +14,9 @@ import {
   openCliProject,
   type CliProjectOpenPayload,
 } from "./services/cliProjectOpen";
-import {
-  createLazyLoadState,
-  installCombinedUnlisten,
-  measurePerfAsync,
-  scheduleAfterPaint,
-} from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
+import { installCombinedUnlisten } from "@lilia/ui/utils/eventListeners";
+import { measurePerfAsync, scheduleAfterPaint } from "@lilia/ui/diagnostics";
 
 const contextMenuHostLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -165,4 +162,3 @@ onBeforeUnmount(() => {
   <ContextMenuHost />
   <AppUpdateHost />
 </template>
-

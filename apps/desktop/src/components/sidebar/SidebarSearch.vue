@@ -8,7 +8,7 @@ import {
   searchSessions,
   type SearchResult,
 } from "../../services/sessionSearch";
-import { measurePerfAsync } from "@lilia/ui";
+import { measurePerfAsync } from "@lilia/ui/diagnostics";
 import SearchDropdown from "@lilia/ui/components/SearchDropdown";
 
 const props = defineProps<{
@@ -185,4 +185,3 @@ onBeforeUnmount(() => {
     </SearchDropdown>
   </template>
 </template>
-

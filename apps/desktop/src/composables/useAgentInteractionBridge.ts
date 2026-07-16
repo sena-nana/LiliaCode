@@ -7,7 +7,7 @@ import {
   type AskUserInteractionKind,
 } from "@lilia/contracts";
 import { onAgentInteractionRequest } from "../services/chat";
-import { installUnlistenFns, runUnlistenFns } from "@lilia/ui";
+import { installUnlistenFns, runUnlistenFns } from "@lilia/ui/utils/eventListeners";
 import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
 import { handleAgentPendingInteractionRequest } from "./useAgentPendingInteractions";
 import { handleProjectArchitectureInteractionRequest } from "./useProjectArchitectureInteractions";
@@ -77,4 +77,3 @@ export async function installAgentInteractionBridge(): Promise<() => void> {
     installed = false;
   };
 }
-

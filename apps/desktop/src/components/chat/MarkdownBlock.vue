@@ -12,9 +12,9 @@ import {
 } from "./markdown/markdownParser";
 import type { ChatImageViewerSource } from "./imageViewer";
 import type { MarkdownBlockTone } from "./timelineDisplay";
-import { measurePerfAsync, measurePerfSync } from "@lilia/ui";
+import { measurePerfAsync, measurePerfSync } from "@lilia/ui/diagnostics";
 import type { InlineToken } from "./markdown/types";
-import { createLazyLoadState } from "@lilia/ui";
+import { createLazyLoadState } from "@lilia/ui/utils/lazyLoadState";
 
 const markdownMathBlockLoad = createLazyLoadState(() =>
   measurePerfAsync(
@@ -197,4 +197,3 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
     </template>
   </div>
 </template>
-
