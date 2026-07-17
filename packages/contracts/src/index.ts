@@ -2,6 +2,7 @@ export * from "./project";
 export * from "./app-events";
 export * from "./app-commands";
 export * from "./task";
+export * from "./task-handoff";
 export * from "./todo";
 export * from "./provider";
 export * from "./chat";

@@ -2,6 +2,7 @@ export const TASK_COMMANDS_CONTRACT: Record<string, unknown>;
 export const TASK_LIST_COMMAND: "task_list";
 export const TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND: "task_list_sidebar_conversations";
 export const TASK_GET_COMMAND: "task_get";
+export const TASK_HANDOFF_GET_COMMAND: "task_handoff_get";
 export const TASK_CREATE_COMMAND: "task_create";
 export const TASK_UPDATE_COMMAND: "task_update";
 export const TASK_DELETE_COMMAND: "task_delete";

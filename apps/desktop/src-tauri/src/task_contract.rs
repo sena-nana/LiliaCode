@@ -105,6 +105,10 @@ pub(crate) fn running_task_status() -> &'static str {
     required_task_status("running")
 }
 
+pub(crate) fn waiting_task_status() -> &'static str {
+    required_task_status("waiting")
+}
+
 #[cfg(test)]
 fn validate_project_dashboard_statuses(statuses: &[String]) {
     for status in statuses {

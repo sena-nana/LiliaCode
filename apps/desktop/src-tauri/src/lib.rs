@@ -53,6 +53,7 @@ mod system_wake;
 #[cfg(test)]
 mod task_command_contract;
 mod task_contract;
+mod task_handoff;
 #[cfg(test)]
 mod todo_command_contract;
 mod todos;
@@ -185,8 +186,8 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
         cli_project::handle_second_instance(app, argv, cwd);
     }));
-    #[cfg(not(desktop))]
-    let builder = builder;
+    #[cfg(feature = "agent-debug-webdriver")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
     builder
         .plugin(tauri_plugin_opener::init())
@@ -255,6 +256,7 @@ pub fn run() {
             chat::attachments::chat_search_context_attachments,
             chat::slash_commands::chat_search_slash_commands,
             cli_project::cli_project_open_consume_pending,
+            task_handoff::task_handoff_get,
             chat::commands::chat_send_message,
             chat::commands::chat_interrupt_turn,
             chat::commands::chat_respond_agent_interaction,

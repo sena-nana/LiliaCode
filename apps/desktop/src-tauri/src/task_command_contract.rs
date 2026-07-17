@@ -18,6 +18,7 @@ struct TaskCommandsContract {
     list: String,
     list_sidebar_conversations: String,
     get: String,
+    handoff_get: String,
     create: String,
     update: String,
     delete: String,
@@ -46,6 +47,7 @@ mod tests {
         task_list_sidebar_conversations, task_promote, task_reorder, task_reparent,
         task_toggle_pin, task_update,
     };
+    use crate::task_handoff::task_handoff_get;
 
     #[test]
     fn task_command_names_load_from_contract_manifest() {
@@ -53,6 +55,7 @@ mod tests {
         let _ = task_list;
         let _ = task_list_sidebar_conversations;
         let _ = task_get;
+        let _ = task_handoff_get;
         let _ = task_create;
         let _ = task_update;
         let _ = task_delete;
@@ -69,6 +72,7 @@ mod tests {
             stringify!(task_list_sidebar_conversations)
         );
         assert_eq!(commands.get, stringify!(task_get));
+        assert_eq!(commands.handoff_get, stringify!(task_handoff_get));
         assert_eq!(commands.create, stringify!(task_create));
         assert_eq!(commands.update, stringify!(task_update));
         assert_eq!(commands.delete, stringify!(task_delete));

@@ -267,6 +267,26 @@ describe("App main navigation events", () => {
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_LIST_COMMAND)).toBe(false);
   });
 
+  it("任务交接事件会直接打开已创建的 LiliaCode 任务", async () => {
+    const view = await renderApp("main");
+
+    await waitFor(() => {
+      expect(mockListenerCount(CLI_PROJECT_OPEN_EVENT_NAME)).toBe(1);
+    });
+    emitTauriEvent(CLI_PROJECT_OPEN_EVENT_NAME, {
+      projectId: "lilia",
+      cwd: "D:\\PROJECT\\workspace\\Lilia",
+      taskId: "handoff-task-1",
+      handoffId: "handoff-1",
+    });
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe(
+        "/projects/lilia/tasks/handoff-task-1",
+      );
+    });
+  });
+
   it("主窗口挂载后会消费首启 CLI 项目打开请求", async () => {
     setMockPendingCliProjectOpen({
       projectId: "tools",
@@ -329,4 +349,3 @@ describe("App main navigation events", () => {
     );
   });
 });
-

@@ -176,6 +176,16 @@ const {
   pendingPlanApproval,
   nonInterruptMode,
 } = composerController;
+const hydratedTaskHandoffs = new Set<string>();
+
+async function hydrateTaskHandoff(taskId: string) {
+  if (!taskId || hydratedTaskHandoffs.has(taskId)) return;
+  const { getImportedTaskHandoff } = await import("../../services/taskHandoff");
+  const imported = await getImportedTaskHandoff(taskId);
+  if (!imported || imported.taskId !== taskId || !imported.prompt.trim()) return;
+  hydratedTaskHandoffs.add(taskId);
+  composerController.onInsertDraftText(imported.prompt);
+}
 
 function queryString(value: unknown): string | null {
   if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : null;
@@ -793,6 +803,17 @@ watch(
     if (props.variant !== "popup" || !taskId) return;
     const text = decodeDraftTextParam(queryString(draft));
     if (text) composerController.onInsertDraftText(text);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [props.taskId, shouldRenderChat.value, timelineEvents.value.length] as const,
+  ([taskId, ready, eventCount]) => {
+    if (!ready || eventCount > 0 || !taskId) return;
+    void hydrateTaskHandoff(taskId).catch((error) => {
+      console.error("[task-handoff] load imported handoff failed", error);
+    });
   },
   { immediate: true },
 );
