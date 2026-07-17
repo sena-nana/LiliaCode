@@ -38,6 +38,7 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         DROP TABLE IF EXISTS task_pending_turns;
         DROP TABLE IF EXISTS task_agent_sessions;
         DROP TABLE IF EXISTS task_worktrees;
+        DROP TABLE IF EXISTS task_handoffs;
         DROP TABLE IF EXISTS project_architecture_changes;
         DROP TABLE IF EXISTS project_architecture_graphs;
         DROP TABLE IF EXISTS task_milestone_links;
@@ -121,6 +122,14 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX idx_tasks_project_archived_order
           ON tasks(project_id, archived, pinned DESC, sort_order ASC);
 
+        CREATE TABLE task_handoffs (
+          handoff_id  TEXT PRIMARY KEY,
+          task_id     TEXT NOT NULL UNIQUE,
+          payload_json TEXT NOT NULL,
+          source_route TEXT NOT NULL,
+          created_at  INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
         CREATE TABLE task_dependencies (
           task_id       TEXT NOT NULL,
           depends_on_id TEXT NOT NULL,

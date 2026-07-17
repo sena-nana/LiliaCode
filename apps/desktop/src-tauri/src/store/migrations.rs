@@ -34,7 +34,28 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "remote_control",
         apply: create_remote_control_tables,
     },
+    SchemaMigration {
+        version: 30,
+        name: "task_handoffs",
+        apply: create_task_handoff_table,
+    },
 ];
+
+fn create_task_handoff_table(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS task_handoffs (
+          handoff_id  TEXT PRIMARY KEY,
+          task_id     TEXT NOT NULL UNIQUE,
+          payload_json TEXT NOT NULL,
+          source_route TEXT NOT NULL,
+          created_at  INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 创建 task handoff schema 失败：{e}"))
+}
 
 fn create_memory_tables(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(

@@ -135,6 +135,7 @@ import {
   TASK_ARCHIVE_PROJECT_COMMAND,
   TASK_CREATE_COMMAND,
   TASK_GET_COMMAND,
+  TASK_HANDOFF_GET_COMMAND,
   TASK_LIST_COMMAND,
   TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
   TASK_PROMOTE_COMMAND,
@@ -3153,6 +3154,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return row ? cloneTask(row) : null;
     }
 
+    case TASK_HANDOFF_GET_COMMAND:
+      return null;
+
     case TASK_UPDATE_COMMAND: {
       const id = String(args.id);
       const title = typeof args.title === "string" ? args.title : null;
@@ -4897,4 +4901,3 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 });
 
 resetTauriMockData();
-

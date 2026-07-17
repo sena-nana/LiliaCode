@@ -135,6 +135,7 @@ import {
   TASK_ARCHIVE_COMMAND,
   TASK_ARCHIVE_PROJECT_COMMAND,
   TASK_GET_COMMAND,
+  TASK_HANDOFF_GET_COMMAND,
   TASK_LIST_COMMAND,
   TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
   TASK_PROMOTE_COMMAND,
@@ -904,6 +905,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       ) as T;
     case TASK_GET_COMMAND:
       return clone(tasks.find((task) => task.id === text(args, "id")) ?? null) as T;
+    case TASK_HANDOFF_GET_COMMAND:
+      return null as T;
     case TASK_PROMOTE_COMMAND:
       return clone({
         ...tasks[0],
@@ -1353,4 +1356,3 @@ export class PhysicalPosition {
 export class PhysicalSize {
   constructor(public width: number, public height: number) {}
 }
-

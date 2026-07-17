@@ -19,6 +19,9 @@ export async function openCliProject(payload: CliProjectOpenPayload, router: Rou
     console.error("[liliacode] project not found after CLI open", payload);
     return;
   }
+  if (payload.taskId) {
+    await router.push(`/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(payload.taskId)}`);
+    return;
+  }
   await router.push(`/projects/${encodeURIComponent(project.id)}`);
 }
-

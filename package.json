@@ -64,7 +64,8 @@
     "verify:tauri": "yarn check:toolchain && node scripts/with-rust-cache.mjs cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "preverify:contracts": "node scripts/check-toolchain.ts",
     "verify:contracts": "yarn check:toolchain && node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json",
-    "verify:agent-debug": "yarn check:toolchain && node scripts/with-rust-cache.mjs node apps/desktop/agent-debug/verify-agent-debug.mjs"
+    "verify:agent-debug": "yarn check:toolchain && node scripts/with-rust-cache.mjs node apps/desktop/agent-debug/verify-agent-debug.mjs",
+    "verify:task-handoff-e2e": "yarn check:toolchain && node scripts/with-rust-cache.mjs node apps/desktop/agent-debug/verify-task-handoff-e2e.mjs"
   },
   "devDependencies": {
     "@lilia/build": "github:sena-nana/LiliaUI#workspace=@lilia/build&commit=304f54706cf0a48469531e534efe7d775aaaacf4",

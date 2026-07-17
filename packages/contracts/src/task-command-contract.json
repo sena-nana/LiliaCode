@@ -3,6 +3,7 @@
     "list": "task_list",
     "listSidebarConversations": "task_list_sidebar_conversations",
     "get": "task_get",
+    "handoffGet": "task_handoff_get",
     "create": "task_create",
     "update": "task_update",
     "delete": "task_delete",

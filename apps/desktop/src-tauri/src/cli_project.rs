@@ -11,9 +11,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::{
-    MAIN_WINDOW_LABEL, app_events_contract,
+    app_events_contract,
     projects_tasks::{display_project_path, ensure_project_row_for_cwd},
     store::LiliaStore,
+    task_handoff, MAIN_WINDOW_LABEL,
 };
 
 const STORE_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -24,6 +25,16 @@ const STORE_READY_POLL: Duration = Duration::from_millis(50);
 pub(crate) struct CliProjectOpenPayload {
     project_id: String,
     cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handoff_id: Option<String>,
+}
+
+#[derive(Debug)]
+enum CliOpenRequest {
+    Project(String),
+    TaskHandoff(PathBuf),
 }
 
 #[derive(Default)]
@@ -62,7 +73,7 @@ fn handle_cli_project_args<R: Runtime>(
     cwd: PathBuf,
     emit_immediately: bool,
 ) {
-    let project_path_arg = match parse_project_path_arg(&argv) {
+    let request = match parse_cli_open_request(&argv) {
         Ok(Some(value)) => value,
         Ok(None) => return,
         Err(err) => {
@@ -71,9 +82,41 @@ fn handle_cli_project_args<R: Runtime>(
         }
     };
 
-    match resolve_cli_project_open(app, &project_path_arg, &cwd) {
+    let result = match request {
+        CliOpenRequest::Project(project_path_arg) => {
+            resolve_cli_project_open(app, &project_path_arg, &cwd)
+        }
+        CliOpenRequest::TaskHandoff(path) => task_handoff::resolve_task_handoff(app, &path, &cwd)
+            .map(|payload| CliProjectOpenPayload {
+                project_id: payload.project_id,
+                cwd: payload.cwd,
+                task_id: Some(payload.task_id),
+                handoff_id: Some(payload.handoff_id),
+            }),
+    };
+    match result {
         Ok(payload) => publish_cli_project_open(app, payload, emit_immediately),
         Err(err) => eprintln!("[liliacode] {err}"),
+    }
+}
+
+fn parse_cli_open_request(argv: &[String]) -> Result<Option<CliOpenRequest>, String> {
+    let args = argv
+        .iter()
+        .skip(1)
+        .filter_map(|arg| {
+            let trimmed = arg.trim();
+            let unquoted = trim_surrounding_quotes(trimmed).trim();
+            (!unquoted.is_empty()).then(|| unquoted.to_string())
+        })
+        .collect::<Vec<_>>();
+    match args.as_slice() {
+        [] => Ok(None),
+        [path] => Ok(Some(CliOpenRequest::Project(path.clone()))),
+        [flag, path] if flag == "--task-handoff" => {
+            Ok(Some(CliOpenRequest::TaskHandoff(PathBuf::from(path))))
+        }
+        _ => Err("用法：liliacode <path> | liliacode --task-handoff <handoff.json>".to_string()),
     }
 }
 
@@ -117,24 +160,6 @@ fn resolve_cli_project_open<R: Runtime>(
     }
 }
 
-fn parse_project_path_arg(argv: &[String]) -> Result<Option<String>, String> {
-    let args = argv
-        .iter()
-        .skip(1)
-        .filter_map(|arg| {
-            let trimmed = arg.trim();
-            let unquoted = trim_surrounding_quotes(trimmed).trim();
-            (!unquoted.is_empty()).then(|| unquoted.to_string())
-        })
-        .collect::<Vec<_>>();
-
-    match args.as_slice() {
-        [] => Ok(None),
-        [path] => Ok(Some(path.clone())),
-        _ => Err("用法：liliacode <path>".to_string()),
-    }
-}
-
 fn trim_surrounding_quotes(value: &str) -> &str {
     value
         .strip_prefix('"')
@@ -142,7 +167,7 @@ fn trim_surrounding_quotes(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-fn resolve_project_path(project_path_arg: &str, cwd: &Path) -> Result<PathBuf, String> {
+pub(crate) fn resolve_project_path(project_path_arg: &str, cwd: &Path) -> Result<PathBuf, String> {
     let raw = PathBuf::from(project_path_arg);
     let path = if raw.is_absolute() {
         raw
@@ -163,6 +188,8 @@ fn ensure_project_for_cwd(conn: &Connection, cwd: &str) -> Result<CliProjectOpen
     Ok(CliProjectOpenPayload {
         project_id: project.id,
         cwd: cwd.to_string(),
+        task_id: None,
+        handoff_id: None,
     })
 }
 
@@ -180,6 +207,7 @@ fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     fn setup_projects_schema(conn: &Connection) {
         conn.execute_batch(
@@ -198,45 +226,53 @@ mod tests {
     }
 
     #[test]
-    fn parse_project_path_arg_accepts_one_path() {
-        assert_eq!(
-            parse_project_path_arg(&["LiliaCode.exe".to_string(), "C:\\work\\Lilia".to_string(),])
-                .unwrap(),
-            Some("C:\\work\\Lilia".to_string()),
-        );
+    fn parse_cli_open_request_preserves_project_path_behavior() {
+        let request = parse_cli_open_request(&[
+            "LiliaCode.exe".to_string(),
+            r#""C:\work\Lilia""#.to_string(),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert!(matches!(
+            request,
+            CliOpenRequest::Project(path) if path == "C:\\work\\Lilia"
+        ));
     }
 
     #[test]
-    fn parse_project_path_arg_trims_cmd_wrapper_quotes() {
-        assert_eq!(
-            parse_project_path_arg(&[
-                "LiliaCode.exe".to_string(),
-                r#""C:\work\Lilia""#.to_string(),
-            ])
-            .unwrap(),
-            Some("C:\\work\\Lilia".to_string()),
-        );
+    fn parse_cli_open_request_accepts_versioned_task_handoff_file() {
+        let request = parse_cli_open_request(&[
+            "LiliaCode.exe".to_string(),
+            "--task-handoff".to_string(),
+            "C:\\temp\\handoff.json".to_string(),
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(matches!(
+            request,
+            CliOpenRequest::TaskHandoff(path) if path == PathBuf::from("C:\\temp\\handoff.json")
+        ));
     }
 
     #[test]
-    fn parse_project_path_arg_rejects_multiple_paths() {
-        let err = parse_project_path_arg(&[
+    fn parse_cli_open_request_rejects_ambiguous_arguments() {
+        assert!(parse_cli_open_request(&[
             "LiliaCode.exe".to_string(),
             "C:\\one".to_string(),
             "C:\\two".to_string(),
         ])
-        .unwrap_err();
-        assert!(err.contains("liliacode <path>"));
+        .is_err());
     }
 
     #[test]
     fn normalize_windows_extended_paths_for_display() {
         assert_eq!(
-            normalize_windows_extended_path(r"\\?\C:\work\Lilia"),
+            display_project_path(Path::new(r"\\?\C:\work\Lilia")),
             r"C:\work\Lilia",
         );
         assert_eq!(
-            normalize_windows_extended_path(r"\\?\UNC\server\share"),
+            display_project_path(Path::new(r"\\?\UNC\server\share")),
             r"\\server\share",
         );
     }

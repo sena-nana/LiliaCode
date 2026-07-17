@@ -23,6 +23,8 @@ export interface AppNavigateEvent {
 export interface CliProjectOpenEvent {
   projectId: string;
   cwd: string;
+  taskId?: string | null;
+  handoffId?: string | null;
 }
 
 export function createAppNavigateEvent(route: string): AppNavigateEvent {
