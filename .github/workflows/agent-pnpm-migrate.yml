@@ -14,3 +14,9 @@ jobs:
     uses: sena-nana/LiliaUI/.github/workflows/reusable-pnpm-migration-v3.yml@a48d975bedf85d0724656d2dbd55b13a9af7b9f3
     with:
       lilia_ui_ref: aa0c1df985de80420764ca5d952afa29f47c4ea8
+
+  diagnose:
+    if: github.head_ref == 'agent/migrate-pnpm-workflow'
+    uses: sena-nana/LiliaUI/.github/workflows/reusable-pnpm-generation-diagnostic.yml@95e8329c7bb6691183e43847e70fe48765e271de
+    with:
+      lilia_ui_ref: aa0c1df985de80420764ca5d952afa29f47c4ea8
