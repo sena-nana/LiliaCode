@@ -24,6 +24,8 @@ tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-updater = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "1787ab5c6d9aee9982505d0686d6c2e03547275e" }
+mutsuki-tauri-host = { git = "https://github.com/sena-nana/MutsukiTauriHost.git", rev = "af169aaf7f13c9da0cbbe1214ac97432f6a259e0" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 toml_edit = "0.25.12"

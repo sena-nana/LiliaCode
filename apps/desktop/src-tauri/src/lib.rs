@@ -8,6 +8,7 @@ mod agent_interaction_contract;
 pub mod agent_timeline;
 mod agent_timeline_contract;
 mod app_commands;
+mod app_delivery;
 mod app_events_contract;
 mod automation;
 mod chat;
@@ -225,6 +226,13 @@ pub fn run() {
                 }
                 Err(err) => {
                     eprintln!("[lilia-store] init failed at {}: {err}", home.display());
+                }
+            }
+            {
+                if let Err(err) = tauri::async_runtime::block_on(async {
+                    app_delivery::start_app_delivery_endpoint(app.handle())
+                }) {
+                    eprintln!("[app-delivery] endpoint start failed: {err}");
                 }
             }
             popup_windows::register_initial_popup_shortcut(app.handle());
