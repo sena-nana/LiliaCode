@@ -990,7 +990,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1182,7 +1182,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1614,7 +1614,7 @@ dependencies = [
  "gobject-sys 0.21.5",
  "libc",
  "system-deps 7.0.8",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2693,7 +2693,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2728,7 +2728,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-runtime-contracts"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=1787ab5c6d9aee9982505d0686d6c2e03547275e#1787ab5c6d9aee9982505d0686d6c2e03547275e"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=6574acd2f266981bb8e6b48c4bcdab4adb947ad5#6574acd2f266981bb8e6b48c4bcdab4adb947ad5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2737,7 +2737,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-runtime-core"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=1787ab5c6d9aee9982505d0686d6c2e03547275e#1787ab5c6d9aee9982505d0686d6c2e03547275e"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=6574acd2f266981bb8e6b48c4bcdab4adb947ad5#6574acd2f266981bb8e6b48c4bcdab4adb947ad5"
 dependencies = [
  "mutsuki-runtime-contracts",
  "serde_json",
@@ -2747,7 +2747,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-runtime-host"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=1787ab5c6d9aee9982505d0686d6c2e03547275e#1787ab5c6d9aee9982505d0686d6c2e03547275e"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=6574acd2f266981bb8e6b48c4bcdab4adb947ad5#6574acd2f266981bb8e6b48c4bcdab4adb947ad5"
 dependencies = [
  "crossbeam-channel",
  "futures-channel",
@@ -2764,7 +2764,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-runtime-sdk"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=1787ab5c6d9aee9982505d0686d6c2e03547275e#1787ab5c6d9aee9982505d0686d6c2e03547275e"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=6574acd2f266981bb8e6b48c4bcdab4adb947ad5#6574acd2f266981bb8e6b48c4bcdab4adb947ad5"
 dependencies = [
  "mutsuki-runtime-contracts",
  "mutsuki-runtime-core",
@@ -2777,7 +2777,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-runtime-sdk-macros"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=1787ab5c6d9aee9982505d0686d6c2e03547275e#1787ab5c6d9aee9982505d0686d6c2e03547275e"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=6574acd2f266981bb8e6b48c4bcdab4adb947ad5#6574acd2f266981bb8e6b48c4bcdab4adb947ad5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2787,7 +2787,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-runtime-wire"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=1787ab5c6d9aee9982505d0686d6c2e03547275e#1787ab5c6d9aee9982505d0686d6c2e03547275e"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=6574acd2f266981bb8e6b48c4bcdab4adb947ad5#6574acd2f266981bb8e6b48c4bcdab4adb947ad5"
 dependencies = [
  "mutsuki-runtime-contracts",
  "rmp-serde",
@@ -2799,7 +2799,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-tauri-bridge"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiTauriHost.git?rev=6f1512e9c34d9577784e7afbe1acce4f6c6c92fc#6f1512e9c34d9577784e7afbe1acce4f6c6c92fc"
+source = "git+https://github.com/sena-nana/MutsukiTauriHost.git?rev=fc07770e4d031ff5a7cad353151046a01495eff2#fc07770e4d031ff5a7cad353151046a01495eff2"
 dependencies = [
  "mutsuki-runtime-contracts",
  "serde",
@@ -2812,7 +2812,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-tauri-host"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiTauriHost.git?rev=6f1512e9c34d9577784e7afbe1acce4f6c6c92fc#6f1512e9c34d9577784e7afbe1acce4f6c6c92fc"
+source = "git+https://github.com/sena-nana/MutsukiTauriHost.git?rev=fc07770e4d031ff5a7cad353151046a01495eff2#fc07770e4d031ff5a7cad353151046a01495eff2"
 dependencies = [
  "dirs",
  "mutsuki-link-core",
@@ -2835,7 +2835,7 @@ dependencies = [
 [[package]]
 name = "mutsuki-tauri-resource"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/MutsukiTauriHost.git?rev=6f1512e9c34d9577784e7afbe1acce4f6c6c92fc#6f1512e9c34d9577784e7afbe1acce4f6c6c92fc"
+source = "git+https://github.com/sena-nana/MutsukiTauriHost.git?rev=fc07770e4d031ff5a7cad353151046a01495eff2#fc07770e4d031ff5a7cad353151046a01495eff2"
 dependencies = [
  "mime_guess",
  "mutsuki-runtime-contracts",
@@ -3966,7 +3966,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4024,7 +4024,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4478,7 +4478,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5149,10 +5149,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5528,7 +5528,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5557,7 +5557,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5964,7 +5964,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
