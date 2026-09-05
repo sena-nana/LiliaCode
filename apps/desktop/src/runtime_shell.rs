@@ -8615,7 +8615,14 @@ mod tests {
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.permission_selection = "readonly".to_owned();
         snapshot.composer_permission_menu_open = true;
-        let (document, handles, _primary) = mounted_primary(&snapshot);
+        let (mut document, handles, _primary) = mounted_primary(&snapshot);
+        document
+            .context_mut()
+            .layout_document(
+                DocumentId::new(PRIMARY_DOCUMENT).expect("primary document id"),
+                nana_ui::runtime::LayoutViewport::new(1400.0, 900.0),
+            )
+            .expect("layout open permission menu");
         let world = document.context().world();
         assert_eq!(
             handles.permission_items.len(),
@@ -8640,20 +8647,39 @@ mod tests {
             .expect("permission menu style");
         assert_eq!(
             menu_style.layout.position,
-            nana_ui::runtime::PositionSpec::Fixed
+            nana_ui::runtime::PositionSpec::Static
         );
-        let open_toolbar = world.layout_box(handles.composer_toolbar.stable_id());
+        let open_toolbar = world
+            .layout_box(handles.composer_toolbar.stable_id())
+            .expect("open toolbar");
+        let open_trigger = world
+            .layout_box(handles.permission_menu.stable_id())
+            .expect("open trigger");
+        let open_item = world.layout_box(ask_item).expect("open menu item");
+        assert!(
+            open_item.y + open_item.height <= open_trigger.y + 1.0,
+            "permission items must open above the trigger: trigger={open_trigger:?} item={open_item:?}"
+        );
         drop(document);
-        let (closed_document, closed_handles, _primary) =
+        let (mut closed_document, closed_handles, _primary) =
             mounted_primary(&snapshot_with_empty_primary_pane());
+        closed_document
+            .context_mut()
+            .layout_document(
+                DocumentId::new(PRIMARY_DOCUMENT).expect("primary document id"),
+                nana_ui::runtime::LayoutViewport::new(1400.0, 900.0),
+            )
+            .expect("layout closed permission menu");
         assert!(closed_handles.permission_items.is_empty());
-        assert_eq!(
-            closed_document
-                .context()
-                .world()
-                .layout_box(closed_handles.composer_toolbar.stable_id()),
-            open_toolbar
-        );
+        let closed_world = closed_document.context().world();
+        let closed_toolbar = closed_world
+            .layout_box(closed_handles.composer_toolbar.stable_id())
+            .expect("closed toolbar");
+        let closed_trigger = closed_world
+            .layout_box(closed_handles.permission_menu.stable_id())
+            .expect("closed trigger");
+        assert_eq!(closed_toolbar, open_toolbar);
+        assert_eq!(closed_trigger, open_trigger);
     }
 
     #[test]
