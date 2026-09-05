@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use lilia_contracts::TaskId;
+use lilia_feature_workspace::PROJECTS_WORKSPACE_ITEM_KIND;
 use nana_ui::runtime::{
     sidebar_row_tool_button, sidebar_section_tool_button, sidebar_top_bar_tool_button,
     AboutMetadata, AboutSection, ActionMenu, ActionMenuItem, Activate, AppContext,
@@ -28,6 +29,11 @@ use nana_ui::{
     UI_METRICS,
 };
 
+use crate::application::{
+    ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND, DOCUMENT_WORKSPACE_ITEM_KIND,
+    MEMORY_WORKSPACE_ITEM_KIND, PROJECT_FILES_WORKSPACE_ITEM_KIND, ROADMAP_WORKSPACE_ITEM_KIND,
+    SETTINGS_WORKSPACE_ITEM_KIND, TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND,
+};
 use crate::runtime_compat::{HostedUiCommand, HostedWindowId};
 use crate::runtime_layout::{
     composer_card, composer_interrupt_button, composer_send_button, flatten_composer_textarea,
@@ -50,6 +56,48 @@ const TITLE_BREADCRUMB_WIDTH: f32 = 440.0;
 const TIMELINE_OVERSCAN_EXTENT: f32 = 480.0;
 const TIMELINE_DEFAULT_VIEWPORT_EXTENT: f32 = 720.0;
 const TIMELINE_ROW_FALLBACK_EXTENT: f32 = 72.0;
+
+fn sidebar_row_icon(kind: ShellSidebarKind, id: &str) -> Icon {
+    if id == "projects-empty" {
+        return Icon::Folder;
+    }
+    match kind {
+        ShellSidebarKind::Header
+        | ShellSidebarKind::DropHint
+        | ShellSidebarKind::Project
+        | ShellSidebarKind::Archived
+        | ShellSidebarKind::SearchProject => Icon::Folder,
+        ShellSidebarKind::Task | ShellSidebarKind::SearchTask | ShellSidebarKind::Empty => {
+            Icon::MessageSquarePlus
+        }
+        ShellSidebarKind::Running => Icon::Activity,
+        ShellSidebarKind::Inbox => Icon::Package,
+        ShellSidebarKind::Reveal => Icon::More,
+    }
+}
+
+fn footer_nav_icon(settings: bool) -> Icon {
+    if settings {
+        Icon::Settings
+    } else {
+        Icon::Nodes
+    }
+}
+
+fn workspace_kind_icon(kind: &str) -> Icon {
+    match kind {
+        TASK_WORKSPACE_ITEM_KIND => Icon::MessageSquarePlus,
+        DOCUMENT_WORKSPACE_ITEM_KIND => Icon::File,
+        TERMINAL_WORKSPACE_ITEM_KIND => Icon::Activity,
+        ROADMAP_WORKSPACE_ITEM_KIND => Icon::Chart,
+        MEMORY_WORKSPACE_ITEM_KIND => Icon::Atom,
+        ARCHITECTURE_WORKSPACE_ITEM_KIND | AUTOMATION_WORKSPACE_ITEM_KIND => Icon::Nodes,
+        PROJECT_FILES_WORKSPACE_ITEM_KIND => Icon::Folder,
+        SETTINGS_WORKSPACE_ITEM_KIND => Icon::Settings,
+        PROJECTS_WORKSPACE_ITEM_KIND => Icon::Workspace,
+        _ => Icon::File,
+    }
+}
 
 pub(crate) fn content_hash(value: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -95,7 +143,6 @@ pub struct ShellSidebarRow {
     pub ancestor: bool,
     pub depth: u16,
     pub expanded: Option<bool>,
-    pub icon: Icon,
     pub can_stop: bool,
     pub can_menu: bool,
     pub can_draft: bool,
@@ -545,6 +592,7 @@ pub struct PrimaryShellSnapshot {
     pub sidebar_search_open: bool,
     pub sidebar_search_query: String,
     pub provider_badge: String,
+    pub provider_badge_icon: Icon,
     pub nav_items: Vec<ShellNavItem>,
     pub sidebar_rows: Vec<ShellSidebarRow>,
     pub sidebar_menu: Vec<ShellMenuItem>,
@@ -1212,7 +1260,7 @@ fn sidebar_search_close() -> IconButton {
 }
 
 fn conversation_empty_state(title: String) -> EmptyState {
-    EmptyState::new(title)
+    EmptyState::new(title).icon(Icon::MessageSquarePlus)
 }
 
 fn iab_unavailable_state() -> EmptyState {
@@ -1424,7 +1472,7 @@ fn row_stop_button() -> Button {
 }
 
 fn row_draft_button() -> IconButton {
-    sidebar_row_tool_button(Icon::Add, "新对话")
+    sidebar_row_tool_button(Icon::MessageSquarePlus, "新对话")
 }
 
 fn composer_view(snapshot: &PrimaryShellSnapshot) -> TextArea {
@@ -1616,7 +1664,11 @@ fn pane_tab_options_for(pane: &ShellPaneRow) -> (String, Vec<TabOption>) {
     let options = pane
         .items
         .iter()
-        .map(|item| TabOption::new(item.id.clone(), item.title.clone()).closable(item.closable))
+        .map(|item| {
+            TabOption::new(item.id.clone(), item.title.clone())
+                .icon(workspace_kind_icon(&item.kind))
+                .closable(item.closable)
+        })
         .collect();
     (selected, options)
 }
@@ -2122,7 +2174,7 @@ pub fn mount_primary_shell(
     for item in &snapshot.nav_items {
         let button = context.create_detached_component(
             document_id,
-            SidebarFooterButton::new(item.label.clone(), nav_icon(item.settings))
+            SidebarFooterButton::new(item.label.clone(), footer_nav_icon(item.settings))
                 .selected(item.selected),
         )?;
         context.append_child(footer, button)?;
@@ -2139,7 +2191,7 @@ pub fn mount_primary_shell(
         footer_nav.insert(item.id.clone(), button);
     }
     let more = context
-        .create_detached_component(document_id, SidebarFooterButton::new("更多", Icon::Nodes))?;
+        .create_detached_component(document_id, SidebarFooterButton::new("更多", Icon::More))?;
     context.append_child(footer, more)?;
     bind_activate(
         context,
@@ -2149,7 +2201,10 @@ pub fn mount_primary_shell(
     )?;
     let provider_badge = context.create_detached_component(
         document_id,
-        SidebarFooterButton::new(snapshot.provider_badge.clone(), Icon::Appearance),
+        SidebarFooterButton::new(
+            snapshot.provider_badge.clone(),
+            snapshot.provider_badge_icon,
+        ),
     )?;
     context.append_child(footer, provider_badge)?;
     bind_activate(
@@ -2647,7 +2702,9 @@ pub fn mount_primary_shell(
     context.append_child(automations_page, automation_canvas)?;
     let automations_empty = context.create_detached_component(
         document_id,
-        EmptyState::new("还没有自动化").message("新建一个工作流后，可在节点图中检查并发布。"),
+        EmptyState::new("还没有自动化")
+            .message("新建一个工作流后，可在节点图中检查并发布。")
+            .icon(Icon::Nodes),
     )?;
     let automations_back = context.create_detached_component(
         document_id,
@@ -2669,7 +2726,7 @@ pub fn mount_primary_shell(
         context.create_detached_component(document_id, SidebarFooter::new())?;
     let automations_refresh = context.create_detached_component(
         document_id,
-        SidebarFooterButton::new("刷新", Icon::Workspace),
+        SidebarFooterButton::new("刷新", Icon::Activity),
     )?;
     let automations_new = context
         .create_detached_component(document_id, SidebarFooterButton::new("新建", Icon::Add))?;
@@ -3167,7 +3224,7 @@ impl ShellHandles {
         })?;
         context.update_component(self.footer_more, |button, _| {
             *button =
-                SidebarFooterButton::new("更多", Icon::Nodes).selected(snapshot.titlebar_menu_open);
+                SidebarFooterButton::new("更多", Icon::More).selected(snapshot.titlebar_menu_open);
         })?;
         context.set_breadcrumb_items(
             self.title_breadcrumb,
@@ -3187,7 +3244,10 @@ impl ShellHandles {
             }
         })?;
         context.update_component(self.provider_badge, |button, _| {
-            *button = SidebarFooterButton::new(snapshot.provider_badge.clone(), Icon::Appearance);
+            *button = SidebarFooterButton::new(
+                snapshot.provider_badge.clone(),
+                snapshot.provider_badge_icon,
+            );
         })?;
         context.update_component(self.heading, |heading, _| {
             *heading = conversation_empty_state(snapshot.heading.clone());
@@ -3473,14 +3533,17 @@ impl ShellHandles {
             keep.insert(item.id.clone());
             let button = if let Some(button) = self.footer_nav.get(&item.id).copied() {
                 context.update_component(button, |button, _| {
-                    *button = SidebarFooterButton::new(item.label.clone(), nav_icon(item.settings))
-                        .selected(item.selected);
+                    *button = SidebarFooterButton::new(
+                        item.label.clone(),
+                        footer_nav_icon(item.settings),
+                    )
+                    .selected(item.selected);
                 })?;
                 button
             } else {
                 let button = context.create_detached_component(
                     document_id,
-                    SidebarFooterButton::new(item.label.clone(), nav_icon(item.settings))
+                    SidebarFooterButton::new(item.label.clone(), footer_nav_icon(item.settings))
                         .selected(item.selected),
                 )?;
                 bind_activate(
@@ -3658,15 +3721,14 @@ impl ShellHandles {
             } else {
                 // Nested session rows read as children of their project through
                 // indentation alone; a glyph there only competes with the label.
-                let leading =
-                    if item.depth == 0 {
-                        Some(context.create_detached_component(
-                            document_id,
-                            SidebarRowIcon::new(item.icon),
-                        )?)
-                    } else {
-                        None
-                    };
+                let leading = if item.depth == 0 {
+                    Some(context.create_detached_component(
+                        document_id,
+                        SidebarRowIcon::new(sidebar_row_icon(item.kind, &item.id)),
+                    )?)
+                } else {
+                    None
+                };
                 let mut row_view = SidebarRow::new(item.label.clone())
                     .state(state)
                     .depth(item.depth)
@@ -6850,14 +6912,6 @@ fn titlebar_menu_intent(id: &str) -> ShellIntent {
     }
 }
 
-fn nav_icon(settings: bool) -> Icon {
-    if settings {
-        Icon::Settings
-    } else {
-        Icon::Nodes
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SidebarBucket {
     Session,
@@ -6917,7 +6971,6 @@ fn partition_sidebar_rows(snapshot: &PrimaryShellSnapshot) -> SidebarRowGroups {
                     ancestor: false,
                     depth: 0,
                     expanded: None,
-                    icon: Icon::Workspace,
                     can_stop: false,
                     can_menu: true,
                     can_draft: false,
@@ -7492,6 +7545,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         sidebar_search_open: false,
         sidebar_search_query: String::new(),
         provider_badge: "未连接".to_owned(),
+        provider_badge_icon: Icon::Cpu,
         nav_items: Vec::new(),
         sidebar_rows: Vec::new(),
         sidebar_menu: Vec::new(),
@@ -7663,7 +7717,6 @@ mod tests {
             ancestor: false,
             depth: 0,
             expanded: None,
-            icon: Icon::Folder,
             can_stop: false,
             can_menu: false,
             can_draft: false,

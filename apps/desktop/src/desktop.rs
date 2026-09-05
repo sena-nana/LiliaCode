@@ -2889,7 +2889,6 @@ impl DesktopProgram {
                 ancestor: false,
                 depth: 0,
                 expanded: None,
-                icon: Icon::Folder,
                 can_stop: false,
                 can_menu: false,
                 can_draft: false,
@@ -2913,7 +2912,6 @@ impl DesktopProgram {
                             ancestor: false,
                             depth: 0,
                             expanded: None,
-                            icon: Icon::Folder,
                             can_stop: false,
                             can_menu: false,
                             can_draft: false,
@@ -2940,7 +2938,6 @@ impl DesktopProgram {
                             ancestor: false,
                             depth: 0,
                             expanded: None,
-                            icon: Icon::Workspace,
                             can_stop: false,
                             can_menu: false,
                             can_draft: false,
@@ -2970,7 +2967,6 @@ impl DesktopProgram {
                     ancestor: false,
                     depth: 0,
                     expanded: None,
-                    icon: Icon::Nodes,
                     can_stop: true,
                     can_menu: false,
                     can_draft: false,
@@ -2997,7 +2993,6 @@ impl DesktopProgram {
                     ancestor: false,
                     depth: 0,
                     expanded: None,
-                    icon: Icon::Workspace,
                     can_stop: false,
                     can_menu: false,
                     can_draft: false,
@@ -3016,7 +3011,6 @@ impl DesktopProgram {
                     ancestor: false,
                     depth: 0,
                     expanded: None,
-                    icon: Icon::Workspace,
                     can_stop: false,
                     can_menu: true,
                     can_draft: false,
@@ -3032,7 +3026,6 @@ impl DesktopProgram {
             ancestor: false,
             depth: 0,
             expanded: None,
-            icon: Icon::Workspace,
             can_stop: false,
             can_menu: false,
             can_draft: false,
@@ -3046,7 +3039,6 @@ impl DesktopProgram {
                 ancestor: false,
                 depth: 0,
                 expanded: None,
-                icon: Icon::Folder,
                 can_stop: false,
                 can_menu: false,
                 can_draft: false,
@@ -3070,7 +3062,6 @@ impl DesktopProgram {
                         && self.current_selected_task().is_some(),
                     depth: 0,
                     expanded: Some(expanded),
-                    icon: Icon::Folder,
                     can_stop: false,
                     can_menu: true,
                     can_draft: true,
@@ -3093,7 +3084,6 @@ impl DesktopProgram {
                         ancestor: false,
                         depth: (depth.saturating_add(1)) as u16,
                         expanded: None,
-                        icon: Icon::Workspace,
                         can_stop: false,
                         can_menu: true,
                         can_draft: false,
@@ -3108,7 +3098,6 @@ impl DesktopProgram {
                         ancestor: false,
                         depth: 1,
                         expanded: None,
-                        icon: Icon::Nodes,
                         can_stop: false,
                         can_menu: false,
                         can_draft: false,
@@ -3122,7 +3111,6 @@ impl DesktopProgram {
                         ancestor: false,
                         depth: 1,
                         expanded: None,
-                        icon: Icon::Workspace,
                         can_stop: false,
                         can_menu: false,
                         can_draft: false,
@@ -3139,7 +3127,6 @@ impl DesktopProgram {
             ancestor: false,
             depth: 0,
             expanded: Some(self.sidebar_inbox_expanded()),
-            icon: Icon::Workspace,
             can_stop: false,
             can_menu: false,
             can_draft: false,
@@ -3160,7 +3147,6 @@ impl DesktopProgram {
                     ancestor: false,
                     depth: depth as u16,
                     expanded: None,
-                    icon: Icon::Workspace,
                     can_stop: false,
                     can_menu: true,
                     can_draft: false,
@@ -3175,7 +3161,6 @@ impl DesktopProgram {
                     ancestor: false,
                     depth: 1,
                     expanded: None,
-                    icon: Icon::Nodes,
                     can_stop: false,
                     can_menu: false,
                     can_draft: false,
@@ -3189,7 +3174,6 @@ impl DesktopProgram {
                     ancestor: false,
                     depth: 1,
                     expanded: None,
-                    icon: Icon::Workspace,
                     can_stop: false,
                     can_menu: false,
                     can_draft: false,
@@ -3205,7 +3189,6 @@ impl DesktopProgram {
                 ancestor: false,
                 depth: 0,
                 expanded: None,
-                icon: Icon::Folder,
                 can_stop: false,
                 can_menu: false,
                 can_draft: false,
@@ -4050,7 +4033,8 @@ impl DesktopProgram {
         let draft_worktree = self
             .draft_worktree_context(HostedWindowId::PRIMARY)
             .map(|(_, selection)| selection);
-        let (provider_badge, _, _) = self.provider_runtime_badge(self.theme_tokens().colors);
+        let (provider_badge, _, provider_badge_icon) =
+            self.provider_runtime_badge(self.theme_tokens().colors);
         let project_page = self.shell_project_page();
         crate::runtime_shell::PrimaryShellSnapshot {
             theme: self.theme,
@@ -4070,6 +4054,7 @@ impl DesktopProgram {
             sidebar_search_open: self.sidebar_search_open,
             sidebar_search_query: self.sidebar_search_query.clone(),
             provider_badge,
+            provider_badge_icon,
             nav_items: self.shell_nav_items(),
             sidebar_rows: self.shell_sidebar_rows(),
             sidebar_menu: self.shell_sidebar_menu_items(),
@@ -25481,11 +25466,11 @@ impl DesktopProgram {
                 })
                 .map(|provider| provider.display_name.clone())
                 .unwrap_or_else(|| "已连接".to_owned());
-            (provider, colors.success, Icon::Appearance)
+            (provider, colors.success, Icon::Sparkles)
         } else if selected_credential_usable {
-            ("正在准备".to_owned(), colors.warning, Icon::Appearance)
+            ("正在准备".to_owned(), colors.warning, Icon::Activity)
         } else {
-            ("未连接".to_owned(), colors.warning, Icon::About)
+            ("未连接".to_owned(), colors.warning, Icon::Cpu)
         }
     }
 
@@ -28747,15 +28732,15 @@ impl RuntimeProgram for DesktopProgram {
         let settings_model = SettingsModel::new(
             "appearance",
             [
-                SettingsTab::new("appearance", "外观").icon(Icon::Appearance),
+                SettingsTab::new("appearance", "外观").icon(Icon::Palette),
                 SettingsTab::new("project", "项目").icon(Icon::Folder),
-                SettingsTab::new("provider", "模型服务").icon(Icon::Nodes),
-                SettingsTab::new("agent", "Agent").icon(Icon::Nodes),
+                SettingsTab::new("provider", "模型服务").icon(Icon::Cpu),
+                SettingsTab::new("agent", "Agent").icon(Icon::Bot),
                 SettingsTab::new("quota", "用量与额度").icon(Icon::Chart),
-                SettingsTab::new("extensions", "扩展").icon(Icon::Nodes),
-                SettingsTab::new("remote", "远程控制").icon(Icon::Nodes),
-                SettingsTab::new("desktop", "桌面").icon(Icon::Appearance),
-                SettingsTab::new("data", "数据迁移").icon(Icon::Folder),
+                SettingsTab::new("extensions", "扩展").icon(Icon::Puzzle),
+                SettingsTab::new("remote", "远程控制").icon(Icon::MonitorPlay),
+                SettingsTab::new("desktop", "桌面").icon(Icon::Workspace),
+                SettingsTab::new("data", "数据迁移").icon(Icon::Package),
                 SettingsTab::new("about", "关于").icon(Icon::About),
             ],
         )
