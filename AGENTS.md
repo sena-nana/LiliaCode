@@ -23,11 +23,14 @@
 
 写或改 NanaUI 界面前，按顺序读以下材料；不要凭 CSS 或其他 GUI 框架的直觉写布局：
 
-1. NanaUI `docs/rust-layout.md` —— Rust 路径布局与边框标准写法（`Stack` 预设、`outline(role, width)`、默认值坑位）。
-2. `apps/desktop/src/runtime_layout.rs` —— 本仓库布局惯用法权威（`Stack` 预设、卡片三件套、控件构造器）。
-3. `.agents/skills/lilia-app-design/SKILL.md` —— 视觉层级与卡片、浮层规范。
+1. NanaUI 仓库根的 `AGENTS.md` —— NanaUI 的渲染合同与 Agent 使用规范（宿主持有 Window/Surface/Device/Queue、禁止第二套 Device/Queue、禁止正式路径 CPU 回读等硬约束）。
+2. NanaUI `docs/rust-layout.md` —— Rust 路径布局与边框标准写法（`Stack` 预设、`outline(role, width)`、默认值坑位）。
+3. `apps/desktop/src/runtime_layout.rs` —— 本仓库布局惯用法权威（`Stack` 预设、卡片三件套、控件构造器）。
+4. `.agents/skills/lilia-app-design/SKILL.md` —— 视觉层级与卡片、浮层规范。
 
 NanaUI 文档与 `examples/component-gallery` 位于其仓库 checkout：工作区旁的 `NanaUI/`，或 cargo git 缓存 `~/.cargo/git/checkouts/nanaui-*/<rev>/docs/`。关键事实：容器默认竖排；水平排列必须用 `Stack::row` 等预设；边框颜色与宽度分属两个字段，缺一即静默不画，必须用 `outline(...)` 一次写全；`flex_shrink` 缺省按 0 处理，不是 CSS 的 1。
+
+需要调试或验证 NanaUI 界面渲染时，使用 NanaUI 的离线渲染能力（`nana-ui-devtools` 已作为 `apps/desktop` dev-dependency 接入，`OffscreenSnapshots` 可离屏绘制 `UiScene` 并输出 PNG），不要靠日志猜界面状态；headless 截图/a11y/点击会话见 NanaUI `AGENTS.md` 的 agent-debug 条目。
 
 ## 运行入口
 
