@@ -166,11 +166,14 @@ impl ComposerModule {
         refresh_suggestions: bool,
     ) -> UiModuleOutcome {
         if self.attachments_locked(cx) && attachment_command(&command) {
+            if matches!(command, DesktopComposerCommand::ApplyPaste { .. }) {
+                return self.command_failed("当前无法添加附件，请稍后重试。");
+            }
             return UiModuleOutcome::clean();
         }
         if self.transient {
             let Some(composer) = self.composer.as_mut() else {
-                return UiModuleOutcome::clean();
+                return self.command_failed("输入内容已不可用，请重新打开会话。");
             };
             return match composer.apply_transient_command(command) {
                 Ok(_) => {
@@ -184,8 +187,7 @@ impl ComposerModule {
                 }
                 Err(error) => {
                     eprintln!("failed to update Native transient composer: {error}");
-                    self.error = Some("无法更新输入内容，请重试。".to_owned());
-                    UiModuleOutcome::dirty()
+                    self.command_failed("无法更新输入内容，请重试。")
                 }
             };
         }
@@ -195,13 +197,12 @@ impl ComposerModule {
             .map(|composer| composer.task_id.clone())
             .or_else(|| cx.selected_task())
         else {
-            return UiModuleOutcome::clean();
+            return self.command_failed("输入内容已不可用，请重新打开会话。");
         };
         let application = match cx.application() {
             Ok(application) => application,
             Err(error) => {
-                self.error = Some(error);
-                return UiModuleOutcome::dirty();
+                return self.command_failed(error);
             }
         };
         match application.execute_composer_command(&task_id, command) {
@@ -213,11 +214,14 @@ impl ComposerModule {
                 }
                 UiModuleOutcome::dirty()
             }
-            Err(_) => {
-                self.error = Some("无法更新输入内容，请重试。".to_owned());
-                UiModuleOutcome::dirty()
-            }
+            Err(_) => self.command_failed("无法更新输入内容，请重试。"),
         }
+    }
+
+    fn command_failed(&mut self, error: impl Into<String>) -> UiModuleOutcome {
+        let error = error.into();
+        self.error = Some(error.clone());
+        UiModuleOutcome::failed(error)
     }
 
     fn set_content(&mut self, value: String, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
@@ -410,6 +414,9 @@ impl ComposerModule {
 }
 
 fn attachment_command(command: &DesktopComposerCommand) -> bool {
+    if let DesktopComposerCommand::ApplyPaste { attachments, .. } = command {
+        return !attachments.is_empty();
+    }
     matches!(
         command,
         DesktopComposerCommand::ReplaceAttachments(_)
@@ -505,8 +512,7 @@ impl UiModule for ComposerModule {
         into.composer_revision = composer.revision;
         into.composer_height = textarea_height(&self.composer_editor);
         into.attachments = composer
-            .attachments
-            .iter()
+            .effective_attachments()
             .map(|attachment| ShellAttachmentRow {
                 id: attachment.id.clone(),
                 label: attachment.name.clone(),
@@ -543,13 +549,192 @@ impl UiModule for ComposerModule {
 
 #[cfg(test)]
 mod tests {
-    use lilia_contracts::TaskId;
+    use std::sync::Arc;
+
+    use lilia_contracts::{LiliaAgentWorkflow, LiliaReviewTarget, TaskId};
     use lilia_kernel::Kernel;
+    use lilia_service::ServiceAuthority;
     use nana_ui_platform::WindowId;
 
     use super::*;
     use crate::application::ApplicationWorkspaceSurface;
     use crate::runtime_shell::{empty_snapshot, ShellProjectPage};
+
+    fn replacement_commands(expected_revision: u64) -> [DesktopComposerCommand; 2] {
+        [
+            DesktopComposerCommand::ApplyPromptOptimization {
+                expected_revision,
+                content: "optimized old prompt".to_owned(),
+            },
+            DesktopComposerCommand::ApplySlashWorkflow {
+                expected_revision,
+                workflow: LiliaAgentWorkflow::LiliaReview {
+                    target: LiliaReviewTarget::BaseBranch {
+                        branch: "main".to_owned(),
+                    },
+                    instructions: None,
+                    delivery: None,
+                },
+            },
+        ]
+    }
+
+    struct NoopHost;
+
+    impl crate::application::DesktopHost for NoopHost {
+        fn execute(
+            &self,
+            _: &crate::application::DesktopHostContext,
+            _: crate::application::DesktopHostAction,
+        ) -> Result<crate::application::DesktopHostResult, crate::application::DesktopHostError>
+        {
+            Ok(crate::application::DesktopHostResult::Completed)
+        }
+    }
+
+    fn durable_fixture() -> (
+        tempfile::TempDir,
+        crate::application::DesktopApplication,
+        Kernel,
+        ComposerModule,
+        rusqlite::Connection,
+    ) {
+        use crate::application::{DesktopApplication, DesktopApplicationConfig, DesktopTaskCreate};
+        let home = tempfile::tempdir().unwrap();
+        let config = DesktopApplicationConfig::new(home.path(), "composer-module-test").unwrap();
+        let authority = ServiceAuthority::bootstrap_with_home(home.path()).unwrap();
+        let app = DesktopApplication::from_authority(config.clone(), authority, Arc::new(NoopHost))
+            .unwrap();
+        let task = app
+            .create_task(DesktopTaskCreate::new(None, "Draft"))
+            .unwrap();
+        let state = app
+            .execute_composer_command(
+                &task.id,
+                DesktopComposerCommand::SetContent("original prompt".to_owned()),
+            )
+            .unwrap();
+        let kernel = Kernel::new();
+        kernel
+            .mount(Arc::new(crate::shell_service::ApplicationFeature::new(
+                app.clone(),
+            )))
+            .unwrap();
+        let mut module = ComposerModule::default();
+        module.apply_state(state);
+        let connection = rusqlite::Connection::open(config.domain_database_path()).unwrap();
+        (home, app, kernel, module, connection)
+    }
+
+    fn assert_rejected(
+        module: &ComposerModule,
+        outcome: UiModuleOutcome,
+        expected: &DesktopComposerState,
+    ) {
+        assert!(
+            outcome.error.is_some(),
+            "the shell must not continue after rejection"
+        );
+        assert!(outcome.dirty);
+        assert!(outcome.effects.is_empty());
+        assert_eq!(module.error, outcome.error);
+        assert_eq!(module.composer(), Some(expected));
+        assert_eq!(module.composer_editor().text(), expected.content);
+    }
+
+    #[test]
+    fn stale_transient_replacements_report_failure_and_keep_the_newer_draft() {
+        for window in [WindowId::PRIMARY, WindowId(42)] {
+            let kernel = Kernel::new();
+            let cx = UiModuleContext::new(&kernel, window);
+            let mut module = loaded_draft();
+            let revision = module.composer().unwrap().revision;
+            module.reduce(ComposerMessage::SetContent("new question".to_owned()), &cx);
+            let newer = module.composer().unwrap().clone();
+            for command in replacement_commands(revision) {
+                let outcome = module.reduce(ComposerMessage::ApplyCommand(command), &cx);
+                assert_rejected(&module, outcome, &newer);
+            }
+        }
+    }
+
+    #[test]
+    fn stale_durable_replacements_report_failure_without_publishing_a_change() {
+        for window in [WindowId::PRIMARY, WindowId(42)] {
+            let (_home, app, kernel, mut module, _connection) = durable_fixture();
+            let cx = UiModuleContext::new(&kernel, window);
+            let revision = module.composer().unwrap().revision;
+            module.reduce(ComposerMessage::SetContent("new question".to_owned()), &cx);
+            let newer = module.composer().unwrap().clone();
+            let events = app.subscribe_events();
+            for command in replacement_commands(revision) {
+                let outcome = module.reduce(ComposerMessage::ApplyCommand(command), &cx);
+                assert_rejected(&module, outcome, &newer);
+                assert_eq!(app.composer_state(&newer.task_id).unwrap(), newer);
+                assert!(events.try_recv().is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn durable_replacement_write_errors_reach_the_shell_and_allow_retry() {
+        for window in [WindowId::PRIMARY, WindowId(42)] {
+            for command_index in 0..2 {
+                let (_home, app, kernel, mut module, connection) = durable_fixture();
+                let cx = UiModuleContext::new(&kernel, window);
+                let original = module.composer().unwrap().clone();
+                let command = replacement_commands(original.revision)[command_index].clone();
+                connection.execute_batch(
+                    "CREATE TRIGGER reject_composer_write BEFORE INSERT ON desktop_composer_drafts
+                     BEGIN SELECT RAISE(ABORT, 'injected composer persistence failure'); END;",
+                ).unwrap();
+                let events = app.subscribe_events();
+                let outcome = module.reduce(ComposerMessage::ApplyCommand(command.clone()), &cx);
+                assert_rejected(&module, outcome, &original);
+                assert_eq!(app.composer_state(&original.task_id).unwrap(), original);
+                assert!(events.try_recv().is_err());
+
+                connection
+                    .execute_batch("DROP TRIGGER reject_composer_write;")
+                    .unwrap();
+                let retried = module.reduce(ComposerMessage::ApplyCommand(command), &cx);
+                assert!(retried.error.is_none());
+                assert!(module.error.is_none());
+                let updated = app.composer_state(&original.task_id).unwrap();
+                assert_eq!(module.composer(), Some(&updated));
+                assert_eq!(updated.revision, original.revision + 1);
+                if command_index == 0 {
+                    assert_eq!(updated.content, "optimized old prompt");
+                } else {
+                    assert!(updated.content.is_empty());
+                    assert!(matches!(
+                        updated.workflow,
+                        Some(LiliaAgentWorkflow::LiliaReview { .. })
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_composer_or_application_is_a_failed_command() {
+        let kernel = Kernel::new();
+        let cx = UiModuleContext::new(&kernel, WindowId::PRIMARY);
+        let mut missing = ComposerModule::default();
+        let outcome = missing.reduce(
+            ComposerMessage::ApplyCommand(replacement_commands(0)[0].clone()),
+            &cx,
+        );
+        assert!(outcome.error.is_some());
+        let mut unavailable_service = loaded_draft();
+        unavailable_service.transient = false;
+        let original = unavailable_service.composer().unwrap().clone();
+        let outcome = unavailable_service.reduce(
+            ComposerMessage::ApplyCommand(replacement_commands(0)[0].clone()),
+            &cx,
+        );
+        assert_rejected(&unavailable_service, outcome, &original);
+    }
 
     fn loaded_draft() -> ComposerModule {
         let mut module = ComposerModule::default();

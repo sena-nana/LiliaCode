@@ -74,6 +74,20 @@ impl DesktopApplication {
         id: &str,
         update: DesktopTodoUpdate,
     ) -> Result<Option<DesktopTaskTodo>, DesktopApplicationError> {
+        let _dispatch = if update.text.is_some()
+            || update.done.is_some()
+            || update.order.is_some()
+            || update.priority.is_some()
+        {
+            Some(
+                self.inner
+                    .guide_dispatch
+                    .lock()
+                    .map_err(|_| DesktopApplicationError::StateUnavailable("guide dispatch"))?,
+            )
+        } else {
+            None
+        };
         let todo = self
             .inner
             .todos
@@ -89,6 +103,11 @@ impl DesktopApplication {
     }
 
     pub fn delete_task_todo(&self, id: &str) -> Result<bool, DesktopApplicationError> {
+        let _dispatch = self
+            .inner
+            .guide_dispatch
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("guide dispatch"))?;
         let task_id = self
             .inner
             .todos

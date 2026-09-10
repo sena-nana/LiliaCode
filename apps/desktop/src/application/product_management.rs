@@ -113,6 +113,48 @@ impl DesktopApplication {
         Ok(self.project_tasks().update_task(task_id, patch)?)
     }
 
+    pub(crate) fn task_completion_editable(&self, task_id: &TaskId) -> bool {
+        let runtime = self.task_runtime_snapshot(task_id);
+        runtime.phase == "idle"
+            && runtime.queued_turns == 0
+            && self.ensure_task_worktree_idle(task_id).is_ok()
+            && self.task_session_snapshot(task_id).is_ok_and(|session| {
+                !session
+                    .pending
+                    .iter()
+                    .any(|pending| pending.status == lilia_contracts::PendingProjectionStatus::Open)
+            })
+    }
+
+    pub(crate) fn set_task_completed(
+        &self,
+        task_id: &TaskId,
+        completed: bool,
+    ) -> Result<ProductTask, DesktopApplicationError> {
+        let _submission = self
+            .inner
+            .turn_submission
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        if !self.task_completion_editable(task_id) {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "task status",
+                message: "请等待当前任务运行、审批或工作树操作结束。".into(),
+            });
+        }
+        self.update_task(
+            task_id,
+            DesktopTaskPatch {
+                status: Some(if completed {
+                    lilia_contracts::ProductTaskStatus::Done
+                } else {
+                    lilia_contracts::ProductTaskStatus::Waiting
+                }),
+                ..Default::default()
+            },
+        )
+    }
+
     pub fn set_task_archived(
         &self,
         task_id: &TaskId,
@@ -158,6 +200,7 @@ impl DesktopApplication {
 
 #[cfg(test)]
 mod tests {
+    use crate::application::composer::DesktopComposerTurnRequest;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
@@ -208,6 +251,54 @@ mod tests {
             Arc::new(NoopHost),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn completion_rejects_running_and_worktree_busy_targets_without_mutating_other_tasks() {
+        let app = application();
+        let task = app
+            .create_task(DesktopTaskCreate::new(None, "Target"))
+            .unwrap();
+        let other = app
+            .create_task(DesktopTaskCreate::new(None, "Other"))
+            .unwrap();
+        app.inner
+            .worktree_operations
+            .lock()
+            .unwrap()
+            .insert(task.id.clone());
+        assert!(!app.task_completion_editable(&task.id));
+        assert!(app.set_task_completed(&task.id, true).is_err());
+        app.inner
+            .worktree_operations
+            .lock()
+            .unwrap()
+            .remove(&task.id);
+        let request = app.composer_state(&task.id).unwrap().turn_request();
+        app.inner
+            .agent
+            .enqueue_with_turn_id(request, "completion-busy-turn".into());
+        assert!(!app.task_completion_editable(&task.id));
+        assert!(app.set_task_completed(&task.id, true).is_err());
+        assert_eq!(
+            app.task_session_snapshot(&task.id).unwrap().task.status,
+            ProductTaskStatus::Draft
+        );
+        assert_eq!(
+            app.set_task_completed(&other.id, true).unwrap().status,
+            ProductTaskStatus::Done
+        );
+        app.inner
+            .agent
+            .finish_without_next(&task.id, "completion-busy-turn");
+        assert_eq!(
+            app.set_task_completed(&task.id, true).unwrap().status,
+            ProductTaskStatus::Done
+        );
+        assert_eq!(
+            app.set_task_completed(&task.id, false).unwrap().status,
+            ProductTaskStatus::Waiting
+        );
     }
 
     #[test]

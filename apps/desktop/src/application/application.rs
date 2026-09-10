@@ -58,7 +58,15 @@ pub(crate) struct DesktopApplicationInner {
     pub(crate) guide_dispatch: Mutex<()>,
     pub(crate) todos: Mutex<DesktopTodoStore>,
     pub(crate) worktrees: Mutex<DesktopWorktreeStore>,
+    pub(crate) worktree_operations: Mutex<std::collections::HashSet<TaskId>>,
     pub(crate) automation: DesktopAutomationService,
+    pub(crate) automation_dispatcher:
+        Mutex<Option<super::automation_dispatch::AutomationDispatcher>>,
+    pub(super) automation_inbox: super::automation_inbox::AutomationInbox,
+    pub(super) automation_delivery: Mutex<()>,
+    pub(super) automation_capture: Mutex<()>,
+    pub(super) automation_execution: super::automation_execution_gate::AutomationExecutionGate,
+    pub(crate) automation_cursor: lilia_storage::SqliteAgentRuntimeStateStore,
     pub(crate) memory: DesktopMemoryService,
     pub(crate) roadmap: DesktopRoadmapService,
     pub(crate) architecture: DesktopArchitectureService,
@@ -289,6 +297,15 @@ impl DesktopApplication {
             crate::application::contributions::LiliaContributionHost::bootstrap()
                 .map_err(|error| DesktopApplicationError::Contribution(error.to_string()))?;
         let timeline = lilia_feature_timeline::TimelineService::new(authority.clone());
+        let automation_inbox =
+            super::automation_inbox::AutomationInbox::new(domain_connection.clone())?;
+        let automation_cursor = if authority.data_paths().is_some() {
+            lilia_storage::SqliteAgentRuntimeStateStore::open(
+                config.data_paths().agent_runtime_db(),
+            )?
+        } else {
+            lilia_storage::SqliteAgentRuntimeStateStore::open_in_memory()?
+        };
         Ok(Self {
             inner: Arc::new(DesktopApplicationInner {
                 config,
@@ -313,7 +330,14 @@ impl DesktopApplication {
                 guide_dispatch: Mutex::new(()),
                 todos: Mutex::new(todos),
                 worktrees: Mutex::new(worktrees),
+                worktree_operations: Mutex::new(std::collections::HashSet::new()),
                 automation,
+                automation_dispatcher: Mutex::new(None),
+                automation_inbox,
+                automation_delivery: Mutex::new(()),
+                automation_capture: Mutex::new(()),
+                automation_execution: Default::default(),
+                automation_cursor,
                 memory,
                 roadmap,
                 architecture,
@@ -519,6 +543,10 @@ impl DesktopApplication {
         limit: usize,
     ) -> Result<TimelineProjectionPage, DesktopApplicationError> {
         Ok(self.inner.timeline.page(task_id, before, limit)?)
+    }
+
+    pub fn uses_hosted_file_dialog(&self) -> bool {
+        self.inner.host.uses_hosted_file_dialog()
     }
 
     pub fn execute_host(

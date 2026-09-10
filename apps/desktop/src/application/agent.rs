@@ -138,7 +138,7 @@ fn normalized_pending_interaction_response(
                 return Err(DesktopApplicationError::InvalidPendingInteraction {
                     request_id: pending.request_id.clone(),
                     message: "tool consent response has an invalid decision".to_owned(),
-                })
+                });
             }
         };
         if accepted != expected_accepted {
@@ -169,7 +169,7 @@ fn normalized_pending_interaction_response(
             return Err(DesktopApplicationError::InvalidPendingInteraction {
                 request_id: pending.request_id.clone(),
                 message: "MCP elicitation response has an invalid action".to_owned(),
-            })
+            });
         }
     };
     if accepted != action.accepted() {
@@ -197,13 +197,13 @@ impl DesktopApplication {
         &self,
         executor: Arc<dyn DesktopTurnExecutor>,
     ) -> Result<(), DesktopApplicationError> {
-        self.inner
-            .turn_executor
-            .set(executor)
-            .map_err(|_| DesktopApplicationError::InvalidInput {
+        self.inner.turn_executor.set(executor).map_err(|_| {
+            DesktopApplicationError::InvalidInput {
                 field: "turnExecutor",
                 message: "turn executor is already installed".to_owned(),
-            })
+            }
+        })?;
+        self.start_automation_dispatcher()
     }
 
     pub fn task_runtime_snapshot(&self, task_id: &TaskId) -> DesktopTaskRuntimeSnapshot {
@@ -737,13 +737,14 @@ impl DesktopApplication {
         &self,
         request: DesktopTurnRequest,
     ) -> Result<DesktopTurnDispatch, DesktopApplicationError> {
-        let request = self.prepare_task_turn_request(request)?;
         let task_id = request.task_id.clone();
         let submission = self
             .inner
             .turn_submission
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        self.ensure_task_worktree_idle(&task_id)?;
+        let request = self.prepare_task_turn_request(request)?;
         let turn_id = format!("native-turn-{}", Uuid::new_v4());
         self.inner
             .pending_turns
@@ -760,8 +761,9 @@ impl DesktopApplication {
 
     pub(crate) fn prepare_task_turn_request(
         &self,
-        request: DesktopTurnRequest,
+        mut request: DesktopTurnRequest,
     ) -> Result<DesktopTurnRequest, DesktopApplicationError> {
+        super::workflow::compile_turn_input(&mut request)?;
         prepare_turn_request(request, self).map_err(Into::into)
     }
 
@@ -1014,14 +1016,21 @@ impl DesktopApplication {
                 message: "automation turn idempotency key must not be empty".to_owned(),
             });
         }
-        let request = self.prepare_task_turn_request(request)?;
         let task_id = request.task_id.clone();
-        let turn_id = format!("automation-turn:{idempotency_key}");
         let submission = self
             .inner
             .turn_submission
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        self.ensure_task_worktree_idle(&task_id)?;
+        let request = self.prepare_task_turn_request(request)?;
+        let turn_id = format!("automation-turn:{idempotency_key}");
+        if let Some(correlation) = &request.automation {
+            self.inner.automation_inbox.record_origin(
+                &format!("turn:{}:{turn_id}", task_id.as_str()),
+                &correlation.run_id,
+            )?;
+        }
         if let Some(status) = self.persisted_turn_terminal_status(&task_id, &turn_id)? {
             self.inner
                 .pending_turns
@@ -1045,7 +1054,7 @@ impl DesktopApplication {
         })
     }
 
-    fn persisted_turn_terminal_status(
+    pub(super) fn persisted_turn_terminal_status(
         &self,
         task_id: &TaskId,
         turn_id: &str,

@@ -202,3 +202,70 @@ fn architecture_interaction_applies_authoritative_scope_and_resumes_the_same_tur
     assert_eq!(graph.version, 1);
     assert_eq!(graph.nodes[0].id, "desktop-application");
 }
+
+#[test]
+fn rollback_restores_authoritative_graph_and_records_a_new_version_once() {
+    let application = application();
+    let project = application
+        .create_project(DesktopProjectCreate::new("Rollback"))
+        .unwrap();
+    let task = application
+        .create_task(DesktopTaskCreate::new(
+            Some(project.id.clone()),
+            "Architecture changes",
+        ))
+        .unwrap();
+    application
+        .apply_project_architecture(ProjectArchitectureApplyInput {
+            project_id: project.id.as_str().into(),
+            task_id: task.id.as_str().into(),
+            turn_id: None,
+            backend: ArchitectureBackend::NativeAgentkit,
+            permission: ArchitecturePermission::Full,
+            reason: "提取服务".into(),
+            changes: vec![ProjectArchitectureChange::UpsertNode {
+                node: ProjectArchitectureNode {
+                    id: "service".into(),
+                    label: "服务".into(),
+                    node_type: "module".into(),
+                    summary: "项目服务".into(),
+                    paths: vec!["src/service.rs".into()],
+                    tags: Vec::new(),
+                },
+            }],
+            request_id: Some("apply-service".into()),
+            expected_version: Some(0),
+        })
+        .unwrap();
+    let result = application
+        .rollback_project_architecture(&project.id, &task.id, ArchitectureBackend::NativeAgentkit)
+        .unwrap();
+    assert!(result.graph.nodes.is_empty());
+    assert_eq!(result.graph.version, 2);
+    let event = result.event.unwrap();
+    assert_eq!(event.status, ArchitectureChangeStatus::RolledBack);
+    assert_eq!(event.task_id, task.id.as_str());
+    assert_eq!((event.before_version, event.after_version), (1, Some(2)));
+    assert_eq!(
+        application.project_architecture(&project.id).unwrap(),
+        result.graph
+    );
+    let history = application
+        .project_architecture_changes(&project.id, 40)
+        .unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].before_graph.as_ref().unwrap().nodes.len(), 1);
+    assert_eq!(history[0].after_graph.as_ref().unwrap().nodes.len(), 0);
+    assert!(application
+        .rollback_project_architecture(&project.id, &task.id, ArchitectureBackend::NativeAgentkit)
+        .unwrap()
+        .event
+        .is_none());
+    assert_eq!(
+        application
+            .project_architecture_changes(&project.id, 40)
+            .unwrap()
+            .len(),
+        2
+    );
+}

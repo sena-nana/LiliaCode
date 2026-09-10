@@ -254,7 +254,7 @@ impl ComposerState {
                 reference.task_id.clone(),
             ));
         }
-        needles.sort_by(|(left, _, _, _), (right, _, _, _)| right.len().cmp(&left.len()));
+        needles.sort_by_key(|(text, _, _, _)| std::cmp::Reverse(text.len()));
         needles.dedup_by(|(left, _, _, _), (right, _, _, _)| left == right);
         let mut spans = Vec::new();
         for (needle, kind, label, token) in needles {

@@ -21,7 +21,7 @@ Agent Debug 为正式 NanaUI/WGPU 桌面提供开发态结构化观察与操作�
 cargo xtask agent-debug
 ```
 
-xtask 构建并启动正式 Native Debug target，等待协议 ready，按固定 corpus 执行 observe/act，最终关闭进程并生成证据。外部窗口或 GPU 能力不可用时必须返回结构化 blocker，不能把跳过当作通过。
+xtask 构建并启动正式 Native Debug target，等待协议 ready，按固定 corpus 执行 observe/act，最终关闭进程并生成证据。构建前后通过继承当前环境的完整 `cargo metadata --locked --format-version 1` 确认实际 NanaUI 来源；本地依赖按其 manifest 路径向上定位 workspace 并记录源码指纹，包括 CARGO_HOME 配置提供的 patch。依赖缺失、歧义或构建期间来源变化均拒绝验收。外部窗口或 GPU 能力不可用时必须返回结构化 blocker，不能把跳过当作通过。
 
 ## 产物
 
@@ -51,3 +51,10 @@ xtask 构建并启动正式 Native Debug target，等待协议 ready，按固定
 ## 使用要求
 
 涉及 UI 主路径、Agent runtime、持久化、权限、构建配置、跨端契约或用户关键路径的大型改动，最终确认必须包含 `cargo xtask agent-debug` 的结果，或具体 blocker、产物路径和剩余风险。普通 Markdown、注释或无运行时影响的整理不运行该门禁。
+
+
+### 普通组合键回放
+
+`ui-key` 保留正常控件挂载、可见性和焦点检查。`key` 可使用普通键名（例如 `Enter`）或组合键（例如 `Meta+z`、`Meta+Shift+z`、`Control+y`）；支持 Control/Ctrl、Meta/Cmd、Shift、Alt 前缀。主窗口与任务弹窗都经 RuntimeInputAdapter 分派，不直接调用撤销或业务helper。
+
+Memory知识回放将临时标题撤销/重做后通过保存按钮写入，逐次查询权威记录，证据为 `knowledge-memory-history.json`。源码或测试通过不能替代该实窗回放通过。

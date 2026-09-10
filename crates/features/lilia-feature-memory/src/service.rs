@@ -18,6 +18,23 @@ struct DesktopMemoryServiceState {
 }
 
 impl DesktopMemoryService {
+    pub fn prepare_turn_injection(
+        &self,
+        task_id: &str,
+        turn_id: &str,
+        turn_sequence: i64,
+        project_id: Option<&str>,
+    ) -> Result<lilia_contracts::MemoryTurnInjection, DesktopMemoryError> {
+        let mut state = self.state()?;
+        let settings = state.settings.load()?.unwrap_or_default().normalized();
+        Ok(state.records.prepare_turn_injection(
+            task_id,
+            turn_id,
+            turn_sequence,
+            project_id,
+            &settings,
+        )?)
+    }
     pub fn from_db_with_settings(
         db: Db,
         settings: impl MemorySettingsStore + 'static,

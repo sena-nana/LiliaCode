@@ -83,6 +83,17 @@ fn checkpoint_from_events(
             turn_id = Some(id.clone());
             status = Some(next.as_str());
         }
+        if let AgentEvent::ToolCallCompleted {
+            call_id, turn_id, ..
+        } = &envelope.event
+        {
+            if pending_by_id.get(call_id).is_some_and(|pending| {
+                pending.kind == "permission_approval"
+                    && pending.turn_id.as_deref() == Some(turn_id.as_str())
+            }) {
+                pending_by_id.remove(call_id);
+            }
+        }
         for command in project_agent_event(task_id, envelope) {
             match command {
                 TimelineProjectionCommand::UpsertPending { pending } => {
@@ -100,6 +111,7 @@ fn checkpoint_from_events(
     let pending = pending_by_id
         .into_values()
         .filter(|pending| turn_id.as_deref() == pending.turn_id.as_deref())
+        .filter(|_| !matches!(status, Some("completed" | "cancelled" | "failed")))
         .collect();
     AgentTurnCheckpoint {
         session_id: session_id.to_owned(),
@@ -1358,6 +1370,76 @@ mod tests {
         assert_eq!(timeline.payload["interaction"], "mcp_elicitation");
         assert_eq!(timeline.payload["requestId"], "mcp-1");
         assert_eq!(timeline.payload["serverName"], "linear");
+    }
+
+    #[test]
+    fn checkpoint_resolves_only_completed_approval_and_clears_terminal_turns() {
+        let task = TaskId::new("checkpoint-approvals").unwrap();
+        let envelope = |sequence, event| AgentEventEnvelope {
+            session_id: "checkpoint-session".into(),
+            sequence,
+            meta: AgentEventMeta::new(format!("checkpoint-{sequence}"), "checkpoint"),
+            event,
+        };
+        let approval = |id: &str| AgentEvent::ApprovalRequest {
+            request: mutsuki_agent_contracts::PermissionRequest {
+                session_id: "checkpoint-session".into(),
+                turn_id: "turn".into(),
+                action_id: id.into(),
+                tool: "local/echo".into(),
+                side_effect: mutsuki_agent_contracts::ToolSideEffect::ExternalWrite,
+                summary: "Run requested tool".into(),
+                version: 1,
+            },
+        };
+        let mut events = vec![
+            envelope(
+                1,
+                AgentEvent::TurnState {
+                    turn_id: "turn".into(),
+                    status: "waiting_approval".into(),
+                },
+            ),
+            envelope(2, approval("first")),
+            envelope(3, approval("second")),
+            envelope(
+                4,
+                AgentEvent::ToolCallCompleted {
+                    turn_id: "turn".into(),
+                    call_id: "first".into(),
+                    summary: "local/echo".into(),
+                    details: None,
+                },
+            ),
+        ];
+        let checkpoint = checkpoint_from_events(&task, "checkpoint-session", 1, &events);
+        assert!(checkpoint.waiting_approval);
+        assert_eq!(
+            checkpoint
+                .pending
+                .iter()
+                .map(|pending| pending.request_id.as_str())
+                .collect::<Vec<_>>(),
+            ["second"]
+        );
+        for status in ["completed", "cancelled", "failed"] {
+            events.push(envelope(
+                5,
+                AgentEvent::TurnState {
+                    turn_id: "turn".into(),
+                    status: status.into(),
+                },
+            ));
+            let persisted: Vec<AgentEventEnvelope> =
+                serde_json::from_value(serde_json::to_value(&events).unwrap()).unwrap();
+            let checkpoint = checkpoint_from_events(&task, "checkpoint-session", 1, &persisted);
+            assert!(!checkpoint.is_waiting());
+            assert!(
+                checkpoint.pending.is_empty(),
+                "terminal {status} must not resurrect pending"
+            );
+            events.pop();
+        }
     }
 
     #[test]

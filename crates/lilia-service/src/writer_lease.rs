@@ -127,6 +127,7 @@ fn open_lock_file(path: &Path) -> io::Result<File> {
 
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(path)?;
@@ -136,7 +137,7 @@ fn open_lock_file(path: &Path) -> io::Result<File> {
     }
     const LOCK_EX: i32 = 2;
     const LOCK_NB: i32 = 4;
-    let rc = unsafe { flock(file.as_raw_fd() as i32, LOCK_EX | LOCK_NB) };
+    let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
     if rc != 0 {
         return Err(io::Error::last_os_error());
     }

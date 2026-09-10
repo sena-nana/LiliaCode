@@ -30,6 +30,7 @@ pub enum TaskModuleMessage {
 
 pub struct TaskModule {
     task_search: String,
+    session_page: usize,
     new_task_title: String,
     task_title_edit: String,
     task_drop_search: String,
@@ -42,6 +43,7 @@ impl Default for TaskModule {
     fn default() -> Self {
         Self {
             task_search: String::new(),
+            session_page: 0,
             new_task_title: String::new(),
             task_title_edit: String::new(),
             task_drop_search: String::new(),
@@ -107,6 +109,7 @@ impl TaskModule {
 
     pub fn clear_list_drafts(&mut self) {
         self.task_search.clear();
+        self.session_page = 0;
         self.new_task_title.clear();
     }
 
@@ -117,9 +120,38 @@ impl TaskModule {
         self.task_drop_search.clear();
     }
 
+    fn project_sessions(&self, into: &mut PrimaryShellSnapshot) {
+        let query = self.task_search.trim().to_lowercase();
+        let matches = into
+            .tasks
+            .iter()
+            .filter(|task| query.is_empty() || task.title.to_lowercase().contains(&query))
+            .cloned()
+            .collect::<Vec<_>>();
+        into.session_search = self.task_search.clone();
+        into.session_page_count = matches.len().div_ceil(20).max(1);
+        into.session_page = self.session_page.min(into.session_page_count - 1);
+        into.project_page_body = format!(
+            "{} 个会话 · 第 {} / {} 页",
+            matches.len(),
+            into.session_page + 1,
+            into.session_page_count
+        );
+        into.session_cards = matches
+            .into_iter()
+            .skip(into.session_page * 20)
+            .take(20)
+            .collect();
+    }
+
     fn reduce_ui(&mut self, message: TaskMessage) -> UiModuleOutcome {
         match message {
+            TaskMessage::SessionPageChanged(offset) => {
+                self.session_page = self.session_page.saturating_add_signed(offset);
+                UiModuleOutcome::dirty()
+            }
             TaskMessage::TaskSearchChanged(value) => {
+                self.session_page = 0;
                 self.task_search = value;
                 UiModuleOutcome::dirty()
             }
@@ -147,7 +179,27 @@ impl UiModule for TaskModule {
         Self::feature_id()
     }
 
-    fn reduce(&mut self, message: Self::Message, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+    fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        if matches!(
+            &message,
+            TaskModuleMessage::Ui(TaskMessage::SessionPageChanged(_))
+        ) {
+            let query = self.task_search.trim().to_lowercase();
+            let count = cx
+                .workspace()
+                .and_then(|workspace| workspace.snapshot().ok())
+                .map(|snapshot| {
+                    snapshot
+                        .tasks
+                        .iter()
+                        .filter(|task| {
+                            query.is_empty() || task.title.to_lowercase().contains(&query)
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            self.session_page = self.session_page.min(count.div_ceil(20).max(1) - 1);
+        }
         match message {
             TaskModuleMessage::Ui(message) => self.reduce_ui(message),
         }
@@ -181,7 +233,6 @@ impl UiModule for TaskModule {
         into.tasks = snapshot
             .tasks
             .into_iter()
-            .take(80)
             .map(|task| ShellTaskRow {
                 selected: selected.as_ref() == Some(&task.id),
                 id: task.id.clone(),
@@ -192,5 +243,49 @@ impl UiModule for TaskModule {
                 },
             })
             .collect();
+        if cx.shows(crate::runtime_shell::ShellProjectPage::Sessions) {
+            self.project_sessions(into);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_pagination_keeps_late_tasks_searchable_and_resets_search_page() {
+        let mut module = TaskModule::default();
+        let mut snapshot = crate::runtime_shell::empty_snapshot();
+        snapshot.tasks = (0..105)
+            .map(|index| ShellTaskRow {
+                id: TaskId::new(format!("task-{index}")).unwrap(),
+                title: format!("会话 {index}"),
+                selected: false,
+            })
+            .collect();
+        module.reduce_ui(TaskMessage::SessionPageChanged(4));
+        module.project_sessions(&mut snapshot);
+        assert_eq!(
+            snapshot.session_cards.first().unwrap().id.as_str(),
+            "task-80"
+        );
+        assert_eq!(snapshot.session_page_count, 6);
+        module.reduce_ui(TaskMessage::SessionPageChanged(1));
+        module.project_sessions(&mut snapshot);
+        assert_eq!(snapshot.session_cards.len(), 5);
+        assert_eq!(
+            snapshot.session_cards.last().unwrap().id.as_str(),
+            "task-104"
+        );
+        module.reduce_ui(TaskMessage::TaskSearchChanged("会话 104".to_owned()));
+        module.project_sessions(&mut snapshot);
+        assert_eq!(snapshot.session_page, 0);
+        assert_eq!(snapshot.session_cards.len(), 1);
+        assert_eq!(snapshot.session_cards[0].id.as_str(), "task-104");
+        module.reduce_ui(TaskMessage::TaskSearchChanged("不存在".to_owned()));
+        module.project_sessions(&mut snapshot);
+        assert!(snapshot.session_cards.is_empty());
+        assert_eq!(snapshot.session_page_count, 1);
     }
 }

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "contextField": "memoryInjection",
+  "identity": ["taskId", "turnId"],
+  "sequence": "maximum of observed distinct authority turn identities and the last persisted task injection decision sequence plus one; the same turn reuses its sequence",
+  "retry": "reuse the persisted decision and baseline for the same turn",
+  "eligibility": ["global enabled", "baseline injection enabled", "task enabled", "cooldown elapsed", "entry enabled", "user or matching project scope"]
+}

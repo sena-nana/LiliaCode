@@ -280,7 +280,30 @@ pub enum ExtensionsModuleMessage {
     PluginDirectoryPicked(String),
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ExtensionEntry {
+    pub key: String,
+    pub label: String,
+    pub meta: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ExtensionEditor {
+    Skill,
+    Hook {
+        source_id: String,
+        original_draft: String,
+    },
+    Mcp,
+}
+
 pub struct ExtensionsModule {
+    query: String,
+    selected_entries: BTreeMap<String, String>,
+    editor: Option<ExtensionEditor>,
+    editor_save_pending: bool,
+    skill_project_scope: bool,
     extensions: Option<DesktopExtensionsSnapshot>,
     hooks: Option<DesktopHooksOverview>,
     hook_documents: BTreeMap<String, DesktopHookDocumentView>,
@@ -306,6 +329,11 @@ pub struct ExtensionsModule {
 impl Default for ExtensionsModule {
     fn default() -> Self {
         Self {
+            query: String::new(),
+            selected_entries: BTreeMap::new(),
+            editor: None,
+            editor_save_pending: false,
+            skill_project_scope: false,
             extensions: None,
             hooks: None,
             hook_documents: BTreeMap::new(),
@@ -331,8 +359,173 @@ impl Default for ExtensionsModule {
 }
 
 impl ExtensionsModule {
+    pub(crate) fn editor(&self) -> Option<&ExtensionEditor> {
+        self.editor.as_ref()
+    }
+    pub(crate) fn busy(&self) -> bool {
+        self.busy || self.editor_save_pending
+    }
+    pub(crate) fn skill_draft(&self) -> (&str, &str) {
+        (&self.skill_id_input, &self.skill_description_input)
+    }
+    pub(crate) fn entries(&self, tab: &str) -> Vec<ExtensionEntry> {
+        let mut entries = Vec::new();
+        if tab == "plugin-hooks" {
+            if let Some(hooks) = &self.hooks {
+                for source in &hooks.sources {
+                    let raw = self
+                        .hook_document(&source.id)
+                        .and_then(|d| d.raw_document.as_deref())
+                        .unwrap_or_default();
+                    if self.matches_search(&format!(
+                        "{} {} {} {:?} {raw}",
+                        source.id,
+                        source.path,
+                        source.project_cwd.as_deref().unwrap_or_default(),
+                        source.scope
+                    )) {
+                        entries.push(ExtensionEntry {
+                            key: format!("hook:{}:{}", source.id, source.path),
+                            label: if source.scope == DesktopHookScope::User {
+                                "用户 Hooks"
+                            } else {
+                                "项目 Hooks"
+                            }
+                            .into(),
+                            meta: if source.scope == DesktopHookScope::User {
+                                "全局范围"
+                            } else {
+                                "项目范围"
+                            }
+                            .into(),
+                            enabled: source.enabled,
+                        });
+                    }
+                }
+            }
+        } else if let Some(snapshot) = &self.extensions {
+            match tab {
+                "extensions" => {
+                    for skill in &snapshot.skills {
+                        if self.matches_search(&format!(
+                            "{} {} {} {} {}",
+                            skill.skill_id,
+                            skill.description,
+                            skill.path,
+                            skill.scope,
+                            skill.registered_from
+                        )) {
+                            entries.push(ExtensionEntry {
+                                key: format!("skill:{}:{}", skill.scope, skill.path),
+                                label: skill.skill_id.clone(),
+                                meta: match skill.scope.as_str() {
+                                    "plugin" => "插件技能",
+                                    "project" => "项目技能",
+                                    _ => "用户技能",
+                                }
+                                .into(),
+                                enabled: skill.enabled,
+                            });
+                        }
+                    }
+                }
+                "plugin-packages" => {
+                    for plugin in &snapshot.plugins {
+                        if self.matches_search(&format!(
+                            "{} {} {} {} {}",
+                            plugin.plugin_id,
+                            plugin.name,
+                            plugin.description,
+                            plugin.version,
+                            plugin.path
+                        )) {
+                            entries.push(ExtensionEntry {
+                                key: format!("plugin:{}", plugin.path),
+                                label: plugin.name.clone(),
+                                meta: plugin.version.clone(),
+                                enabled: plugin.enabled,
+                            });
+                        }
+                    }
+                }
+                "plugin-mcp" => {
+                    for server in &snapshot.mcp_servers {
+                        if self.matches_search(&format!(
+                            "{} {} {} {} {} {}",
+                            server.server_id,
+                            server.source,
+                            server.transport,
+                            server.location.as_deref().unwrap_or_default(),
+                            server
+                                .command
+                                .as_deref()
+                                .or(server.url.as_deref())
+                                .unwrap_or_default(),
+                            server.args.join(" ")
+                        )) {
+                            entries.push(ExtensionEntry {
+                                key: format!("mcp:{}:{}", server.source, server.server_id),
+                                label: server.server_id.clone(),
+                                meta: server.source.clone(),
+                                enabled: server.enabled,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        entries
+    }
+    pub(crate) fn selected_entry(&self, tab: &str) -> Option<ExtensionEntry> {
+        let entries = self.entries(tab);
+        self.selected_entries
+            .get(tab)
+            .and_then(|key| entries.iter().find(|entry| &entry.key == key))
+            .or_else(|| entries.first())
+            .cloned()
+    }
+    fn cancel_editor(&mut self) -> UiModuleOutcome {
+        if self.busy() {
+            return UiModuleOutcome::clean();
+        }
+        if let Some(ExtensionEditor::Hook {
+            source_id,
+            original_draft,
+        }) = self.editor.take()
+        {
+            self.hook_drafts.insert(source_id, original_draft);
+        }
+        self.editor = None;
+        self.editor_save_pending = false;
+        self.mcp_editor = None;
+        self.skill_id_input.clear();
+        self.skill_description_input.clear();
+        self.error = None;
+        UiModuleOutcome::dirty()
+    }
     pub fn feature_id() -> FeatureId {
         FeatureId::new("lilia.extensions").expect("the extensions feature id is not blank")
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+    pub fn matches_search(&self, text: &str) -> bool {
+        text.to_lowercase()
+            .contains(&self.query.trim().to_lowercase())
+    }
+    pub fn hook_document(&self, id: &str) -> Option<&DesktopHookDocumentView> {
+        self.hook_documents.get(id)
+    }
+    pub fn skill_project_scope(&self) -> bool {
+        self.skill_project_scope
+    }
+    pub fn prompt_draft(&self, name: &str) -> &str {
+        self.mcp_prompt_argument_drafts
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or("{}")
     }
 
     pub fn snapshot(&self) -> Option<&DesktopExtensionsSnapshot> {
@@ -429,16 +622,31 @@ impl ExtensionsModule {
             })
     }
 
-    fn hook_source(&self, source_id: &str) -> Option<DesktopHookSourceView> {
+    fn editable_hook_source(&self, source_id: &str) -> Option<DesktopHookSourceView> {
         self.hooks
             .as_ref()?
             .sources
             .iter()
-            .find(|source| source.id == source_id)
+            .find(|source| source.id == source_id && source.editable)
             .cloned()
     }
 
     fn apply_hooks_snapshot(&mut self, snapshot: NativeHooksSnapshot) {
+        let draft = match &mut self.editor {
+            Some(ExtensionEditor::Hook {
+                source_id,
+                original_draft,
+            }) => {
+                if let Some(document) = snapshot.documents.get(source_id) {
+                    *original_draft = hook_document_draft(document);
+                }
+                self.hook_drafts
+                    .get(source_id)
+                    .cloned()
+                    .map(|draft| (source_id.clone(), draft))
+            }
+            _ => None,
+        };
         self.hook_drafts = snapshot
             .documents
             .iter()
@@ -446,10 +654,57 @@ impl ExtensionsModule {
             .collect();
         self.hook_documents = snapshot.documents;
         self.hooks = Some(snapshot.overview);
+        if let Some((id, draft)) = draft {
+            self.hook_drafts.insert(id, draft);
+        }
     }
 
     fn apply_outcome(&mut self, outcome: ExtensionsOutcome) -> UiModuleOutcome {
         self.error = None;
+        if self.editor_save_pending
+            && matches!(
+                (&self.editor, &outcome),
+                (Some(ExtensionEditor::Skill), ExtensionsOutcome::Skill(_))
+                    | (
+                        Some(ExtensionEditor::Hook { .. }),
+                        ExtensionsOutcome::Hook(_)
+                    )
+                    | (Some(ExtensionEditor::Mcp), ExtensionsOutcome::Activated(_))
+            )
+        {
+            match &outcome {
+                ExtensionsOutcome::Skill(snapshot) => {
+                    if let Some(skill) = snapshot
+                        .skills
+                        .iter()
+                        .find(|skill| skill.skill_id == self.skill_id_input.trim())
+                    {
+                        self.selected_entries.insert(
+                            "extensions".into(),
+                            format!("skill:{}:{}", skill.scope, skill.path),
+                        );
+                    }
+                }
+                ExtensionsOutcome::Activated(report) => {
+                    if let Some(editor) = &self.mcp_editor {
+                        if let Some(server) = report
+                            .snapshot
+                            .mcp_servers
+                            .iter()
+                            .find(|server| server.server_id == editor.server_id)
+                        {
+                            self.selected_entries.insert(
+                                "plugin-mcp".into(),
+                                format!("mcp:{}:{}", server.source, server.server_id),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+            self.editor = None;
+            self.editor_save_pending = false;
+        }
         match outcome {
             ExtensionsOutcome::Skill(snapshot) => {
                 self.extensions = Some(snapshot);
@@ -473,7 +728,9 @@ impl ExtensionsModule {
             ExtensionsOutcome::Activated(report) => {
                 self.extensions = Some(report.snapshot.clone());
                 self.extensions_activation = Some(report);
-                self.mcp_editor = None;
+                if !matches!(self.editor, Some(ExtensionEditor::Mcp)) {
+                    self.mcp_editor = None;
+                }
                 self.mcp_delete_confirmation = None;
             }
             ExtensionsOutcome::Content(preview) => {
@@ -488,7 +745,72 @@ impl ExtensionsModule {
         message: ExtensionsMessage,
         cx: &UiModuleContext<'_>,
     ) -> UiModuleOutcome {
+        if self.editor_save_pending
+            && matches!(
+                &message,
+                ExtensionsMessage::CreateSkill
+                    | ExtensionsMessage::SaveHookSource(_)
+                    | ExtensionsMessage::SaveMcpServer
+                    | ExtensionsMessage::CancelMcpEditor
+                    | ExtensionsMessage::CancelEditor
+            )
+        {
+            return UiModuleOutcome::clean();
+        }
         match message {
+            ExtensionsMessage::SelectEntry { tab, key } => {
+                if self.entries(&tab).iter().any(|entry| entry.key == key) {
+                    self.selected_entries.insert(tab, key);
+                }
+                UiModuleOutcome::dirty()
+            }
+            ExtensionsMessage::OpenSkillEditor => {
+                if self.busy {
+                    return UiModuleOutcome::clean();
+                }
+                self.editor = Some(ExtensionEditor::Skill);
+                self.error = None;
+                UiModuleOutcome::dirty()
+            }
+            ExtensionsMessage::OpenHookEditor(source_id) => {
+                if self.busy
+                    || !self
+                        .editable_hook_source(&source_id)
+                        .is_some_and(|s| s.exists)
+                {
+                    return UiModuleOutcome::clean();
+                }
+                let original_draft = self
+                    .hook_drafts
+                    .get(&source_id)
+                    .cloned()
+                    .unwrap_or_else(|| "[]".into());
+                self.editor = Some(ExtensionEditor::Hook {
+                    source_id,
+                    original_draft,
+                });
+                self.error = None;
+                UiModuleOutcome::dirty()
+            }
+            ExtensionsMessage::CancelEditor => self.cancel_editor(),
+            ExtensionsMessage::SearchChanged(value) => {
+                self.query = value;
+                UiModuleOutcome::dirty()
+            }
+            ExtensionsMessage::ToggleSkillScope => {
+                self.skill_project_scope = !self.skill_project_scope;
+                UiModuleOutcome::dirty()
+            }
+            ExtensionsMessage::McpTransportChanged(value) => {
+                if let Some(editor) = &mut self.mcp_editor {
+                    editor.transport = match value.as_str() {
+                        "streamable_http" => DesktopMcpTransport::StreamableHttp,
+                        "sse" => DesktopMcpTransport::Sse,
+                        _ => DesktopMcpTransport::Stdio,
+                    };
+                }
+                UiModuleOutcome::dirty()
+            }
             ExtensionsMessage::Refresh => self.queue(ExtensionsCommand::Refresh {
                 project_cwd: Self::project_cwd(cx),
             }),
@@ -508,7 +830,11 @@ impl ExtensionsModule {
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
-            ExtensionsMessage::CreateSkill => self.create_skill(),
+            ExtensionsMessage::CreateSkill => {
+                let outcome = self.create_skill(Self::project_cwd(cx));
+                self.editor_save_pending = self.pending_submit.is_some();
+                outcome
+            }
             ExtensionsMessage::ToggleSkill(skill_id) => self.toggle_skill(&skill_id),
             ExtensionsMessage::RequestDeleteSkill(skill_id) => {
                 if self.busy {
@@ -527,9 +853,6 @@ impl ExtensionsModule {
                 UiModuleOutcome::dirty()
             }
             ExtensionsMessage::PluginSourceChanged(value) => {
-                if self.busy {
-                    return UiModuleOutcome::clean();
-                }
                 self.plugin_source_input = value;
                 self.error = None;
                 UiModuleOutcome::dirty()
@@ -579,7 +902,11 @@ impl ExtensionsModule {
             ExtensionsMessage::CreateHookSource(source_id) => {
                 self.create_hook_source(&source_id, cx)
             }
-            ExtensionsMessage::SaveHookSource(source_id) => self.save_hook_source(&source_id, cx),
+            ExtensionsMessage::SaveHookSource(source_id) => {
+                let outcome = self.save_hook_source(&source_id, cx);
+                self.editor_save_pending = self.pending_submit.is_some();
+                outcome
+            }
             ExtensionsMessage::ToggleHookSource(source_id) => {
                 self.toggle_hook_source(&source_id, cx)
             }
@@ -609,6 +936,7 @@ impl ExtensionsModule {
                     return UiModuleOutcome::clean();
                 }
                 self.mcp_editor = Some(McpEditorState::default());
+                self.editor = Some(ExtensionEditor::Mcp);
                 self.mcp_delete_confirmation = None;
                 self.error = None;
                 UiModuleOutcome::dirty()
@@ -649,15 +977,12 @@ impl ExtensionsModule {
             ExtensionsMessage::ToggleMcpEditorEnabled => self.edit_mcp_field(|editor| {
                 editor.enabled = !editor.enabled;
             }),
-            ExtensionsMessage::SaveMcpServer => self.save_mcp_server(),
-            ExtensionsMessage::CancelMcpEditor => {
-                if self.busy {
-                    return UiModuleOutcome::clean();
-                }
-                self.mcp_editor = None;
-                self.error = None;
-                UiModuleOutcome::dirty()
+            ExtensionsMessage::SaveMcpServer => {
+                let outcome = self.save_mcp_server();
+                self.editor_save_pending = self.pending_submit.is_some();
+                outcome
             }
+            ExtensionsMessage::CancelMcpEditor => self.cancel_editor(),
             ExtensionsMessage::ToggleMcpServer(server_id) => self.toggle_mcp_server(&server_id),
             ExtensionsMessage::RequestDeleteMcpServer(server_id) => {
                 if self.busy {
@@ -791,9 +1116,13 @@ impl ExtensionsModule {
         UiModuleOutcome::dirty()
     }
 
-    fn create_skill(&mut self) -> UiModuleOutcome {
+    fn create_skill(&mut self, project_cwd: Option<String>) -> UiModuleOutcome {
         if self.busy {
             return UiModuleOutcome::clean();
+        }
+        if self.skill_project_scope && project_cwd.is_none() {
+            self.error = Some("请先选择一个项目工作区。".into());
+            return UiModuleOutcome::dirty();
         }
         let skill_id = self.skill_id_input.trim();
         if skill_id.is_empty() {
@@ -808,8 +1137,16 @@ impl ExtensionsModule {
         self.queue(ExtensionsCommand::Skill(SkillRegistryOperation::Create(
             DesktopSkillCreate {
                 expected_registry_revision: revision,
-                scope: DesktopSkillScope::User,
-                project_cwd: None,
+                scope: if self.skill_project_scope {
+                    DesktopSkillScope::Project
+                } else {
+                    DesktopSkillScope::User
+                },
+                project_cwd: if self.skill_project_scope {
+                    project_cwd
+                } else {
+                    None
+                },
                 skill_id: self.skill_id_input.clone(),
                 description: self.skill_description_input.clone(),
             },
@@ -845,6 +1182,14 @@ impl ExtensionsModule {
         let Some(skill_id) = self.skill_delete_confirmation.clone() else {
             return UiModuleOutcome::clean();
         };
+        if !self.extensions.as_ref().is_some_and(|s| {
+            s.skills
+                .iter()
+                .any(|skill| skill.skill_id == skill_id && skill.editable)
+        }) {
+            self.skill_delete_confirmation = None;
+            return UiModuleOutcome::dirty();
+        }
         let revision = self
             .extensions
             .as_ref()
@@ -907,6 +1252,14 @@ impl ExtensionsModule {
         let Some(plugin_id) = self.plugin_delete_confirmation.clone() else {
             return UiModuleOutcome::clean();
         };
+        if !self.extensions.as_ref().is_some_and(|s| {
+            s.plugins
+                .iter()
+                .any(|plugin| plugin.plugin_id == plugin_id && plugin.editable)
+        }) {
+            self.plugin_delete_confirmation = None;
+            return UiModuleOutcome::dirty();
+        }
         let revision = self
             .extensions
             .as_ref()
@@ -919,7 +1272,7 @@ impl ExtensionsModule {
     }
 
     fn create_hook_source(&mut self, source_id: &str, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
-        let Some(source) = self.hook_source(source_id) else {
+        let Some(source) = self.editable_hook_source(source_id) else {
             return UiModuleOutcome::clean();
         };
         if source.exists {
@@ -935,7 +1288,7 @@ impl ExtensionsModule {
     }
 
     fn save_hook_source(&mut self, source_id: &str, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
-        let Some(source) = self.hook_source(source_id) else {
+        let Some(source) = self.editable_hook_source(source_id) else {
             return UiModuleOutcome::clean();
         };
         if !source.exists {
@@ -967,7 +1320,7 @@ impl ExtensionsModule {
     }
 
     fn toggle_hook_source(&mut self, source_id: &str, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
-        let Some(source) = self.hook_source(source_id) else {
+        let Some(source) = self.editable_hook_source(source_id) else {
             return UiModuleOutcome::clean();
         };
         if !source.exists {
@@ -988,7 +1341,8 @@ impl ExtensionsModule {
         let Some(source_id) = self.hook_delete_confirmation.clone() else {
             return UiModuleOutcome::clean();
         };
-        let Some(source) = self.hook_source(&source_id) else {
+        let Some(source) = self.editable_hook_source(&source_id) else {
+            self.hook_delete_confirmation = None;
             return UiModuleOutcome::clean();
         };
         if !source.exists {
@@ -1130,6 +1484,7 @@ impl ExtensionsModule {
         });
         self.mcp_delete_confirmation = None;
         self.error = None;
+        self.editor = Some(ExtensionEditor::Mcp);
         UiModuleOutcome::dirty()
     }
 
@@ -1140,6 +1495,17 @@ impl ExtensionsModule {
         let Some(editor) = self.mcp_editor.clone() else {
             return UiModuleOutcome::clean();
         };
+        if let Some(id) = &editor.editing_server_id {
+            if !self.extensions.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .mcp_servers
+                    .iter()
+                    .any(|server| &server.server_id == id && server.editable)
+            }) {
+                self.error = Some("此服务已不可编辑，请刷新后重试。".into());
+                return UiModuleOutcome::dirty();
+            }
+        }
         let args = match serde_json::from_str::<Vec<String>>(&editor.args_json) {
             Ok(args) => args,
             Err(_) => {
@@ -1181,7 +1547,7 @@ impl ExtensionsModule {
         self.queue(ExtensionsCommand::McpRegistry(
             McpRegistryOperation::Upsert(DesktopMcpServerUpsert {
                 expected_registry_revision,
-                server_id: editor.server_id,
+                server_id: editor.editing_server_id.unwrap_or(editor.server_id),
                 transport: editor.transport,
                 command,
                 args,
@@ -1224,6 +1590,14 @@ impl ExtensionsModule {
         let Some(server_id) = self.mcp_delete_confirmation.clone() else {
             return UiModuleOutcome::clean();
         };
+        if !self.extensions.as_ref().is_some_and(|s| {
+            s.mcp_servers
+                .iter()
+                .any(|server| server.server_id == server_id && server.editable)
+        }) {
+            self.mcp_delete_confirmation = None;
+            return UiModuleOutcome::dirty();
+        }
         let revision = self
             .extensions
             .as_ref()
@@ -1257,6 +1631,7 @@ impl UiModule for ExtensionsModule {
             }
             ExtensionsModuleMessage::JobFailed(error) => {
                 self.busy = false;
+                self.editor_save_pending = false;
                 self.error = Some(error);
                 UiModuleOutcome::dirty()
             }
@@ -1312,6 +1687,16 @@ impl UiModule for ExtensionsModule {
                 snapshot
                     .skills
                     .iter()
+                    .filter(|skill| {
+                        self.matches_search(&format!(
+                            "{} {} {} {} {}",
+                            skill.skill_id,
+                            skill.description,
+                            skill.path,
+                            skill.scope,
+                            skill.registered_from
+                        ))
+                    })
                     .map(|skill| ShellSkillRow {
                         id: skill.skill_id.clone(),
                         label: if skill.description.trim().is_empty() {
@@ -1320,6 +1705,7 @@ impl UiModule for ExtensionsModule {
                             skill.description.clone()
                         },
                         enabled: skill.enabled,
+                        editable: skill.editable,
                     })
                     .collect()
             })

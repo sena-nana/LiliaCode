@@ -201,7 +201,11 @@ impl ProjectTaskService {
     }
 
     pub fn get_project(&self, project_id: &ProjectId) -> Result<Project, TaskError> {
-        Ok(self.authority.client()?.products().get_project(project_id)?)
+        Ok(self
+            .authority
+            .client()?
+            .products()
+            .get_project(project_id)?)
     }
 
     pub fn query_tasks(&self, query: TaskQuery) -> Result<Vec<ProductTask>, TaskError> {
@@ -264,10 +268,7 @@ impl ProjectTaskService {
         Ok(())
     }
 
-    pub fn create_project(
-        &self,
-        input: DesktopProjectCreate,
-    ) -> Result<Project, TaskError> {
+    pub fn create_project(&self, input: DesktopProjectCreate) -> Result<Project, TaskError> {
         let mut project = Project::new(input.id.clone(), input.name)?;
         project.workspace_path = normalized_optional_text(input.workspace_path);
         project.sort_order = self
@@ -501,10 +502,7 @@ impl ProjectTaskService {
         Ok(result.value)
     }
 
-    pub fn reorder_projects(
-        &self,
-        ordered_ids: &[ProjectId],
-    ) -> Result<Vec<Project>, TaskError> {
+    pub fn reorder_projects(&self, ordered_ids: &[ProjectId]) -> Result<Vec<Project>, TaskError> {
         if ordered_ids.is_empty() {
             return Err(TaskError::InvalidInput {
                 field: "ordered_project_ids",
@@ -585,10 +583,7 @@ impl ProjectTaskService {
         self.query_projects(ProjectQuery::default())
     }
 
-    pub fn create_task(
-        &self,
-        input: DesktopTaskCreate,
-    ) -> Result<ProductTask, TaskError> {
+    pub fn create_task(&self, input: DesktopTaskCreate) -> Result<ProductTask, TaskError> {
         if let Some(project_id) = &input.project_id {
             self.get_project(project_id)?;
         }
@@ -628,7 +623,8 @@ impl ProjectTaskService {
             result.duplicate,
         );
         if !result.duplicate {
-            self.events.tasks_changed(task.project_id.clone(), Some(task.id.clone()));
+            self.events
+                .tasks_changed(task.project_id.clone(), Some(task.id.clone()));
         }
         Ok(task)
     }
@@ -665,10 +661,15 @@ impl ProjectTaskService {
         }
         task.updated_at = now_millis().max(current.updated_at);
         let meta = update_meta("task", task.id.as_str(), current.revision)?;
+        let status_changed = task.status != current.status;
         let result = self.authority.client()?.update_product_entity(
             &meta,
             ProductEntity::Task(task),
-            "desktop_update_task",
+            if status_changed {
+                "desktop_update_task_status"
+            } else {
+                "desktop_update_task"
+            },
         )?;
         let task = task_entity(result.value)?;
         self.record(
@@ -677,7 +678,8 @@ impl ProjectTaskService {
             result.duplicate,
         );
         if !result.duplicate {
-            self.events.tasks_changed(task.project_id.clone(), Some(task.id.clone()));
+            self.events
+                .tasks_changed(task.project_id.clone(), Some(task.id.clone()));
         }
         Ok(task)
     }
@@ -761,7 +763,10 @@ impl ProjectTaskService {
             result.duplicate,
         );
         if !result.duplicate {
-            self.events.tasks_changed(result.value.task.project_id.clone(), Some(result.value.task.id.clone()));
+            self.events.tasks_changed(
+                result.value.task.project_id.clone(),
+                Some(result.value.task.id.clone()),
+            );
         }
         Ok(result.value)
     }
@@ -785,7 +790,8 @@ impl ProjectTaskService {
             Some(task.id.as_str().to_owned()),
             false,
         );
-        self.events.tasks_changed(task.project_id.clone(), Some(task.id.clone()));
+        self.events
+            .tasks_changed(task.project_id.clone(), Some(task.id.clone()));
         Ok(task)
     }
 
@@ -927,9 +933,11 @@ impl ProjectTaskService {
             result.duplicate,
         );
         if !result.duplicate {
-            self.events.tasks_changed(source_project_id.clone(), Some(moved.id.clone()));
+            self.events
+                .tasks_changed(source_project_id.clone(), Some(moved.id.clone()));
             if moved.project_id != source_project_id {
-                self.events.tasks_changed(moved.project_id.clone(), Some(moved.id.clone()));
+                self.events
+                    .tasks_changed(moved.project_id.clone(), Some(moved.id.clone()));
             }
         }
         Ok(moved)
@@ -1134,4 +1142,3 @@ fn now_millis() -> i64 {
         .try_into()
         .unwrap_or(i64::MAX)
 }
-
