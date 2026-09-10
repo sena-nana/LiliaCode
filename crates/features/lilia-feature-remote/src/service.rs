@@ -97,9 +97,7 @@ struct RemoteWakeRuntime {
 }
 
 impl DesktopRemoteControlService {
-    pub fn in_memory(
-        host: Arc<dyn RemoteWakeHost>,
-    ) -> Result<Self, DesktopRemoteControlError> {
+    pub fn in_memory(host: Arc<dyn RemoteWakeHost>) -> Result<Self, DesktopRemoteControlError> {
         let connection = Db::in_memory()
             .map_err(|error| DesktopRemoteControlError::internal(error.to_string()))?;
         Self::from_db(connection, host)
@@ -240,10 +238,8 @@ fn remote_wake_monitor(controller: Arc<RemoteWakeController>) {
             && state
                 .active_until_ms
                 .is_some_and(|active_until| active_until > now);
-        if state.platform_active != target {
-            if controller.host.set_system_awake(target).is_ok() {
-                state.platform_active = target;
-            }
+        if state.platform_active != target && controller.host.set_system_awake(target).is_ok() {
+            state.platform_active = target;
         }
         let wait = state
             .active_until_ms
@@ -351,7 +347,9 @@ pub fn endpoint_id(connection: &Connection) -> Result<String, DesktopRemoteContr
     Ok(id)
 }
 
-pub fn endpoint(connection: &Connection) -> Result<RemoteEndpointAddress, DesktopRemoteControlError> {
+pub fn endpoint(
+    connection: &Connection,
+) -> Result<RemoteEndpointAddress, DesktopRemoteControlError> {
     Ok(RemoteEndpointAddress {
         endpoint_id: endpoint_id(connection)?,
         relay_url: None,
@@ -510,9 +508,8 @@ pub fn start_pairing(
             ],
         )
         .map_err(database_error)?;
-    active_ticket(connection)?.ok_or_else(|| {
-        DesktopRemoteControlError::internal("pairing ticket was not persisted")
-    })
+    active_ticket(connection)?
+        .ok_or_else(|| DesktopRemoteControlError::internal("pairing ticket was not persisted"))
 }
 
 pub fn authorize_request(

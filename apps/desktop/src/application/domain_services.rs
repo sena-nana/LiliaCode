@@ -129,14 +129,38 @@ impl DesktopApplication {
         &self,
         input: MemoryUpsertInput,
     ) -> Result<DesktopMemory, DesktopApplicationError> {
+        let previous = input
+            .id
+            .as_deref()
+            .map(|id| self.inner.memory.memory(id))
+            .transpose()?
+            .flatten();
         let memory = self.inner.memory.save(input)?;
-        self.emit_event(MemoryChanged {
-            memory_id: Some(memory.id.clone()),
-            project_id: memory
+        let current_project = memory
+            .project_id
+            .as_deref()
+            .and_then(|id| ProjectId::new(id).ok());
+        let previous_project = previous.as_ref().map(|memory| {
+            memory
                 .project_id
                 .as_deref()
-                .and_then(|project_id| ProjectId::new(project_id).ok()),
+                .and_then(|id| ProjectId::new(id).ok())
         });
+        let mut affected = vec![current_project];
+        if let Some(previous_project) = previous_project {
+            if !affected.contains(&previous_project) {
+                affected.push(previous_project);
+            }
+        }
+        if affected.contains(&None) {
+            affected = vec![None];
+        }
+        for project_id in affected {
+            self.emit_event(MemoryChanged {
+                memory_id: Some(memory.id.clone()),
+                project_id,
+            });
+        }
         Ok(memory)
     }
 

@@ -21,6 +21,7 @@ pub enum ArchitectureMessage {
     Open,
     Refresh,
     Rollback,
+    SelectHistory(String),
     Graph(GraphCanvasEvent),
 }
 
@@ -31,6 +32,7 @@ pub struct ArchitectureModule {
     model: GraphModel,
     viewport: GraphViewport,
     selection: Option<GraphSelection>,
+    selected_history: Option<String>,
     error: Option<String>,
 }
 
@@ -43,6 +45,7 @@ impl Default for ArchitectureModule {
             model: GraphModel::empty(),
             viewport: GraphViewport::default(),
             selection: None,
+            selected_history: None,
             error: None,
         }
     }
@@ -108,8 +111,19 @@ impl ArchitectureModule {
             (Ok(graph), Ok(history), Ok(quarantine)) => {
                 let reset_viewport =
                     self.graph.project_id != graph.project_id || self.graph.nodes.is_empty();
+                if self.graph.project_id != graph.project_id {
+                    self.selected_history = None;
+                }
                 self.graph = graph;
                 self.history = history;
+                if self.selected_history.as_ref().is_some_and(|id| {
+                    !self
+                        .history
+                        .iter()
+                        .any(|record| &crate::architecture_panel::record_key(record) == id)
+                }) {
+                    self.selected_history = None;
+                }
                 self.quarantine_count = quarantine.len();
                 self.error = None;
                 self.rebuild(reset_viewport);
@@ -148,6 +162,9 @@ impl ArchitectureModule {
                     }
                 }
                 self.model = model;
+                if !selection_exists(&self.model, self.selection.as_ref()) {
+                    self.selection = None;
+                }
                 if reset_viewport || !had_previous_nodes {
                     self.viewport = crate::desktop::architecture_default_viewport(&self.model);
                     self.selection = None;
@@ -167,7 +184,7 @@ impl ArchitectureModule {
         };
         // The rollback is recorded against a task, so a project with no tasks has
         // nothing to attribute it to.
-        let Some(task_id) = cx.first_task() else {
+        let Some(task_id) = cx.selected_task().or_else(|| cx.first_task()) else {
             self.error = Some("当前项目没有可记录回滚来源的任务。".to_owned());
             return UiModuleOutcome::dirty();
         };
@@ -202,7 +219,9 @@ impl ArchitectureModule {
     fn apply_graph_event(&mut self, event: GraphCanvasEvent) -> UiModuleOutcome {
         match event {
             GraphCanvasEvent::SelectionChanged(selection) => {
-                self.selection = selection;
+                self.selection =
+                    selection.filter(|selection| selection_exists(&self.model, Some(selection)));
+                self.selected_history = None;
             }
             GraphCanvasEvent::ViewportInput(viewport)
             | GraphCanvasEvent::ViewportChanged(viewport) => {
@@ -232,6 +251,19 @@ impl UiModule for ArchitectureModule {
             ),
             ArchitectureMessage::Refresh => self.refresh(cx),
             ArchitectureMessage::Rollback => self.rollback(cx),
+            ArchitectureMessage::SelectHistory(id) => {
+                if self
+                    .history
+                    .iter()
+                    .any(|record| crate::architecture_panel::record_key(record) == id)
+                {
+                    self.selected_history = Some(id);
+                    self.selection = None;
+                    UiModuleOutcome::dirty()
+                } else {
+                    UiModuleOutcome::clean()
+                }
+            }
             ArchitectureMessage::Graph(event) => self.apply_graph_event(event),
         }
     }
@@ -281,7 +313,68 @@ impl UiModule for ArchitectureModule {
                 status: crate::desktop::architecture_status_label(record.event.status).to_owned(),
             })
             .collect();
+        into.architecture_details = crate::architecture_panel::ArchitecturePanelSnapshot {
+            graph: Some(self.graph.clone()),
+            records: self.history.clone(),
+            selection: self.selection.clone(),
+            selected_history: self.selected_history.clone(),
+            error: self.error.clone(),
+        };
+        into.architecture_can_rollback = cx.selected_task().or_else(|| cx.first_task()).is_some()
+            && self.history.iter().any(|record| {
+                record.event.status == lilia_feature_architecture::ArchitectureChangeStatus::Applied
+                    && record.after_graph.as_ref() == Some(&self.graph)
+            });
         into.architecture_graph = self.model.clone();
         into.architecture_selection = self.selection.clone();
+    }
+}
+
+fn selection_exists(model: &GraphModel, selection: Option<&GraphSelection>) -> bool {
+    match selection {
+        Some(GraphSelection::Node(id)) | Some(GraphSelection::Port { node: id, .. }) => {
+            model.node(id).is_some()
+        }
+        Some(GraphSelection::Edge(id)) => model.edge(id).is_some(),
+        None => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::ProjectArchitectureNode;
+
+    #[test]
+    fn graph_refresh_removes_deleted_selection_without_resetting_surviving_nodes() {
+        let mut module = ArchitectureModule::default();
+        module.graph = ProjectArchitectureGraph::empty("project");
+        module.graph.nodes.push(ProjectArchitectureNode {
+            id: "service".into(),
+            label: "服务".into(),
+            node_type: "module".into(),
+            summary: String::new(),
+            paths: Vec::new(),
+            tags: Vec::new(),
+        });
+        module.rebuild(true);
+        let id = "service".into();
+        module.apply_graph_event(GraphCanvasEvent::SelectionChanged(Some(
+            GraphSelection::Node(id),
+        )));
+        assert!(module.selection.is_some());
+        let viewport = module.viewport;
+        module.graph.version += 1;
+        module.graph.nodes[0].label = "已重命名".into();
+        module.rebuild(false);
+        assert!(module.selection.is_some());
+        assert_eq!(module.viewport, viewport);
+        module.graph.nodes.clear();
+        module.rebuild(false);
+        assert!(module.selection.is_none());
+        module.apply_graph_event(GraphCanvasEvent::SelectionChanged(Some(
+            GraphSelection::Node("missing".into()),
+        )));
+        assert!(module.selection.is_none());
     }
 }

@@ -80,7 +80,12 @@ pub fn window_event_id(event: &WindowEvent) -> WindowId {
         | WindowEvent::Closed { id }
         | WindowEvent::FileHovered { id, .. }
         | WindowEvent::FileDropped { id, .. }
-        | WindowEvent::FileHoverCancelled { id } => *id,
+        | WindowEvent::FileHoverCancelled { id }
+        | WindowEvent::FileDialogCompleted { id, .. }
+        | WindowEvent::FileDialogRejected { id, .. }
+        | WindowEvent::OpenFailed { id, .. }
+        | WindowEvent::MousePassthroughChanged { id, .. }
+        | WindowEvent::AppearanceChanged { id, .. } => *id,
     }
 }
 

@@ -66,7 +66,7 @@ pub enum SuggestionsMessage {
     },
     Apply {
         window_id: HostedWindowId,
-        prompt: String,
+        item_id: String,
     },
 }
 
@@ -134,6 +134,16 @@ pub enum QuotaMessage {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExtensionsMessage {
+    SelectEntry {
+        tab: String,
+        key: String,
+    },
+    OpenSkillEditor,
+    OpenHookEditor(String),
+    CancelEditor,
+    SearchChanged(String),
+    ToggleSkillScope,
+    McpTransportChanged(String),
     Refresh,
     SkillIdChanged(String),
     SkillDescriptionChanged(String),
@@ -261,6 +271,7 @@ pub enum ProjectMessage {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TaskMessage {
     TaskSearchChanged(String),
+    SessionPageChanged(isize),
     NewTaskTitleChanged(String),
     TaskTitleChanged(String),
     TaskDropSearchChanged(String),

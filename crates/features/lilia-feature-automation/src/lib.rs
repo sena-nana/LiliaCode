@@ -8,6 +8,7 @@ mod contract;
 mod execution;
 mod graph;
 mod service;
+mod signals;
 mod sqlite;
 mod store;
 mod template;
@@ -29,12 +30,15 @@ pub use graph::{
     AutomationGraphError,
 };
 pub use service::{DesktopAutomationError, DesktopAutomationService};
+pub use signals::automation_signal_matches;
 pub use sqlite::SqliteAutomationStore;
 pub use store::{
     AutomationActiveRunConflict, AutomationExecutionTransition, AutomationNodeStateUpdate,
     AutomationRecordKind, AutomationRunStateUpdate, AutomationStore, AutomationStoreError,
 };
-pub use template::{automation_json_path, render_automation_template};
+pub use template::{
+    automation_json_path, automation_json_value_to_port, render_automation_template,
+};
 pub use types::{
     AutomationBeginRunInput, AutomationDraft, AutomationEdge, AutomationNode,
     AutomationNodePosition, AutomationResumeRunInput, AutomationRun, AutomationRunDetail,
@@ -43,7 +47,9 @@ pub use types::{
     AutomationWorkflowVersion, GraphExecution,
 };
 
-use lilia_kernel::{Event, Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
+use lilia_kernel::{
+    Event, Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef,
+};
 
 /// Where the automation service reports that a workflow or run changed.
 pub trait AutomationEvents: Send + Sync + 'static {

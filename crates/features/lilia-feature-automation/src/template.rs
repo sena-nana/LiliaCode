@@ -34,7 +34,7 @@ pub(crate) fn automation_json_value_to_string(value: &JsonValue) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
-pub(crate) fn automation_json_value_to_port(value: &JsonValue) -> String {
+pub fn automation_json_value_to_port(value: &JsonValue) -> String {
     automation_json_value_to_string(value)
         .trim()
         .chars()

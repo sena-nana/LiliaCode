@@ -1,6 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -9,18 +10,129 @@ use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
 use url::Url;
 
 const MAX_MARKDOWN_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_MARKDOWN_IMAGE_RESIDENT_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
+pub(crate) enum MarkdownImageLoadState {
+    Pending { requested: bool },
+    Loading,
+    Ready(LoadedMarkdownImage),
+    Evicted,
+    Failed,
+}
+
+impl MarkdownImageLoadState {
+    pub(crate) fn pending_request(&self) -> Option<bool> {
+        match self {
+            Self::Pending { requested } => Some(*requested),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn request(&mut self) -> bool {
+        if matches!(self, Self::Loading | Self::Ready(_)) {
+            return false;
+        }
+        *self = Self::Pending { requested: true };
+        true
+    }
+}
+
+pub(crate) fn resident_image_bytes(images: &BTreeMap<String, MarkdownImageLoadState>) -> usize {
+    images
+        .values()
+        .filter_map(|state| match state {
+            MarkdownImageLoadState::Ready(image) => Some(image.resident_len()),
+            _ => None,
+        })
+        .fold(0usize, usize::saturating_add)
+}
+
+pub(crate) fn evict_lru_image(
+    images: &mut BTreeMap<String, MarkdownImageLoadState>,
+    recency: &BTreeMap<String, u64>,
+    protected: &BTreeSet<&str>,
+) -> bool {
+    let candidate = images
+        .iter()
+        .filter(|(source, state)| {
+            matches!(state, MarkdownImageLoadState::Ready(_))
+                && !protected.contains(source.as_str())
+        })
+        .min_by_key(|(source, _)| recency.get(source.as_str()).copied().unwrap_or_default())
+        .map(|(source, _)| source.clone());
+    let Some(source) = candidate else {
+        return false;
+    };
+    images.insert(source, MarkdownImageLoadState::Evicted);
+    true
+}
+
+pub(crate) fn admit_loaded_image(
+    images: &mut BTreeMap<String, MarkdownImageLoadState>,
+    recency: &BTreeMap<String, u64>,
+    protected: &BTreeSet<&str>,
+    source: String,
+    image: LoadedMarkdownImage,
+    budget: usize,
+) -> bool {
+    if image.resident_len() > budget {
+        images.insert(source, MarkdownImageLoadState::Failed);
+        return false;
+    }
+    while resident_image_bytes(images).saturating_add(image.resident_len()) > budget {
+        if !evict_lru_image(images, recency, protected) {
+            images.insert(source, MarkdownImageLoadState::Evicted);
+            return false;
+        }
+    }
+    images.insert(source, MarkdownImageLoadState::Ready(image));
+    true
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct LoadedMarkdownImage {
     bytes: Arc<[u8]>,
     media_type: String,
+    data_url: OnceLock<Arc<str>>,
+    pub(crate) pixels: ImagePixels,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ImagePixels {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Arc<[u8]>,
 }
 
 impl LoadedMarkdownImage {
+    pub(crate) fn data_url(&self) -> Arc<str> {
+        self.data_url
+            .get_or_init(|| {
+                Arc::from(format!(
+                    "data:{};base64,{}",
+                    self.media_type,
+                    base64::engine::general_purpose::STANDARD.encode(&self.bytes)
+                ))
+            })
+            .clone()
+    }
+
     pub(crate) fn media_type(&self) -> &str {
         &self.media_type
     }
 
+    pub(crate) fn resident_len(&self) -> usize {
+        self.bytes
+            .len()
+            .saturating_add(self.pixels.rgba.len())
+            .saturating_add(self.data_url.get().map_or_else(
+                || encoded_data_url_len(self.bytes.len(), self.media_type.len()),
+                |url| url.len(),
+            ))
+    }
+
+    #[cfg(test)]
     pub(crate) fn encoded_len(&self) -> usize {
         self.bytes.len()
     }
@@ -146,25 +258,58 @@ fn read_bounded(reader: &mut impl Read) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn encoded_data_url_len(bytes: usize, media_type: usize) -> usize {
+    bytes
+        .div_ceil(3)
+        .saturating_mul(4)
+        .saturating_add(media_type)
+        .saturating_add("data:;base64,".len())
+}
+
 fn loaded_image(bytes: Vec<u8>, media_type: String) -> Result<LoadedMarkdownImage, String> {
     if bytes.is_empty() || !payload_matches_media_type(&bytes, &media_type) {
         return Err("image body does not match its content type".to_owned());
     }
-    if let Some(format) = raster_image_format(&media_type) {
+    let encoding_bytes = bytes
+        .len()
+        .saturating_add(encoded_data_url_len(bytes.len(), media_type.len()));
+    let pixel_budget = MAX_MARKDOWN_IMAGE_RESIDENT_BYTES.saturating_sub(encoding_bytes);
+    let pixels = if let Some(format) = raster_image_format(&media_type) {
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(16_384);
         limits.max_image_height = Some(16_384);
-        limits.max_alloc = Some(256 * 1024 * 1024);
+        limits.max_alloc = Some(pixel_budget as u64);
         let mut reader = image::ImageReader::with_format(Cursor::new(&bytes), format);
         reader.limits(limits);
-        reader
+        let image = reader
             .decode()
-            .map_err(|_| "image body could not be decoded".to_owned())?;
+            .map_err(|_| "image body could not be decoded".to_owned())?
+            .into_rgba8();
+        ImagePixels {
+            width: image.width(),
+            height: image.height(),
+            rgba: image.into_raw().into(),
+        }
+    } else {
+        let image = nana_svg_raster::rasterize_document_capped(&bytes, 4096)
+            .ok_or_else(|| "SVG image could not be decoded".to_owned())?;
+        ImagePixels {
+            width: image.width,
+            height: image.height,
+            rgba: image.rgba,
+        }
+    };
+    if pixels.rgba.len() > pixel_budget {
+        return Err("image exceeds the 64 MiB resident memory limit".to_owned());
     }
-    Ok(LoadedMarkdownImage {
+    let image = LoadedMarkdownImage {
         bytes: Arc::from(bytes),
+        data_url: OnceLock::new(),
         media_type,
-    })
+        pixels,
+    };
+    image.data_url();
+    Ok(image)
 }
 
 fn raster_image_format(media_type: &str) -> Option<image::ImageFormat> {
@@ -243,11 +388,162 @@ mod tests {
         let loaded = load_markdown_image(png).unwrap();
         assert_eq!(loaded.media_type(), "image/png");
         assert!(loaded.encoded_len() > 0);
+        assert_eq!((loaded.pixels.width, loaded.pixels.height), (1, 1));
+        assert_eq!(loaded.pixels.rgba.len(), 4);
+        assert!(Arc::ptr_eq(&loaded.data_url(), &loaded.data_url()));
+        assert!(Arc::ptr_eq(&loaded.data_url(), &loaded.clone().data_url()));
+        assert_eq!(loaded.data_url().as_ref(), png);
 
         assert!(
             load_markdown_image("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB").is_err()
         );
         assert!(load_markdown_image("data:image/png;base64,PGh0bWw+").is_err());
         assert!(load_markdown_image("javascript:alert(1)").is_err());
+    }
+
+    fn cache_image() -> LoadedMarkdownImage {
+        load_markdown_image(concat!("data:image/png;base64,",
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")).unwrap()
+    }
+
+    #[test]
+    fn resident_budget_includes_encoded_pixels_and_cached_data_url() {
+        let image = cache_image();
+        assert_eq!(
+            image.resident_len(),
+            image.bytes.len() + image.pixels.rgba.len() + image.data_url().len()
+        );
+        assert!(image.resident_len() > image.encoded_len() * 2);
+        let images =
+            BTreeMap::from([("image".into(), MarkdownImageLoadState::Ready(image.clone()))]);
+        assert_eq!(resident_image_bytes(&images), image.resident_len());
+        assert!(image.resident_len() <= MAX_MARKDOWN_IMAGE_RESIDENT_BYTES);
+    }
+
+    #[test]
+    fn image_lru_eviction_stays_idle_until_user_requests_it() {
+        let image = cache_image();
+        let budget = image.resident_len() * 2;
+        let mut images = BTreeMap::from([
+            ("old".into(), MarkdownImageLoadState::Ready(image.clone())),
+            (
+                "recent".into(),
+                MarkdownImageLoadState::Ready(image.clone()),
+            ),
+            ("incoming".into(), MarkdownImageLoadState::Loading),
+        ]);
+        let mut recency = BTreeMap::from([
+            ("old".into(), 1),
+            ("recent".into(), 2),
+            ("incoming".into(), 3),
+        ]);
+        assert!(admit_loaded_image(
+            &mut images,
+            &recency,
+            &BTreeSet::new(),
+            "incoming".into(),
+            image.clone(),
+            budget
+        ));
+        assert!(matches!(images["old"], MarkdownImageLoadState::Evicted));
+        assert!(images
+            .values()
+            .all(|state| state.pending_request().is_none()));
+        assert_eq!(resident_image_bytes(&images), budget);
+        assert!(images.get_mut("old").unwrap().request());
+        assert_eq!(images["old"].pending_request(), Some(true));
+        images.insert("old".into(), MarkdownImageLoadState::Loading);
+        recency.insert("old".into(), 4);
+        assert!(admit_loaded_image(
+            &mut images,
+            &recency,
+            &BTreeSet::new(),
+            "old".into(),
+            image,
+            budget
+        ));
+        assert!(matches!(images["recent"], MarkdownImageLoadState::Evicted));
+        assert!(matches!(
+            images["incoming"],
+            MarkdownImageLoadState::Ready(_)
+        ));
+        assert_eq!(resident_image_bytes(&images), budget);
+    }
+
+    #[test]
+    fn oversized_image_does_not_flush_usable_cache_entries() {
+        let image = cache_image();
+        let budget = image.resident_len();
+        let mut oversized = image.clone();
+        oversized.pixels.rgba = vec![0; budget].into();
+        let mut images = BTreeMap::from([
+            ("keep".into(), MarkdownImageLoadState::Ready(image)),
+            ("large".into(), MarkdownImageLoadState::Loading),
+        ]);
+        assert!(!admit_loaded_image(
+            &mut images,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            "large".into(),
+            oversized,
+            budget
+        ));
+        assert!(matches!(images["large"], MarkdownImageLoadState::Failed));
+        assert!(matches!(images["keep"], MarkdownImageLoadState::Ready(_)));
+        assert_eq!(resident_image_bytes(&images), budget);
+        assert_eq!(images["large"].pending_request(), None);
+        assert!(images.get_mut("large").unwrap().request());
+    }
+
+    #[test]
+    fn protected_preview_defers_other_image_without_reloading_loop() {
+        let image = cache_image();
+        let budget = image.resident_len();
+        let mut images = BTreeMap::from([
+            (
+                "preview".into(),
+                MarkdownImageLoadState::Ready(image.clone()),
+            ),
+            ("other".into(), MarkdownImageLoadState::Loading),
+        ]);
+        let recency = BTreeMap::from([("preview".into(), 1), ("other".into(), 2)]);
+        assert!(!admit_loaded_image(
+            &mut images,
+            &recency,
+            &BTreeSet::from(["preview"]),
+            "other".into(),
+            image.clone(),
+            budget
+        ));
+        assert!(matches!(
+            images["preview"],
+            MarkdownImageLoadState::Ready(_)
+        ));
+        assert!(images
+            .values()
+            .all(|state| state.pending_request().is_none()));
+        assert!(images.get_mut("other").unwrap().request());
+        images.insert("other".into(), MarkdownImageLoadState::Loading);
+        assert!(admit_loaded_image(
+            &mut images,
+            &recency,
+            &BTreeSet::new(),
+            "other".into(),
+            image,
+            budget
+        ));
+        assert!(matches!(images["preview"], MarkdownImageLoadState::Evicted));
+        assert_eq!(resident_image_bytes(&images), budget);
+    }
+
+    #[test]
+    fn svg_preview_contains_painted_pixels() {
+        let image = loaded_image(br##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="2" fill="#ff0000"/></svg>"##.to_vec(), "image/svg+xml".into()).unwrap();
+        assert_eq!((image.pixels.width, image.pixels.height), (4, 2));
+        assert!(image
+            .pixels
+            .rgba
+            .chunks_exact(4)
+            .all(|pixel| pixel == [255, 0, 0, 255]));
     }
 }

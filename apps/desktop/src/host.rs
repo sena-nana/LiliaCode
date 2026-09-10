@@ -15,6 +15,10 @@ const GITHUB_TARGET_KEY: &str = "github.oauth.token";
 pub struct NativeDesktopHost;
 
 impl DesktopHost for NativeDesktopHost {
+    fn uses_hosted_file_dialog(&self) -> bool {
+        true
+    }
+
     fn execute(
         &self,
         context: &DesktopHostContext,
@@ -79,15 +83,8 @@ impl DesktopHost for NativeDesktopHost {
 }
 
 fn open_file_dialog(request: DesktopFileDialogRequest) -> Vec<std::path::PathBuf> {
-    #[cfg(debug_assertions)]
-    if let Some(environment) = match request.dialog_id.as_str() {
-        "project-workspace" => Some("LILIA_AGENT_DEBUG_WORKSPACE"),
-        "project-clone-parent" => Some("LILIA_AGENT_DEBUG_CLONE_PARENT"),
-        _ => None,
-    } {
-        if let Some(path) = std::env::var_os(environment).filter(|path| !path.is_empty()) {
-            return vec![std::path::PathBuf::from(path)];
-        }
+    if let Some(paths) = file_dialog_fixture(&request) {
+        return paths;
     }
 
     dialog::pick(dialog::FileDialogRequest {
@@ -104,6 +101,49 @@ fn open_file_dialog(request: DesktopFileDialogRequest) -> Vec<std::path::PathBuf
         select_directories: request.select_directories,
         multiple: request.multiple,
     })
+}
+
+pub(crate) fn hosted_file_dialog_request(
+    id: u64,
+    request: DesktopFileDialogRequest,
+) -> nana_ui::FileDialogRequest {
+    let kind = match (request.select_directories, request.multiple) {
+        (false, false) => nana_ui::FileDialogKind::OpenFile,
+        (false, true) => nana_ui::FileDialogKind::OpenFiles,
+        (true, false) => nana_ui::FileDialogKind::PickFolder,
+        (true, true) => nana_ui::FileDialogKind::PickFolders,
+    };
+    let mut dialog = nana_ui::FileDialogRequest::new(id, kind).filters(
+        request
+            .filters
+            .into_iter()
+            .map(|filter| nana_ui::FileFilter::new(filter.name, filter.extensions)),
+    );
+    if let Some(title) = request.title {
+        dialog = dialog.title(title);
+    }
+    if let Some(directory) = request.initial_directory {
+        dialog = dialog.directory(directory);
+    }
+    dialog
+}
+
+pub(crate) fn file_dialog_fixture(
+    request: &DesktopFileDialogRequest,
+) -> Option<Vec<std::path::PathBuf>> {
+    #[cfg(debug_assertions)]
+    if let Some(environment) = match request.dialog_id.as_str() {
+        "project-workspace" => Some("LILIA_AGENT_DEBUG_WORKSPACE"),
+        "project-clone-parent" => Some("LILIA_AGENT_DEBUG_CLONE_PARENT"),
+        _ => None,
+    } {
+        if let Some(path) = std::env::var_os(environment).filter(|path| !path.is_empty()) {
+            return Some(vec![std::path::PathBuf::from(path)]);
+        }
+    }
+
+    let _ = request;
+    None
 }
 
 fn credential(
@@ -248,6 +288,41 @@ fn host_error(error: PlatformError) -> DesktopHostError {
 mod tests {
     use super::*;
     use crate::application::DesktopUpdateAction;
+    use std::sync::Arc;
+
+    #[test]
+    fn hosted_picker_preserves_multiple_directories_and_file_filters() {
+        use nana_ui::FileDialogKind;
+        for (directories, multiple, kind) in [
+            (false, false, FileDialogKind::OpenFile),
+            (false, true, FileDialogKind::OpenFiles),
+            (true, false, FileDialogKind::PickFolder),
+            (true, true, FileDialogKind::PickFolders),
+        ] {
+            let directory = std::path::PathBuf::from("/tmp/project");
+            let request = hosted_file_dialog_request(
+                u64::from(u32::MAX) + 1,
+                DesktopFileDialogRequest {
+                    dialog_id: "attachments".into(),
+                    title: Some("选择附件".into()),
+                    initial_directory: Some(directory.clone()),
+                    filters: vec![crate::application::DesktopFileFilter {
+                        name: "图片".into(),
+                        extensions: vec!["png".into(), "webp".into()],
+                    }],
+                    select_directories: directories,
+                    multiple,
+                },
+            );
+            assert_eq!(request.id, u64::from(u32::MAX) + 1);
+            assert_eq!(request.kind, kind);
+            assert_eq!(request.directory, Some(directory));
+            assert_eq!(
+                request.filters[0].extensions.as_slice(),
+                &[Arc::from("png"), Arc::from("webp")]
+            );
+        }
+    }
 
     #[cfg(windows)]
     #[test]

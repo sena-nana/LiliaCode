@@ -466,7 +466,7 @@ impl AgentTurnHost for DesktopApplication {
         let worktree_instructions = self
             .worktree_auto_instructions_for_task(&spec.task_id)
             .map_err(agent_turn_error)?;
-        message.metadata = Some(turn_context(
+        let mut context = turn_context(
             &spec.task_id,
             &spec.turn_id,
             &spec.request,
@@ -474,7 +474,11 @@ impl AgentTurnHost for DesktopApplication {
             task.project_id.as_ref(),
             architecture.as_ref(),
             worktree_instructions.as_deref(),
-        ));
+        );
+        let memory = self.prepare_memory_for_turn(&spec.task_id, &spec.turn_id)?;
+        context["memoryInjection"] = serde_json::to_value(&memory)
+            .map_err(|error| AgentTurnError::Agent(error.to_string()))?;
+        message.metadata = Some(context);
         let events_application = self.clone();
         let events_task_id = spec.task_id.clone();
         let page = self
@@ -513,6 +517,62 @@ impl AgentTurnHost for DesktopApplication {
             completed: page.completed,
             cancelled_by_user: page.cancelled,
         })
+    }
+}
+
+impl DesktopApplication {
+    pub(crate) fn prepare_memory_for_turn(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+    ) -> Result<lilia_contracts::MemoryTurnInjection, AgentTurnError> {
+        let task = self.get_task(task_id).map_err(agent_turn_error)?;
+        let runtime = self.authority().shared_runtime();
+        let mut turns = std::collections::HashSet::from([turn_id.to_owned()]);
+        for binding in self
+            .authority()
+            .list_session_bindings(task_id)
+            .map_err(|error| AgentTurnError::Agent(error.to_string()))?
+        {
+            let session = runtime
+                .inner()
+                .session_snapshot(binding.agent_session.as_str())
+                .map_err(|error| AgentTurnError::Agent(error.to_string()))?;
+            for event in session.events {
+                if let AgentEvent::TurnState { turn_id, .. } = event.event {
+                    turns.insert(turn_id);
+                }
+            }
+        }
+        let previous = self
+            .inner
+            .memory
+            .injection_state(task_id.as_str())
+            .map_err(|error| agent_turn_error(error.into()))?;
+        let decision = self
+            .inner
+            .memory
+            .prepare_turn_injection(
+                task_id.as_str(),
+                turn_id,
+                i64::try_from(turns.len()).unwrap_or(i64::MAX),
+                task.project_id
+                    .as_ref()
+                    .map(lilia_contracts::ProjectId::as_str),
+            )
+            .map_err(|error| agent_turn_error(error.into()))?;
+        if self
+            .inner
+            .memory
+            .injection_state(task_id.as_str())
+            .map_err(|error| agent_turn_error(error.into()))?
+            != previous
+        {
+            self.emit_event(crate::application::MemoryInjectionChanged {
+                task_id: task_id.clone(),
+            });
+        }
+        Ok(decision)
     }
 }
 

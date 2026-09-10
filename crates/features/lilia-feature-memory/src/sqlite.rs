@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS memory_injection_states (
   updated_at             INTEGER NOT NULL,
   FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS memory_turn_injections (
+  task_id TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  decision_json TEXT NOT NULL,
+  PRIMARY KEY (task_id, turn_id)
+);
+CREATE TRIGGER IF NOT EXISTS memory_turn_injections_task_deleted
+AFTER DELETE ON tasks BEGIN
+  DELETE FROM memory_turn_injections WHERE task_id = OLD.id;
+END;
 "#;
 
 pub struct SqliteMemoryStore {
@@ -122,6 +132,102 @@ impl SqliteMemoryStore {
 }
 
 impl MemoryStore for SqliteMemoryStore {
+    fn prepare_turn_injection(
+        &mut self,
+        task_id: &str,
+        turn_id: &str,
+        turn_sequence: i64,
+        project_id: Option<&str>,
+        settings: &super::MemorySettings,
+    ) -> Result<lilia_contracts::MemoryTurnInjection, MemoryStoreError> {
+        let mut connection = self.connection.lock();
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| MemoryStoreError::storage("begin memory turn injection", error))?;
+        let previous: Option<String> = tx.query_row(
+            "SELECT decision_json FROM memory_turn_injections WHERE task_id = ?1 AND turn_id = ?2",
+            params![task_id, turn_id], |row| row.get(0),
+        ).optional().map_err(|error| MemoryStoreError::storage("read memory turn injection", error))?;
+        if let Some(previous) = previous {
+            return serde_json::from_str(&previous).map_err(|error| {
+                MemoryStoreError::Serialization {
+                    field: "memory_turn_injection",
+                    message: error.to_string(),
+                }
+            });
+        }
+        let previous_sequence: Option<i64> = tx.query_row(
+            "SELECT MAX(CAST(json_extract(decision_json, '$.turnSequence') AS INTEGER)) FROM memory_turn_injections WHERE task_id = ?1",
+            params![task_id], |row| row.get(0),
+        ).map_err(|error| MemoryStoreError::storage("read memory turn sequence", error))?;
+        let turn_sequence = turn_sequence.max(previous_sequence.unwrap_or(0).saturating_add(1));
+        let injection = injection_state_on(&tx, task_id)?;
+        let eligible = settings.enabled
+            && settings.baseline_injection_enabled
+            && injection.enabled
+            && injection.last_injected_turn_seq.is_none_or(|last| {
+                turn_sequence.saturating_sub(last)
+                    >= i64::try_from(settings.cooldown_turns).unwrap_or(i64::MAX)
+            });
+        let mut decision = lilia_contracts::MemoryTurnInjection {
+            task_id: task_id.to_owned(),
+            turn_id: turn_id.to_owned(),
+            turn_sequence,
+            memory_ids: Vec::new(),
+            baseline: None,
+        };
+        if eligible {
+            let mut sections = vec!["[Lilia Memory Baseline]".to_owned()];
+            for (scope, project, title) in [
+                (MemoryScope::User, None, "User constraints:"),
+                (MemoryScope::Project, project_id, "Project constraints:"),
+            ] {
+                if scope == MemoryScope::Project && project.is_none() {
+                    continue;
+                }
+                let mut records = list_scope(&tx, scope, project)?;
+                records.retain(|record| record.enabled);
+                records.sort_by(|a, b| a.id.cmp(&b.id));
+                if records.is_empty() {
+                    continue;
+                }
+                sections.push(format!("\n{title}"));
+                for record in records {
+                    sections.push(format!(
+                        "- {}: {}",
+                        record.title.trim(),
+                        record
+                            .body
+                            .lines()
+                            .map(str::trim)
+                            .filter(|line| !line.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ));
+                    decision.memory_ids.push(record.id);
+                }
+            }
+            if !decision.memory_ids.is_empty() {
+                decision.baseline = Some(sections.join("\n"));
+                tx.execute("INSERT INTO memory_injection_states (task_id,enabled,last_injected_turn_seq,updated_at) VALUES (?1,1,?2,?3) ON CONFLICT(task_id) DO UPDATE SET last_injected_turn_seq=excluded.last_injected_turn_seq, updated_at=excluded.updated_at",
+                    params![task_id, turn_sequence, now_millis().max(injection.updated_at.saturating_add(1))])
+                    .map_err(|error| MemoryStoreError::storage("record memory injection cooldown", error))?;
+            }
+        }
+        let encoded =
+            serde_json::to_string(&decision).map_err(|error| MemoryStoreError::Serialization {
+                field: "memory_turn_injection",
+                message: error.to_string(),
+            })?;
+        tx.execute(
+            "INSERT INTO memory_turn_injections (task_id,turn_id,decision_json) VALUES (?1,?2,?3)",
+            params![task_id, turn_id, encoded],
+        )
+        .map_err(|error| MemoryStoreError::storage("persist memory turn injection", error))?;
+        tx.commit()
+            .map_err(|error| MemoryStoreError::storage("commit memory turn injection", error))?;
+        Ok(decision)
+    }
     fn list(&self, project_id: Option<&str>) -> Result<Vec<DesktopMemory>, MemoryStoreError> {
         let mut memories = list_scope(&self.connection.lock(), MemoryScope::User, None)?;
         if let Some(project_id) = normalized_optional(project_id) {
@@ -735,6 +841,150 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use super::*;
+
+    #[test]
+    fn turn_injection_scopes_cooldown_and_retry_survive_reopening() {
+        let mut store = store();
+        store.save(input("user", MemoryScope::User, None)).unwrap();
+        store
+            .save(input("local", MemoryScope::Project, Some("project-1")))
+            .unwrap();
+        store
+            .save(input("foreign", MemoryScope::Project, Some("project-2")))
+            .unwrap();
+        store
+            .save(input("disabled", MemoryScope::User, None))
+            .unwrap();
+        store.set_enabled("disabled", false, None).unwrap();
+        let settings = super::super::MemorySettings {
+            cooldown_turns: 2,
+            ..Default::default()
+        };
+        let first = store
+            .prepare_turn_injection("task-1", "turn-1", 1, Some("project-1"), &settings)
+            .unwrap();
+        assert_eq!(first.memory_ids, ["user", "local"]);
+        assert!(first
+            .baseline
+            .as_ref()
+            .unwrap()
+            .contains("Project constraints:"));
+        let checkpoint = store.injection_state("task-1").unwrap();
+        assert_eq!(checkpoint.last_injected_turn_seq, Some(1));
+        let db = store.connection.clone();
+        drop(store);
+        let mut store = SqliteMemoryStore::from_db(db).unwrap();
+        store.set_enabled("user", false, None).unwrap();
+        assert_eq!(
+            store
+                .prepare_turn_injection("task-1", "turn-1", 99, None, &settings)
+                .unwrap(),
+            first
+        );
+        assert_eq!(store.injection_state("task-1").unwrap(), checkpoint);
+        assert!(store
+            .prepare_turn_injection("task-1", "turn-2", 2, Some("project-1"), &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        let next = store
+            .prepare_turn_injection("task-1", "turn-3", 3, Some("project-1"), &settings)
+            .unwrap();
+        assert_eq!(next.memory_ids, ["local"]);
+        assert_eq!(
+            store
+                .injection_state("task-1")
+                .unwrap()
+                .last_injected_turn_seq,
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn turn_injection_respects_all_switches_and_reset_only_affects_new_turns() {
+        let mut store = store();
+        store.save(input("user", MemoryScope::User, None)).unwrap();
+        let mut settings = super::super::MemorySettings::default();
+        settings.enabled = false;
+        assert!(store
+            .prepare_turn_injection("task-1", "global-off", 1, None, &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        settings.enabled = true;
+        settings.baseline_injection_enabled = false;
+        assert!(store
+            .prepare_turn_injection("task-1", "baseline-off", 2, None, &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        settings.baseline_injection_enabled = true;
+        store.set_task_enabled("task-1", false, None).unwrap();
+        assert!(store
+            .prepare_turn_injection("task-1", "task-off", 3, None, &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        store.set_task_enabled("task-1", true, None).unwrap();
+        assert!(store
+            .prepare_turn_injection("task-1", "global-off", 4, None, &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        assert!(store
+            .prepare_turn_injection("task-1", "on", 4, None, &settings)
+            .unwrap()
+            .baseline
+            .is_some());
+        assert!(store
+            .prepare_turn_injection("task-1", "cooling", 5, None, &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        store.reset_task_cooldown("task-1", None).unwrap();
+        assert!(store
+            .prepare_turn_injection("task-1", "cooling", 5, None, &settings)
+            .unwrap()
+            .baseline
+            .is_none());
+        assert!(store
+            .prepare_turn_injection("task-1", "reset-next", 6, None, &settings)
+            .unwrap()
+            .baseline
+            .is_some());
+    }
+
+    #[test]
+    fn turn_injection_sequence_remains_monotonic_after_session_compaction() {
+        let mut store = store();
+        store.save(input("user", MemoryScope::User, None)).unwrap();
+        let settings = super::super::MemorySettings {
+            cooldown_turns: 2,
+            ..Default::default()
+        };
+        let first = store
+            .prepare_turn_injection("task-1", "before-compact", 12, None, &settings)
+            .unwrap();
+        assert!(first.baseline.is_some());
+        let cooling = store
+            .prepare_turn_injection("task-1", "after-compact-1", 1, None, &settings)
+            .unwrap();
+        assert_eq!(cooling.turn_sequence, 13);
+        assert!(cooling.baseline.is_none());
+        let next = store
+            .prepare_turn_injection("task-1", "after-compact-2", 2, None, &settings)
+            .unwrap();
+        assert_eq!(next.turn_sequence, 14);
+        assert!(next.baseline.is_some());
+        let state = store.injection_state("task-1").unwrap();
+        assert_eq!(
+            store
+                .prepare_turn_injection("task-1", "before-compact", 99, None, &settings)
+                .unwrap(),
+            first
+        );
+        assert_eq!(store.injection_state("task-1").unwrap(), state);
+    }
 
     fn store() -> SqliteMemoryStore {
         let store = SqliteMemoryStore::in_memory().unwrap();

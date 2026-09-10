@@ -432,7 +432,7 @@ impl DesktopApplication {
                     revision: composer.revision,
                     content_bytes: composer.content.len(),
                     content_sha256: format!("{:x}", Sha256::digest(composer.content.as_bytes())),
-                    attachment_count: composer.attachments.len(),
+                    attachment_count: composer.effective_attachments().count(),
                     conversation_task_ids,
                     model: composer.model,
                     reasoning_effort: composer.reasoning_effort,

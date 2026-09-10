@@ -131,6 +131,12 @@ impl DesktopApplication {
         )?;
         self.ensure_task_conversation(&record.task, &record.task.title)?;
         if !record.duplicate {
+            self.execute_composer_command(
+                &record.task.id,
+                crate::application::DesktopComposerCommand::SetContent(task_handoff_prompt(
+                    &record.handoff,
+                )),
+            )?;
             if project_was_new {
                 self.emit_event(ProjectsChanged);
             }
@@ -578,10 +584,23 @@ mod tests {
         let first = app
             .accept_task_handoff_payload(&payload, workspace.path())
             .unwrap();
+        assert_eq!(
+            app.composer_state(&first.task_id).unwrap().content,
+            first.prompt
+        );
+        app.execute_composer_command(
+            &first.task_id,
+            crate::application::DesktopComposerCommand::SetContent("用户调整后的草稿".to_owned()),
+        )
+        .unwrap();
         let second = app
             .accept_task_handoff_payload(&payload, workspace.path())
             .unwrap();
 
+        assert_eq!(
+            app.composer_state(&first.task_id).unwrap().content,
+            "用户调整后的草稿"
+        );
         assert_eq!(second.task_id, first.task_id);
         assert_eq!(second.project_id, first.project_id);
         assert!(!first.duplicate);

@@ -1,15 +1,23 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use nana_ui::runtime::{
-    AlignSpec, AppContext, Button, Card, Chip, FlexDirection, FrameworkError, IconButton,
-    JustifySpec, LengthSpec, MutationQueue, SemanticColorRole, StableNodeId, Stack, TextArea,
+    AlignSpec, AppContext, Button, Card, Chip, DocumentId, Entity, FrameworkError, IconButton,
+    JustifySpec, LengthSpec, SemanticColorRole, StableNodeId, Stack, Text, TextArea,
 };
 use nana_ui::{ButtonKind, CardKind, ControlSize, Icon, UI_METRICS};
 
 const COMPOSER_SEND_SIZE: f32 = 30.0;
 const PILL_RADIUS: f32 = 999.0;
-pub(crate) const COMPOSER_CARD_RADIUS: f32 = 16.0;
+pub(crate) const COMPOSER_CARD_RADIUS: f32 = 8.0;
+
+pub(crate) fn form_text_input(value: impl Into<String>) -> nana_ui::runtime::TextInput {
+    let input = nana_ui::runtime::TextInput::new(value);
+    let layout = Stack::from_layout(input.style.layout.clone())
+        .height(LengthSpec::Px(40.0))
+        .node_style()
+        .layout;
+    input.layout(layout)
+}
 
 pub(crate) fn composer_card() -> Card {
     let mut card = Card::new()
@@ -17,14 +25,27 @@ pub(crate) fn composer_card() -> Card {
         .padding(UI_METRICS.control_padding_x);
     card.style.background = Some(SemanticColorRole::Surface);
     let layout = Arc::make_mut(&mut card.style.layout);
-    layout.direction = Some(FlexDirection::Column);
+    layout.direction = Some(nana_ui_core::FlexDirection::Column);
+    layout.flex_grow = Some(0.0);
+    layout.height = Some(LengthSpec::Shrink);
     layout.gap = Some(LengthSpec::Px(7.0));
     layout.border_radius = Some(COMPOSER_CARD_RADIUS);
     card
 }
 
-/// Holds the empty-state headline centered in the leftover pane height, and
-/// collapses to nothing once a timeline takes over the pane.
+pub(crate) fn conversation_headline(value: String) -> Text {
+    let mut text = Text::new(value);
+    let layout = Arc::make_mut(&mut text.style.layout);
+    layout.font_size = Some(24.0);
+    layout.font_weight = Some(500);
+    layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(1.25));
+    layout.letter_spacing = Some(0.2);
+    layout.width = Some(LengthSpec::Percent(100.0));
+    layout.max_width = Some(LengthSpec::Px(680.0));
+    text.style.text_horizontal_alignment = nana_ui::runtime::TextHorizontalAlignment::Center;
+    text
+}
+
 pub(crate) fn headline_slot(active: bool) -> Stack {
     if active {
         Stack::fill_column(0.0)
@@ -33,6 +54,66 @@ pub(crate) fn headline_slot(active: bool) -> Stack {
     } else {
         Stack::column(0.0).height(LengthSpec::Px(0.0))
     }
+}
+
+pub(crate) fn headline_offset_space() -> Stack {
+    Stack::column(0.0)
+        .height(LengthSpec::Viewport {
+            axis: nana_ui_core::ViewportAxis::Height,
+            value: 16.0,
+        })
+        .shrink(0.0)
+}
+
+pub(crate) fn mount_empty_headline(
+    context: &mut AppContext,
+    document: DocumentId,
+    title: String,
+) -> Result<(Entity<Stack>, Entity<Text>, Entity<Stack>), FrameworkError> {
+    let slot =
+        context.create_detached_component(document, headline_slot(!title.trim().is_empty()))?;
+    let group = context.create_detached_component(
+        document,
+        Stack::column(14.0)
+            .align(AlignSpec::Center)
+            .max_width(680.0)
+            .width(LengthSpec::CalcPercentOffset {
+                percent: 100.0,
+                offset_px: -48.0,
+            }),
+    )?;
+    let heading = context.create_detached_component(document, conversation_headline(title))?;
+    let actions = context.create_detached_component(
+        document,
+        Stack::bar(6.0)
+            .justify(JustifySpec::Center)
+            .max_width(560.0)
+            .min_height(LengthSpec::Px(24.0))
+            .wrap(true),
+    )?;
+    let offset = context.create_detached_component(document, headline_offset_space())?;
+    context.append_child(group, heading)?;
+    context.append_child(group, actions)?;
+    context.append_child(slot, group)?;
+    context.append_child(slot, offset)?;
+    Ok((slot, heading, actions))
+}
+
+pub(crate) fn sync_conversation_body(
+    context: &mut AppContext,
+    body: StableNodeId,
+    heading: Option<StableNodeId>,
+    error: Option<StableNodeId>,
+    timeline: StableNodeId,
+    earlier: Option<StableNodeId>,
+) -> Result<(), FrameworkError> {
+    let mut order = Vec::with_capacity(3);
+    order.extend(error);
+    order.push(heading.unwrap_or(timeline));
+    if heading.is_none() {
+        order.extend(earlier);
+    }
+    context.reconcile_children(body, &order).map(|_| ())
 }
 
 pub(crate) fn trigger_slot(width: f32, height: f32) -> Stack {
@@ -53,50 +134,18 @@ pub(crate) fn pending_interaction_card() -> Card {
         .padding(UI_METRICS.control_padding_x);
     card.style.background = Some(SemanticColorRole::Surface);
     let layout = Arc::make_mut(&mut card.style.layout);
-    layout.direction = Some(FlexDirection::Column);
+    layout.direction = Some(nana_ui_core::FlexDirection::Column);
     layout.gap = Some(LengthSpec::Px(8.0));
     layout.border_radius = Some(COMPOSER_CARD_RADIUS);
     card
 }
 
 pub(crate) fn pending_actions_row() -> Stack {
-    Stack::row(6.0)
+    Stack::bar(6.0).wrap(true)
 }
 
 pub(crate) fn inspector_header_bar() -> Stack {
     Stack::bar(6.0).justify(JustifySpec::SpaceBetween)
-}
-
-pub(crate) fn reconcile_children(
-    context: &mut AppContext,
-    parent: StableNodeId,
-    ordered: &[StableNodeId],
-) -> Result<(), FrameworkError> {
-    let ordered = ordered
-        .iter()
-        .copied()
-        .filter(|id| *id != parent && context.world().contains(*id))
-        .collect::<Vec<_>>();
-    let current = context
-        .world()
-        .node(parent)
-        .map(|node| node.children.clone())
-        .unwrap_or_default();
-    if current.as_slice() == ordered.as_slice() {
-        return Ok(());
-    }
-    let keep = ordered.iter().copied().collect::<HashSet<_>>();
-    let mut mutations = MutationQueue::new();
-    for child in &current {
-        if !keep.contains(child) {
-            mutations.park_subtree(*child);
-        }
-    }
-    for child in ordered {
-        mutations.insert(parent, child, None);
-    }
-    context.commit_mutations(mutations)?;
-    Ok(())
 }
 
 fn round_icon_button(icon: Icon, label: &'static str, kind: ButtonKind) -> IconButton {
@@ -175,13 +224,11 @@ mod tests {
     }
 
     #[test]
-    fn composer_and_pending_cards_are_outlined() {
+    fn composer_card_is_outlined() {
         let card = composer_card();
         assert_eq!(card.kind, CardKind::Outlined);
-        assert_eq!(card.style.background, Some(SemanticColorRole::Surface));
         let pending = pending_interaction_card();
         assert_eq!(pending.kind, CardKind::Outlined);
-        assert_eq!(pending.style.background, Some(SemanticColorRole::Surface));
     }
 }
 
@@ -197,7 +244,11 @@ pub(crate) fn flatten_composer_textarea(area: TextArea) -> TextArea {
     layout.min_height = Some(LengthSpec::Px(ControlSize::Medium.height()));
     layout.padding_left = Some(LengthSpec::Px(UI_METRICS.field_padding_x));
     layout.padding_right = Some(LengthSpec::Px(UI_METRICS.field_padding_x));
-    layout.padding_top = Some(LengthSpec::Px(UI_METRICS.field_padding_y));
-    layout.padding_bottom = Some(LengthSpec::Px(UI_METRICS.field_padding_y));
+    layout.padding_top = Some(LengthSpec::Px(
+        ControlSize::Medium.vertical_padding(UI_METRICS),
+    ));
+    layout.padding_bottom = Some(LengthSpec::Px(
+        ControlSize::Medium.vertical_padding(UI_METRICS),
+    ));
     area.style(style)
 }

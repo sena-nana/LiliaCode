@@ -1,6 +1,84 @@
 use crate::application::DesktopSuggestionItem;
 use lilia_contracts::TaskId;
 
+pub(crate) fn suggestion_source_label(item: &DesktopSuggestionItem) -> Option<String> {
+    let with_count = |label: String, count: usize| {
+        if count > 1 {
+            format!("{label} +{}", count - 1)
+        } else {
+            label
+        }
+    };
+    if let Some(activity) = item.github_activities.first() {
+        let title = activity.title.trim();
+        let anchor = match activity.kind.as_str() {
+            "pull_request" | "issue" => {
+                let prefix = if activity.kind == "pull_request" {
+                    "PR"
+                } else {
+                    "Issue"
+                };
+                let number = title.split('#').skip(1).find_map(|part| {
+                    let digits = part
+                        .chars()
+                        .take_while(char::is_ascii_digit)
+                        .collect::<String>();
+                    (!digits.is_empty()).then_some(digits)
+                });
+                number
+                    .map(|number| format!("{prefix} #{number}"))
+                    .unwrap_or_else(|| prefix.to_owned())
+            }
+            "push" => {
+                let branch = title
+                    .get(..4)
+                    .filter(|prefix| prefix.eq_ignore_ascii_case("push"))
+                    .and_then(|_| title.get(4..))
+                    .filter(|rest| rest.chars().next().is_some_and(char::is_whitespace))
+                    .and_then(|rest| rest.split_once(':'))
+                    .map(|(branch, _)| branch.trim())
+                    .filter(|branch| !branch.is_empty());
+                branch
+                    .map(|branch| format!("Push {branch}"))
+                    .unwrap_or_else(|| "Push".to_owned())
+            }
+            _ => {
+                if !title.is_empty() {
+                    title.to_owned()
+                } else if !activity.kind.is_empty() {
+                    activity.kind.clone()
+                } else {
+                    "GitHub".to_owned()
+                }
+            }
+        };
+        let label = [activity.repo_full_name.trim(), anchor.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        return Some(with_count(label, item.github_activities.len()));
+    }
+    if let Some(context) = item.local_git_contexts.first() {
+        let branch = context.branch.trim();
+        let label = if branch.is_empty() {
+            "本地 Git".to_owned()
+        } else {
+            format!("本地 Git · {branch}")
+        };
+        return Some(with_count(label, item.local_git_contexts.len()));
+    }
+    item.codex_threads.first().map(|thread| {
+        let title = thread.title.trim();
+        let label = if title.is_empty() {
+            "会话线程".to_owned()
+        } else {
+            format!("会话线程 · {title}")
+        };
+        with_count(label, item.codex_threads.len())
+    })
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ConversationSuggestionState {
     task_id: Option<TaskId>,
@@ -81,15 +159,25 @@ impl ConversationSuggestionState {
     }
 
     pub(crate) fn visible_item_ids(&self) -> impl Iterator<Item = &str> {
+        self.visible_items().map(|item| item.id.as_str())
+    }
+
+    pub(crate) fn visible_items(&self) -> impl Iterator<Item = &DesktopSuggestionItem> {
         self.items
             .iter()
-            .filter(|_| !self.loading && !self.error)
-            .map(|item| item.id.as_str())
+            .filter(|_| self.enabled && !self.loading && !self.error)
+    }
+
+    pub(crate) fn is_loading(&self) -> bool {
+        self.enabled && self.loading
+    }
+
+    pub(crate) fn has_error(&self) -> bool {
+        self.enabled && self.error
     }
 
     pub(crate) fn prompt_for(&self, item_id: &str) -> Option<String> {
-        self.items
-            .iter()
+        self.visible_items()
             .find(|item| item.id == item_id)
             .map(|item| item.prompt.clone())
     }
@@ -140,5 +228,104 @@ mod tests {
 
         assert_eq!(state.visible_item_ids().collect::<Vec<_>>(), ["current"]);
         assert_eq!(state.prompt_for("current").as_deref(), Some("继续当前任务"));
+    }
+
+    #[test]
+    fn reused_ids_resolve_the_latest_prompt_only_after_refresh_completes() {
+        let task = TaskId::new("draft").unwrap();
+        let mut state = ConversationSuggestionState::default();
+        let first = lilia_kernel::JobId::new(1);
+        state.begin(task.clone(), "project".into(), first);
+        state.finish(&task, first, Ok(vec![suggestion("same", "旧提示")]));
+        assert_eq!(state.prompt_for("same").as_deref(), Some("旧提示"));
+
+        let refresh = lilia_kernel::JobId::new(2);
+        state.begin(task.clone(), "project".into(), refresh);
+        assert!(state.is_loading());
+        assert!(state.prompt_for("same").is_none());
+        assert!(!state.can_refresh());
+        state.finish(&task, refresh, Ok(vec![suggestion("same", "当前提示")]));
+        assert_eq!(state.prompt_for("same").as_deref(), Some("当前提示"));
+
+        let failed = lilia_kernel::JobId::new(3);
+        state.begin(task.clone(), "project".into(), failed);
+        state.finish(&task, failed, Err("offline".into()));
+        assert!(state.has_error());
+        assert!(state.can_refresh());
+        assert!(state.prompt_for("same").is_none());
+    }
+
+    #[test]
+    fn source_captions_follow_historical_reference_priority_and_activity_anchors() {
+        use crate::application::{
+            DesktopSuggestionGitHubActivityRef, DesktopSuggestionLocalGitContextRef,
+            DesktopSuggestionSessionThreadRef,
+        };
+        let mut item = suggestion("source", "prompt");
+        assert_eq!(suggestion_source_label(&item), None);
+        item.codex_threads.push(DesktopSuggestionSessionThreadRef {
+            id: "thread".into(),
+            title: "  当前会话  ".into(),
+            updated_at: None,
+            preview: None,
+        });
+        assert_eq!(
+            suggestion_source_label(&item).as_deref(),
+            Some("会话线程 · 当前会话")
+        );
+        item.codex_threads.push(item.codex_threads[0].clone());
+        assert_eq!(
+            suggestion_source_label(&item).as_deref(),
+            Some("会话线程 · 当前会话 +1")
+        );
+        item.local_git_contexts
+            .push(DesktopSuggestionLocalGitContextRef {
+                id: "local".into(),
+                branch: " feature/parity ".into(),
+                status: "dirty".into(),
+                changed_files: Vec::new(),
+                recent_commits: Vec::new(),
+            });
+        assert_eq!(
+            suggestion_source_label(&item).as_deref(),
+            Some("本地 Git · feature/parity")
+        );
+        item.github_activities
+            .push(DesktopSuggestionGitHubActivityRef {
+                id: "github".into(),
+                repo_full_name: " org/repo ".into(),
+                kind: "pull_request".into(),
+                title: "Update #42 (opened)".into(),
+                url: None,
+            });
+        for (kind, title, expected) in [
+            ("pull_request", "Update #42 (opened)", "org/repo · PR #42"),
+            ("issue", "Discuss #7", "org/repo · Issue #7"),
+            ("issue", "Discuss", "org/repo · Issue"),
+            (
+                "push",
+                "pUsH feature/next: latest commit",
+                "org/repo · Push feature/next",
+            ),
+            ("push", "No branch", "org/repo · Push"),
+            ("release", " v1.0 ", "org/repo · v1.0"),
+        ] {
+            item.github_activities[0].kind = kind.into();
+            item.github_activities[0].title = title.into();
+            assert_eq!(suggestion_source_label(&item).as_deref(), Some(expected));
+        }
+        item.github_activities
+            .push(item.github_activities[0].clone());
+        assert_eq!(
+            suggestion_source_label(&item).as_deref(),
+            Some("org/repo · v1.0 +1")
+        );
+        item.github_activities.clear();
+        item.local_git_contexts[0].branch.clear();
+        assert_eq!(suggestion_source_label(&item).as_deref(), Some("本地 Git"));
+        item.local_git_contexts.clear();
+        item.codex_threads.truncate(1);
+        item.codex_threads[0].title.clear();
+        assert_eq!(suggestion_source_label(&item).as_deref(), Some("会话线程"));
     }
 }

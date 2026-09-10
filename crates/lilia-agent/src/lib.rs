@@ -36,6 +36,8 @@ pub use model_turn::{
     live_model_adapter_eligible, resolve_model_endpoint, LiveModelDriver,
     DEFAULT_OPENAI_COMPATIBLE_ENDPOINT, ENV_MODEL_ENDPOINT,
 };
+#[cfg(debug_assertions)]
+pub use mutsuki_agent_runtime::InMemorySecretStore;
 pub use mutsuki_agent_runtime::SecretStore;
 pub use native_runtime::{
     NativeAgentKitRuntime, NativeContextCompactionSource, NativeControlModelRequest,
