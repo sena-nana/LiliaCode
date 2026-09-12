@@ -6,6 +6,42 @@ use std::path::Path;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub(crate) fn retained_key_event(chord: &str) -> nana_ui_platform::InputEvent {
+    let mut modifiers = nana_ui_platform::InputModifiers::default();
+    let mut parts = chord.split('+').peekable();
+    let mut key = chord;
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            key = part;
+            break;
+        }
+        match part {
+            "Control" | "Ctrl" => modifiers.control = true,
+            "Meta" | "Cmd" => modifiers.meta = true,
+            "Shift" => modifiers.shift = true,
+            "Alt" => modifiers.alt = true,
+            _ => {
+                return nana_ui_platform::InputEvent::Keyboard {
+                    pressed: true,
+                    key: chord.into(),
+                    code: chord.into(),
+                    text: None,
+                    repeat: false,
+                    modifiers: Default::default(),
+                };
+            }
+        }
+    }
+    nana_ui_platform::InputEvent::Keyboard {
+        pressed: true,
+        key: key.into(),
+        code: key.into(),
+        text: None,
+        repeat: false,
+        modifiers,
+    }
+}
+
 const ENABLE_ENV: &str = "LILIA_AGENT_DEBUG";
 const ADDRESS_ENV: &str = "LILIA_AGENT_DEBUG_ADDR";
 const READY_ENV: &str = "LILIA_AGENT_DEBUG_READY";
@@ -16,23 +52,93 @@ const MAX_LOGS: usize = 240;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DebugCommand {
+    UiWindow {
+        window_id: u64,
+        command: Box<DebugCommand>,
+    },
     Observe,
-    EquivalenceSnapshot { fixture_id: String },
-    Click { target_id: String },
-    Input { target_id: String, text: String },
-    InputFrame { target_id: String, text: String },
-    ResizePanelFrame { extent: f32 },
-    Mark { label: String, data: Option<String> },
-    CorruptQueuedTurn { turn_id: String },
-    SeedInterruptedTool { task_id: String, turn_id: String },
-    HoldDatabaseWriter { duration_ms: u64 },
+    UiObserve,
+    UiClick {
+        target_id: String,
+    },
+    UiHover {
+        target_id: String,
+        point: Option<(f32, f32)>,
+    },
+    UiClickAt {
+        target_id: String,
+        x: f32,
+        y: f32,
+    },
+    UiDrag {
+        target_id: String,
+        start: (f32, f32),
+        end: (f32, f32),
+    },
+    UiKey {
+        target_id: String,
+        key: String,
+    },
+    UiScroll {
+        target_id: String,
+        delta_y: f32,
+    },
+    UiInput {
+        target_id: String,
+        text: String,
+    },
+    UiInputFrame {
+        target_id: String,
+        text: String,
+    },
+    EquivalenceSnapshot {
+        fixture_id: String,
+    },
+    Click {
+        target_id: String,
+    },
+    Input {
+        target_id: String,
+        text: String,
+    },
+    InputFrame {
+        target_id: String,
+        text: String,
+    },
+    ResizePanelFrame {
+        extent: f32,
+    },
+    Mark {
+        label: String,
+        data: Option<String>,
+    },
+    CorruptQueuedTurn {
+        turn_id: String,
+    },
+    SeedInterruptedTool {
+        task_id: String,
+        turn_id: String,
+    },
+    HoldDatabaseWriter {
+        duration_ms: u64,
+    },
     RecentErrors,
 }
 
 impl DebugCommand {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::UiWindow { command, .. } => command.name(),
             Self::Observe => "observe",
+            Self::UiObserve => "ui-observe",
+            Self::UiClick { .. } => "ui-click",
+            Self::UiHover { .. } => "ui-hover",
+            Self::UiClickAt { .. } => "ui-click-at",
+            Self::UiDrag { .. } => "ui-drag",
+            Self::UiKey { .. } => "ui-key",
+            Self::UiScroll { .. } => "ui-scroll",
+            Self::UiInput { .. } => "ui-input",
+            Self::UiInputFrame { .. } => "ui-input-frame",
             Self::EquivalenceSnapshot { .. } => "equivalence-snapshot",
             Self::Click { .. } => "click",
             Self::Input { .. } => "input",
@@ -213,6 +319,8 @@ pub struct DebugObservation {
     pub selected_task_pinned: Option<bool>,
     pub selected_automation: Option<String>,
     pub automation_count: usize,
+    pub automation_authority: Option<serde_json::Value>,
+    pub knowledge_authority: Option<serde_json::Value>,
     pub automation_published: bool,
     pub automation_enabled: bool,
     pub automation_node_count: usize,
@@ -401,6 +509,9 @@ pub struct DebugObservation {
     pub data_import_error: Option<String>,
     pub composer_revision: u64,
     pub composer_length: usize,
+    pub composer_content_sha256: String,
+    pub composer_model: Option<String>,
+    pub composer_reasoning: Option<String>,
     pub composer_attachment_count: usize,
     pub composer_conversation_reference_count: usize,
     pub context_usage_used_tokens: Option<u64>,
@@ -569,6 +680,14 @@ impl DebugObservation {
             "todoPriorities": &self.todo_priorities,
             "todoEditing": self.todo_editing,
         });
+        observation["knowledgeAuthority"] = self
+            .knowledge_authority
+            .clone()
+            .unwrap_or(serde_json::Value::Null);
+        observation["automationAuthority"] = self
+            .automation_authority
+            .clone()
+            .unwrap_or(serde_json::Value::Null);
         observation
             .as_object_mut()
             .expect("debug observation is an object")
@@ -813,6 +932,9 @@ impl DebugObservation {
             "queuedTurnIds": &self.queued_turn_ids,
             "composerRevision": self.composer_revision,
             "composerLength": self.composer_length,
+            "composerContentSha256": self.composer_content_sha256,
+            "composerModel": self.composer_model,
+            "composerReasoning": self.composer_reasoning,
             "composerAttachmentCount": self.composer_attachment_count,
             "composerConversationReferenceCount": self.composer_conversation_reference_count,
             "contextUsageUsedTokens": self.context_usage_used_tokens,
@@ -1149,12 +1271,104 @@ fn serve_connection(
 }
 
 fn parse_request(line: &str) -> Result<DebugCommand, String> {
-    let fields = JsonCursor::new(line).parse_object()?;
+    let mut fields = JsonCursor::new(line).parse_object()?;
+    if let Some(window) = fields.remove("windowId") {
+        let window_id = window
+            .parse::<u64>()
+            .map_err(|_| "windowId must be an integer".to_owned())?;
+        let encoded = serde_json::to_string(&fields).map_err(|error| error.to_string())?;
+        let command = parse_request(&encoded)?;
+        if !matches!(
+            command,
+            DebugCommand::UiObserve
+                | DebugCommand::UiClick { .. }
+                | DebugCommand::UiInput { .. }
+                | DebugCommand::UiKey { .. }
+        ) {
+            return Err(
+                "windowId is supported for ui-observe, ui-click, ui-input and ui-key".into(),
+            );
+        }
+        return Ok(DebugCommand::UiWindow {
+            window_id,
+            command: Box::new(command),
+        });
+    }
     let command = fields
         .get("command")
         .ok_or_else(|| "command is required".to_owned())?;
     match command.as_str() {
         "observe" => Ok(DebugCommand::Observe),
+        "ui-observe" => Ok(DebugCommand::UiObserve),
+        "ui-click" => Ok(DebugCommand::UiClick {
+            target_id: required_field(&fields, "targetId")?.to_owned(),
+        }),
+        "ui-hover" => {
+            let point = if fields.contains_key("x") || fields.contains_key("y") {
+                let coordinate = |name| {
+                    required_field(&fields, name)?
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|value| value.is_finite())
+                        .ok_or_else(|| format!("{name} must be finite"))
+                };
+                Some((coordinate("x")?, coordinate("y")?))
+            } else {
+                None
+            };
+            Ok(DebugCommand::UiHover {
+                target_id: required_field(&fields, "targetId")?.to_owned(),
+                point,
+            })
+        }
+        "ui-click-at" => {
+            let coordinate = |name| {
+                required_field(&fields, name)?
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| format!("{name} must be finite"))
+            };
+            Ok(DebugCommand::UiClickAt {
+                target_id: required_field(&fields, "targetId")?.to_owned(),
+                x: coordinate("x")?,
+                y: coordinate("y")?,
+            })
+        }
+        "ui-drag" => {
+            let coordinate = |name| {
+                required_field(&fields, name)?
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| format!("{name} must be finite"))
+            };
+            Ok(DebugCommand::UiDrag {
+                target_id: required_field(&fields, "targetId")?.to_owned(),
+                start: (coordinate("startX")?, coordinate("startY")?),
+                end: (coordinate("endX")?, coordinate("endY")?),
+            })
+        }
+        "ui-key" => Ok(DebugCommand::UiKey {
+            target_id: required_field(&fields, "targetId")?.to_owned(),
+            key: required_field(&fields, "key")?.to_owned(),
+        }),
+        "ui-scroll" => Ok(DebugCommand::UiScroll {
+            target_id: required_field(&fields, "targetId")?.to_owned(),
+            delta_y: required_field(&fields, "deltaY")?
+                .parse::<f32>()
+                .ok()
+                .filter(|value| value.is_finite() && value.abs() <= 10_000.0)
+                .ok_or_else(|| "deltaY must be finite and within 10000 pixels".to_owned())?,
+        }),
+        "ui-input" => Ok(DebugCommand::UiInput {
+            target_id: required_field(&fields, "targetId")?.to_owned(),
+            text: required_field(&fields, "text")?.to_owned(),
+        }),
+        "ui-input-frame" => Ok(DebugCommand::UiInputFrame {
+            target_id: required_field(&fields, "targetId")?.to_owned(),
+            text: required_field(&fields, "text")?.to_owned(),
+        }),
         "equivalence-snapshot" => Ok(DebugCommand::EquivalenceSnapshot {
             fixture_id: required_field(&fields, "fixtureId")?.to_owned(),
         }),
@@ -1389,6 +1603,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hover_accepts_only_complete_finite_coordinates() {
+        assert_eq!(
+            parse_request(r#"{"command":"ui-hover","targetId":"row"}"#).unwrap(),
+            DebugCommand::UiHover {
+                target_id: "row".into(),
+                point: None
+            }
+        );
+        assert_eq!(
+            parse_request(r#"{"command":"ui-hover","targetId":"chart","x":"12.5","y":"34"}"#)
+                .unwrap(),
+            DebugCommand::UiHover {
+                target_id: "chart".into(),
+                point: Some((12.5, 34.0))
+            }
+        );
+        assert!(parse_request(r#"{"command":"ui-hover","targetId":"chart","x":"12"}"#).is_err());
+        assert!(
+            parse_request(r#"{"command":"ui-hover","targetId":"chart","x":"NaN","y":"34"}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn parses_supported_jsonl_commands_and_escapes() {
         assert_eq!(
             parse_request(r#"{"command":"observe"}"#).unwrap(),
@@ -1589,6 +1827,7 @@ mod tests {
             selected_task_pinned: None,
             selected_automation: Some("workflow-1".to_owned()),
             automation_count: 1,
+            automation_authority: None,
             automation_published: true,
             automation_enabled: false,
             automation_node_count: 2,
@@ -1605,6 +1844,7 @@ mod tests {
             automation_selected_node_config_draft: Some(
                 serde_json::json!({"triggerKind": "task_changed"}),
             ),
+            knowledge_authority: None,
             selected_milestone: Some("milestone-1".to_owned()),
             selected_milestone_title: Some("M1".to_owned()),
             selected_milestone_description: Some("Native milestone".to_owned()),
@@ -1794,6 +2034,9 @@ mod tests {
             data_import_error: None,
             composer_revision: 3,
             composer_length: 12,
+            composer_content_sha256: String::new(),
+            composer_model: None,
+            composer_reasoning: None,
             composer_attachment_count: 2,
             composer_conversation_reference_count: 1,
             context_usage_used_tokens: Some(4_096),

@@ -12,16 +12,17 @@ mod command;
 mod context;
 mod conversation;
 mod entity;
-mod execution;
-mod secret;
 mod error;
+mod execution;
 mod frontend_contract;
 mod handoff;
 mod ids;
+mod memory;
 mod milestone;
 mod project;
 mod projection;
 mod revision;
+mod secret;
 mod sidebar;
 mod task;
 mod workflow;
@@ -54,9 +55,8 @@ pub use command::{
 pub use context::ChatContextUsage;
 pub use conversation::{ChatConversationReference, ProductConversation, ProductConversationStatus};
 pub use entity::{ProductEntity, ProductEntityKind};
-pub use execution::ExecutionPermission;
-pub use secret::Secret;
 pub use error::{ConflictKind, ProductError, ProductResult};
+pub use execution::ExecutionPermission;
 pub use frontend_contract::{product_event_name, PRODUCT_CORE_FRONTEND_CONTRACT_JSON};
 pub use handoff::{
     LiliaCodeTaskHandoff, LiliaCodeTaskHandoffKind, ProductTaskHandoffImport,
@@ -66,6 +66,9 @@ pub use handoff::{
 pub use ids::{
     ArtifactId, AssignmentId, BindingId, ConversationId, MilestoneId, ProjectAssetId, ProjectId,
     TaskId, WorkflowId, WorkflowRunId,
+};
+pub use memory::{
+    memory_scope_display, MemoryScopeDisplay, MemoryTurnInjection, MEMORY_TURN_INJECTION_CONTRACT,
 };
 pub use milestone::{ProductMilestone, ProductMilestoneStatus};
 pub use project::{
@@ -81,6 +84,7 @@ pub use projection::{
     TIMELINE_UI_CACHE_KIND,
 };
 pub use revision::{ExpectedRevision, ProductRevision};
+pub use secret::Secret;
 pub use sidebar::{
     SidebarNavigationContribution, SidebarNavigationContributionError,
     SidebarNavigationContributionSet, SidebarNavigationIcon, SidebarNavigationTarget,

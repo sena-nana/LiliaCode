@@ -1041,6 +1041,11 @@ impl NativeAgentKitRuntime {
         let binding = self.binding(session.as_str())?;
         let credential_bound = self.gate_credentials_for_turn()?;
         let snapshot = self.session_snapshot(session.as_str())?;
+        if persisted_turn_status(&snapshot, &decision.turn_id) == Some("cancelled") {
+            return Err(AgentKitPortError::InvalidInput(
+                "cancelled turn cannot resume approval".into(),
+            ));
+        }
         let context = snapshot
             .messages
             .iter()
@@ -1679,7 +1684,17 @@ impl NativeAgentKitRuntime {
     }
 
     pub fn session_snapshot(&self, session_id: &str) -> Result<AgentSession, AgentKitPortError> {
-        let host = self.host_for_plan(None, false)?;
+        let active_host = self
+            .active_runs
+            .lock()
+            .map_err(|_| AgentKitPortError::Unavailable("active run lock poisoned".into()))?
+            .values()
+            .find(|run| run.session_id == session_id)
+            .map(|run| run.host.clone());
+        let host = match active_host {
+            Some(host) => host,
+            None => self.host_for_plan(None, false)?,
+        };
         self.session_snapshot_on_host(&host, session_id)
     }
 
@@ -1719,7 +1734,7 @@ impl NativeAgentKitRuntime {
         &self,
         host: Arc<AgentKitHost>,
         session_id: &str,
-        request: AgentRunRequest,
+        mut request: AgentRunRequest,
     ) -> Result<AgentRunResult, AgentKitPortError> {
         let turn_id = request.turn_id.clone();
         let mut observed_sequence = self
@@ -1732,6 +1747,22 @@ impl NativeAgentKitRuntime {
             .sessions
             .subscribe_events(session_id, observed_sequence)
             .map_err(agent_port_error)?;
+        let mcp_turn = turn_id
+            .as_deref()
+            .map(|turn| {
+                host.begin_mcp_turn(session_id, turn)
+                    .map_err(agent_port_error)
+            })
+            .transpose()?;
+        if let Some(admission) = mcp_turn.as_ref() {
+            let metadata = request.metadata.get_or_insert_with(|| json!({}));
+            metadata
+                .as_object_mut()
+                .ok_or_else(|| {
+                    AgentKitPortError::InvalidInput("Agent metadata must be an object".into())
+                })?
+                .insert("mcpAdmission".into(), json!(admission.generation()));
+        }
         let handle = host
             .submit(
                 "agent-run",
@@ -1895,6 +1926,11 @@ impl NativeAgentKitRuntime {
             .collect::<Vec<_>>();
         drop(active);
         for run in &runs {
+            if let Some(turn_id) = run.turn_id.as_deref() {
+                run.host
+                    .cancel_mcp(&run.session_id, turn_id)
+                    .map_err(agent_port_error)?;
+            }
             run.host
                 .cancel_subagents(&run.session_id)
                 .map_err(agent_port_error)?;
@@ -2259,6 +2295,11 @@ impl NativeAgentKitRuntime {
             ),
             None => "control".into(),
         };
+        let mut catalog = self.bootstrap.bundle.routed_model_tools();
+        catalog.sort_by(|left, right| left.name.cmp(&right.name));
+        let catalog = serde_json::to_string(&catalog)
+            .map_err(|error| AgentKitPortError::InvalidInput(error.to_string()))?;
+        let key = format!("{key}:{catalog}");
         let mut cached = self
             .host
             .lock()
@@ -2475,7 +2516,7 @@ fn agent_run_metadata(
             })
             .expect("Native Coding run context serializes")
         })
-        .unwrap_or_else(|| json!({}));
+        .unwrap_or_else(|| json!({"turn_id": turn_id}));
     if let Some(reasoning_effort) = context
         .and_then(|value| value.get("reasoningEffort"))
         .and_then(Value::as_str)
@@ -2690,6 +2731,702 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::mpsc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn cancelling_approved_mcp_call_cancels_shared_transport_without_success_result() {
+        assert_mcp_cancellation(false, false);
+    }
+
+    #[test]
+    fn cancelling_before_mcp_registration_prevents_dispatch_and_preserves_next_turn() {
+        assert_mcp_cancellation(true, false);
+    }
+
+    #[test]
+    fn removed_mcp_turn_admission_rejects_late_runner_and_preserves_next_turn() {
+        assert_mcp_cancellation(true, true);
+    }
+
+    use mutsuki_agent_plugin_mcp::{McpTransport, McpTransportFactory};
+    struct WaitingMcpFactory {
+        readonly: bool,
+        started: mpsc::Sender<()>,
+        cancelled: mpsc::Sender<()>,
+    }
+    struct WaitingMcpTransport {
+        readonly: bool,
+        started: mpsc::Sender<()>,
+        cancelled: mpsc::Sender<()>,
+        response: Option<Value>,
+    }
+    impl McpTransportFactory for WaitingMcpFactory {
+        fn open(
+            &self,
+            _: &mutsuki_agent_contracts::McpServerManifest,
+        ) -> Result<Box<dyn McpTransport>, AgentError> {
+            Ok(Box::new(WaitingMcpTransport {
+                readonly: self.readonly,
+                started: self.started.clone(),
+                cancelled: self.cancelled.clone(),
+                response: None,
+            }))
+        }
+    }
+    impl McpTransport for WaitingMcpTransport {
+        fn send(&mut self, request: &Value) -> Result<(), AgentError> {
+            let result = match request["method"].as_str().unwrap_or("") {
+                "initialize" => {
+                    json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{},"prompts":{}},"serverInfo":{"name":"waiting","version":"1"}})
+                }
+                "tools/list" => {
+                    json!({"tools":[{"name":"wait","description":"Wait until cancelled","inputSchema":{"type":"object","properties":{}},"annotations":mutsuki_agent_contracts::McpToolAnnotations { read_only_hint: Some(self.readonly), ..Default::default() }}]})
+                }
+                "resources/list" => json!({"resources":[]}),
+                "prompts/list" => json!({"prompts":[]}),
+                "tools/call"
+                    if request
+                        .pointer("/params/arguments/finish")
+                        .and_then(Value::as_bool)
+                        == Some(true) =>
+                {
+                    json!({"content":[{"type":"text","text":"next turn completed"}],"isError":false})
+                }
+                "tools/call" => {
+                    self.started.send(()).unwrap();
+                    return Ok(());
+                }
+                "notifications/cancelled" => {
+                    self.cancelled.send(()).unwrap();
+                    return Ok(());
+                }
+                _ if request.get("id").is_none() => return Ok(()),
+                other => {
+                    return Err(AgentError::invalid_input(format!(
+                        "unexpected MCP method {other}"
+                    )))
+                }
+            };
+            self.response = Some(json!({"jsonrpc":"2.0","id":request["id"],"result":result}));
+            Ok(())
+        }
+        fn receive(&mut self, timeout: Duration) -> Result<Option<Value>, AgentError> {
+            if self.response.is_some() {
+                return Ok(self.response.take());
+            }
+            std::thread::sleep(timeout.min(Duration::from_millis(25)));
+            Ok(None)
+        }
+        fn is_alive(&mut self) -> Result<bool, AgentError> {
+            Ok(true)
+        }
+        fn terminate(&mut self) -> Result<(), AgentError> {
+            Ok(())
+        }
+    }
+
+    fn assert_mcp_cancellation(before_registration: bool, remove_admission: bool) {
+        let tool = mutsuki_agent_contracts::mcp_namespaced_name("waiting", "wait");
+        let call = json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"waiting-mcp-call","type":"function","function":{"name":tool,"arguments":"{}"}}]}}]});
+        let responses = if before_registration {
+            let mut next_call = call.clone();
+            next_call["choices"][0]["message"]["tool_calls"][0]["id"] = json!("next-mcp-call");
+            next_call["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] =
+                json!("{\"finish\":true}");
+            vec![call, next_call, final_response()]
+        } else {
+            vec![call]
+        };
+        let (mut runtime, server) = configured_runtime(responses);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (cancelled_tx, cancelled_rx) = mpsc::channel();
+        runtime.bootstrap.bundle.mcp = Arc::new(mutsuki_agent_plugin_mcp::SharedMcpService::new(
+            Arc::new(WaitingMcpFactory {
+                readonly: false,
+                started: started_tx,
+                cancelled: cancelled_tx,
+            }),
+        ));
+        runtime
+            .bootstrap
+            .bundle
+            .mcp
+            .connect(mutsuki_agent_contracts::McpServerManifest {
+                server_id: "waiting".into(),
+                source: "test".into(),
+                transport: mutsuki_agent_contracts::McpTransportKind::StreamableHttp,
+                command: None,
+                args: vec![],
+                env_allowlist: vec![],
+                url: Some("http://127.0.0.1/waiting".into()),
+                headers: vec![],
+                permissions: vec![],
+                request_timeout_ms: Some(10_000),
+            })
+            .unwrap();
+        let runtime = Arc::new(runtime);
+        let session = session(
+            &runtime,
+            if remove_admission {
+                "mcp-cancel-removed"
+            } else if before_registration {
+                "mcp-cancel-registration"
+            } else {
+                "mcp-cancel"
+            },
+        );
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        if before_registration {
+            AgentKitHost::before_mcp_registration(session.as_str(), move || {
+                let _ = entered_tx.send(());
+                let _ = release_rx.recv_timeout(Duration::from_secs(5));
+            });
+        }
+        let waiting = runtime
+            .submit_turn_with_context_streaming(
+                &session,
+                "call wait",
+                "mcp-cancel-turn",
+                Some(json!({"permission":"ask"})),
+            )
+            .unwrap();
+        assert!(
+            waiting.waiting_approval,
+            "write-like MCP tool must require approval: {waiting:?}"
+        );
+        assert!(
+            started_rx.try_recv().is_err(),
+            "MCP must not execute before approval"
+        );
+        let approval = waiting
+            .events
+            .iter()
+            .find_map(|event| match &event.event {
+                AgentEvent::ApprovalRequest { request } => Some(request.clone()),
+                _ => None,
+            })
+            .unwrap();
+        struct Cleanup {
+            runtime: Arc<NativeAgentKitRuntime>,
+            session: AgentSessionRef,
+            workers: Vec<std::thread::JoinHandle<()>>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = self.runtime.cancel_active_runs(self.session.as_str(), None);
+                for worker in self.workers.drain(..) {
+                    let _ = worker.join();
+                }
+            }
+        }
+        let mut cleanup = Cleanup {
+            runtime: runtime.clone(),
+            session: session.clone(),
+            workers: Vec::new(),
+        };
+        let cancelled_approval = ProductApprovalDecision {
+            session_id: approval.session_id.clone(),
+            turn_id: approval.turn_id.clone(),
+            action_id: approval.action_id.clone(),
+            version: approval.version,
+            approved: true,
+        };
+        let (done_tx, done_rx) = mpsc::channel();
+        let running_runtime = runtime.clone();
+        let running_session = session.clone();
+        let running = std::thread::spawn(move || {
+            let result = running_runtime.respond_approval_streaming(
+                &running_session,
+                &ProductApprovalDecision {
+                    session_id: approval.session_id,
+                    turn_id: approval.turn_id,
+                    action_id: approval.action_id,
+                    version: approval.version,
+                    approved: true,
+                },
+            );
+            let _ = done_tx.send(result);
+        });
+        cleanup.workers.push(running);
+        if before_registration {
+            entered_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("approved runner reaches registration boundary");
+        } else {
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("approved runner enters actual MCP transport");
+        }
+        let active_host = runtime
+            .active_runs
+            .lock()
+            .unwrap()
+            .values()
+            .find(|run| run.session_id == session.as_str())
+            .unwrap()
+            .host
+            .clone();
+        let cancel_runtime = runtime.clone();
+        let cancel_session = session.clone();
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let stopping = std::thread::spawn(move || {
+            let _ = stop_tx.send(
+                cancel_runtime.cancel_session_turn(cancel_session.as_str(), "mcp-cancel-turn"),
+            );
+        });
+        cleanup.workers.push(stopping);
+        let mut replacement_admission = None;
+        if before_registration {
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while !active_host.mcp_turn_cancelled(session.as_str(), "mcp-cancel-turn") {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "Stop latches cancellation before registration"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if remove_admission {
+                active_host.remove_mcp_turn_admission(session.as_str(), "mcp-cancel-turn");
+                assert_eq!(active_host.mcp_turn_count(), 0);
+                replacement_admission = Some(
+                    active_host
+                        .begin_mcp_turn(session.as_str(), "mcp-cancel-turn")
+                        .unwrap(),
+                );
+            }
+            release_tx.send(()).unwrap();
+        }
+        stop_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("Stop must not wait for MCP catalog lock")
+            .unwrap();
+        if before_registration {
+            assert!(
+                started_rx.try_recv().is_err(),
+                "cancelled turn must not dispatch tools/call"
+            );
+            assert!(
+                active_host.mcp_turn_cancelled(session.as_str(), "next-turn"),
+                "unregistered turns fail closed"
+            );
+        } else {
+            cancelled_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("MCP protocol receives cancellation");
+        }
+        let result = done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cancelled runner returns promptly");
+        assert!(
+            result.is_err(),
+            "cancelled runner must not complete successfully: {result:?}"
+        );
+        for worker in cleanup.workers.drain(..) {
+            worker.join().unwrap();
+        }
+        if remove_admission {
+            assert_eq!(
+                active_host.mcp_turn_count(),
+                1,
+                "old execution cleanup must not revoke replacement generation"
+            );
+        }
+        drop(replacement_admission);
+        assert_eq!(
+            active_host.mcp_turn_count(),
+            0,
+            "terminal run releases admission"
+        );
+        let snapshot = runtime.session_snapshot(session.as_str()).unwrap();
+        assert!(snapshot.events.iter().any(|event| matches!(&event.event,AgentEvent::TurnState {turn_id,status} if turn_id=="mcp-cancel-turn" && status=="cancelled")));
+        assert!(!snapshot.events.iter().any(|event| matches!(&event.event,AgentEvent::ToolCallCompleted {summary,..} if summary==&tool)));
+        assert!(
+            runtime
+                .respond_approval_streaming(&session, &cancelled_approval)
+                .is_err(),
+            "cancelled turn cannot reopen admission"
+        );
+        if before_registration {
+            let next = runtime
+                .submit_turn_with_context_streaming(
+                    &session,
+                    "complete next call",
+                    "next-turn",
+                    Some(json!({"permission":"ask"})),
+                )
+                .unwrap();
+            assert!(next.waiting_approval);
+            let approval = next
+                .events
+                .iter()
+                .find_map(|event| match &event.event {
+                    AgentEvent::ApprovalRequest { request } => Some(request.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            let completed = runtime
+                .respond_approval_streaming(
+                    &session,
+                    &ProductApprovalDecision {
+                        session_id: approval.session_id,
+                        turn_id: approval.turn_id,
+                        action_id: approval.action_id,
+                        version: approval.version,
+                        approved: true,
+                    },
+                )
+                .unwrap();
+            assert!(
+                completed.completed,
+                "next turn must still execute: {completed:?}"
+            );
+            assert!(completed.events.iter().any(|event| matches!(&event.event, AgentEvent::ToolCallCompleted { call_id, .. } if call_id == "next-mcp-call")));
+        }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn delegated_readonly_mcp_executes_and_parent_stop_cancels_waiting_child() {
+        let tool = mutsuki_agent_contracts::mcp_namespaced_name("waiting", "wait");
+        let model_call = |id: &str, arguments: &str| json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":id,"type":"function","function":{"name":tool,"arguments":arguments}}]}}]});
+        let (mut runtime, server) = configured_runtime(vec![
+            delegate_agent_call(),
+            model_call("child-completed", "{\"finish\":true}"),
+            final_response(),
+            final_response(),
+            delegate_agent_call(),
+            model_call("child-waiting", "{}"),
+        ]);
+        runtime
+            .configure_subagents(vec![NativeSubagentDefinition {
+                id: "reviewer".into(),
+                name: "Reviewer".into(),
+                description: "Read shared MCP".into(),
+                instruction: "Use the available readonly MCP tool.".into(),
+                enabled: true,
+            }])
+            .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (cancelled_tx, cancelled_rx) = mpsc::channel();
+        runtime.bootstrap.bundle.mcp = Arc::new(mutsuki_agent_plugin_mcp::SharedMcpService::new(
+            Arc::new(WaitingMcpFactory {
+                readonly: true,
+                started: started_tx,
+                cancelled: cancelled_tx,
+            }),
+        ));
+        runtime
+            .bootstrap
+            .bundle
+            .mcp
+            .connect(mutsuki_agent_contracts::McpServerManifest {
+                server_id: "waiting".into(),
+                source: "test".into(),
+                transport: mutsuki_agent_contracts::McpTransportKind::StreamableHttp,
+                command: None,
+                args: vec![],
+                env_allowlist: vec![],
+                url: Some("http://127.0.0.1/waiting".into()),
+                headers: vec![],
+                permissions: vec![],
+                request_timeout_ms: Some(10_000),
+            })
+            .unwrap();
+        let runtime = Arc::new(runtime);
+        let session = session(&runtime, "delegated-mcp");
+        let completed = runtime
+            .submit_turn_with_context_streaming(
+                &session,
+                "delegate a readonly call",
+                "child-success",
+                Some(json!({"permission":"ask"})),
+            )
+            .unwrap();
+        assert!(
+            completed.completed,
+            "readonly child completes: {completed:?}"
+        );
+        assert!(completed.events.iter().any(|event| matches!(&event.event, AgentEvent::ToolCallCompleted{summary,..} if summary == "delegate_agent")));
+        let child_session_id = format!("{}:subagent:reviewer:delegate-1", session.as_str());
+        let child = runtime.session_snapshot(&child_session_id).unwrap();
+        assert!(child.events.iter().any(|event| matches!(&event.event, AgentEvent::ToolCallCompleted { call_id, .. } if call_id == "child-completed")), "child actually executed MCP: {child:?}");
+        let running_runtime = runtime.clone();
+        let running_session = session.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = running_runtime.submit_turn_with_context_streaming(
+                &running_session,
+                "delegate a waiting call",
+                "child-stop",
+                Some(json!({"permission":"ask"})),
+            );
+            let _ = done_tx.send(result);
+        });
+        struct Cleanup {
+            runtime: Arc<NativeAgentKitRuntime>,
+            session: AgentSessionRef,
+            worker: Option<std::thread::JoinHandle<()>>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = self.runtime.cancel_active_runs(self.session.as_str(), None);
+                if let Some(worker) = self.worker.take() {
+                    let _ = worker.join();
+                }
+            }
+        }
+        let mut cleanup = Cleanup {
+            runtime: runtime.clone(),
+            session: session.clone(),
+            worker: Some(worker),
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("child reaches shared MCP transport");
+        runtime
+            .cancel_session_turn(session.as_str(), "child-stop")
+            .unwrap();
+        cancelled_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("parent stop cancels child MCP transport");
+        assert!(done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("parent returns promptly")
+            .is_err());
+        cleanup.worker.take().unwrap().join().unwrap();
+        let snapshot = runtime.session_snapshot(session.as_str()).unwrap();
+        assert!(snapshot.events.iter().any(|event| matches!(&event.event, AgentEvent::TurnState {turn_id,status} if turn_id == "child-stop" && status == "cancelled")));
+        assert!(!snapshot.events.iter().any(|event| matches!(&event.event, AgentEvent::ToolCallCompleted {turn_id,..} if turn_id == "child-stop")));
+        let child = runtime.session_snapshot(&child_session_id).unwrap();
+        assert!(!child.events.iter().any(|event| matches!(&event.event, AgentEvent::ToolCallCompleted { call_id, .. } if call_id == "child-waiting")), "cancelled child must not publish MCP success");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn live_mcp_without_workspace_updates_cached_host_and_executes_through_shared_service() {
+        use mutsuki_agent_plugin_mcp::{McpTransport, McpTransportFactory};
+        struct Factory(Arc<std::sync::atomic::AtomicUsize>);
+        struct Transport {
+            count: Arc<std::sync::atomic::AtomicUsize>,
+            response: Option<Value>,
+        }
+        impl McpTransportFactory for Factory {
+            fn open(
+                &self,
+                _: &mutsuki_agent_contracts::McpServerManifest,
+            ) -> Result<Box<dyn McpTransport>, AgentError> {
+                Ok(Box::new(Transport {
+                    count: self.0.clone(),
+                    response: None,
+                }))
+            }
+        }
+        impl McpTransport for Transport {
+            fn send(&mut self, request: &Value) -> Result<(), AgentError> {
+                if request.get("id").is_none() {
+                    return Ok(());
+                }
+                let result = match request["method"].as_str().unwrap_or("") {
+                    "initialize" => {
+                        json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{},"prompts":{}},"serverInfo":{"name":"fixture","version":"1"}})
+                    }
+                    "tools/list" => {
+                        json!({"tools":[{"name":"echo","description":"Read-only test echo","inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":true,"destructiveHint":false}}]})
+                    }
+                    "resources/list" => json!({"resources":[]}),
+                    "prompts/list" => json!({"prompts":[]}),
+                    "tools/call" => {
+                        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        json!({"content":[{"type":"text","text":"shared-mcp-executed"}],"isError":false})
+                    }
+                    other => {
+                        return Err(AgentError::invalid_input(format!(
+                            "unexpected MCP method {other}"
+                        )))
+                    }
+                };
+                self.response = Some(json!({"jsonrpc":"2.0","id":request["id"],"result":result}));
+                Ok(())
+            }
+            fn receive(&mut self, _: Duration) -> Result<Option<Value>, AgentError> {
+                Ok(self.response.take())
+            }
+            fn is_alive(&mut self) -> Result<bool, AgentError> {
+                Ok(true)
+            }
+            fn terminate(&mut self) -> Result<(), AgentError> {
+                Ok(())
+            }
+        }
+        let tool_name = mutsuki_agent_contracts::mcp_namespaced_name("live", "echo");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!(
+            "http://{}/v1/chat/completions",
+            listener.local_addr().unwrap()
+        );
+        let (tx, rx) = mpsc::channel();
+        let call = json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"mcp-call-1","type":"function","function":{"name":tool_name,"arguments":"{}"}}]}}]});
+        let server = std::thread::spawn(move || {
+            for response in [
+                text_response("before connect"),
+                call,
+                text_response("after call"),
+                text_response("after disconnect"),
+            ] {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(Duration::from_millis(5))
+                        }
+                        Err(error) => panic!("MCP model request missing: {error}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(&mut stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse::<usize>().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                drop(reader);
+                tx.send(serde_json::from_slice::<Value>(&body).unwrap())
+                    .unwrap();
+                let body = response.to_string();
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            }
+        });
+        let mut runtime = runtime_for_model_endpoint(endpoint);
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        runtime.bootstrap.bundle.mcp = Arc::new(mutsuki_agent_plugin_mcp::SharedMcpService::new(
+            Arc::new(Factory(count.clone())),
+        ));
+        let session = session(&runtime, "live-mcp-no-folder");
+        runtime
+            .submit_turn_with_context_streaming(
+                &session,
+                "before",
+                "before",
+                Some(json!({"permission":"ask"})),
+            )
+            .unwrap();
+        let before = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime
+            .bootstrap
+            .bundle
+            .mcp
+            .connect(mutsuki_agent_contracts::McpServerManifest {
+                server_id: "live".into(),
+                source: "test".into(),
+                transport: mutsuki_agent_contracts::McpTransportKind::StreamableHttp,
+                command: None,
+                args: vec![],
+                env_allowlist: vec![],
+                url: Some("http://127.0.0.1/fixture".into()),
+                headers: vec![],
+                permissions: vec![],
+                request_timeout_ms: None,
+            })
+            .unwrap();
+        let mut page = runtime
+            .submit_turn_with_context_streaming(
+                &session,
+                "call echo",
+                "connected",
+                Some(json!({"permission":"ask"})),
+            )
+            .unwrap();
+        let connected = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        if page.waiting_approval {
+            assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+            let approval = page
+                .events
+                .iter()
+                .find_map(|event| match &event.event {
+                    AgentEvent::ApprovalRequest { request } => Some(request.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("MCP approval state has no request: {page:?}"));
+            page = runtime
+                .respond_approval_streaming(
+                    &session,
+                    &ProductApprovalDecision {
+                        session_id: approval.session_id,
+                        turn_id: approval.turn_id,
+                        action_id: approval.action_id,
+                        version: approval.version,
+                        approved: true,
+                    },
+                )
+                .unwrap();
+        }
+        let result = rx.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|error| panic!(
+            "MCP continuation model request missing: {error}; shared calls={}; turn page={page:?}; session={:?}",
+            count.load(std::sync::atomic::Ordering::SeqCst), runtime.session_snapshot(session.as_str()),
+        ));
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(result.to_string().contains("shared-mcp-executed"));
+        assert!(page.events.iter().any(|event| matches!(&event.event,AgentEvent::ToolCallCompleted { summary,.. } if summary==&tool_name)));
+        let task_id = TaskId::new("task-live-mcp-no-folder").unwrap();
+        let completed_session = runtime.session_snapshot(session.as_str()).unwrap();
+        let checkpoint = crate::projection::checkpoint_from_session(&task_id, &completed_session);
+        assert!(!checkpoint.is_waiting());
+        assert!(
+            checkpoint.pending.is_empty(),
+            "completed MCP approval must not reopen on task refresh"
+        );
+        let reloaded_session: AgentSession =
+            serde_json::from_value(serde_json::to_value(&completed_session).unwrap()).unwrap();
+        assert!(
+            crate::projection::checkpoint_from_session(&task_id, &reloaded_session)
+                .pending
+                .is_empty()
+        );
+        runtime.disconnect_shared_mcp_server("live").unwrap();
+        runtime
+            .submit_turn_with_context_streaming(
+                &session,
+                "after",
+                "disconnected",
+                Some(json!({"permission":"ask"})),
+            )
+            .unwrap();
+        let disconnected = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let has_tool = |request: &Value| {
+            request["tools"].as_array().is_some_and(|tools| {
+                tools
+                    .iter()
+                    .any(|tool| tool["function"]["name"] == tool_name)
+            })
+        };
+        assert!(!has_tool(&before));
+        assert!(has_tool(&connected));
+        assert!(!has_tool(&disconnected));
+        assert!(!connected["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["function"]["name"] == "computer.fs.write"));
+        server.join().unwrap();
+    }
 
     struct TestWorkspace(PathBuf);
 
@@ -3667,17 +4404,15 @@ mod tests {
             })
             .unwrap();
         assert!(!workspace.0.join("created.txt").exists());
+        let decision = ProductApprovalDecision {
+            session_id: approval.session_id,
+            turn_id: approval.turn_id,
+            action_id: approval.action_id,
+            version: approval.version,
+            approved: true,
+        };
         let resumed = runtime
-            .respond_approval_streaming(
-                &session,
-                &ProductApprovalDecision {
-                    session_id: approval.session_id,
-                    turn_id: approval.turn_id,
-                    action_id: approval.action_id,
-                    version: approval.version,
-                    approved: true,
-                },
-            )
+            .respond_approval_streaming(&session, &decision)
             .unwrap();
         server.join().unwrap();
         assert_eq!(
@@ -3696,6 +4431,31 @@ mod tests {
         let snapshot = runtime.session_snapshot(session.as_str()).unwrap();
         assert_eq!(snapshot.turn_count, 1);
         assert!(snapshot.next_event_sequence >= resumed.next_sequence);
+
+        std::fs::write(
+            workspace.0.join("created.txt"),
+            "user changed after approval",
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                runtime.respond_approval_streaming(&session, &decision),
+                Err(AgentKitPortError::InvalidInput(_))
+            ),
+            "resolved approval must reject its stale action revision"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace.0.join("created.txt")).unwrap(),
+            "user changed after approval",
+            "repeated approval must not execute the approved write again"
+        );
+        let after_repeat = runtime.session_snapshot(session.as_str()).unwrap();
+        assert_eq!(
+            after_repeat.next_event_sequence,
+            snapshot.next_event_sequence
+        );
+        assert_eq!(after_repeat.messages, snapshot.messages);
+        assert_eq!(after_repeat.turn_count, snapshot.turn_count);
     }
 
     #[test]

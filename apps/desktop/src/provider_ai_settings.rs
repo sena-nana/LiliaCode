@@ -244,6 +244,19 @@ impl ProviderAiSettingsState {
         }
     }
 
+    pub(crate) fn set_preset_effort(&mut self, preset_id: &str, value: &str) {
+        if !matches!(value, "" | "low" | "medium" | "high" | "xhigh" | "max") {
+            return;
+        }
+        if let Some(preset) = self
+            .preset_drafts
+            .iter_mut()
+            .find(|preset| preset.id == preset_id)
+        {
+            preset.reasoning_effort = normalized(value).map(str::to_owned);
+        }
+    }
+
     pub(crate) fn cycle_preset_effort(&mut self, preset_id: &str) {
         const EFFORTS: [Option<&str>; 6] = [
             None,

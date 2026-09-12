@@ -14,6 +14,7 @@ use serde_json::Value;
 pub(crate) struct TaskTimelineItem {
     pub(crate) id: String,
     pub(crate) sequence: u64,
+    pub(crate) turn_id: Option<String>,
     pub(crate) kind: String,
     pub(crate) title: String,
     pub(crate) message_role: Option<String>,
@@ -77,6 +78,19 @@ pub(crate) struct PendingActionView {
 }
 
 impl TaskSessionView {
+    pub(crate) fn timeline_attachment(
+        &self,
+        event_id: &str,
+        attachment_id: &str,
+    ) -> Option<&ChatAttachment> {
+        self.timeline
+            .iter()
+            .find(|event| event.id == event_id)?
+            .attachments
+            .iter()
+            .find(|attachment| attachment.id == attachment_id)
+    }
+
     pub(crate) fn with_ephemeral_debug_overlay(
         &self,
         events: &[TaskTimelineItem],
@@ -341,9 +355,37 @@ fn task_timeline_items(events: Vec<TimelineProjectionEvent>) -> Vec<TaskTimeline
 }
 
 fn task_timeline_item_with_retry(
-    event: TimelineProjectionEvent,
+    mut event: TimelineProjectionEvent,
     can_retry: bool,
 ) -> TaskTimelineItem {
+    if event.payload.get("source").and_then(Value::as_str) == Some("native-agentkit") {
+        if let Some(status) = event.payload.get("turnStatus").and_then(Value::as_str) {
+            event.kind = "turn_state".into();
+            event.title = "执行状态".into();
+            event.summary = Some(
+                match status {
+                    "running" | "starting" => "正在执行",
+                    "completed" => "已完成",
+                    "failed" => "执行失败",
+                    "cancelled" | "interrupted" => "已停止",
+                    "waiting_approval" => "等待确认",
+                    "approval_granted" => "已批准",
+                    "approval_denied" => "已拒绝",
+                    "waiting_interaction" => "等待回复",
+                    _ => "状态已更新",
+                }
+                .into(),
+            );
+        } else {
+            event.title = match event.kind.as_str() {
+                "usage" => "用量".into(),
+                "reasoning" => "思考过程".into(),
+                "tool" => "工具执行".into(),
+                "subagent" => "协作任务".into(),
+                _ => event.title,
+            };
+        }
+    }
     let markdown = timeline_markdown(&event.kind, &event.payload, event.summary.as_deref());
     let markdown_document = markdown.as_deref().map(NativeMarkdown::parse);
     let markdown_plain_text = markdown_document.as_ref().map(NativeMarkdown::plain_text);
@@ -372,6 +414,7 @@ fn task_timeline_item_with_retry(
     TaskTimelineItem {
         id: event.id.as_str().to_owned(),
         sequence: event.sequence,
+        turn_id: event.turn_id,
         kind: event.kind.clone(),
         title: event.title,
         message_role,
@@ -504,6 +547,7 @@ mod tests {
                 TaskTimelineItem {
                     id: "event-2".to_owned(),
                     sequence: 2,
+                    turn_id: None,
                     kind: "message".to_owned(),
                     title: "完成".to_owned(),
                     message_role: Some("assistant".to_owned()),
@@ -522,6 +566,7 @@ mod tests {
                 TaskTimelineItem {
                     id: "event-1".to_owned(),
                     sequence: 1,
+                    turn_id: None,
                     kind: "command".to_owned(),
                     title: "开始".to_owned(),
                     message_role: None,
@@ -673,6 +718,36 @@ mod tests {
 
         event.status = "completed".to_owned();
         assert!(task_timeline_item(event).batch_apply.is_none());
+    }
+
+    #[test]
+    fn terminal_turn_state_replaces_running_status_in_the_visible_timeline() {
+        let mut running = projection_event(1);
+        running.turn_id = Some("turn-1".into());
+        running.kind = "diagnostic".into();
+        running.payload = json!({"source":"native-agentkit", "turnStatus":"running"});
+        let mut completed = running.clone();
+        completed.id = lilia_contracts::ProjectionEventId::new("completed");
+        completed.sequence = 2;
+        completed.status = "success".into();
+        completed.payload["turnStatus"] = json!("completed");
+        let view = TaskSessionView::from_facts(
+            "任务".into(),
+            task_timeline_items(vec![running, completed]),
+            0,
+            0,
+            vec![],
+            vec![],
+        );
+        let rows = crate::module::timeline::TimelineModule::rows(&view, |_| false);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "success");
+        assert_eq!(rows[0].markdown, "已完成");
+        assert_eq!(
+            view.timeline.len(),
+            2,
+            "the presentation must retain authority history for paging"
+        );
     }
 
     #[test]

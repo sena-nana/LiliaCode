@@ -645,6 +645,72 @@ mod tests {
     }
 
     #[test]
+    fn registered_skill_availability_tracks_required_tool_validation_and_recovery() {
+        let (application, home) = application();
+        application
+            .create_skill_package(DesktopSkillCreate {
+                expected_registry_revision: 0,
+                scope: DesktopSkillScope::User,
+                project_cwd: None,
+                skill_id: "needs-missing-tool".into(),
+                description: "Validate required tools".into(),
+            })
+            .unwrap();
+        let document = home.path().join("skills/needs-missing-tool/SKILL.md");
+        let body = "Review the selected changes and cite the affected files.";
+        std::fs::write(&document, format!("---\nid: needs-missing-tool\nversion: 1.0.0\ntitle: Required tool check\nsummary: Validate required tools\nrequired_tools:\n  - acceptance.missing.tool\n---\n{body}\n")).unwrap();
+        let shared_runtime = application.authority().shared_runtime();
+        let runtime = shared_runtime.inner();
+        let bundle = runtime.bootstrap().bundle();
+        let _registry = bundle
+            .core
+            .skills
+            .clone()
+            .with_tool_registry(bundle.core.tools.clone());
+        application.reload_registered_skills().unwrap();
+        let catalog: SkillDiscoverResult =
+            serde_json::from_value(runtime.shared_skill_catalog().unwrap()).unwrap();
+        let unavailable = catalog
+            .catalog
+            .iter()
+            .find(|entry| entry.skill_id == "needs-missing-tool")
+            .unwrap();
+        assert!(!unavailable.available);
+        assert!(!unavailable.unavailable_reasons.is_empty());
+        let snapshot = application.extensions_snapshot().unwrap();
+        let row = snapshot
+            .skills
+            .iter()
+            .find(|row| row.skill_id == "needs-missing-tool")
+            .unwrap();
+        assert!(
+            row.enabled,
+            "configuration stays enabled when a dependency is absent"
+        );
+        assert!(
+            !row.runtime_available,
+            "registered rows must preserve runtime availability"
+        );
+        assert!(runtime.shared_skill_load("needs-missing-tool").is_err());
+
+        std::fs::write(&document, format!("---\nid: needs-missing-tool\nversion: 1.0.0\ntitle: Required tool check\nsummary: Validate required tools\n---\n{body}\n")).unwrap();
+        application.reload_registered_skills().unwrap();
+        let snapshot = application.extensions_snapshot().unwrap();
+        assert!(
+            snapshot
+                .skills
+                .iter()
+                .find(|row| row.skill_id == "needs-missing-tool")
+                .unwrap()
+                .runtime_available
+        );
+        let loaded: SkillLoadResult =
+            serde_json::from_value(runtime.shared_skill_load("needs-missing-tool").unwrap())
+                .unwrap();
+        assert_eq!(loaded.instructions_text.trim(), body);
+    }
+
+    #[test]
     fn managed_skill_lifecycle_is_revision_safe_and_controls_runtime_discovery() {
         let (application, home) = application();
         let created = application

@@ -1,6 +1,15 @@
 use super::{DesktopMemory, MemoryInjectionState, MemorySettings, MemoryUpsertInput};
 
 pub trait MemoryStore: Send {
+    fn prepare_turn_injection(
+        &mut self,
+        task_id: &str,
+        turn_id: &str,
+        turn_sequence: i64,
+        project_id: Option<&str>,
+        settings: &MemorySettings,
+    ) -> Result<lilia_contracts::MemoryTurnInjection, MemoryStoreError>;
+
     fn list(&self, project_id: Option<&str>) -> Result<Vec<DesktopMemory>, MemoryStoreError>;
 
     fn memory(&self, memory_id: &str) -> Result<Option<DesktopMemory>, MemoryStoreError>;

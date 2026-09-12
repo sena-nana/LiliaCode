@@ -75,14 +75,22 @@ pub(crate) fn persistent_credential_bridge(
     })?;
     let registry = SqliteProductCredentialRegistry::open(paths.agent_runtime_db())
         .map_err(|error| DesktopProviderError::Persistence(error.to_string()))?;
-    ProductCredentialBridge::with_persistence(
-        std::sync::Arc::new(DesktopHostSecretStore {
-            host,
-            context: DesktopHostContext::from(config),
-        }),
-        std::sync::Arc::new(registry),
-    )
-    .map_err(|error| DesktopProviderError::Persistence(error.to_string()))
+    let store: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(DesktopHostSecretStore {
+        host,
+        context: DesktopHostContext::from(config),
+    });
+    #[cfg(debug_assertions)]
+    let store = if std::env::var("LILIA_AGENT_DEBUG").as_deref() == Ok("1")
+        && std::env::var("LILIA_AGENT_DEBUG_SEED").as_deref() == Ok("1")
+        && std::env::var("LILIA_AGENT_DEBUG_EPHEMERAL_CREDENTIALS").as_deref() == Ok("1")
+    {
+        std::sync::Arc::new(lilia_agent::InMemorySecretStore::default())
+            as std::sync::Arc<dyn SecretStore>
+    } else {
+        store
+    };
+    ProductCredentialBridge::with_persistence(store, std::sync::Arc::new(registry))
+        .map_err(|error| DesktopProviderError::Persistence(error.to_string()))
 }
 
 struct DesktopHostSecretStore {

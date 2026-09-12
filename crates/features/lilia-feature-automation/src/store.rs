@@ -132,6 +132,8 @@ pub enum AutomationStoreError {
     },
     #[error("automation workflow {workflow_id} already has active run {run_id}")]
     ActiveRunExists { workflow_id: String, run_id: String },
+    #[error("automation workflow {workflow_id} does not accept this signal")]
+    SignalNotMatched { workflow_id: String },
     #[error("automation run does not exist: {run_id}")]
     RunNotFound { run_id: String },
     #[error("automation run node does not exist: {run_id}/{node_id}")]

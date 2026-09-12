@@ -1,5 +1,7 @@
+mod memory_page;
+mod quota;
+mod timeline;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use lilia_contracts::TaskId;
@@ -7,26 +9,25 @@ use lilia_feature_workspace::PROJECTS_WORKSPACE_ITEM_KIND;
 use nana_ui::runtime::{
     sidebar_row_tool_button, sidebar_section_tool_button, sidebar_top_bar_tool_button,
     AboutMetadata, AboutSection, ActionMenu, ActionMenuItem, Activate, AppContext,
-    AppearanceSection, Breadcrumb, BreadcrumbItem, BreadcrumbTone, Button, Card, Chip,
-    CommandPalette, ConfirmDialog, ConfirmIntent, ConfirmSlots, ContextMenu, ContextMenuEvent,
-    ContextMenuItem, DesktopShell, DocumentId, EmptyState, Entity, FlexDirection, FormField,
-    FrameworkError, GraphCanvas, HighlightRequest, IconButton, IconGlyph, ImageViewer,
-    ImageViewerContent, ImageViewerEvent, InteractiveCard, JustifySpec, KeyCaptureLayer,
-    LengthSpec, List, ListItem, NativeMarkdown, NodeStyle, OverlayChanged, OverlayClosing,
-    OverlayHost, PaneChrome, PaneChromeAction, PaneChromeActionKind, PopoverToggled, ReorderItem,
-    ReorderList, ReorderListEvent, ScrollAxes, ScrollChanged, ScrollOffset, ScrollView,
-    SecondaryPress, SemanticColorRole, SettingsBack, SettingsCard, SettingsPage, SettingsRow,
-    SettingsSidebar, SettingsTabSelected, SidebarFooter, SidebarFooterButton, SidebarFrame,
-    SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection, SidebarSectionState, SplitPane,
-    StableNodeId, Stack, Switch, TabOption, Tabs, TabsEvent, Text, TextArea, TextAtomSpan,
-    TextChanged, TimeSeriesChart, ToggleChanged, TreeDropPosition, TreeView, TreeViewEvent, View,
-    VirtualListItems, VirtualListLayout,
+    AppearanceSection, Breadcrumb, BreadcrumbItem, BreadcrumbTone, Button, Card, CommandPalette,
+    ConfirmDialog, ConfirmIntent, ConfirmSlots, ContextMenu, ContextMenuEvent, ContextMenuItem,
+    DesktopShell, DocumentId, EmptyState, Entity, FormField, FrameworkError, GraphCanvas,
+    HighlightRequest, IconButton, IconGlyph, ImageViewer, ImageViewerContent, ImageViewerEvent,
+    JustifySpec, KeyCaptureLayer, LengthSpec, List, ListItem, NodeStyle, OverlayChanged,
+    OverlayClosing, OverlayHost, PaneChrome, PaneChromeAction, PaneChromeActionKind,
+    PopoverToggled, ReorderItem, ReorderList, ReorderListEvent, ScrollAxes, ScrollChanged,
+    ScrollOffset, ScrollView, SecondaryPress, SemanticColorRole, SettingsBack, SettingsCard,
+    SettingsPage, SettingsRow, SettingsSidebar, SettingsTabSelected, SidebarFooter,
+    SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection,
+    SidebarSectionState, SplitPane, StableNodeId, Stack, Switch, TabOption, Tabs, TabsEvent, Text,
+    TextArea, TextChanged, TimeSeriesChart, ToggleChanged, TreeDropPosition, TreeView,
+    TreeViewEvent, View, VirtualListItems, VirtualListLayout,
 };
 use nana_ui::{
     AppearanceEvent, AppearanceSettings, ButtonKind, CommandPaletteEvent, CommandPaletteItem,
-    ControlSize, Icon, PopoverPlacement, SettingsModel, SettingsState, SettingsTabId, SplitAxis,
-    SplitPaneModel, ThemeMode, WindowChrome, WindowChromeAction, WindowChromeEvent, WorkspaceModel,
-    UI_METRICS,
+    ControlSize, Icon, PopoverPlacement, RegionId, SettingsModel, SettingsState, SettingsTabId,
+    SplitAxis, SplitPaneModel, ThemeMode, WindowChrome, WindowChromeAction, WindowChromeEvent,
+    WorkspaceModel, UI_METRICS,
 };
 
 use crate::application::{
@@ -37,12 +38,14 @@ use crate::application::{
 use crate::runtime_compat::{HostedUiCommand, HostedWindowId};
 use crate::runtime_layout::{
     composer_card, composer_interrupt_button, composer_send_button, flatten_composer_textarea,
-    headline_slot, inspector_header_bar, pending_actions_row, pending_interaction_card,
-    pill_button, reconcile_children, sidebar_icon_button, token_chip, trigger_slot, window_control,
+    headline_slot, inspector_header_bar, pill_button, sidebar_icon_button, trigger_slot,
+    window_control,
 };
 use crate::target_ids;
 
 const PRIMARY_DOCUMENT: u64 = 1;
+#[cfg(debug_assertions)]
+mod debug;
 const SESSIONS_EMPTY_TEXT: &str = "还没有会话";
 const INBOX_EMPTY_TEXT: &str = "没有未绑定的对话";
 const PROJECTS_EMPTY_TEXT: &str = "暂无项目";
@@ -99,11 +102,6 @@ fn workspace_kind_icon(kind: &str) -> Icon {
     }
 }
 
-pub(crate) fn content_hash(value: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    value.hash(&mut hasher);
-    hasher.finish()
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellTaskRow {
@@ -153,6 +151,7 @@ pub enum ShellConfirmKind {
     ArchiveConversations,
     RemoveProject,
     Update,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -264,6 +263,7 @@ pub struct ShellSlashItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellProjectPage {
     Overview,
+    Sessions,
     Clone,
     Roadmap,
     Memory,
@@ -298,9 +298,25 @@ pub struct ShellMenuItem {
     pub label: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellTimelineImage {
+    pub source: String,
+    pub data_url: Arc<str>,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellTimelineRow {
+    pub selected_text: Option<String>,
+    pub images: Vec<ShellTimelineImage>,
+    pub attachments: Vec<crate::application::ChatAttachment>,
     pub id: String,
+    pub title: String,
+    pub role: String,
+    pub status: String,
+    pub can_branch: bool,
+    pub can_apply: bool,
     pub markdown: String,
     pub expanded: bool,
     pub can_expand: bool,
@@ -334,6 +350,11 @@ pub struct ShellMemoryCard {
     pub id: String,
     pub title: String,
     pub subtitle: String,
+    pub scope_label: String,
+    pub enabled: bool,
+    pub selected: bool,
+    pub body: String,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -379,6 +400,7 @@ pub struct ShellAttachmentRow {
 pub struct ShellSuggestionRow {
     pub id: String,
     pub label: String,
+    pub source: Option<String>,
     pub prompt: String,
 }
 
@@ -396,13 +418,6 @@ pub struct ShellProviderRow {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ShellCredentialRow {
-    pub id: String,
-    pub revision: u64,
-    pub label: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct ShellAgentRow {
     pub id: String,
     pub label: String,
@@ -414,6 +429,7 @@ pub struct ShellSkillRow {
     pub id: String,
     pub label: String,
     pub enabled: bool,
+    pub editable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -514,8 +530,11 @@ pub struct ShellDiagnosticRow {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellMarkdownPreview {
+    pub intrinsic_size: Option<(u32, u32)>,
+    pub source: String,
     pub title: String,
     pub metadata: String,
+    pub texture_slot: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -533,6 +552,8 @@ pub struct ShellFilesSnapshot {
 
 #[derive(Debug, Clone)]
 pub struct SettingsSnapshot {
+    pub(crate) controls: Vec<crate::runtime_surface::SurfaceControl>,
+    pub(crate) extensions: Option<crate::runtime_extensions::ExtensionBrowserSnapshot>,
     pub model: SettingsModel,
     pub state: SettingsState,
     pub appearance: AppearanceSettings,
@@ -551,12 +572,10 @@ pub struct SettingsSnapshot {
     pub desktop_status: String,
     pub data_status: String,
     pub data_can_import: bool,
-    pub provider_secret: String,
     pub provider_model: String,
     pub provider_openai_endpoint: String,
     pub provider_anthropic_endpoint: String,
     pub can_save_credential: bool,
-    pub credentials: Vec<ShellCredentialRow>,
     pub custom_agents: Vec<ShellAgentRow>,
     pub custom_agent_editor_open: bool,
     pub custom_agent_name: String,
@@ -564,7 +583,7 @@ pub struct SettingsSnapshot {
     pub custom_agent_instruction: String,
     pub quota_days_label: String,
     pub quota_backend_label: String,
-    pub quota_values: Vec<f64>,
+    pub quota_daily: Vec<lilia_feature_usage::QuotaUsageDailyBucket>,
     pub skills: Vec<ShellSkillRow>,
     pub skill_id: String,
     pub skill_description: String,
@@ -607,8 +626,10 @@ pub struct PrimaryShellSnapshot {
     pub timeline_viewport_extent: f32,
     pub composer: String,
     pub composer_atom_spans: Vec<lilia_feature_composer::ContentAtomSpan>,
+    pub composer_project_id: Option<String>,
     pub composer_task_id: Option<String>,
     pub composer_revision: u64,
+    pub conversation_controls: crate::runtime_conversation::ConversationControls,
     pub composer_height: f32,
     pub composer_placeholder: String,
     pub composer_disabled: bool,
@@ -617,6 +638,7 @@ pub struct PrimaryShellSnapshot {
     pub pending_blocks_send: bool,
     pub clone_repository: String,
     pub clone_parent: String,
+    pub milestone_editor_identity: Option<(String, String)>,
     pub milestone_title: String,
     pub milestone_description: String,
     pub milestone_due_date: String,
@@ -628,8 +650,7 @@ pub struct PrimaryShellSnapshot {
     pub permission_selection: String,
     pub worktree_label: Option<String>,
     pub worktree_selection: String,
-    pub suggestions: Vec<ShellSuggestionRow>,
-    pub suggestions_can_refresh: bool,
+    pub suggestions: crate::runtime_empty_suggestions::EmptySuggestionsSnapshot,
     pub command_palette_open: bool,
     pub command_palette_query: String,
     pub command_palette_selected: usize,
@@ -656,16 +677,35 @@ pub struct PrimaryShellSnapshot {
     pub project_cards: Vec<ShellProjectCard>,
     pub roadmap_cards: Vec<ShellRoadmapCard>,
     pub memory_cards: Vec<ShellMemoryCard>,
+    pub memory_draft_enabled: bool,
+    pub memory_editor_generation: u64,
+    pub memory_selected: Option<String>,
     pub memory_title: String,
     pub memory_body: String,
     pub memory_tags: String,
     pub memory_scope_label: String,
+    pub memory_enabled: Option<bool>,
+    pub memory_global_enabled: bool,
+    pub memory_baseline_enabled: bool,
+    pub memory_cooldown: String,
+    pub memory_task_enabled: Option<bool>,
+    pub memory_task_menu_open: bool,
+    pub memory_task_label: String,
+    pub memory_task_options: Vec<(String, String, bool)>,
+    pub roadmap_tasks: Vec<(String, String, bool)>,
+    pub session_search: String,
+    pub session_page: usize,
+    pub session_page_count: usize,
+    pub session_cards: Vec<ShellTaskRow>,
     pub architecture_records: Vec<ShellArchitectureRecord>,
     pub architecture_graph: nana_ui::GraphModel,
     pub architecture_viewport: nana_ui::GraphViewport,
     pub architecture_selection: Option<nana_ui::GraphSelection>,
     pub architecture_can_rollback: bool,
+    pub architecture_details: crate::architecture_panel::ArchitecturePanelSnapshot,
     pub inspector_kind: String,
+    pub iab: crate::iab_panel::IabPanelSnapshot,
+    pub todo_panel: crate::todo_panel::TodoPanelSnapshot,
     pub coding: Option<ShellCodingSnapshot>,
     pub pane_can_move_window: bool,
     pub pane_can_move_next: bool,
@@ -675,6 +715,7 @@ pub struct PrimaryShellSnapshot {
     pub titlebar_can_close: bool,
     pub automations_open: bool,
     pub automations: Vec<ShellAutomationRow>,
+    pub(crate) automation_controls: Vec<crate::runtime_surface::SurfaceControl>,
     pub automation_graph: nana_ui::GraphModel,
     pub automation_viewport: nana_ui::GraphViewport,
     pub automation_selection: Option<nana_ui::GraphSelection>,
@@ -685,6 +726,20 @@ pub struct PrimaryShellSnapshot {
 #[derive(Debug, Clone)]
 pub enum ShellIntent {
     OverlayPresenceChanged,
+    Todo {
+        window_id: HostedWindowId,
+        action: crate::todo_panel::TodoAction,
+    },
+    Browser(crate::iab_panel::IabAction),
+    ProviderCommand(crate::shell::ProviderMessage),
+    ExtensionsCommand(crate::shell::ExtensionsMessage),
+    RemoteCommand(crate::shell::RemoteMessage),
+    AutomationCommand(crate::desktop::AutomationMessage),
+    SettingsCommand(crate::desktop::SettingsSurfaceAction),
+    Conversation {
+        window_id: nana_ui_platform::WindowId,
+        action: crate::runtime_conversation::ConversationAction,
+    },
     ToggleSidebar,
     NewConversation,
     SelectTask(TaskId),
@@ -747,15 +802,14 @@ pub enum ShellIntent {
     CloseMarkdownPreview,
     MarkdownImageViewerInteraction,
 
-    ToggleComposerPlus,
+    ComposerPlusOpen(bool),
     ComposerPlus(String),
-    ToggleComposerPermission,
+    ComposerPermissionOpen(bool),
     ComposerPermission(String),
-    ToggleComposerWorktree,
+    ComposerWorktreeOpen(bool),
     ComposerWorktree(String),
     ApplySlash(String),
     SelectMention(String),
-    ToggleTimelineExpand(String),
     TimelineScrolled {
         offset: f32,
         viewport_extent: f32,
@@ -776,6 +830,7 @@ pub enum ShellIntent {
     SelectRoadmapMilestone(String),
     RefreshArchitecture,
     RollbackArchitecture,
+    ArchitectureHistory(String),
     ArchitectureGraph(nana_ui::GraphCanvasEvent),
     RespondApproval {
         request_id: String,
@@ -851,17 +906,17 @@ pub enum ShellIntent {
     DeleteMilestone,
     CreateMilestone,
     SaveMilestone,
+    MemoryCommand(crate::module::memory::MemoryMessage),
+    ToggleMilestoneTask(String),
+    SessionSearchChanged(String),
+    SessionPageChanged(isize),
     SelectMemory(String),
     MemoryTitleChanged(String),
     MemoryBodyChanged(String),
     MemoryTagsChanged(String),
-    ToggleMemoryScope,
     NewMemory,
     SaveMemory,
-    DeleteMemory,
     LoadEarlierTimeline,
-    CopyTimeline(String),
-    RetryTimeline(String),
     MovePaneToWindow,
     MovePaneToNext,
     OpenSettings,
@@ -888,9 +943,11 @@ pub enum ShellIntent {
     PickDataImportSource,
     ExecuteDataImport,
     ResetDataImport,
-    RemoveAttachment(String),
-    ApplySuggestion(String),
-    RefreshSuggestions,
+    ApplySuggestion {
+        window_id: nana_ui_platform::WindowId,
+        item_id: String,
+    },
+    RefreshSuggestions(nana_ui_platform::WindowId),
     DocumentChanged(String),
     SaveDocument,
     DiscardDocument,
@@ -900,12 +957,7 @@ pub enum ShellIntent {
     ToggleProjectFile(String),
     OpenProjectFile(String),
     RefreshProjectFiles,
-    ProviderSecretChanged(String),
     SaveProviderCredential,
-    RevokeProviderCredential {
-        credential_id: String,
-        revision: u64,
-    },
     ProviderModelChanged(String),
     ProviderOpenAiEndpointChanged(String),
     ProviderAnthropicEndpointChanged(String),
@@ -926,16 +978,6 @@ pub enum ShellIntent {
     SkillDescriptionChanged(String),
     CreateSkill,
     ToggleSkill(String),
-    NewMcpServer,
-    EditMcpServer(String),
-    McpServerIdChanged(String),
-    CycleMcpTransport,
-    McpLocationChanged(String),
-    McpArgsChanged(String),
-    ToggleMcpEditorEnabled,
-    SaveMcpServer,
-    CancelMcpEditor,
-    ToggleMcpServer(String),
     ToggleTitlebarMenu,
     BackToTaskList,
     OpenTaskPopup,
@@ -963,7 +1005,6 @@ pub enum ShellIntent {
     RunAutomation,
     RefreshAutomations,
     AutomationGraph(nana_ui::GraphCanvasEvent),
-    CloseTaskPopup(nana_ui_platform::WindowId),
     TaskPopupComposerChanged {
         window_id: nana_ui_platform::WindowId,
         value: String,
@@ -989,6 +1030,8 @@ struct SyncedInputs {
     timeline_layout: VirtualListLayout,
     timeline_scroll_offset: f32,
     timeline_viewport_extent: f32,
+    timeline_actions_locked: bool,
+    timeline_can_load_earlier: bool,
     workspace: Option<WorkspaceInputs>,
     inspector: Option<InspectorInputs>,
 }
@@ -1006,10 +1049,27 @@ struct WorkspaceInputs {
 #[derive(PartialEq)]
 struct InspectorInputs {
     kind: String,
+    architecture: crate::architecture_panel::ArchitecturePanelSnapshot,
+    iab: crate::iab_panel::IabPanelSnapshot,
     todos: Vec<ShellTodoRow>,
     body: String,
     records: Vec<ShellArchitectureRecord>,
     coding: Option<ShellCodingSnapshot>,
+}
+
+#[derive(Clone, Copy)]
+enum ShellFormEditor {
+    Line(Entity<nana_ui::runtime::TextInput>),
+    Multiline(Entity<TextArea>),
+}
+
+impl ShellFormEditor {
+    fn stable_id(self) -> StableNodeId {
+        match self {
+            Self::Line(editor) => editor.stable_id(),
+            Self::Multiline(editor) => editor.stable_id(),
+        }
+    }
 }
 
 pub struct ShellHandles {
@@ -1021,12 +1081,21 @@ pub struct ShellHandles {
     more_menu: Option<Entity<ContextMenu>>,
     titlebar_menu: Option<Entity<ContextMenu>>,
     sidebar_toggle: Entity<IconButton>,
+    sidebar_collapse_override: Option<bool>,
     footer_more: Entity<SidebarFooterButton>,
-    form_fields: HashMap<String, Entity<TextArea>>,
+    text_bindings: HashMap<StableNodeId, Option<String>>,
+    milestone_editor_identity: Option<(String, String)>,
+    form_fields: HashMap<String, ShellFormEditor>,
     form_wrappers: HashMap<String, Entity<FormField>>,
     form_switches: HashMap<String, Entity<Switch>>,
     settings_card: Entity<SettingsCard>,
     quota_chart: Option<Entity<TimeSeriesChart>>,
+    quota_toolbar: Option<Entity<Stack>>,
+    settings_surface: crate::runtime_surface::SurfaceHandles,
+    automation_surface: crate::runtime_surface::SurfaceHandles,
+    automation_inspector: Entity<Stack>,
+    automation_workspace: Entity<Stack>,
+    automation_inspector_scroll: Entity<ScrollView>,
     pane_bar: Entity<Stack>,
     pane_buttons: HashMap<String, Entity<Button>>,
     automations_page: Entity<Stack>,
@@ -1037,6 +1106,8 @@ pub struct ShellHandles {
     title_trailing: Entity<Stack>,
     conversation_sidebar: Entity<SidebarFrame>,
     automations_sidebar: Entity<SidebarFrame>,
+    automations_new: Entity<SidebarFooterButton>,
+    automations_refresh: Entity<SidebarFooterButton>,
     automations_body: Entity<Stack>,
     sidebar_top: Entity<Stack>,
     new_conversation: Entity<SidebarRow>,
@@ -1066,6 +1137,7 @@ pub struct ShellHandles {
     conversation_column: Entity<Stack>,
     conversation_body: Entity<Stack>,
     settings_sidebar: Entity<SettingsSidebar>,
+    extensions: crate::runtime_extensions::ExtensionBrowser,
     settings_page: Entity<SettingsPage>,
     appearance: Entity<AppearanceSection>,
     about: Entity<AboutSection>,
@@ -1073,26 +1145,29 @@ pub struct ShellHandles {
     product_heading: Entity<Text>,
     product_body: Entity<Text>,
     product_error: Entity<Text>,
-    project_name: Entity<TextArea>,
+    project_name: Entity<nana_ui::runtime::TextInput>,
     project_name_field: Entity<FormField>,
     project_workspace: Entity<Text>,
     project_workspace_row: Entity<SettingsRow>,
     product_actions: HashMap<String, Entity<Button>>,
     provider_rows: HashMap<String, Entity<Button>>,
     heading_slot: Entity<Stack>,
-    heading: Entity<EmptyState>,
+    heading_actions: Entity<Stack>,
+    empty_suggestions: crate::runtime_empty_suggestions::EmptySuggestions,
+    heading: Entity<Text>,
     error: Entity<Text>,
     timeline_scroll: Entity<ScrollView>,
     timeline_list: Entity<List>,
     timeline_virtual: VirtualListItems<String, Stack>,
-    timeline_markdown: HashMap<String, Entity<NativeMarkdown>>,
-    timeline_markdown_source: HashMap<String, u64>,
-    timeline_actions: HashMap<String, Entity<Chip>>,
+    timeline_content: HashMap<String, crate::runtime_conversation::TimelineContent>,
+    timeline_measurements: timeline::TimelineMeasurements,
     synced: SyncedInputs,
     composer_generation: ComposerGeneration,
+    conversation_controls: crate::runtime_conversation::ConversationControlsHandles,
     shell_assembled: bool,
     load_earlier: Option<Entity<Button>>,
     composer_dock: Entity<Card>,
+    pub(crate) todo_panel: crate::todo_panel::TodoPanel,
     composer: Entity<TextArea>,
     composer_toolbar: Entity<Stack>,
     extras: Entity<Stack>,
@@ -1109,28 +1184,38 @@ pub struct ShellHandles {
     permission_menu: Entity<ActionMenu>,
     permission_items: HashMap<String, Entity<ActionMenuItem>>,
     worktree_slot: Entity<Stack>,
-    #[cfg(test)]
-    worktree_icon: Entity<IconGlyph>,
     worktree_menu: Entity<ActionMenu>,
     worktree_items: HashMap<String, Entity<ActionMenuItem>>,
     pending_panel: Entity<Card>,
-    pending_actions: Entity<Stack>,
-    pending_title: Entity<Text>,
-    pending_prompt: Entity<Text>,
-    pending_draft: Entity<TextArea>,
-    pending_tool_command: Entity<TextArea>,
-    pending_tool_message: Entity<TextArea>,
-    pending_request: Arc<Mutex<String>>,
-    pending_tool_command_value: Arc<Mutex<String>>,
-    pending_tool_message_value: Arc<Mutex<String>>,
+    pending: crate::runtime_pending::PendingPanel,
     composer_actions: Entity<Stack>,
     send: Entity<IconButton>,
     interrupt: Option<Entity<IconButton>>,
-    project_page: Entity<Stack>,
+    project_page: Entity<ScrollView>,
+    project_page_content: Entity<Stack>,
+    session_search_input: Entity<nana_ui::runtime::TextInput>,
+    session_toolbar: Entity<Stack>,
+    session_pagination: Entity<Stack>,
+    memory_task_menu: Entity<ActionMenu>,
+    memory_task_items: HashMap<String, Entity<ActionMenuItem>>,
+    memory_group_titles: HashMap<String, Entity<Text>>,
+    memory_layout: HashMap<String, Entity<Stack>>,
+    memory_icons: HashMap<String, Entity<IconButton>>,
+    memory_cooldown_input: Option<Entity<nana_ui::runtime::NumberInput>>,
+    memory_editor_generation: Option<u64>,
+    memory_scope_radio: Option<(
+        Entity<nana_ui::runtime::SegmentedControl>,
+        Entity<nana_ui::runtime::SegmentedOption>,
+        Entity<nana_ui::runtime::SegmentedOption>,
+    )>,
+    memory_checkboxes: HashMap<String, Entity<nana_ui::runtime::Checkbox>>,
     project_page_title: Entity<Text>,
     project_page_body: Entity<Text>,
-    project_cards: HashMap<String, Entity<InteractiveCard>>,
+    project_cards: HashMap<String, Entity<ListItem>>,
+    project_card_text: HashMap<String, (Entity<Text>, Entity<Text>)>,
     architecture_canvas: Entity<GraphCanvas>,
+    architecture_toolbar: Entity<Stack>,
+    pub(crate) architecture_details: crate::architecture_panel::ArchitecturePanel,
     automations_empty: Entity<EmptyState>,
     workspace_page: Entity<Stack>,
     conversation_workspace: Entity<SplitPane>,
@@ -1145,6 +1230,7 @@ pub struct ShellHandles {
     diagnostics_panel: Entity<Stack>,
     diagnostic_rows: HashMap<String, Entity<Text>>,
     image_viewer: Option<Entity<ImageViewer>>,
+    image_viewer_source: Option<String>,
     workspace_actions: Entity<Stack>,
     workspace_buttons: HashMap<String, Entity<Button>>,
     workspace_tree: Entity<TreeView>,
@@ -1164,7 +1250,7 @@ pub struct ShellHandles {
     extra_workspace_panes: HashMap<String, WorkspacePaneView>,
     workspace_splits: HashMap<String, Entity<SplitPane>>,
     workspace_split_handles: HashMap<String, Entity<Stack>>,
-    iab_empty: Entity<EmptyState>,
+    pub(crate) iab: crate::iab_panel::IabPanelView,
     confirm: Option<Entity<ConfirmDialog>>,
     confirm_cancel: Option<Entity<Button>>,
     confirm_commit: Option<Entity<Button>>,
@@ -1192,12 +1278,22 @@ pub(crate) fn emit(sink: &IntentSink, intent: ShellIntent) {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ComposerGeneration {
     task_id: Option<String>,
+    draft_project_id: Option<String>,
     revision: u64,
 }
 
 impl ComposerGeneration {
-    pub fn new(task_id: Option<String>, revision: u64) -> Self {
-        Self { task_id, revision }
+    pub fn new(task_id: Option<String>, revision: u64, project_id: Option<String>) -> Self {
+        let draft_project_id = if task_id.is_none() { project_id } else { None };
+        Self {
+            task_id,
+            draft_project_id,
+            revision,
+        }
+    }
+
+    pub fn task_changed(&self, next: &Self) -> bool {
+        self.task_id != next.task_id || self.draft_project_id != next.draft_project_id
     }
 }
 
@@ -1219,7 +1315,7 @@ pub(crate) fn bind_activate<V: View>(
     })
 }
 
-fn sidebar_toggle_button(collapsed: bool) -> IconButton {
+fn sidebar_toggle_button(collapsed: bool, replacement_mode: bool) -> IconButton {
     IconButton::new(
         Icon::Sidebar,
         if collapsed {
@@ -1228,6 +1324,18 @@ fn sidebar_toggle_button(collapsed: bool) -> IconButton {
             "隐藏会话栏"
         },
     )
+    .disabled(replacement_mode)
+}
+
+fn workspace_for_shell(snapshot: &PrimaryShellSnapshot) -> WorkspaceModel {
+    let mut workspace = snapshot.workspace.clone();
+    if snapshot.settings_open || snapshot.automations_open {
+        workspace.update(
+            nana_ui::WorkspaceMutation::SetRegionCollapsed(RegionId::Resources, false),
+            std::time::Duration::ZERO,
+        );
+    }
+    workspace
 }
 
 fn new_conversation_row(leading: StableNodeId) -> SidebarRow {
@@ -1259,14 +1367,8 @@ fn sidebar_search_close() -> IconButton {
     sidebar_top_bar_tool_button(Icon::Close, "关闭搜索")
 }
 
-fn conversation_empty_state(title: String) -> EmptyState {
-    EmptyState::new(title).icon(Icon::MessageSquarePlus)
-}
-
-fn iab_unavailable_state() -> EmptyState {
-    EmptyState::new("无法浏览网页")
-        .message("没有可打开的页面。")
-        .compact(true)
+fn conversation_empty_state(title: String) -> Text {
+    crate::runtime_layout::conversation_headline(title)
 }
 
 fn breadcrumb_items(parent: &str, current: &str) -> Vec<BreadcrumbItem> {
@@ -1392,10 +1494,34 @@ fn extra_button(label: &str, kind: ButtonKind) -> Button {
     pill_button(label, kind)
 }
 
-fn markdown_image_viewer(preview: &ShellMarkdownPreview) -> ImageViewer {
-    ImageViewer::new(ImageViewerContent::None)
-        .name(preview.title.clone())
-        .metadata(preview.metadata.clone())
+pub(crate) fn markdown_image_viewer(preview: &ShellMarkdownPreview) -> ImageViewer {
+    let mut viewer = ImageViewer::new(
+        preview
+            .texture_slot
+            .as_ref()
+            .map(|slot| ImageViewerContent::host_texture(slot.clone()))
+            .unwrap_or_default(),
+    )
+    .name(preview.title.clone())
+    .metadata(preview.metadata.clone());
+    viewer.intrinsic_size = preview.intrinsic_size;
+    viewer
+}
+
+pub(crate) fn sync_markdown_image_viewer(
+    viewer: &mut ImageViewer,
+    preview: &ShellMarkdownPreview,
+    source_changed: bool,
+) {
+    let updated = markdown_image_viewer(preview);
+    if source_changed {
+        *viewer = updated;
+    } else {
+        viewer.content = updated.content;
+        viewer.intrinsic_size = updated.intrinsic_size;
+        viewer.name = updated.name;
+        viewer.metadata = updated.metadata;
+    }
 }
 
 fn fill_workspace_editor(value: impl Into<String>, language: Option<&str>) -> TextArea {
@@ -1475,10 +1601,29 @@ fn row_draft_button() -> IconButton {
     sidebar_row_tool_button(Icon::MessageSquarePlus, "新对话")
 }
 
+pub(crate) fn composer_atoms(
+    spans: &[lilia_feature_composer::ContentAtomSpan],
+) -> Arc<[nana_ui::runtime::TextAtomSpan]> {
+    use lilia_feature_composer::ContentAtomKind;
+    spans
+        .iter()
+        .map(|span| {
+            nana_ui::runtime::TextAtomSpan::new(span.start, span.end)
+                .label(span.label.as_str())
+                .token(span.token.as_str())
+                .icon(match span.kind {
+                    ContentAtomKind::Directory => Icon::Folder,
+                    ContentAtomKind::Conversation => Icon::MessageSquarePlus,
+                    ContentAtomKind::File | ContentAtomKind::Image => Icon::File,
+                })
+        })
+        .collect()
+}
+
 fn composer_view(snapshot: &PrimaryShellSnapshot) -> TextArea {
     flatten_composer_textarea(
         TextArea::new(snapshot.composer.clone())
-            .atom_spans(composer_atom_chips(&snapshot.composer_atom_spans))
+            .atom_spans(composer_atoms(&snapshot.composer_atom_spans))
             .placeholder(snapshot.composer_placeholder.clone())
             .disabled(snapshot.composer_disabled)
             .height(
@@ -1489,29 +1634,11 @@ fn composer_view(snapshot: &PrimaryShellSnapshot) -> TextArea {
     )
 }
 
-pub(crate) fn composer_atom_chips(
-    spans: &[lilia_feature_composer::ContentAtomSpan],
-) -> Arc<[TextAtomSpan]> {
-    spans
-        .iter()
-        .map(|span| {
-            TextAtomSpan::new(span.start, span.end)
-                .label(span.label.as_str())
-                .token(span.token.as_str())
-                .icon(match span.kind {
-                    lilia_feature_composer::ContentAtomKind::Directory => Icon::Folder,
-                    lilia_feature_composer::ContentAtomKind::Conversation => {
-                        Icon::MessageSquarePlus
-                    }
-                    lilia_feature_composer::ContentAtomKind::File
-                    | lilia_feature_composer::ContentAtomKind::Image => Icon::File,
-                })
-        })
-        .collect()
-}
-
 fn composer_plus_menu(open: bool) -> ActionMenu {
-    ActionMenu::new().trigger_icon(Icon::Add, "添加").open(open)
+    ActionMenu::new()
+        .trigger_icon(Icon::Add, "添加")
+        .placement(PopoverPlacement::Top)
+        .open(open)
 }
 
 /// 权限与工作树菜单：文本触发的下拉，向上展开（输入条贴着窗口底部）。
@@ -1600,7 +1727,9 @@ fn sync_action_menu_items(
             let _ = context.remove_view(item);
         }
     }
-    reconcile_children(context, menu.stable_id(), &order)
+    context
+        .reconcile_children(menu.stable_id(), &order)
+        .map(|_| ())
 }
 
 fn action_menu_item(label: &str, active: bool) -> ActionMenuItem {
@@ -1618,7 +1747,7 @@ fn composer_attach_button() -> IconButton {
 }
 
 fn plus_menu_items(snapshot: &PrimaryShellSnapshot) -> Vec<(String, String)> {
-    vec![
+    let mut items = vec![
         ("add-file".into(), "添加文件".into()),
         ("add-directory".into(), "添加目录".into()),
         ("reference".into(), "引用其他对话".into()),
@@ -1641,7 +1770,12 @@ fn plus_menu_items(snapshot: &PrimaryShellSnapshot) -> Vec<(String, String)> {
                 "开启目标模式".into()
             },
         ),
-    ]
+    ];
+    if snapshot.conversation_controls.can_manage_todos {
+        items.push(("new-guide".into(), "添加引导".into()));
+        items.push(("edit-goal".into(), "设置目标".into()));
+    }
+    items
 }
 
 fn pane_tab_options(snapshot: &PrimaryShellSnapshot) -> (String, Vec<TabOption>) {
@@ -1724,7 +1858,8 @@ fn workspace_tabs_intent_for(pane_id: &str, event: &TabsEvent) -> ShellIntent {
 
 fn settings_field_label(id: &str) -> &'static str {
     match id {
-        "provider_secret" => "访问密钥",
+        "session-search" => "搜索会话",
+        "memory-cooldown" => "注入间隔（轮）",
         "provider_model" => "模型",
         "provider_openai" => "OpenAI 端点",
         "provider_anthropic" => "Anthropic 端点",
@@ -2016,7 +2151,10 @@ pub fn mount_primary_shell(
     let title_leading = context.create_detached_component(document_id, Stack::row(0.0))?;
     let sidebar_toggle = context.create_detached_component(
         document_id,
-        sidebar_toggle_button(snapshot.sidebar_collapsed),
+        sidebar_toggle_button(
+            snapshot.sidebar_collapsed,
+            snapshot.settings_open || snapshot.automations_open,
+        ),
     )?;
     context.append_child(title_leading, sidebar_toggle)?;
     bind_activate(
@@ -2237,28 +2375,24 @@ pub fn mount_primary_shell(
     )?;
     let conversation_body =
         context.create_detached_component(document_id, Stack::fill_column(12.0))?;
-    let heading_slot = context.create_detached_component(
+    let (heading_slot, heading, heading_actions) = crate::runtime_layout::mount_empty_headline(
+        context,
         document_id,
-        headline_slot(!snapshot.heading.trim().is_empty()),
+        snapshot.heading.clone(),
     )?;
-    let heading = context.create_detached_component(
-        document_id,
-        conversation_empty_state(snapshot.heading.clone()),
-    )?;
-    context.append_child(heading_slot, heading)?;
     let error = context.create_detached_component(
         document_id,
         Text::new(snapshot.error.clone().unwrap_or_default()),
     )?;
-    let timeline_scroll =
-        context.create_detached_component(document_id, ScrollView::new(ScrollAxes::Vertical))?;
+    let timeline_scroll = context.create_detached_component(
+        document_id,
+        ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
+    )?;
     let timeline_list = context.create_detached_component(
         document_id,
-        List::new().label("时间线").style(timeline_list_style(
-            snapshot.timeline_layout.total_extent(),
-            0.0,
-            0.0,
-        )),
+        List::new()
+            .label("时间线")
+            .style(crate::runtime_conversation::timeline_container().node_style()),
     )?;
     context.append_child(timeline_scroll, timeline_list)?;
     let timeline_scroll_sink = Arc::clone(&sink);
@@ -2274,6 +2408,12 @@ pub fn mount_primary_shell(
     context.append_child(conversation_body, heading_slot)?;
     context.append_child(conversation_body, error)?;
     context.append_child(conversation_body, timeline_scroll)?;
+    let todo_panel = crate::todo_panel::TodoPanel::mount(
+        context,
+        document_id,
+        Arc::clone(&sink),
+        HostedWindowId::PRIMARY,
+    )?;
     let composer_dock = context.create_detached_component(document_id, composer_card())?;
     let composer = context.create_detached_component(document_id, composer_view(snapshot))?;
     let composer_sink = Arc::clone(&sink);
@@ -2283,14 +2423,17 @@ pub fn mount_primary_shell(
             ShellIntent::ComposerChanged(event.value.clone()),
         );
     })?;
-    let extras = context.create_detached_component(document_id, Stack::fill_row(6.0))?;
+    let extras = context.create_detached_component(
+        document_id,
+        crate::runtime_conversation::wrapping_controls_row(6.0),
+    )?;
     let plus_slot = context
         .create_detached_component(document_id, trigger_slot(PLUS_SLOT_SIZE, PLUS_SLOT_SIZE))?;
     let plus_menu = context
         .create_detached_component(document_id, composer_plus_menu(snapshot.composer_plus_open))?;
     context.on(plus_menu, {
         let sink = Arc::clone(&sink);
-        move |_, _: &PopoverToggled, _| emit(&sink, ShellIntent::ToggleComposerPlus)
+        move |_, event: &PopoverToggled, _| emit(&sink, ShellIntent::ComposerPlusOpen(event.open))
     })?;
     let attach = context.create_detached_component(document_id, composer_attach_button())?;
     bind_activate(
@@ -2311,7 +2454,9 @@ pub fn mount_primary_shell(
     )?;
     context.on(permission_menu, {
         let sink = Arc::clone(&sink);
-        move |_, _: &PopoverToggled, _| emit(&sink, ShellIntent::ToggleComposerPermission)
+        move |_, event: &PopoverToggled, _| {
+            emit(&sink, ShellIntent::ComposerPermissionOpen(event.open))
+        }
     })?;
     let worktree_slot = context.create_detached_component(document_id, Stack::row(4.0))?;
     let worktree_icon =
@@ -2325,7 +2470,9 @@ pub fn mount_primary_shell(
     )?;
     context.on(worktree_menu, {
         let sink = Arc::clone(&sink);
-        move |_, _: &PopoverToggled, _| emit(&sink, ShellIntent::ToggleComposerWorktree)
+        move |_, event: &PopoverToggled, _| {
+            emit(&sink, ShellIntent::ComposerWorktreeOpen(event.open))
+        }
     })?;
     context.append_child(plus_slot, plus_menu)?;
     context.append_child(permission_slot, permission_icon)?;
@@ -2335,94 +2482,13 @@ pub fn mount_primary_shell(
     context.append_child(extras, plus_slot)?;
     context.append_child(extras, attach)?;
     context.append_child(extras, permission_slot)?;
-    let pending_panel =
-        context.create_detached_component(document_id, pending_interaction_card())?;
-    let pending_title = context.create_detached_component(document_id, Text::new(String::new()))?;
-    let pending_prompt =
-        context.create_detached_component(document_id, Text::new(String::new()))?;
-    let pending_draft = context
-        .create_detached_component(document_id, TextArea::new(String::new()).height(48.0))?;
-    let pending_request = Arc::new(Mutex::new(String::new()));
-    let pending_tool_command_value = Arc::new(Mutex::new(String::new()));
-    let pending_tool_message_value = Arc::new(Mutex::new(String::new()));
-    context.on(pending_draft, {
-        let sink = Arc::clone(&sink);
-        let pending_request = Arc::clone(&pending_request);
-        move |_, event: &TextChanged, _| {
-            let request_id = pending_request
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            emit(
-                &sink,
-                ShellIntent::PendingDraftChanged {
-                    request_id,
-                    value: event.value.clone(),
-                },
-            );
-        }
-    })?;
-    let pending_tool_command = context
-        .create_detached_component(document_id, TextArea::new(String::new()).height(48.0))?;
-    context.on(pending_tool_command, {
-        let sink = Arc::clone(&sink);
-        let pending_request = Arc::clone(&pending_request);
-        let pending_tool_command_value = Arc::clone(&pending_tool_command_value);
-        let pending_tool_message_value = Arc::clone(&pending_tool_message_value);
-        move |_, event: &TextChanged, _| {
-            let request_id = pending_request
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            if let Ok(mut guard) = pending_tool_command_value.lock() {
-                *guard = event.value.clone();
-            }
-            let message = pending_tool_message_value
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            emit(
-                &sink,
-                ShellIntent::ToolConsentDraftChanged {
-                    request_id,
-                    command: event.value.clone(),
-                    message,
-                },
-            );
-        }
-    })?;
-    let pending_tool_message = context
-        .create_detached_component(document_id, TextArea::new(String::new()).height(48.0))?;
-    context.on(pending_tool_message, {
-        let sink = Arc::clone(&sink);
-        let pending_request = Arc::clone(&pending_request);
-        let pending_tool_command_value = Arc::clone(&pending_tool_command_value);
-        let pending_tool_message_value = Arc::clone(&pending_tool_message_value);
-        move |_, event: &TextChanged, _| {
-            let request_id = pending_request
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            if let Ok(mut guard) = pending_tool_message_value.lock() {
-                *guard = event.value.clone();
-            }
-            let command = pending_tool_command_value
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            emit(
-                &sink,
-                ShellIntent::ToolConsentDraftChanged {
-                    request_id,
-                    command,
-                    message: event.value.clone(),
-                },
-            );
-        }
-    })?;
-    context.append_child(pending_panel, pending_title)?;
-    context.append_child(pending_panel, pending_prompt)?;
-    let pending_actions = context.create_detached_component(document_id, pending_actions_row())?;
+    let pending = crate::runtime_pending::PendingPanel::mount(
+        context,
+        document_id,
+        nana_ui_platform::WindowId::PRIMARY,
+        sink.clone(),
+    )?;
+    let pending_panel = pending.pending_panel;
     let actions = context.create_detached_component(document_id, Stack::row(6.0))?;
     let send =
         context.create_detached_component(document_id, composer_send_button(snapshot.can_send))?;
@@ -2430,7 +2496,11 @@ pub fn mount_primary_shell(
     context.append_child(actions, send)?;
     let composer_toolbar = context.create_detached_component(
         document_id,
-        Stack::bar(8.0).justify(JustifySpec::SpaceBetween),
+        Stack::bar(8.0)
+            .justify(JustifySpec::SpaceBetween)
+            .with_layout(|layout| {
+                layout.flex_wrap = nana_ui_core::FlexWrap::Wrap;
+            }),
     )?;
     context.append_child(composer_toolbar, extras)?;
     context.append_child(composer_toolbar, actions)?;
@@ -2441,6 +2511,8 @@ pub fn mount_primary_shell(
     context.append_child(conversation_column, composer_dock)?;
     context.append_child(conversation, conversation_column)?;
 
+    let extensions =
+        crate::runtime_extensions::ExtensionBrowser::mount(context, document_id, sink.clone())?;
     let settings_sidebar = context.create_detached_component(
         document_id,
         SettingsSidebar::new(
@@ -2485,7 +2557,7 @@ pub fn mount_primary_shell(
         context.create_detached_component(document_id, KeyCaptureLayer::new())?;
     let project_name = context.create_detached_component(
         document_id,
-        TextArea::new(snapshot.settings.project_name.clone()).height(40.0),
+        crate::runtime_layout::form_text_input(snapshot.settings.project_name.clone()),
     )?;
     let project_name_sink = Arc::clone(&sink);
     context.on(project_name, move |_, event: &TextChanged, _| {
@@ -2660,8 +2732,8 @@ pub fn mount_primary_shell(
     context.append_child(inspector, inspector_body)?;
     let inspector_todos = context.create_detached_component(document_id, Stack::column(4.0))?;
     context.append_child(inspector, inspector_todos)?;
-    let iab_empty = context.create_detached_component(document_id, iab_unavailable_state())?;
-    context.append_child(inspector, iab_empty)?;
+    let iab = crate::iab_panel::IabPanelView::mount(context, document_id, Arc::clone(&sink))?;
+    context.append_child(inspector, iab.root)?;
     let diagnostics_panel =
         context.create_detached_component(document_id, Stack::column(4.0).padding(8.0))?;
     let coding_panel = context.create_detached_component(document_id, Stack::fill_column(8.0))?;
@@ -2683,6 +2755,21 @@ pub fn mount_primary_shell(
     let automations_page =
         context.create_detached_component(document_id, Stack::fill_column(10.0).padding(16.0))?;
     let automation_list = context.create_detached_component(document_id, Stack::row(8.0))?;
+    let automation_workspace =
+        context.create_detached_component(document_id, Stack::fill_row(12.0))?;
+    let automation_inspector =
+        context.create_detached_component(document_id, Stack::column(8.0).padding(8.0))?;
+    let automation_inspector_scroll = context.create_detached_component(
+        document_id,
+        ScrollView::new(ScrollAxes::Vertical).style(
+            Stack::fill_column(0.0)
+                .width(LengthSpec::Px(320.0))
+                .grow(0.0)
+                .shrink(0.0)
+                .node_style(),
+        ),
+    )?;
+    context.append_child(automation_inspector_scroll, automation_inspector)?;
     let automation_actions = context.create_detached_component(document_id, Stack::row(8.0))?;
     let automation_canvas = context.create_detached_component(
         document_id,
@@ -2756,12 +2843,56 @@ pub fn mount_primary_shell(
     context.append_child(automations_sidebar, automations_section)?;
     context.append_child(automations_sidebar, automations_footer)?;
 
-    let project_page =
-        context.create_detached_component(document_id, Stack::fill_column(12.0).padding(16.0))?;
+    let project_page = context.create_detached_component(
+        document_id,
+        ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
+    )?;
+    let project_page_content =
+        context.create_detached_component(document_id, Stack::column(12.0).padding(16.0))?;
+    context.append_child(project_page, project_page_content)?;
+    let session_search_input = context.create_detached_component(
+        document_id,
+        nana_ui::runtime::TextInput::new("")
+            .placeholder("搜索会话")
+            .layout(
+                Stack::fill_row(0.0)
+                    .height(LengthSpec::Px(32.0))
+                    .node_style()
+                    .layout,
+            )
+            .size(ControlSize::Medium),
+    )?;
+    let session_search_sink = Arc::clone(&sink);
+    context.on(session_search_input, move |_, event: &TextChanged, _| {
+        emit(
+            &session_search_sink,
+            ShellIntent::SessionSearchChanged(event.value.clone()),
+        );
+    })?;
+    let session_toolbar = context.create_detached_component(document_id, Stack::bar(8.0))?;
+    let session_pagination =
+        context.create_detached_component(document_id, Stack::bar(8.0).wrap(true))?;
+    let memory_task_menu =
+        context.create_detached_component(document_id, composer_menu("选择会话", false))?;
+    let memory_task_sink = Arc::clone(&sink);
+    context.on(memory_task_menu, move |_, event: &PopoverToggled, _| {
+        emit(
+            &memory_task_sink,
+            ShellIntent::MemoryCommand(crate::module::memory::MemoryMessage::TaskMenuOpen(
+                event.open,
+            )),
+        );
+    })?;
     let project_page_title =
         context.create_detached_component(document_id, Text::new(String::new()))?;
     let project_page_body =
         context.create_detached_component(document_id, Text::new(String::new()))?;
+    let architecture_toolbar = context.create_detached_component(document_id, Stack::bar(6.0))?;
+    let architecture_details = crate::architecture_panel::ArchitecturePanel::mount(
+        context,
+        document_id,
+        Arc::clone(&sink),
+    )?;
     let architecture_canvas = context.create_detached_component(
         document_id,
         GraphCanvas::new("architecture", snapshot.architecture_graph.clone())
@@ -2778,9 +2909,9 @@ pub fn mount_primary_shell(
             );
         },
     )?;
-    context.append_child(project_page, project_page_title)?;
-    context.append_child(project_page, project_page_body)?;
-    context.append_child(project_page, architecture_canvas)?;
+    context.append_child(project_page_content, project_page_title)?;
+    context.append_child(project_page_content, project_page_body)?;
+    context.append_child(project_page_content, architecture_canvas)?;
 
     let conversation_workspace = context.create_detached_component(
         document_id,
@@ -2812,7 +2943,7 @@ pub fn mount_primary_shell(
         automations_page,
         project_page,
     );
-    let mut shell_builder = DesktopShell::from_model(snapshot.workspace.clone())
+    let mut shell_builder = DesktopShell::from_model(workspace_for_shell(snapshot))
         .title(snapshot.title_context.clone())
         .title_leading(title_leading.stable_id())
         .title_center(title_breadcrumb.stable_id())
@@ -2865,6 +2996,14 @@ pub fn mount_primary_shell(
         })?;
     }
 
+    let conversation_controls = crate::runtime_conversation::ConversationControlsHandles::mount(
+        context,
+        document_id,
+        nana_ui_platform::WindowId::PRIMARY,
+        sink.clone(),
+        false,
+    )?;
+    conversation_controls.bind_composer_keyboard(context, composer)?;
     let mut handles = ShellHandles {
         sink,
         shell,
@@ -2874,12 +3013,22 @@ pub fn mount_primary_shell(
         more_menu: None,
         titlebar_menu: None,
         sidebar_toggle,
+        sidebar_collapse_override: (snapshot.settings_open || snapshot.automations_open)
+            .then_some(snapshot.sidebar_collapsed),
         footer_more: more,
+        text_bindings: HashMap::new(),
+        milestone_editor_identity: None,
         form_fields: HashMap::new(),
         form_wrappers: HashMap::new(),
         form_switches: HashMap::new(),
         settings_card,
         quota_chart: None,
+        quota_toolbar: None,
+        settings_surface: Default::default(),
+        automation_surface: Default::default(),
+        automation_inspector,
+        automation_workspace,
+        automation_inspector_scroll,
         pane_bar,
         pane_buttons: HashMap::new(),
         automations_page,
@@ -2890,6 +3039,8 @@ pub fn mount_primary_shell(
         title_trailing,
         conversation_sidebar,
         automations_sidebar,
+        automations_new,
+        automations_refresh,
         automations_body,
         sidebar_top,
         new_conversation,
@@ -2919,6 +3070,7 @@ pub fn mount_primary_shell(
         conversation_column,
         conversation_body,
         settings_sidebar,
+        extensions,
         settings_page,
         appearance,
         about,
@@ -2933,19 +3085,22 @@ pub fn mount_primary_shell(
         product_actions: HashMap::new(),
         provider_rows: HashMap::new(),
         heading_slot,
+        heading_actions,
+        empty_suggestions: Default::default(),
         heading,
         error,
         timeline_scroll,
         timeline_list,
         timeline_virtual: VirtualListItems::default(),
-        timeline_markdown: HashMap::new(),
-        timeline_markdown_source: HashMap::new(),
-        timeline_actions: HashMap::new(),
+        timeline_content: HashMap::new(),
+        timeline_measurements: timeline::TimelineMeasurements::default(),
         synced: SyncedInputs::default(),
+        conversation_controls,
         composer_generation: ComposerGeneration::default(),
         shell_assembled: false,
         load_earlier: None,
         composer_dock,
+        todo_panel,
         composer,
         composer_toolbar,
         extras,
@@ -2962,28 +3117,34 @@ pub fn mount_primary_shell(
         permission_menu,
         permission_items: HashMap::new(),
         worktree_slot,
-        #[cfg(test)]
-        worktree_icon,
         worktree_menu,
         worktree_items: HashMap::new(),
         pending_panel,
-        pending_actions,
-        pending_title,
-        pending_prompt,
-        pending_draft,
-        pending_tool_command,
-        pending_tool_message,
-        pending_request,
-        pending_tool_command_value,
-        pending_tool_message_value,
+        pending,
         composer_actions: actions,
         send,
         interrupt: None,
         project_page,
+        project_page_content,
+        session_search_input,
+        session_toolbar,
+        session_pagination,
+        memory_task_menu,
+        memory_task_items: HashMap::new(),
+        memory_group_titles: HashMap::new(),
+        memory_layout: HashMap::new(),
+        memory_icons: HashMap::new(),
+        memory_cooldown_input: None,
+        memory_scope_radio: None,
+        memory_editor_generation: None,
+        memory_checkboxes: HashMap::new(),
         project_page_title,
         project_page_body,
         project_cards: HashMap::new(),
+        project_card_text: HashMap::new(),
         architecture_canvas,
+        architecture_toolbar,
+        architecture_details,
         automations_empty,
         workspace_page,
         conversation_workspace,
@@ -2998,6 +3159,7 @@ pub fn mount_primary_shell(
         diagnostics_panel,
         diagnostic_rows: HashMap::new(),
         image_viewer: None,
+        image_viewer_source: None,
         workspace_actions,
         workspace_buttons: HashMap::new(),
         workspace_tree,
@@ -3017,7 +3179,7 @@ pub fn mount_primary_shell(
         extra_workspace_panes: HashMap::new(),
         workspace_splits: HashMap::new(),
         workspace_split_handles: HashMap::new(),
-        iab_empty,
+        iab,
         confirm: None,
         confirm_cancel: None,
         confirm_commit: None,
@@ -3063,6 +3225,19 @@ pub fn mount_primary_shell(
         inspector_close.stable_id(),
     );
     handles.sync_lists(context, snapshot)?;
+    crate::runtime_layout::sync_conversation_body(
+        context,
+        handles.conversation_body.stable_id(),
+        (!snapshot.heading.trim().is_empty() && snapshot.timeline.is_empty())
+            .then(|| handles.heading_slot.stable_id()),
+        snapshot
+            .error
+            .as_ref()
+            .filter(|error| !error.is_empty())
+            .map(|_| handles.error.stable_id()),
+        handles.timeline_scroll.stable_id(),
+        handles.load_earlier.map(|button| button.stable_id()),
+    )?;
     handles.sync_settings_content(context, document_id, snapshot)?;
     handles.sync_workspace_page(context, document_id, snapshot)?;
     handles.sync_overlay(context, document_id, snapshot)?;
@@ -3096,7 +3271,7 @@ fn has_workspace_primary_content(snapshot: &PrimaryShellSnapshot) -> bool {
     }
 }
 
-fn conversation_root() -> Stack {
+pub(crate) fn conversation_root() -> Stack {
     // 每帧整体重投影会抹掉 Primary 区域涂在节点上的底色，因此自带 Background。
     Stack::fill_column(0.0)
         .padding_xy(24.0, 20.0)
@@ -3124,7 +3299,7 @@ fn primary_content_id(
     settings_page: Entity<SettingsPage>,
     conversation_workspace: Entity<SplitPane>,
     automations_page: Entity<Stack>,
-    project_page: Entity<Stack>,
+    project_page: Entity<ScrollView>,
 ) -> StableNodeId {
     if snapshot.settings_open {
         settings_page.stable_id()
@@ -3200,16 +3375,37 @@ fn close_shell_overlay<V: View>(
 }
 
 impl ShellHandles {
+    pub(crate) fn composer_node(&self) -> StableNodeId {
+        self.composer.stable_id()
+    }
+
+    pub(crate) fn automation_canvas_size(
+        &self,
+        document: &nana_ui::runtime::RuntimeDocument,
+    ) -> Option<nana_ui::GraphSize> {
+        document
+            .context()
+            .world()
+            .layout_box(self.automation_canvas.stable_id())
+            .map(|bounds| nana_ui::GraphSize::new(bounds.width, bounds.height))
+    }
     /// 拖动工作区分隔条由 NanaUI 输入层直接改写 shell 模型且不通知宿主，
     /// 宿主在每次同步前经此拉取，保持平行 controller 与 shell 一致。
     pub fn live_workspace_model(
         &self,
         document: &mut nana_ui::runtime::RuntimeDocument,
     ) -> Option<WorkspaceModel> {
-        document
+        let mut model = document
             .context_mut()
             .read(self.shell, |shell| shell.model.clone())
-            .ok()
+            .ok()?;
+        if let Some(collapsed) = self.sidebar_collapse_override {
+            model.update(
+                nana_ui::WorkspaceMutation::SetRegionCollapsed(RegionId::Resources, collapsed),
+                std::time::Duration::ZERO,
+            );
+        }
+        Some(model)
     }
 
     pub fn sync(
@@ -3220,7 +3416,10 @@ impl ShellHandles {
         let context = document.context_mut();
         let _ = context.set_theme(snapshot.theme);
         context.update_component(self.sidebar_toggle, |button, _| {
-            *button = sidebar_toggle_button(snapshot.sidebar_collapsed);
+            *button = sidebar_toggle_button(
+                snapshot.sidebar_collapsed,
+                snapshot.settings_open || snapshot.automations_open,
+            );
         })?;
         context.update_component(self.footer_more, |button, _| {
             *button =
@@ -3252,7 +3451,7 @@ impl ShellHandles {
         context.update_component(self.heading, |heading, _| {
             *heading = conversation_empty_state(snapshot.heading.clone());
         })?;
-        let headline_active = !snapshot.heading.trim().is_empty();
+        let headline_active = !snapshot.heading.trim().is_empty() && snapshot.timeline.is_empty();
         context.update_component(self.heading_slot, |slot, _| {
             *slot = headline_slot(headline_active);
         })?;
@@ -3262,14 +3461,20 @@ impl ShellHandles {
         let composer_generation = ComposerGeneration::new(
             snapshot.composer_task_id.clone(),
             snapshot.composer_revision,
+            snapshot.composer_project_id.clone(),
         );
+        if self.composer_generation.task_changed(&composer_generation) {
+            context.clear_text_history(self.composer.stable_id())?;
+        }
         let write_composer = !composer_is_focused(context, self.composer)
             || self.composer_generation != composer_generation;
         context.update_component(self.composer, |composer, _| {
             if write_composer && composer.state.value != snapshot.composer {
                 composer.state.replace_value(snapshot.composer.clone());
             }
-            composer.atom_spans = composer_atom_chips(&snapshot.composer_atom_spans);
+            if composer.state.value == snapshot.composer {
+                composer.atom_spans = composer_atoms(&snapshot.composer_atom_spans);
+            }
             composer.placeholder = Arc::from(snapshot.composer_placeholder.as_str());
             composer.disabled = snapshot.composer_disabled;
             Arc::make_mut(&mut composer.style.layout).height = Some(LengthSpec::Px(
@@ -3291,6 +3496,18 @@ impl ShellHandles {
             .map(|node| node.document)
             .ok_or(FrameworkError::MissingView(self.task_body.stable_id()))?;
         self.sync_lists(context, snapshot)?;
+        crate::runtime_layout::sync_conversation_body(
+            context,
+            self.conversation_body.stable_id(),
+            headline_active.then(|| self.heading_slot.stable_id()),
+            snapshot
+                .error
+                .as_ref()
+                .filter(|error| !error.is_empty())
+                .map(|_| self.error.stable_id()),
+            self.timeline_scroll.stable_id(),
+            self.load_earlier.map(|button| button.stable_id()),
+        )?;
         self.sync_settings_content(context, document_id, snapshot)?;
         let document_id = context
             .world()
@@ -3315,6 +3532,8 @@ impl ShellHandles {
         self.sync_project_page(context, document_id, snapshot)?;
         let inspector_inputs = InspectorInputs {
             kind: snapshot.inspector_kind.clone(),
+            architecture: snapshot.architecture_details.clone(),
+            iab: snapshot.iab.clone(),
             todos: snapshot.inspector_todos.clone(),
             body: snapshot.inspector_body.clone(),
             records: snapshot.architecture_records.clone(),
@@ -3346,16 +3565,19 @@ impl ShellHandles {
             .as_ref()
             .is_some_and(|document| !document.diagnostics.is_empty())
             .then(|| self.diagnostics_panel.stable_id());
+        let projected_workspace = workspace_for_shell(snapshot);
+        self.sidebar_collapse_override = (snapshot.settings_open || snapshot.automations_open)
+            .then_some(snapshot.sidebar_collapsed);
         let mut shell_changed = !self.shell_assembled;
         context.update_component(self.shell, |shell, _| {
             shell_changed = shell_changed
-                || shell.model != snapshot.workspace
+                || shell.model != projected_workspace
                 || shell.title.as_deref() != Some(snapshot.title_context.as_str())
                 || shell.navigation != Some(navigation)
                 || shell.primary != Some(primary)
                 || shell.inspector != inspector
                 || shell.bottom != bottom;
-            shell.model = snapshot.workspace.clone();
+            shell.model = projected_workspace;
             shell.title = Some(Arc::from(snapshot.title_context.as_str()));
             shell.title_leading = Some(self.title_leading.stable_id());
             shell.title_center = Some(self.title_breadcrumb.stable_id());
@@ -3450,16 +3672,23 @@ impl ShellHandles {
             self.synced.sidebar_search_open = snapshot.sidebar_search_open;
         }
         self.sync_sidebar_chrome(context, snapshot)?;
-        if self.synced.timeline != snapshot.timeline
+        if self.timeline_measurements.task != snapshot.composer_task_id
+            || self.synced.timeline != snapshot.timeline
             || self.synced.timeline_layout != snapshot.timeline_layout
             || self.synced.timeline_scroll_offset != snapshot.timeline_scroll_offset
             || self.synced.timeline_viewport_extent != snapshot.timeline_viewport_extent
+            || self.synced.timeline_actions_locked
+                != (snapshot.can_interrupt || snapshot.pending_blocks_send)
+            || self.synced.timeline_can_load_earlier != snapshot.timeline_can_load_earlier
         {
             self.reconcile_timeline(context, document_id, snapshot)?;
             self.synced.timeline = snapshot.timeline.clone();
             self.synced.timeline_layout = snapshot.timeline_layout.clone();
             self.synced.timeline_scroll_offset = snapshot.timeline_scroll_offset;
             self.synced.timeline_viewport_extent = snapshot.timeline_viewport_extent;
+            self.synced.timeline_actions_locked =
+                snapshot.can_interrupt || snapshot.pending_blocks_send;
+            self.synced.timeline_can_load_earlier = snapshot.timeline_can_load_earlier;
         }
         Ok(())
     }
@@ -3505,7 +3734,9 @@ impl ShellHandles {
         } else {
             vec![self.conversation_section.stable_id()]
         };
-        reconcile_children(context, self.sidebar_scroll.stable_id(), &sections)
+        context
+            .reconcile_children(self.sidebar_scroll.stable_id(), &sections)
+            .map(|_| ())
     }
 
     fn sync_sidebar_chrome(
@@ -3526,7 +3757,7 @@ impl ShellHandles {
                 self.search_toggle.stable_id(),
             ]
         };
-        reconcile_children(context, self.sidebar_top.stable_id(), &top)?;
+        context.reconcile_children(self.sidebar_top.stable_id(), &top)?;
         let mut footer = Vec::new();
         let mut keep = HashSet::new();
         for item in &snapshot.nav_items {
@@ -3579,7 +3810,7 @@ impl ShellHandles {
             .node(self.provider_badge.stable_id())
             .and_then(|node| node.parent)
             .ok_or(FrameworkError::MissingView(self.provider_badge.stable_id()))?;
-        reconcile_children(context, footer_id, &footer)
+        context.reconcile_children(footer_id, &footer).map(|_| ())
     }
 
     fn sync_row_tools(
@@ -3683,7 +3914,9 @@ impl ShellHandles {
                 tool.attach(context, host)?;
             }
         }
-        reconcile_children(context, host.stable_id(), &order)
+        context
+            .reconcile_children(host.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn sync_sidebar_row_group(
@@ -3857,7 +4090,9 @@ impl ShellHandles {
         tree_drop: bool,
     ) -> Result<(), FrameworkError> {
         if order.is_empty() {
-            return reconcile_children(context, body.stable_id(), &[]);
+            return context
+                .reconcile_children(body.stable_id(), &[])
+                .map(|_| ());
         }
         let entries = items
             .iter()
@@ -3872,8 +4107,10 @@ impl ShellHandles {
             list.items = entries;
             list.tree_drop = tree_drop;
         })?;
-        reconcile_children(context, list.stable_id(), order)?;
-        reconcile_children(context, body.stable_id(), &[list.stable_id()])
+        context.reconcile_children(list.stable_id(), order)?;
+        context
+            .reconcile_children(body.stable_id(), &[list.stable_id()])
+            .map(|_| ())
     }
 
     fn sync_composer_actions(
@@ -3911,7 +4148,9 @@ impl ShellHandles {
         context.update_component(self.send, |button, _| {
             *button = composer_send_button(snapshot.can_send && !snapshot.pending_blocks_send);
         })?;
-        reconcile_children(context, self.composer_actions.stable_id(), &order)
+        context
+            .reconcile_children(self.composer_actions.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn sync_composer_stage(
@@ -3920,6 +4159,13 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        self.conversation_controls.sync_composer_keyboard(
+            &snapshot.conversation_controls,
+            &snapshot.composer,
+            snapshot.can_send && !snapshot.pending_blocks_send,
+        );
+        self.conversation_controls
+            .sync(context, document_id, &snapshot.conversation_controls)?;
         context.update_component(self.plus_menu, |menu, _| {
             *menu = composer_plus_menu(snapshot.composer_plus_open);
         })?;
@@ -3997,21 +4243,33 @@ impl ShellHandles {
         if !self.completion_items.is_empty() {
             dock_stage.push(self.completion_slot.stable_id());
         }
+        dock_stage.push(self.conversation_controls.root.stable_id());
         dock_stage.push(self.composer.stable_id());
         dock_stage.push(self.composer_toolbar.stable_id());
-        reconcile_children(context, self.composer_dock.stable_id(), &dock_stage)?;
+        context.reconcile_children(self.composer_dock.stable_id(), &dock_stage)?;
 
+        self.todo_panel
+            .sync(context, document_id, &snapshot.todo_panel)?;
         let mut column = vec![self.conversation_body.stable_id()];
+        if snapshot.todo_panel.visible {
+            column.push(self.todo_panel.root.stable_id());
+        }
         if snapshot.pending.is_some() {
             column.push(self.pending_panel.stable_id());
+        } else {
+            column.push(self.composer_dock.stable_id());
         }
-        column.push(self.composer_dock.stable_id());
-        reconcile_children(context, self.conversation_column.stable_id(), &column)?;
-        reconcile_children(
-            context,
-            self.composer_toolbar.stable_id(),
-            &[self.extras.stable_id(), self.composer_actions.stable_id()],
-        )
+        context.reconcile_children(self.conversation_column.stable_id(), &column)?;
+        context
+            .reconcile_children(
+                self.composer_toolbar.stable_id(),
+                &[
+                    self.extras.stable_id(),
+                    self.conversation_controls.toolbar.stable_id(),
+                    self.composer_actions.stable_id(),
+                ],
+            )
+            .map(|_| ())
     }
 
     fn sync_pending_panel(
@@ -4020,280 +4278,8 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
-        let Some(pending) = &snapshot.pending else {
-            if let Ok(mut guard) = self.pending_request.lock() {
-                guard.clear();
-            }
-            reconcile_children(context, self.pending_actions.stable_id(), &[])?;
-            reconcile_children(context, self.pending_panel.stable_id(), &[])?;
-            return Ok(());
-        };
-        if let Ok(mut guard) = self.pending_request.lock() {
-            *guard = pending.request_id.clone();
-        }
-        context.update_component(self.pending_title, |text, _| {
-            *text = Text::new(pending.title.clone());
-        })?;
-        context.update_component(self.pending_prompt, |text, _| {
-            *text = Text::new(pending.prompt.clone());
-        })?;
-        context.update_component(self.pending_draft, |editor, _| {
-            editor.placeholder = Arc::from("补充说明");
-            let value = pending
-                .ask
-                .as_ref()
-                .map(|ask| ask.freeform.clone())
-                .unwrap_or_else(|| pending.draft.clone());
-            if editor.state.value != value {
-                editor.state.replace_value(value);
-            }
-        })?;
-        let mut keep = HashSet::new();
-        let mut field_keep = HashSet::new();
-        let mut order = vec![
-            self.pending_title.stable_id(),
-            self.pending_prompt.stable_id(),
-        ];
-        let request_id = pending.request_id.clone();
-        match pending.kind {
-            ShellPendingKind::PlanApproval => {
-                order.push(self.pending_draft.stable_id());
-            }
-            ShellPendingKind::ToolConsent => {
-                if let Some(tool) = &pending.tool {
-                    if let Ok(mut guard) = self.pending_tool_command_value.lock() {
-                        *guard = tool.command.clone();
-                    }
-                    if let Ok(mut guard) = self.pending_tool_message_value.lock() {
-                        *guard = tool.message.clone();
-                    }
-                    if tool.command_editable {
-                        context.update_component(self.pending_tool_command, |editor, _| {
-                            editor.placeholder = Arc::from("确认执行的命令");
-                            if editor.state.value != tool.command {
-                                editor.state.replace_value(tool.command.clone());
-                            }
-                        })?;
-                        order.push(self.pending_tool_command.stable_id());
-                    }
-                    context.update_component(self.pending_tool_message, |editor, _| {
-                        editor.placeholder = Arc::from("拒绝理由");
-                        if editor.state.value != tool.message {
-                            editor.state.replace_value(tool.message.clone());
-                        }
-                    })?;
-                    order.push(self.pending_tool_message.stable_id());
-                }
-            }
-            ShellPendingKind::AskUser => {
-                if pending.ask.as_ref().is_some_and(|ask| ask.show_freeform) {
-                    order.push(self.pending_draft.stable_id());
-                }
-            }
-            ShellPendingKind::McpElicitation => {
-                if let Some(mcp) = &pending.mcp {
-                    if let Some(url) = &mcp.url {
-                        let open = self.upsert_tagged_button(
-                            context,
-                            document_id,
-                            &format!("pending-mcp-url-{request_id}"),
-                            "打开链接",
-                            ButtonKind::Subtle,
-                            ShellIntent::OpenMarkdownLink(url.clone()),
-                            false,
-                        )?;
-                        keep.insert(format!("pending-mcp-url-{request_id}"));
-                        order.push(open.stable_id());
-                    }
-                    if let Some(raw) = &mcp.raw_json {
-                        self.upsert_field(
-                            context,
-                            document_id,
-                            &mut field_keep,
-                            &mut order,
-                            &format!("pending-mcp-raw-{request_id}"),
-                            raw,
-                            {
-                                let request_id = request_id.clone();
-                                move |value| ShellIntent::McpRawJsonChanged {
-                                    request_id: request_id.clone(),
-                                    value,
-                                }
-                            },
-                        )?;
-                    }
-                    for field in &mcp.fields {
-                        if field.options.is_empty() && field.kind != "boolean" {
-                            self.upsert_field(
-                                context,
-                                document_id,
-                                &mut field_keep,
-                                &mut order,
-                                &format!("pending-mcp-field-{request_id}-{}", field.key),
-                                &field.value,
-                                {
-                                    let request_id = request_id.clone();
-                                    let field_key = field.key.clone();
-                                    move |value| ShellIntent::McpFieldChanged {
-                                        request_id: request_id.clone(),
-                                        field_key: field_key.clone(),
-                                        value,
-                                    }
-                                },
-                            )?;
-                        } else if field.kind == "boolean" {
-                            let id = format!("pending-mcp-bool-{request_id}-{}", field.key);
-                            let button = self.upsert_tagged_button(
-                                context,
-                                document_id,
-                                &id,
-                                if field.enabled {
-                                    "已开启"
-                                } else {
-                                    "已关闭"
-                                },
-                                if field.enabled {
-                                    ButtonKind::Primary
-                                } else {
-                                    ButtonKind::Subtle
-                                },
-                                ShellIntent::McpToggleBoolean {
-                                    request_id: request_id.clone(),
-                                    field_key: field.key.clone(),
-                                },
-                                false,
-                            )?;
-                            keep.insert(id);
-                            order.push(button.stable_id());
-                        } else {
-                            for option in &field.options {
-                                let id = format!(
-                                    "pending-mcp-opt-{request_id}-{}-{}",
-                                    field.key, option.value
-                                );
-                                let button = self.upsert_tagged_button(
-                                    context,
-                                    document_id,
-                                    &id,
-                                    &option.label,
-                                    if option.selected {
-                                        ButtonKind::Primary
-                                    } else {
-                                        ButtonKind::Subtle
-                                    },
-                                    ShellIntent::McpToggleOption {
-                                        request_id: request_id.clone(),
-                                        field_key: field.key.clone(),
-                                        value: option.value.clone(),
-                                        multi: option.multi,
-                                    },
-                                    false,
-                                )?;
-                                keep.insert(id);
-                                order.push(button.stable_id());
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        for option in &pending.options {
-            let id = format!("pending-opt-{}-{}", request_id, option.id);
-            let button = self.upsert_tagged_button(
-                context,
-                document_id,
-                &id,
-                &option.label,
-                if option.selected {
-                    ButtonKind::Primary
-                } else if option.danger {
-                    ButtonKind::Danger
-                } else {
-                    ButtonKind::Subtle
-                },
-                ShellIntent::SelectPendingOption {
-                    request_id: request_id.clone(),
-                    option_id: option.id.clone(),
-                },
-                false,
-            )?;
-            keep.insert(id);
-            order.push(button.stable_id());
-        }
-        if let Some(ask) = &pending.ask {
-            if ask.show_other {
-                let id = format!("pending-ask-other-{request_id}");
-                let button = self.upsert_tagged_button(
-                    context,
-                    document_id,
-                    &id,
-                    if ask.other_selected {
-                        "✓ 其他"
-                    } else {
-                        "其他"
-                    },
-                    if ask.other_selected {
-                        ButtonKind::Primary
-                    } else {
-                        ButtonKind::Subtle
-                    },
-                    ShellIntent::AskUserPending {
-                        request_id: request_id.clone(),
-                        action: "select".to_owned(),
-                        value: "other".to_owned(),
-                    },
-                    false,
-                )?;
-                keep.insert(id);
-                order.push(button.stable_id());
-            }
-        }
-        let actions = pending_action_specs(pending);
-        let mut action_order = Vec::new();
-        for (id, label, kind, intent, disabled) in actions {
-            keep.insert(id.clone());
-            let button = self.upsert_tagged_button(
-                context,
-                document_id,
-                &id,
-                &label,
-                kind,
-                intent,
-                disabled,
-            )?;
-            action_order.push(button.stable_id());
-        }
-        reconcile_children(context, self.pending_actions.stable_id(), &action_order)?;
-        if !action_order.is_empty() {
-            order.push(self.pending_actions.stable_id());
-        }
-        let stale: Vec<_> = self
-            .extra_buttons
-            .keys()
-            .filter(|key| key.starts_with("pending-") && !keep.contains(*key))
-            .cloned()
-            .collect();
-        for key in stale {
-            if let Some(button) = self.extra_buttons.remove(&key) {
-                let _ = context.remove_view(button);
-            }
-        }
-        let stale_fields: Vec<_> = self
-            .form_fields
-            .keys()
-            .filter(|key| key.starts_with("pending-") && !field_keep.contains(*key))
-            .cloned()
-            .collect();
-        for key in stale_fields {
-            if let Some(field) = self.form_fields.remove(&key) {
-                let _ = context.remove_view(field);
-            }
-            if let Some(wrapper) = self.form_wrappers.remove(&key) {
-                let _ = context.remove_view(wrapper);
-            }
-        }
-        reconcile_children(context, self.pending_panel.stable_id(), &order)
+        self.pending
+            .sync(context, document_id, snapshot.pending.as_ref())
     }
 
     fn upsert_tagged_button(
@@ -4328,9 +4314,9 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
-        context.update_component(self.iab_empty, |empty, _| {
-            *empty = iab_unavailable_state();
-        })?;
+        self.iab.sync(context, &snapshot.iab)?;
+        self.architecture_details
+            .sync(context, document_id, &snapshot.architecture_details)?;
         let inspector_rows: Vec<(String, String)> = match snapshot.inspector_kind.as_str() {
             "architecture" => snapshot
                 .architecture_records
@@ -4383,30 +4369,30 @@ impl ShellHandles {
                 let _ = context.remove_view(row);
             }
         }
-        reconcile_children(context, self.inspector_todos.stable_id(), &order)?;
+        context.reconcile_children(self.inspector_todos.stable_id(), &order)?;
         self.sync_coding_tools(context, document_id, snapshot)?;
         let mut inspector_order = vec![self.inspector_header.stable_id()];
         match snapshot.inspector_kind.as_str() {
             "coding" => inspector_order.push(self.coding_panel.stable_id()),
-            "iab" => inspector_order.push(self.iab_empty.stable_id()),
+            "iab" => inspector_order.push(self.iab.root.stable_id()),
             "architecture" => {
-                inspector_order.push(self.inspector_body.stable_id());
-                inspector_order.push(self.inspector_todos.stable_id());
+                inspector_order.push(self.architecture_details.root.stable_id());
             }
             _ => {
                 inspector_order.push(self.inspector_body.stable_id());
                 inspector_order.push(self.inspector_todos.stable_id());
             }
         }
-        reconcile_children(
-            context,
+        context.reconcile_children(
             self.inspector_header.stable_id(),
             &[
                 self.inspector_heading.stable_id(),
                 self.inspector_close.stable_id(),
             ],
         )?;
-        reconcile_children(context, self.inspector.stable_id(), &inspector_order)
+        context
+            .reconcile_children(self.inspector.stable_id(), &inspector_order)
+            .map(|_| ())
     }
 
     fn sync_coding_tools(
@@ -4416,7 +4402,7 @@ impl ShellHandles {
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
         let Some(coding) = &snapshot.coding else {
-            reconcile_children(context, self.coding_panel.stable_id(), &[])?;
+            context.reconcile_children(self.coding_panel.stable_id(), &[])?;
             return Ok(());
         };
         context.update_component(self.coding_query, |editor, _| {
@@ -4521,7 +4507,9 @@ impl ShellHandles {
                 let _ = context.remove_view(button);
             }
         }
-        reconcile_children(context, self.coding_panel.stable_id(), &order)
+        context
+            .reconcile_children(self.coding_panel.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn upsert_coding_button(
@@ -4555,11 +4543,34 @@ impl ShellHandles {
         if snapshot.project_page.is_none() {
             return Ok(());
         }
+        if snapshot.project_page == Some(ShellProjectPage::Memory) {
+            return self.sync_memory_page(context, document_id, snapshot);
+        }
+        context.update_component(self.project_page_content, |content, _| {
+            *content = if snapshot.project_page == Some(ShellProjectPage::Architecture) {
+                Stack::fill_column(12.0).padding(16.0)
+            } else {
+                Stack::column(
+                    if snapshot.project_page == Some(ShellProjectPage::Sessions) {
+                        6.0
+                    } else {
+                        12.0
+                    },
+                )
+                .padding(16.0)
+            };
+        })?;
         context.update_component(self.project_page_title, |text, _| {
             *text = Text::new(snapshot.project_page_title.clone());
         })?;
         context.update_component(self.project_page_body, |text, _| {
             *text = Text::new(snapshot.project_page_body.clone());
+            if snapshot.project_page == Some(ShellProjectPage::Sessions) {
+                let layout = Arc::make_mut(&mut text.style.layout);
+                layout.white_space = nana_ui_core::WhiteSpaceSpec::Nowrap;
+                layout.white_space_nowrap = true;
+                layout.flex_shrink = Some(0.0);
+            }
         })?;
         context.update_component(self.architecture_canvas, |canvas, _| {
             *canvas = GraphCanvas::new("architecture", snapshot.architecture_graph.clone())
@@ -4570,6 +4581,50 @@ impl ShellHandles {
         let mut field_keep = HashSet::new();
         let mut order = vec![self.project_page_title.stable_id()];
         match snapshot.project_page {
+            Some(ShellProjectPage::Sessions) => {
+                context.update_component(self.session_search_input, |input, _| {
+                    if input.state.value != snapshot.session_search {
+                        input.state.replace_value(snapshot.session_search.clone());
+                    }
+                })?;
+                let create = self.upsert_tagged_button(
+                    context,
+                    document_id,
+                    "session-new",
+                    "新建会话",
+                    ButtonKind::Primary,
+                    ShellIntent::NewConversation,
+                    false,
+                )?;
+                context.reconcile_children(
+                    self.session_toolbar.stable_id(),
+                    &[self.session_search_input.stable_id(), create.stable_id()],
+                )?;
+                let mut pagination = vec![self.project_page_body.stable_id()];
+                for (id, label, offset, disabled) in [
+                    ("session-previous", "上一页", -1, snapshot.session_page == 0),
+                    (
+                        "session-next",
+                        "下一页",
+                        1,
+                        snapshot.session_page + 1 >= snapshot.session_page_count,
+                    ),
+                ] {
+                    let button = self.upsert_tagged_button(
+                        context,
+                        document_id,
+                        id,
+                        label,
+                        ButtonKind::Subtle,
+                        ShellIntent::SessionPageChanged(offset),
+                        disabled,
+                    )?;
+                    pagination.push(button.stable_id());
+                }
+                context.reconcile_children(self.session_pagination.stable_id(), &pagination)?;
+                order.push(self.session_toolbar.stable_id());
+                order.push(self.session_pagination.stable_id());
+            }
             Some(ShellProjectPage::Clone) => {
                 order.push(self.project_page_body.stable_id());
                 self.upsert_field(
@@ -4653,6 +4708,31 @@ impl ShellHandles {
                 order.push(save.stable_id());
             }
             Some(ShellProjectPage::Roadmap) => {
+                if self.milestone_editor_identity != snapshot.milestone_editor_identity {
+                    for key in [
+                        "project-milestone-title",
+                        "project-milestone-description",
+                        "project-milestone-due",
+                    ] {
+                        if let Some(editor) = self.form_fields.get(key) {
+                            context.clear_text_history(editor.stable_id())?;
+                        }
+                    }
+                    self.milestone_editor_identity = snapshot.milestone_editor_identity.clone();
+                }
+                order.push(self.project_page_body.stable_id());
+                for (id, title, linked) in &snapshot.roadmap_tasks {
+                    self.upsert_switch(
+                        context,
+                        document_id,
+                        &mut field_keep,
+                        &mut order,
+                        &format!("milestone-task-{id}"),
+                        title,
+                        *linked,
+                        ShellIntent::ToggleMilestoneTask(id.clone()),
+                    )?;
+                }
                 self.upsert_field(
                     context,
                     document_id,
@@ -4747,83 +4827,7 @@ impl ShellHandles {
                 )?;
                 order.push(delete.stable_id());
             }
-            Some(ShellProjectPage::Memory) => {
-                if !snapshot.project_page_body.is_empty() {
-                    order.push(self.project_page_body.stable_id());
-                }
-                let new_memory = self.upsert_tagged_button(
-                    context,
-                    document_id,
-                    "memory-new",
-                    "新建",
-                    ButtonKind::Primary,
-                    ShellIntent::NewMemory,
-                    false,
-                )?;
-                order.push(new_memory.stable_id());
-                self.upsert_field(
-                    context,
-                    document_id,
-                    &mut field_keep,
-                    &mut order,
-                    "memory-title",
-                    &snapshot.memory_title,
-                    ShellIntent::MemoryTitleChanged,
-                )?;
-                self.upsert_field(
-                    context,
-                    document_id,
-                    &mut field_keep,
-                    &mut order,
-                    "memory-body",
-                    &snapshot.memory_body,
-                    ShellIntent::MemoryBodyChanged,
-                )?;
-                self.upsert_field(
-                    context,
-                    document_id,
-                    &mut field_keep,
-                    &mut order,
-                    "memory-tags",
-                    &snapshot.memory_tags,
-                    ShellIntent::MemoryTagsChanged,
-                )?;
-                let scope = self.upsert_tagged_button(
-                    context,
-                    document_id,
-                    "memory-scope",
-                    if snapshot.memory_scope_label.is_empty() {
-                        "范围"
-                    } else {
-                        snapshot.memory_scope_label.as_str()
-                    },
-                    ButtonKind::Subtle,
-                    ShellIntent::ToggleMemoryScope,
-                    false,
-                )?;
-                order.push(scope.stable_id());
-                let save = self.upsert_tagged_button(
-                    context,
-                    document_id,
-                    "memory-save",
-                    "保存",
-                    ButtonKind::Primary,
-                    ShellIntent::SaveMemory,
-                    snapshot.memory_title.trim().is_empty()
-                        || snapshot.memory_body.trim().is_empty(),
-                )?;
-                order.push(save.stable_id());
-                let delete = self.upsert_tagged_button(
-                    context,
-                    document_id,
-                    "memory-delete",
-                    "删除",
-                    ButtonKind::Danger,
-                    ShellIntent::DeleteMemory,
-                    snapshot.memory_cards.is_empty(),
-                )?;
-                order.push(delete.stable_id());
-            }
+            Some(ShellProjectPage::Memory) => unreachable!("Memory uses its dedicated page"),
             Some(ShellProjectPage::Architecture) => {
                 let refresh = self.upsert_tagged_button(
                     context,
@@ -4834,7 +4838,7 @@ impl ShellHandles {
                     ShellIntent::RefreshArchitecture,
                     false,
                 )?;
-                order.push(refresh.stable_id());
+
                 let rollback = self.upsert_tagged_button(
                     context,
                     document_id,
@@ -4844,7 +4848,24 @@ impl ShellHandles {
                     ShellIntent::RollbackArchitecture,
                     !snapshot.architecture_can_rollback,
                 )?;
-                order.push(rollback.stable_id());
+                let details = self.upsert_tagged_button(
+                    context,
+                    document_id,
+                    "project-architecture-details",
+                    "节点与历史",
+                    ButtonKind::Subtle,
+                    ShellIntent::ToggleTaskInspector,
+                    false,
+                )?;
+                context.reconcile_children(
+                    self.architecture_toolbar.stable_id(),
+                    &[
+                        refresh.stable_id(),
+                        rollback.stable_id(),
+                        details.stable_id(),
+                    ],
+                )?;
+                order.push(self.architecture_toolbar.stable_id());
                 if !snapshot.project_page_body.is_empty() {
                     order.push(self.project_page_body.stable_id());
                 }
@@ -4858,6 +4879,18 @@ impl ShellHandles {
         }
         let cards: Vec<(String, String, String, Option<ShellIntent>)> = match snapshot.project_page
         {
+            Some(ShellProjectPage::Sessions) => snapshot
+                .session_cards
+                .iter()
+                .map(|task| {
+                    (
+                        format!("session-{}", task.id.as_str()),
+                        task.title.clone(),
+                        String::new(),
+                        Some(ShellIntent::SelectTask(task.id.clone())),
+                    )
+                })
+                .collect(),
             Some(ShellProjectPage::Overview) => snapshot
                 .project_cards
                 .iter()
@@ -4882,33 +4915,54 @@ impl ShellHandles {
                     )
                 })
                 .collect(),
-            Some(ShellProjectPage::Memory) => snapshot
-                .memory_cards
-                .iter()
-                .map(|card| {
-                    (
-                        format!("memory-{}", card.id),
-                        card.title.clone(),
-                        card.subtitle.clone(),
-                        Some(ShellIntent::SelectMemory(card.id.clone())),
-                    )
-                })
-                .collect(),
             _ => Vec::new(),
         };
         for (id, title, subtitle, intent) in cards {
             keep.insert(id.clone());
             let card = if let Some(card) = self.project_cards.get(&id).copied() {
+                context.update_component(card, |row, _| {
+                    row.label = title.clone();
+                })?;
+                if let Some((heading, body)) = self.project_card_text.get(&id).copied() {
+                    context
+                        .update_component(heading, |text, _| *text = Text::new(title.clone()))?;
+                    context
+                        .update_component(body, |text, _| *text = Text::new(subtitle.clone()))?;
+                }
                 card
             } else {
-                let card =
-                    context.create_detached_component(document_id, InteractiveCard::new())?;
-                let heading =
-                    context.create_detached_component(document_id, Text::new(title.clone()))?;
-                let body =
-                    context.create_detached_component(document_id, Text::new(subtitle.clone()))?;
-                context.append_child(card, heading)?;
-                context.append_child(card, body)?;
+                let sessions = snapshot.project_page == Some(ShellProjectPage::Sessions);
+                let row = if sessions {
+                    ListItem::new(title.clone()).size(ControlSize::Medium)
+                } else {
+                    ListItem::new(title.clone()).auto_height(true).style(
+                        Stack::fill_row(0.0)
+                            .padding(12.0)
+                            .surface(SemanticColorRole::Surface)
+                            .outline(SemanticColorRole::Border, 1.0)
+                            .radius(8.0)
+                            .node_style(),
+                    )
+                };
+                let card = context.create_detached_component(document_id, row)?;
+                if !sessions {
+                    let content =
+                        context.create_detached_component(document_id, Stack::column(4.0))?;
+                    let heading =
+                        context.create_detached_component(document_id, Text::new(title.clone()))?;
+                    let body = context
+                        .create_detached_component(document_id, Text::new(subtitle.clone()))?;
+                    context.append_child(content, heading)?;
+                    context.append_child(content, body)?;
+                    context.set_list_item_slots(
+                        card,
+                        nana_ui::runtime::ListItemSlots {
+                            content: Some(content.stable_id()),
+                            ..Default::default()
+                        },
+                    )?;
+                    self.project_card_text.insert(id.clone(), (heading, body));
+                }
                 if let Some(intent) = intent {
                     bind_activate(context, card, Arc::clone(&self.sink), intent)?;
                 }
@@ -4924,11 +4978,14 @@ impl ShellHandles {
             .cloned()
             .collect();
         for key in stale {
+            self.project_card_text.remove(&key);
             if let Some(card) = self.project_cards.remove(&key) {
                 let _ = context.remove_view(card);
             }
         }
-        reconcile_children(context, self.project_page.stable_id(), &order)
+        context
+            .reconcile_children(self.project_page_content.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn reconcile_timeline(
@@ -4937,131 +4994,14 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
-        let layout = timeline_virtual_layout(snapshot);
-        let viewport_extent = timeline_viewport_extent(context, self.timeline_scroll, snapshot);
-        let window = context.materialize_virtual_list(
-            self.timeline_list,
-            &mut self.timeline_virtual,
-            &layout,
-            snapshot.timeline_scroll_offset.max(0.0),
-            viewport_extent,
-            TIMELINE_OVERSCAN_EXTENT,
-            |index| {
-                snapshot
-                    .timeline
-                    .get(index)
-                    .map(|row| row.id.clone())
-                    .unwrap_or_else(|| format!("missing-{index}"))
-            },
-            |_, _| Stack::fill_column(6.0),
-        )?;
-        context.update_component(self.timeline_list, |list, _| {
-            list.style = timeline_list_style(
-                window.total_extent,
-                window.leading_extent,
-                window.trailing_extent,
-            );
-        })?;
-        let mounted = self
-            .timeline_virtual
-            .mounted_keys()
-            .iter()
-            .cloned()
-            .collect::<HashSet<_>>();
-        self.timeline_markdown
-            .retain(|key, _| mounted.contains(key));
-        self.timeline_markdown_source
-            .retain(|key, _| mounted.contains(key));
-        self.timeline_actions
-            .retain(|key, _| timeline_action_is_mounted(key, &mounted));
-        let mut action_keep = HashSet::new();
-        for item in snapshot
-            .timeline
-            .iter()
-            .filter(|item| mounted.contains(&item.id))
-        {
-            let Some(root) = self.timeline_virtual.entity(&item.id) else {
-                continue;
-            };
-            let source = content_hash(&item.markdown);
-            let markdown = if let Some(entity) = self.timeline_markdown.get(&item.id).copied() {
-                if self.timeline_markdown_source.get(&item.id) != Some(&source) {
-                    context.update_component(entity, |markdown, _| {
-                        *markdown = NativeMarkdown::parse(&item.markdown);
-                    })?;
-                    context.assemble_markdown(entity)?;
-                    self.timeline_markdown_source
-                        .insert(item.id.clone(), source);
-                }
-                entity
-            } else {
-                let entity = context.create_detached_component(
-                    document_id,
-                    NativeMarkdown::parse(&item.markdown),
-                )?;
-                context.assemble_markdown(entity)?;
-                self.timeline_markdown.insert(item.id.clone(), entity);
-                self.timeline_markdown_source
-                    .insert(item.id.clone(), source);
-                entity
-            };
-            let mut children = vec![markdown.stable_id()];
-            if item.can_expand {
-                let id = format!("expand-{}", item.id);
-                action_keep.insert(id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &id,
-                    if item.expanded { "收起" } else { "展开" },
-                    ShellIntent::ToggleTimelineExpand(item.id.clone()),
-                )?;
-                children.push(button.stable_id());
-            }
-            if item.can_copy {
-                let id = format!("copy-{}", item.id);
-                action_keep.insert(id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &id,
-                    "复制",
-                    ShellIntent::CopyTimeline(item.id.clone()),
-                )?;
-                children.push(button.stable_id());
-            }
-            if item.can_retry {
-                let id = format!("retry-{}", item.id);
-                action_keep.insert(id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &id,
-                    "重试",
-                    ShellIntent::RetryTimeline(item.id.clone()),
-                )?;
-                children.push(button.stable_id());
-            }
-            reconcile_children(context, root.stable_id(), &children)?;
-        }
-        let stale_actions: Vec<_> = self
-            .timeline_actions
-            .keys()
-            .filter(|key| !action_keep.contains(*key))
-            .cloned()
-            .collect();
-        for key in stale_actions {
-            if let Some(entity) = self.timeline_actions.remove(&key) {
-                let _ = context.remove_view(entity);
-            }
-        }
+        self.prepare_timeline_projection(context, snapshot);
+        self.materialize_timeline(context, document_id)?;
         if snapshot.timeline_can_load_earlier {
-            let button = if let Some(button) = self.load_earlier {
+            if let Some(button) = self.load_earlier {
                 context.update_component(button, |button, _| {
                     *button = extra_button("加载更早", ButtonKind::Subtle);
                     button.disabled = false;
                 })?;
-                button
             } else {
                 let button = context.create_detached_component(
                     document_id,
@@ -5074,59 +5014,16 @@ impl ShellHandles {
                     ShellIntent::LoadEarlierTimeline,
                 )?;
                 self.load_earlier = Some(button);
-                button
-            };
-            reconcile_children(
-                context,
-                self.conversation_body.stable_id(),
-                &[
-                    self.heading_slot.stable_id(),
-                    self.error.stable_id(),
-                    self.timeline_scroll.stable_id(),
-                    button.stable_id(),
-                ],
-            )?;
-        } else {
-            if let Some(button) = self.load_earlier.take() {
-                let _ = context.remove_view(button);
             }
-            reconcile_children(
-                context,
-                self.conversation_body.stable_id(),
-                &[
-                    self.heading_slot.stable_id(),
-                    self.error.stable_id(),
-                    self.timeline_scroll.stable_id(),
-                ],
-            )?;
+        } else if let Some(button) = self.load_earlier.take() {
+            let _ = context.remove_view(button);
         }
-        reconcile_children(
-            context,
-            self.timeline_scroll.stable_id(),
-            &[self.timeline_list.stable_id()],
-        )
-    }
-
-    fn upsert_timeline_action(
-        &mut self,
-        context: &mut AppContext,
-        document_id: DocumentId,
-        id: &str,
-        label: &str,
-        intent: ShellIntent,
-    ) -> Result<Entity<Chip>, FrameworkError> {
-        if let Some(button) = self.timeline_actions.get(id).copied() {
-            context.update_component(button, |button, _| {
-                *button = token_chip(label, false);
-            })?;
-            Ok(button)
-        } else {
-            let button =
-                context.create_detached_component(document_id, token_chip(label, false))?;
-            bind_activate(context, button, Arc::clone(&self.sink), intent)?;
-            self.timeline_actions.insert(id.to_owned(), button);
-            Ok(button)
-        }
+        context
+            .reconcile_children(
+                self.timeline_scroll.stable_id(),
+                &[self.timeline_list.stable_id()],
+            )
+            .map(|_| ())
     }
 
     fn reconcile_composer_extras(
@@ -5135,32 +5032,16 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
-        let mut keep = HashSet::new();
-        let mut desired = Vec::new();
-        if snapshot.suggestions_can_refresh {
-            desired.push((
-                "refresh-suggestions".to_owned(),
-                "刷新建议".to_owned(),
-                ButtonKind::Subtle,
-                ShellIntent::RefreshSuggestions,
-            ));
-        }
-        for suggestion in &snapshot.suggestions {
-            desired.push((
-                suggestion.id.clone(),
-                suggestion.label.clone(),
-                ButtonKind::Subtle,
-                ShellIntent::ApplySuggestion(suggestion.prompt.clone()),
-            ));
-        }
-        for attachment in &snapshot.attachments {
-            desired.push((
-                attachment.id.clone(),
-                attachment.label.clone(),
-                ButtonKind::Ghost,
-                ShellIntent::RemoveAttachment(attachment.id.clone()),
-            ));
-        }
+        let show_suggestions = snapshot.timeline.is_empty() && snapshot.composer.trim().is_empty();
+        self.empty_suggestions.sync(
+            context,
+            document_id,
+            self.heading_actions,
+            &snapshot.suggestions,
+            show_suggestions,
+            nana_ui_platform::WindowId::PRIMARY,
+            Arc::clone(&self.sink),
+        )?;
         let mut order = vec![
             self.plus_slot.stable_id(),
             self.attach.stable_id(),
@@ -5169,36 +5050,25 @@ impl ShellHandles {
         if snapshot.worktree_label.is_some() {
             order.push(self.worktree_slot.stable_id());
         }
-        for (id, label, kind, intent) in desired {
-            keep.insert(id.clone());
-            let button = if let Some(button) = self.extra_buttons.get(&id).copied() {
-                context.update_component(button, |button, _| {
-                    *button = extra_button(&label, kind);
-                })?;
-                button
-            } else {
-                let button =
-                    context.create_detached_component(document_id, extra_button(&label, kind))?;
-                bind_activate(context, button, Arc::clone(&self.sink), intent)?;
-                self.extra_buttons.insert(id, button);
-                button
-            };
-            order.push(button.stable_id());
-        }
-        let stale: Vec<_> = self
+        let stale = self
             .extra_buttons
             .keys()
             .filter(|key| {
-                !keep.contains(*key) && !key.starts_with("pending-") && !key.starts_with("project-")
+                !key.starts_with("pending-")
+                    && !key.starts_with("project-")
+                    && !key.starts_with("session-")
+                    && !key.starts_with("memory-")
             })
             .cloned()
-            .collect();
+            .collect::<Vec<_>>();
         for key in stale {
             if let Some(button) = self.extra_buttons.remove(&key) {
                 let _ = context.remove_view(button);
             }
         }
-        reconcile_children(context, self.extras.stable_id(), &order)
+        context
+            .reconcile_children(self.extras.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn reconcile_composer_completion(
@@ -5227,6 +5097,15 @@ impl ShellHandles {
                 )
             }));
         for (id, label, intent) in desired {
+            let selected = match &intent {
+                ShellIntent::ApplySlash(id) => self.conversation_controls.active_completion(
+                    &crate::runtime_conversation::ConversationAction::Slash(id.clone()),
+                ),
+                ShellIntent::SelectMention(id) => self.conversation_controls.active_completion(
+                    &crate::runtime_conversation::ConversationAction::Context(id.clone()),
+                ),
+                _ => false,
+            };
             keep.insert(id.clone());
             let item = if let Some(item) = self.completion_items.get(&id).copied() {
                 context.update_component(item, |item, _| {
@@ -5240,6 +5119,10 @@ impl ShellHandles {
                 self.completion_items.insert(id, item);
                 item
             };
+            context.update_component(item, |item, _| {
+                item.active = selected;
+                item.style.background = selected.then_some(SemanticColorRole::Selected);
+            })?;
             order.push(item.stable_id());
         }
         self.completion_items.retain(|key, item| {
@@ -5250,7 +5133,9 @@ impl ShellHandles {
                 false
             }
         });
-        reconcile_children(context, self.completion_slot.stable_id(), &order)
+        context
+            .reconcile_children(self.completion_slot.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn sync_settings_content(
@@ -5274,6 +5159,8 @@ impl ShellHandles {
         })?;
         let tab = snapshot.settings.state.active_tab().as_str();
         let (heading, body, error, show_project, actions) = settings_tab_copy(&snapshot.settings);
+        let show_body = !body.is_empty();
+        let show_error = error.as_ref().is_some_and(|error| !error.is_empty());
         context.update_component(self.product_heading, |text, _| {
             *text = Text::new(heading.clone());
         })?;
@@ -5298,10 +5185,13 @@ impl ShellHandles {
                 String::new()
             });
         })?;
-        let content = match tab {
-            "appearance" => self.appearance.stable_id(),
-            "about" => self.about.stable_id(),
-            _ => self.product_settings.stable_id(),
+        let content = if snapshot.settings.extensions.is_some() {
+            self.extensions.root.stable_id()
+        } else {
+            match tab {
+                "about" => self.about.stable_id(),
+                _ => self.product_settings.stable_id(),
+            }
         };
         context.update_component(self.settings_page, |page, _| {
             page.model = snapshot.settings.model.clone();
@@ -5312,6 +5202,17 @@ impl ShellHandles {
         context.assemble_appearance_section(self.appearance)?;
         context.assemble_about_section(self.about)?;
         context.assemble_settings_page(self.settings_page)?;
+
+        if let Some(extensions) = &snapshot.settings.extensions {
+            self.extensions.sync(
+                context,
+                document_id,
+                extensions,
+                snapshot.workspace.viewport_geometry().logical_size.0,
+                self.sink.clone(),
+            )?;
+            return Ok(());
+        }
 
         let mut keep = HashSet::new();
         let mut card_order = Vec::new();
@@ -5325,25 +5226,45 @@ impl ShellHandles {
             })?;
             card_order.push(self.shortcut_capture.stable_id());
         }
+        let mut quota_actions = Vec::new();
         for action in actions {
             keep.insert(action.id.clone());
+            let view = if tab == "quota" {
+                quota::action_button(&action.id, &action.label)
+            } else {
+                product_action_button(&action.label, action.primary)
+            };
             let button = if let Some(button) = self.product_actions.get(&action.id).copied() {
                 context.update_component(button, |button, _| {
-                    *button = product_action_button(&action.label, action.primary);
+                    *button = view;
                 })?;
                 button
             } else {
-                let button = context.create_detached_component(
-                    document_id,
-                    product_action_button(&action.label, action.primary),
-                )?;
+                let button = context.create_detached_component(document_id, view)?;
                 bind_activate(context, button, Arc::clone(&self.sink), action.intent)?;
                 self.product_actions.insert(action.id.clone(), button);
                 button
             };
-            card_order.push(button.stable_id());
+            if tab == "quota" {
+                quota_actions.push(button.stable_id());
+            } else {
+                card_order.push(button.stable_id());
+            }
         }
-        if tab == "provider" {
+        if tab == "quota" {
+            let layout = quota::toolbar(snapshot.workspace.viewport_geometry().logical_size.0);
+            let toolbar = if let Some(toolbar) = self.quota_toolbar {
+                context.update_component(toolbar, |view, _| *view = layout)?;
+                toolbar
+            } else {
+                let toolbar = context.create_detached_component(document_id, layout)?;
+                self.quota_toolbar = Some(toolbar);
+                toolbar
+            };
+            context.reconcile_children(toolbar.stable_id(), &quota_actions)?;
+            card_order.push(toolbar.stable_id());
+        }
+        if matches!(tab, "provider" | "credentials") {
             for provider in &snapshot.settings.providers {
                 keep.insert(provider.id.clone());
                 let label = if provider.selected {
@@ -5381,6 +5302,14 @@ impl ShellHandles {
             }
         }
         self.append_settings_forms(context, document_id, snapshot, &mut keep, &mut card_order)?;
+        self.settings_surface
+            .settings_width(snapshot.workspace.viewport_geometry().logical_size.0);
+        let surface_order = self.settings_surface.sync(
+            context,
+            document_id,
+            &snapshot.settings.controls,
+            self.sink.clone(),
+        )?;
         let stale: Vec<_> = self
             .product_actions
             .keys()
@@ -5400,7 +5329,14 @@ impl ShellHandles {
                 let _ = context.remove_view(button);
             }
             if let Some(field) = self.form_fields.remove(&key) {
-                let _ = context.remove_view(field);
+                match field {
+                    ShellFormEditor::Line(editor) => {
+                        let _ = context.remove_view(editor);
+                    }
+                    ShellFormEditor::Multiline(editor) => {
+                        let _ = context.remove_view(editor);
+                    }
+                }
             }
             if let Some(wrapper) = self.form_wrappers.remove(&key) {
                 let _ = context.remove_view(wrapper);
@@ -5412,17 +5348,25 @@ impl ShellHandles {
         context.update_component(self.settings_card, |card, _| {
             *card = SettingsCard::new(heading);
         })?;
-        reconcile_children(context, self.settings_card.stable_id(), &card_order)?;
-        reconcile_children(
-            context,
-            self.product_settings.stable_id(),
-            &[
-                self.product_heading.stable_id(),
-                self.product_body.stable_id(),
-                self.product_error.stable_id(),
-                self.settings_card.stable_id(),
-            ],
-        )
+        context.reconcile_children(self.settings_card.stable_id(), &card_order)?;
+        let mut page_order = if tab == "appearance" {
+            vec![self.appearance.stable_id()]
+        } else {
+            vec![self.product_heading.stable_id()]
+        };
+        if show_body {
+            page_order.push(self.product_body.stable_id());
+        }
+        if show_error {
+            page_order.push(self.product_error.stable_id());
+        }
+        if !card_order.is_empty() {
+            page_order.push(self.settings_card.stable_id());
+        }
+        page_order.extend(surface_order);
+        context
+            .reconcile_children(self.product_settings.stable_id(), &page_order)
+            .map(|_| ())
     }
 
     fn append_settings_forms(
@@ -5436,69 +5380,24 @@ impl ShellHandles {
         let settings = &snapshot.settings;
         match settings.state.active_tab().as_str() {
             "provider" => {
-                self.upsert_field(
-                    context,
-                    document_id,
-                    keep,
-                    order,
-                    "provider_secret",
-                    &settings.provider_secret,
-                    |value| ShellIntent::ProviderSecretChanged(value),
-                )?;
-                self.upsert_field(
-                    context,
-                    document_id,
-                    keep,
-                    order,
-                    "provider_model",
-                    &settings.provider_model,
-                    |value| ShellIntent::ProviderModelChanged(value),
-                )?;
-                self.upsert_field(
-                    context,
-                    document_id,
-                    keep,
-                    order,
-                    "provider_openai",
-                    &settings.provider_openai_endpoint,
-                    |value| ShellIntent::ProviderOpenAiEndpointChanged(value),
-                )?;
-                self.upsert_field(
-                    context,
-                    document_id,
-                    keep,
-                    order,
-                    "provider_anthropic",
-                    &settings.provider_anthropic_endpoint,
-                    |value| ShellIntent::ProviderAnthropicEndpointChanged(value),
-                )?;
-                for credential in &settings.credentials {
-                    let id = format!("revoke-{}", credential.id);
-                    keep.insert(id.clone());
-                    let label = format!("撤销 {}", credential.label);
-                    let button = if let Some(button) = self.product_actions.get(&id).copied() {
-                        context.update_component(button, |button, _| {
-                            *button = extra_button(&label, ButtonKind::Danger);
-                        })?;
-                        button
-                    } else {
-                        let button = context.create_detached_component(
-                            document_id,
-                            extra_button(&label, ButtonKind::Danger),
-                        )?;
-                        bind_activate(
-                            context,
-                            button,
-                            Arc::clone(&self.sink),
-                            ShellIntent::RevokeProviderCredential {
-                                credential_id: credential.id.clone(),
-                                revision: credential.revision,
-                            },
-                        )?;
-                        self.product_actions.insert(id, button);
-                        button
-                    };
-                    order.push(button.stable_id());
+                for (id, value, edit) in [
+                    (
+                        "provider_model",
+                        &settings.provider_model,
+                        ShellIntent::ProviderModelChanged as fn(String) -> ShellIntent,
+                    ),
+                    (
+                        "provider_openai",
+                        &settings.provider_openai_endpoint,
+                        ShellIntent::ProviderOpenAiEndpointChanged,
+                    ),
+                    (
+                        "provider_anthropic",
+                        &settings.provider_anthropic_endpoint,
+                        ShellIntent::ProviderAnthropicEndpointChanged,
+                    ),
+                ] {
+                    self.upsert_field(context, document_id, keep, order, id, value, edit)?;
                 }
             }
             "agent" => {
@@ -5581,14 +5480,18 @@ impl ShellHandles {
             "quota" => {
                 let chart = if let Some(chart) = self.quota_chart {
                     context.update_component(chart, |view, _| {
-                        *view = TimeSeriesChart::new(settings.quota_values.iter().copied())
-                            .label("用量");
+                        let mut next =
+                            quota::trend(&settings.quota_daily, snapshot.workspace.inline_size());
+                        if view.values == next.values && view.layers == next.layers {
+                            next.active = view.active;
+                        }
+                        *view = next;
                     })?;
                     chart
                 } else {
                     let chart = context.create_detached_component(
                         document_id,
-                        TimeSeriesChart::new(settings.quota_values.iter().copied()).label("用量"),
+                        quota::trend(&settings.quota_daily, snapshot.workspace.inline_size()),
                     )?;
                     self.quota_chart = Some(chart);
                     chart
@@ -5617,20 +5520,23 @@ impl ShellHandles {
                 for skill in &settings.skills {
                     let id = format!("skill-{}", skill.id);
                     keep.insert(id.clone());
-                    let label = if skill.enabled {
+                    let label = if !skill.editable {
+                        format!("{} · 只读", skill.label)
+                    } else if skill.enabled {
                         format!("关闭 {}", skill.label)
                     } else {
                         format!("开启 {}", skill.label)
                     };
                     let button = if let Some(button) = self.product_actions.get(&id).copied() {
                         context.update_component(button, |button, _| {
-                            *button = extra_button(&label, ButtonKind::Subtle);
+                            *button =
+                                extra_button(&label, ButtonKind::Subtle).disabled(!skill.editable);
                         })?;
                         button
                     } else {
                         let button = context.create_detached_component(
                             document_id,
-                            extra_button(&label, ButtonKind::Subtle),
+                            extra_button(&label, ButtonKind::Subtle).disabled(!skill.editable),
                         )?;
                         bind_activate(
                             context,
@@ -5642,71 +5548,6 @@ impl ShellHandles {
                         button
                     };
                     order.push(button.stable_id());
-                }
-                for server in &settings.mcp_servers {
-                    for (suffix, label, intent) in [
-                        (
-                            "edit",
-                            format!("编辑 {}", server.label),
-                            ShellIntent::EditMcpServer(server.id.clone()),
-                        ),
-                        (
-                            "toggle",
-                            if server.enabled {
-                                format!("关闭 {}", server.label)
-                            } else {
-                                format!("开启 {}", server.label)
-                            },
-                            ShellIntent::ToggleMcpServer(server.id.clone()),
-                        ),
-                    ] {
-                        let id = format!("mcp-{}-{}", server.id, suffix);
-                        keep.insert(id.clone());
-                        let button = if let Some(button) = self.product_actions.get(&id).copied() {
-                            context.update_component(button, |button, _| {
-                                *button = extra_button(&label, ButtonKind::Subtle);
-                            })?;
-                            button
-                        } else {
-                            let button = context.create_detached_component(
-                                document_id,
-                                extra_button(&label, ButtonKind::Subtle),
-                            )?;
-                            bind_activate(context, button, Arc::clone(&self.sink), intent)?;
-                            self.product_actions.insert(id, button);
-                            button
-                        };
-                        order.push(button.stable_id());
-                    }
-                }
-                if let Some(editor) = &settings.mcp_editor {
-                    self.upsert_field(
-                        context,
-                        document_id,
-                        keep,
-                        order,
-                        "mcp_server_id",
-                        &editor.server_id,
-                        |value| ShellIntent::McpServerIdChanged(value),
-                    )?;
-                    self.upsert_field(
-                        context,
-                        document_id,
-                        keep,
-                        order,
-                        "mcp_location",
-                        &editor.location,
-                        |value| ShellIntent::McpLocationChanged(value),
-                    )?;
-                    self.upsert_field(
-                        context,
-                        document_id,
-                        keep,
-                        order,
-                        "mcp_args",
-                        &editor.args,
-                        |value| ShellIntent::McpArgsChanged(value),
-                    )?;
                 }
             }
             "remote" => {
@@ -5736,6 +5577,80 @@ impl ShellHandles {
         Ok(())
     }
 
+    fn bind_text_document(
+        &mut self,
+        context: &mut AppContext,
+        editor: StableNodeId,
+        identity: Option<&str>,
+    ) -> Result<(), FrameworkError> {
+        let identity = identity.map(str::to_owned);
+        if self.text_bindings.get(&editor) != Some(&identity) {
+            context.clear_text_history(editor)?;
+            self.text_bindings.insert(editor, identity);
+        }
+        Ok(())
+    }
+
+    fn form_editor(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        id: &str,
+        value: &str,
+        intent: impl Fn(String) -> ShellIntent + Send + Sync + 'static,
+    ) -> Result<ShellFormEditor, FrameworkError> {
+        let editor = if let Some(field) = self.form_fields.get(id).copied() {
+            match field {
+                ShellFormEditor::Line(editor) => {
+                    context.update_component(editor, |editor, _| {
+                        if editor.state.value != value {
+                            editor.state.replace_value(value.to_owned());
+                        }
+                    })?
+                }
+                ShellFormEditor::Multiline(editor) => {
+                    context.update_component(editor, |editor, _| {
+                        if editor.state.value != value {
+                            editor.state.replace_value(value.to_owned());
+                        }
+                    })?
+                }
+            }
+            field
+        } else {
+            let sink = Arc::clone(&self.sink);
+            let field = if matches!(
+                id,
+                "memory-body"
+                    | "project-milestone-description"
+                    | "agent_instruction"
+                    | "agent_description"
+                    | "skill_description"
+            ) {
+                let field = context.create_detached_component(
+                    document_id,
+                    TextArea::new(value.to_owned()).height(160.0),
+                )?;
+                context.on(field, move |_, event: &TextChanged, _| {
+                    emit(&sink, intent(event.value.clone()));
+                })?;
+                ShellFormEditor::Multiline(field)
+            } else {
+                let field = context.create_detached_component(
+                    document_id,
+                    crate::runtime_layout::form_text_input(value.to_owned()),
+                )?;
+                context.on(field, move |_, event: &TextChanged, _| {
+                    emit(&sink, intent(event.value.clone()));
+                })?;
+                ShellFormEditor::Line(field)
+            };
+            self.form_fields.insert(id.to_owned(), field);
+            field
+        };
+        Ok(editor)
+    }
+
     fn upsert_field(
         &mut self,
         context: &mut AppContext,
@@ -5748,25 +5663,7 @@ impl ShellHandles {
     ) -> Result<(), FrameworkError> {
         keep.insert(id.to_owned());
         let label = settings_field_label(id);
-        let editor = if let Some(field) = self.form_fields.get(id).copied() {
-            context.update_component(field, |editor, _| {
-                if editor.state.value != value {
-                    editor.state.replace_value(value.to_owned());
-                }
-            })?;
-            field
-        } else {
-            let field = context.create_detached_component(
-                document_id,
-                TextArea::new(value.to_owned()).height(40.0),
-            )?;
-            let sink = Arc::clone(&self.sink);
-            context.on(field, move |_, event: &TextChanged, _| {
-                emit(&sink, intent(event.value.clone()));
-            })?;
-            self.form_fields.insert(id.to_owned(), field);
-            field
-        };
+        let editor = self.form_editor(context, document_id, id, value, intent)?;
         let wrapper = if let Some(wrapper) = self.form_wrappers.get(id).copied() {
             context.update_component(wrapper, |field, _| {
                 *field = FormField::new(label).control_child(editor.stable_id());
@@ -5777,7 +5674,10 @@ impl ShellHandles {
                 document_id,
                 FormField::new(label).control_child(editor.stable_id()),
             )?;
-            context.append_child(wrapper, editor)?;
+            match editor {
+                ShellFormEditor::Line(editor) => context.append_child(wrapper, editor)?,
+                ShellFormEditor::Multiline(editor) => context.append_child(wrapper, editor)?,
+            }
             self.form_wrappers.insert(id.to_owned(), wrapper);
             wrapper
         };
@@ -5853,6 +5753,14 @@ impl ShellHandles {
         context.update_component(self.workspace_status, |text, _| {
             *text = Text::new(status);
         })?;
+        self.bind_text_document(
+            context,
+            self.workspace_editor.stable_id(),
+            snapshot
+                .document
+                .as_ref()
+                .map(|document| document.item_id.as_str()),
+        )?;
         if let Some(document) = &snapshot.document {
             context.update_component(self.workspace_editor, |editor_view, _| {
                 if editor_view.state.value != document.text {
@@ -5912,7 +5820,7 @@ impl ShellHandles {
             }
             _ => {}
         }
-        reconcile_children(context, self.workspace_content.stable_id(), &order)?;
+        context.reconcile_children(self.workspace_content.stable_id(), &order)?;
         self.sync_live_workspace_panes(context, document_id, snapshot)
     }
 
@@ -5999,7 +5907,9 @@ impl ShellHandles {
                 let _ = context.remove_view(button);
             }
         }
-        reconcile_children(context, self.workspace_actions.stable_id(), &order)
+        context
+            .reconcile_children(self.workspace_actions.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn sync_panes(
@@ -6052,7 +5962,7 @@ impl ShellHandles {
                 let _ = context.remove_view(button);
             }
         }
-        reconcile_children(context, self.pane_bar.stable_id(), &order)?;
+        context.reconcile_children(self.pane_bar.stable_id(), &order)?;
         context.update_component(self.pane_chrome, |chrome, _| {
             let mut actions: Vec<PaneChromeAction> = chrome
                 .actions
@@ -6096,6 +6006,7 @@ impl ShellHandles {
             .collect::<Vec<_>>();
         if leaf_ids.len() < 2 {
             for (_, pane) in self.extra_workspace_panes.drain() {
+                self.text_bindings.remove(&pane.editor.stable_id());
                 let _ = context.remove_view(pane.chrome);
             }
             for (_, split) in self.workspace_splits.drain() {
@@ -6104,11 +6015,12 @@ impl ShellHandles {
             for (_, handle) in self.workspace_split_handles.drain() {
                 let _ = context.remove_view(handle);
             }
-            return reconcile_children(
-                context,
-                self.workspace_page.stable_id(),
-                &[self.pane_chrome.stable_id(), self.pane_bar.stable_id()],
-            );
+            return context
+                .reconcile_children(
+                    self.workspace_page.stable_id(),
+                    &[self.pane_chrome.stable_id(), self.pane_bar.stable_id()],
+                )
+                .map(|_| ());
         }
         let primary_id = snapshot
             .panes
@@ -6134,6 +6046,7 @@ impl ShellHandles {
             .collect();
         for id in stale {
             if let Some(view) = self.extra_workspace_panes.remove(&id) {
+                self.text_bindings.remove(&view.editor.stable_id());
                 let _ = context.remove_view(view.chrome);
             }
         }
@@ -6152,7 +6065,9 @@ impl ShellHandles {
             &snapshot.pane_layout,
             &primary_id,
         )?;
-        reconcile_children(context, self.workspace_page.stable_id(), &[root])
+        context
+            .reconcile_children(self.workspace_page.stable_id(), &[root])
+            .map(|_| ())
     }
 
     fn mount_pane_layout(
@@ -6211,8 +6126,7 @@ impl ShellHandles {
                     self.workspace_splits.insert(key.clone(), split);
                     split
                 };
-                reconcile_children(
-                    context,
+                context.reconcile_children(
                     split.stable_id(),
                     &[first_id, handle.stable_id(), second_id],
                 )?;
@@ -6246,7 +6160,7 @@ impl ShellHandles {
     }
 
     fn sync_extra_workspace_pane(
-        &self,
+        &mut self,
         context: &mut AppContext,
         snapshot: &PrimaryShellSnapshot,
         pane: &ShellPaneRow,
@@ -6292,6 +6206,11 @@ impl ShellHandles {
         context.update_component(view.status, |text, _| {
             *text = Text::new(status);
         })?;
+        self.bind_text_document(
+            context,
+            view.editor.stable_id(),
+            document.map(|document| document.item_id.as_str()),
+        )?;
         if let Some(document) = document {
             context.update_component(view.editor, |editor_view, _| {
                 if editor_view.state.value != document.text {
@@ -6332,7 +6251,9 @@ impl ShellHandles {
             }
             _ => {}
         }
-        reconcile_children(context, view.content.stable_id(), &order)
+        context
+            .reconcile_children(view.content.stable_id(), &order)
+            .map(|_| ())
     }
 
     fn upsert_chrome_button(
@@ -6405,27 +6326,33 @@ impl ShellHandles {
             };
             order.push(button.stable_id());
         }
-        let stale: Vec<_> = self
-            .pane_buttons
-            .keys()
-            .filter(|key| key.starts_with("auto-") && !keep.contains(*key))
-            .cloned()
-            .collect();
-        for key in stale {
-            if let Some(button) = self.pane_buttons.remove(&key) {
-                let _ = context.remove_view(button);
-            }
-        }
-        reconcile_children(context, self.automations_body.stable_id(), &order)?;
+        context.reconcile_children(self.automations_body.stable_id(), &order)?;
+        let inspector = self.automation_surface.sync(
+            context,
+            document_id,
+            &snapshot.automation_controls,
+            self.sink.clone(),
+        )?;
+        context.reconcile_children(self.automation_inspector.stable_id(), &inspector)?;
+        context.reconcile_children(
+            self.automation_workspace.stable_id(),
+            &[
+                self.automation_canvas.stable_id(),
+                self.automation_inspector_scroll.stable_id(),
+            ],
+        )?;
         let page = if snapshot.automations.is_empty() {
-            vec![self.automations_empty.stable_id()]
+            vec![
+                self.automation_actions.stable_id(),
+                self.automations_empty.stable_id(),
+            ]
         } else {
             vec![
                 self.automation_actions.stable_id(),
-                self.automation_canvas.stable_id(),
+                self.automation_workspace.stable_id(),
             ]
         };
-        reconcile_children(context, self.automations_page.stable_id(), &page)?;
+        context.reconcile_children(self.automations_page.stable_id(), &page)?;
         let mut actions = Vec::new();
         for (id, label, kind, intent) in [
             (
@@ -6456,9 +6383,29 @@ impl ShellHandles {
             keep.insert(id.to_owned());
             let button =
                 self.upsert_chrome_button(context, document_id, id, label, kind, intent)?;
+            context.update_component(button, |button, _| {
+                button.disabled = matches!(id, "auto-save" | "auto-run")
+                    && !snapshot
+                        .automations
+                        .iter()
+                        .any(|workflow| workflow.selected);
+            })?;
             actions.push(button.stable_id());
         }
-        reconcile_children(context, self.automation_actions.stable_id(), &actions)
+        let stale: Vec<_> = self
+            .pane_buttons
+            .keys()
+            .filter(|key| key.starts_with("auto-") && !keep.contains(*key))
+            .cloned()
+            .collect();
+        for key in stale {
+            if let Some(button) = self.pane_buttons.remove(&key) {
+                let _ = context.remove_view(button);
+            }
+        }
+        context
+            .reconcile_children(self.automation_actions.stable_id(), &actions)
+            .map(|_| ())
     }
 
     fn titlebar_more_items(
@@ -6499,6 +6446,13 @@ impl ShellHandles {
                     ShellIntent::ToggleTaskInspector,
                 ),
             ]);
+        }
+        if snapshot.titlebar_has_task && cfg!(target_os = "macos") {
+            items.push((
+                "more-browser",
+                "浏览网页".to_owned(),
+                ShellIntent::Browser(crate::iab_panel::IabAction::Open),
+            ));
         }
         if snapshot.titlebar_can_split {
             items.extend([
@@ -6576,7 +6530,11 @@ impl ShellHandles {
         {
             return None;
         }
-        if self.confirm.is_some_and(|view| view.stable_id() == root) {
+        if self.extensions.dialog_id() == Some(root) {
+            Some(ShellIntent::ExtensionsCommand(
+                crate::shell::ExtensionsMessage::CancelEditor,
+            ))
+        } else if self.confirm.is_some_and(|view| view.stable_id() == root) {
             Some(ShellIntent::CancelDestructive)
         } else if self.palette.is_some_and(|view| view.stable_id() == root) {
             Some(ShellIntent::CommandPalette(CommandPaletteEvent::Dismiss))
@@ -6708,6 +6666,23 @@ impl ShellHandles {
             return Ok(());
         }
 
+        if self.extensions.sync_dialog(
+            context,
+            document_id,
+            host,
+            snapshot
+                .settings
+                .extensions
+                .as_ref()
+                .and_then(|extensions| extensions.editor.as_ref()),
+            self.sink.clone(),
+        )? {
+            context.update_component(self.shell, |shell, _| {
+                shell.overlays = self.extensions.dialog_id().into_iter().collect();
+            })?;
+            return Ok(());
+        }
+
         if snapshot.command_palette_open {
             let palette = if let Some(palette) = self.palette {
                 context.update_component(palette, |view, _| {
@@ -6814,9 +6789,12 @@ impl ShellHandles {
         }
 
         if let Some(preview) = &snapshot.markdown_preview {
+            let source_changed =
+                self.image_viewer_source.as_deref() != Some(preview.source.as_str());
+            self.image_viewer_source = Some(preview.source.clone());
             let viewer = if let Some(viewer) = self.image_viewer {
                 context.update_component(viewer, |view, _| {
-                    *view = markdown_image_viewer(preview);
+                    sync_markdown_image_viewer(view, preview, source_changed);
                 })?;
                 viewer
             } else {
@@ -6893,7 +6871,9 @@ impl ShellHandles {
                 let _ = context.remove_view(row);
             }
         }
-        reconcile_children(context, self.diagnostics_panel.stable_id(), &order)
+        context
+            .reconcile_children(self.diagnostics_panel.stable_id(), &order)
+            .map(|_| ())
     }
 }
 
@@ -6905,6 +6885,7 @@ fn titlebar_menu_intent(id: &str) -> ShellIntent {
         "more-popup" => ShellIntent::OpenTaskPopup,
         "more-ask" => ShellIntent::AskTaskPopup,
         "more-inspector" => ShellIntent::ToggleTaskInspector,
+        "more-browser" => ShellIntent::Browser(crate::iab_panel::IabAction::Open),
         "more-split-h" => ShellIntent::SplitWorkspaceHorizontal,
         "more-split-v" => ShellIntent::SplitWorkspaceVertical,
         "more-close" => ShellIntent::CloseCurrentWorkspaceItem,
@@ -7072,6 +7053,7 @@ fn mount_sidebar_reorder(
         document_id,
         ReorderList::new([])
             .size(ControlSize::Medium)
+            .live_rows(true)
             .spacing(1.0)
             .tree_drop(tree_drop)
             .label(label),
@@ -7156,24 +7138,6 @@ fn timeline_viewport_extent(
                 .then_some(snapshot.timeline_viewport_extent)
         })
         .unwrap_or(TIMELINE_DEFAULT_VIEWPORT_EXTENT)
-}
-
-fn timeline_list_style(total: f32, leading: f32, trailing: f32) -> NodeStyle {
-    let mut style = NodeStyle::default();
-    let layout = Arc::make_mut(&mut style.layout);
-    layout.direction = Some(FlexDirection::Column);
-    layout.width = Some(LengthSpec::Fill);
-    layout.min_height = Some(LengthSpec::Px(total.max(0.0)));
-    layout.padding_top = Some(LengthSpec::Px(leading.max(0.0)));
-    layout.padding_bottom = Some(LengthSpec::Px(trailing.max(0.0)));
-    style
-}
-
-fn timeline_action_is_mounted(action_id: &str, mounted: &HashSet<String>) -> bool {
-    ["expand-", "copy-", "retry-"]
-        .into_iter()
-        .find_map(|prefix| action_id.strip_prefix(prefix))
-        .is_some_and(|id| mounted.contains(id))
 }
 
 /// 行右键菜单与行内 more 按钮同源：项目类行弹项目菜单，会话类行弹任务
@@ -7370,42 +7334,6 @@ fn settings_tab_copy(
                         intent: ShellIntent::CreateSkill,
                     });
                 }
-                actions.push(SettingsAction {
-                    id: "new-mcp".into(),
-                    label: "新建 MCP".into(),
-                    primary: false,
-                    intent: ShellIntent::NewMcpServer,
-                });
-                if let Some(editor) = &settings.mcp_editor {
-                    actions.push(SettingsAction {
-                        id: "cycle-mcp-transport".into(),
-                        label: format!("传输：{}", editor.transport),
-                        primary: false,
-                        intent: ShellIntent::CycleMcpTransport,
-                    });
-                    actions.push(SettingsAction {
-                        id: "toggle-mcp-enabled".into(),
-                        label: if editor.enabled {
-                            "MCP：开".into()
-                        } else {
-                            "MCP：关".into()
-                        },
-                        primary: false,
-                        intent: ShellIntent::ToggleMcpEditorEnabled,
-                    });
-                    actions.push(SettingsAction {
-                        id: "save-mcp".into(),
-                        label: "保存 MCP".into(),
-                        primary: true,
-                        intent: ShellIntent::SaveMcpServer,
-                    });
-                    actions.push(SettingsAction {
-                        id: "cancel-mcp".into(),
-                        label: "取消编辑".into(),
-                        primary: false,
-                        intent: ShellIntent::CancelMcpEditor,
-                    });
-                }
                 actions
             },
         ),
@@ -7522,6 +7450,25 @@ fn settings_tab_copy(
             .filter(|action| action.id != "execute-import" || settings.data_can_import)
             .collect(),
         ),
+        "credentials" => (
+            "凭据".into(),
+            settings.provider_status.clone(),
+            None,
+            false,
+            Vec::new(),
+        ),
+        "assistant" => (
+            "Provider 配置".into(),
+            String::new(),
+            None,
+            false,
+            Vec::new(),
+        ),
+        "model-config" => ("模型配置".into(), String::new(), None, false, Vec::new()),
+        "preferences" => ("项目偏好".into(), String::new(), None, false, Vec::new()),
+        "plugin-packages" => ("插件".into(), String::new(), None, false, Vec::new()),
+        "plugin-hooks" => ("Hooks".into(), String::new(), None, false, Vec::new()),
+        "plugin-mcp" => ("MCP".into(), String::new(), None, false, Vec::new()),
         _ => (String::new(), String::new(), None, false, Vec::new()),
     }
 }
@@ -7560,8 +7507,10 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         timeline_viewport_extent: TIMELINE_DEFAULT_VIEWPORT_EXTENT,
         composer: String::new(),
         composer_atom_spans: Vec::new(),
+        composer_project_id: None,
         composer_task_id: None,
         composer_revision: 0,
+        conversation_controls: Default::default(),
         composer_height: COMPOSER_MIN_HEIGHT,
         composer_placeholder: "输入消息".to_owned(),
         composer_disabled: true,
@@ -7570,6 +7519,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         pending_blocks_send: false,
         clone_repository: String::new(),
         clone_parent: String::new(),
+        milestone_editor_identity: None,
         milestone_title: String::new(),
         milestone_description: String::new(),
         milestone_due_date: String::new(),
@@ -7581,8 +7531,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         permission_selection: "ask".to_owned(),
         worktree_label: None,
         worktree_selection: "current".to_owned(),
-        suggestions: Vec::new(),
-        suggestions_can_refresh: false,
+        suggestions: Default::default(),
         command_palette_open: false,
         command_palette_query: String::new(),
         command_palette_selected: 0,
@@ -7595,6 +7544,8 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
             .expect("settings model");
             let state = SettingsState::new(&model);
             SettingsSnapshot {
+                controls: Vec::new(),
+                extensions: None,
                 model,
                 state,
                 appearance: AppearanceSettings::default(),
@@ -7613,12 +7564,10 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
                 desktop_status: String::new(),
                 data_status: String::new(),
                 data_can_import: false,
-                provider_secret: String::new(),
                 provider_model: String::new(),
                 provider_openai_endpoint: String::new(),
                 provider_anthropic_endpoint: String::new(),
                 can_save_credential: false,
-                credentials: Vec::new(),
                 custom_agents: Vec::new(),
                 custom_agent_editor_open: false,
                 custom_agent_name: String::new(),
@@ -7626,7 +7575,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
                 custom_agent_instruction: String::new(),
                 quota_days_label: String::new(),
                 quota_backend_label: String::new(),
-                quota_values: Vec::new(),
+                quota_daily: Vec::new(),
                 skills: Vec::new(),
                 skill_id: String::new(),
                 skill_description: String::new(),
@@ -7663,16 +7612,35 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         project_cards: Vec::new(),
         roadmap_cards: Vec::new(),
         memory_cards: Vec::new(),
+        memory_draft_enabled: true,
+        memory_editor_generation: 0,
+        memory_selected: None,
         memory_title: String::new(),
         memory_body: String::new(),
         memory_tags: String::new(),
         memory_scope_label: String::new(),
+        memory_enabled: None,
+        memory_global_enabled: true,
+        memory_baseline_enabled: true,
+        memory_cooldown: String::new(),
+        memory_task_enabled: None,
+        memory_task_menu_open: false,
+        memory_task_label: String::new(),
+        memory_task_options: Vec::new(),
+        roadmap_tasks: Vec::new(),
+        session_search: String::new(),
+        session_page: 0,
+        session_page_count: 1,
+        session_cards: Vec::new(),
         architecture_records: Vec::new(),
         architecture_graph: nana_ui::GraphModel::empty(),
         architecture_viewport: nana_ui::GraphViewport::default(),
         architecture_selection: None,
         architecture_can_rollback: false,
+        architecture_details: Default::default(),
         inspector_kind: String::new(),
+        iab: Default::default(),
+        todo_panel: Default::default(),
         coding: None,
         pane_can_move_window: false,
         pane_can_move_next: false,
@@ -7682,6 +7650,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         titlebar_can_close: false,
         automations_open: false,
         automations: Vec::new(),
+        automation_controls: Vec::new(),
         automation_graph: nana_ui::GraphModel::empty(),
         automation_viewport: nana_ui::GraphViewport::default(),
         automation_selection: None,
@@ -7721,6 +7690,54 @@ mod tests {
             can_menu: false,
             can_draft: false,
         }
+    }
+
+    #[test]
+    fn project_card_refreshes_text_and_keeps_its_live_action() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.project_page = Some(ShellProjectPage::Overview);
+        snapshot.project_cards = vec![ShellProjectCard {
+            id: "project-a".to_owned(),
+            title: "旧标题".to_owned(),
+            subtitle: "0 个任务".to_owned(),
+        }];
+        let intents = Arc::new(Mutex::new(Vec::new()));
+        let received = Arc::clone(&intents);
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| received.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        handles.sync(&mut document, &snapshot).unwrap();
+        let card = handles.project_cards["overview-project-a"];
+        snapshot.project_cards[0].title = "新标题".to_owned();
+        snapshot.project_cards[0].subtitle = "12 个任务".to_owned();
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert_eq!(handles.project_cards["overview-project-a"], card);
+        let (heading, body) = handles.project_card_text["overview-project-a"];
+        assert_eq!(
+            document
+                .context_mut()
+                .read(heading, |text| text.value.to_string())
+                .unwrap(),
+            "新标题"
+        );
+        assert_eq!(
+            document
+                .context_mut()
+                .read(body, |text| text.value.to_string())
+                .unwrap(),
+            "12 个任务"
+        );
+        assert!(document
+            .context_mut()
+            .activate_node(card.stable_id())
+            .unwrap());
+        assert!(intents
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|intent| matches!(intent, ShellIntent::SelectProject(id) if id == "project-a")));
     }
 
     #[test]
@@ -7891,6 +7908,159 @@ mod tests {
     }
 
     #[test]
+    fn image_viewer_projection_preserves_zoom_pan_until_the_source_changes() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.markdown_preview = Some(ShellMarkdownPreview {
+            intrinsic_size: None,
+            source: "file:///first.png".into(),
+            title: "First".into(),
+            metadata: "加载中".into(),
+            texture_slot: None,
+        });
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        let viewer = handles.image_viewer.unwrap();
+        let document_id = document.document();
+        let context = document.context_mut();
+        context.advance_animations(std::time::Duration::from_millis(180));
+        context
+            .layout_document(
+                document_id,
+                nana_ui::runtime::LayoutViewport::new(960.0, 600.0),
+            )
+            .unwrap();
+        context.rebuild_hit_test(document_id);
+        let bounds = context.world().layout_box(viewer.stable_id()).unwrap();
+        let geometry = context
+            .read(viewer, |viewer| viewer.geometry(bounds))
+            .unwrap();
+        let (x, y) = (
+            geometry.stage.x + geometry.stage.width * 0.5,
+            geometry.stage.y + geometry.stage.height * 0.5,
+        );
+        let mut adapter = nana_ui::RuntimeInputAdapter::default();
+        let wheel = nana_ui_platform::InputEvent::Wheel {
+            x,
+            y,
+            delta_x: 0.0,
+            delta_y: 1.0,
+            line_delta: true,
+            modifiers: Default::default(),
+        };
+        assert!(
+            adapter
+                .dispatch(context, document_id, &wheel)
+                .unwrap()
+                .prevent_default
+        );
+        let zoom = context.read(viewer, |viewer| viewer.zoom).unwrap();
+        assert!(zoom > 1.0);
+        context.image_viewer_pointer_down(viewer, 19, x, y).unwrap();
+        context
+            .image_viewer_pointer_move(viewer, 19, x + 10.0, y + 12.0)
+            .unwrap();
+        let state = context
+            .read(viewer, |viewer| {
+                (viewer.zoom, viewer.offset, viewer.dragging)
+            })
+            .unwrap();
+        let preview = snapshot.markdown_preview.as_mut().unwrap();
+        preview.texture_slot = Some("same-window-slot".into());
+        preview.intrinsic_size = Some((720, 400));
+        preview.metadata = "PNG".into();
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert_eq!(
+            document
+                .context()
+                .read(viewer, |viewer| (
+                    viewer.zoom,
+                    viewer.offset,
+                    viewer.dragging
+                ))
+                .unwrap(),
+            state
+        );
+        assert_eq!(
+            document
+                .context()
+                .read(viewer, |viewer| viewer.intrinsic_size)
+                .unwrap(),
+            Some((720, 400))
+        );
+        document
+            .context_mut()
+            .image_viewer_pointer_up(viewer, 19)
+            .unwrap();
+        assert!(
+            adapter
+                .dispatch(document.context_mut(), document_id, &wheel)
+                .unwrap()
+                .prevent_default
+        );
+        assert!(
+            document
+                .context()
+                .read(viewer, |viewer| viewer.zoom)
+                .unwrap()
+                > zoom
+        );
+        snapshot.markdown_preview.as_mut().unwrap().source = "file:///second.png".into();
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert_eq!(
+            document
+                .context()
+                .read(viewer, |viewer| viewer.zoom)
+                .unwrap(),
+            1.0
+        );
+        assert!(document
+            .context()
+            .read(viewer, |viewer| viewer.dragging.is_none())
+            .unwrap());
+    }
+
+    #[test]
+    fn image_viewer_escape_closes_the_mounted_surface_and_updates_business_presence() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.markdown_preview = Some(ShellMarkdownPreview {
+            intrinsic_size: None,
+            source: "test:image".into(),
+            title: "图片".into(),
+            metadata: "PNG".into(),
+            texture_slot: None,
+        });
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        let viewer = handles.image_viewer.unwrap();
+        document
+            .context_mut()
+            .advance_animations(std::time::Duration::from_millis(180));
+        let document_id = document.document();
+        document
+            .context_mut()
+            .layout_document(
+                document_id,
+                nana_ui::runtime::LayoutViewport::new(960.0, 600.0),
+            )
+            .unwrap();
+        assert!(handles
+            .key_retained_ui(&mut document, "lilia.ui.image.viewer", "Escape")
+            .unwrap());
+        assert!(matches!(
+            handles
+                .take_overlay_dismissals(document.context())
+                .as_slice(),
+            [ShellIntent::CloseMarkdownPreview]
+        ));
+        snapshot.markdown_preview = None;
+        handles.sync(&mut document, &snapshot).unwrap();
+        document
+            .context_mut()
+            .advance_animations(std::time::Duration::from_millis(400));
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert!(handles.image_viewer.is_none());
+        assert!(!document.context().world().contains(viewer.stable_id()));
+    }
+
+    #[test]
     fn shell_menu_escape_updates_business_presence_and_ignores_a_stale_close_after_reopen() {
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.titlebar_menu_open = true;
@@ -8006,18 +8176,10 @@ mod tests {
 
         let timeline = handles.timeline_scroll.stable_id();
         let heading = handles.heading_slot.stable_id();
-        let body = document
-            .context()
-            .world()
-            .node(timeline)
-            .and_then(|node| node.parent)
-            .expect("conversation body");
+        let body = handles.conversation_body.stable_id();
+        assert!(!document.context().world().is_mounted(timeline));
         assert_eq!(
-            document
-                .context()
-                .world()
-                .node(heading)
-                .and_then(|node| node.parent),
+            document.context().world().node(heading).unwrap().parent,
             Some(body)
         );
         let body_layout = &document
@@ -8113,8 +8275,83 @@ mod tests {
     }
 
     #[test]
-    fn pending_interaction_sits_above_composer_not_inside_it() {
+    fn empty_headline_uses_the_full_body_and_historical_viewport_offset() {
+        for (width, height) in [(960.0, 600.0), (1440.0, 900.0)] {
+            let mut snapshot = snapshot_with_empty_primary_pane();
+            let (mut document, mut handles, _) = mounted_primary(&snapshot);
+            let ids = document
+                .context()
+                .world()
+                .document_order(document.document());
+            document.context_mut().resolve_styles(&ids).unwrap();
+            document
+                .context_mut()
+                .layout_document(
+                    DocumentId::new(PRIMARY_DOCUMENT).unwrap(),
+                    nana_ui::runtime::LayoutViewport::new(width, height),
+                )
+                .unwrap();
+            let mut shaper = nana_ui::NanaTextShaper::default();
+            document
+                .context_mut()
+                .shape_text(&[handles.heading.stable_id()], &mut shaper)
+                .unwrap();
+            let ids = document
+                .context()
+                .world()
+                .document_order(document.document());
+            document.context_mut().resolve_styles(&ids).unwrap();
+            document
+                .context_mut()
+                .layout_document(
+                    DocumentId::new(PRIMARY_DOCUMENT).unwrap(),
+                    nana_ui::runtime::LayoutViewport::new(width, height),
+                )
+                .unwrap();
+            let world = document.context().world();
+            let body = world
+                .layout_box(handles.conversation_body.stable_id())
+                .unwrap();
+            let heading = world.layout_box(handles.heading.stable_id()).unwrap();
+            assert!(
+                (heading.y + heading.height / 2.0
+                    - (body.y + body.height / 2.0 - height * 0.08 - 19.0))
+                    .abs()
+                    <= 1.0,
+                "headline must follow viewport height: {heading:?}, body: {body:?}"
+            );
+            assert!((heading.x + heading.width / 2.0 - (body.x + body.width / 2.0)).abs() <= 1.0);
+            assert!(!world.is_mounted(handles.timeline_scroll.stable_id()));
+            snapshot.heading.clear();
+            handles.sync(&mut document, &snapshot).unwrap();
+            let ids = document
+                .context()
+                .world()
+                .document_order(document.document());
+            document.context_mut().resolve_styles(&ids).unwrap();
+            document
+                .context_mut()
+                .layout_document(
+                    DocumentId::new(PRIMARY_DOCUMENT).unwrap(),
+                    nana_ui::runtime::LayoutViewport::new(width, height),
+                )
+                .unwrap();
+            let world = document.context().world();
+            assert!(!world.is_mounted(handles.heading_slot.stable_id()));
+            let body = world
+                .layout_box(handles.conversation_body.stable_id())
+                .unwrap();
+            let timeline = world
+                .layout_box(handles.timeline_scroll.stable_id())
+                .unwrap();
+            assert!((timeline.height - body.height).abs() <= 1.0);
+        }
+    }
+
+    #[test]
+    fn pending_interaction_replaces_composer_and_restores_the_ordinary_draft() {
         let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.composer = "保留普通草稿\n第二行".into();
         snapshot.pending = Some(ShellPending {
             request_id: "pending-1".to_owned(),
             kind: ShellPendingKind::PermissionApproval,
@@ -8126,7 +8363,7 @@ mod tests {
             ask: None,
             mcp: None,
         });
-        let (document, handles, _primary) = mounted_primary(&snapshot);
+        let (mut document, mut handles, _primary) = mounted_primary(&snapshot);
         let body = handles.conversation_body.stable_id();
         let pending = handles.pending_panel.stable_id();
         let dock = handles.composer_dock.stable_id();
@@ -8136,7 +8373,7 @@ mod tests {
                 .world()
                 .node(handles.conversation_column.stable_id())
                 .map(|node| node.children),
-            Some(vec![body, pending, dock])
+            Some(vec![body, pending])
         );
         assert_eq!(
             document
@@ -8150,7 +8387,7 @@ mod tests {
             .context()
             .world()
             .node(pending)
-            .map(|node| node.children.contains(&handles.pending_actions.stable_id()))
+            .map(|node| node.children.contains(&handles.pending.actions_node()))
             .unwrap_or(false));
         assert_eq!(
             handles
@@ -8158,6 +8395,45 @@ mod tests {
                 .get(target_ids::TASK_SESSION_PENDING)
                 .copied(),
             Some(pending)
+        );
+        assert!(document
+            .context()
+            .world()
+            .node(dock)
+            .unwrap()
+            .parent
+            .is_none());
+        assert_eq!(
+            document
+                .context()
+                .read(handles.composer, |editor| editor.state.value.clone())
+                .unwrap(),
+            snapshot.composer
+        );
+        snapshot.pending = None;
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert_eq!(
+            document
+                .context()
+                .world()
+                .node(handles.conversation_column.stable_id())
+                .unwrap()
+                .children,
+            vec![body, dock]
+        );
+        assert!(document
+            .context()
+            .world()
+            .node(pending)
+            .unwrap()
+            .parent
+            .is_none());
+        assert_eq!(
+            document
+                .context()
+                .read(handles.composer, |editor| editor.state.value.clone())
+                .unwrap(),
+            snapshot.composer
         );
     }
 
@@ -8196,7 +8472,7 @@ mod tests {
     }
 
     #[test]
-    fn iab_inspector_shows_unavailable_state_without_browse_actions() {
+    fn iab_inspector_mounts_browser_and_its_navigation_surface() {
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.inspector_title = "浏览器".to_owned();
         snapshot.inspector_kind = "iab".to_owned();
@@ -8208,7 +8484,7 @@ mod tests {
             .map(|node| node.children.clone())
             .unwrap_or_default();
         assert!(inspector.contains(&handles.inspector_header.stable_id()));
-        assert!(inspector.contains(&handles.iab_empty.stable_id()));
+        assert!(inspector.contains(&handles.iab.root.stable_id()));
         assert!(!inspector.contains(&handles.inspector_body.stable_id()));
         assert!(!inspector.contains(&handles.inspector_todos.stable_id()));
         assert!(!inspector.contains(&handles.coding_panel.stable_id()));
@@ -8233,9 +8509,25 @@ mod tests {
         let page = document
             .context()
             .world()
-            .node(handles.project_page.stable_id())
+            .node(handles.project_page_content.stable_id())
             .map(|node| node.children.clone())
             .unwrap_or_default();
+        assert_eq!(
+            document
+                .context()
+                .world()
+                .node(handles.project_page_content.stable_id())
+                .and_then(|node| node.parent),
+            Some(handles.project_page.stable_id())
+        );
+        assert_eq!(
+            document
+                .context()
+                .world()
+                .node_style(handles.project_page_content.stable_id())
+                .and_then(|style| style.layout.flex_grow),
+            Some(1.0)
+        );
         assert!(page.contains(&handles.architecture_canvas.stable_id()));
         assert!(page.contains(&handles.project_page_body.stable_id()));
         let inspector = document
@@ -8245,17 +8537,11 @@ mod tests {
             .map(|node| node.children.clone())
             .unwrap_or_default();
         assert!(inspector.contains(&handles.inspector_header.stable_id()));
-        assert!(inspector.contains(&handles.inspector_body.stable_id()));
-        assert!(inspector.contains(&handles.inspector_todos.stable_id()));
-        assert!(!inspector.contains(&handles.iab_empty.stable_id()));
+        assert!(inspector.contains(&handles.architecture_details.root.stable_id()));
+        assert!(!inspector.contains(&handles.inspector_todos.stable_id()));
+        assert!(!inspector.contains(&handles.iab.root.stable_id()));
         assert!(!inspector.contains(&handles.coding_panel.stable_id()));
-        let inspector_rows = document
-            .context()
-            .world()
-            .node(handles.inspector_todos.stable_id())
-            .map(|node| node.children.len())
-            .unwrap_or(0);
-        assert_eq!(inspector_rows, 1);
+        assert!(page.contains(&handles.architecture_toolbar.stable_id()));
         let card_ids: Vec<_> = handles
             .project_cards
             .values()
@@ -8527,6 +8813,68 @@ mod tests {
     }
 
     #[test]
+    fn settings_replacement_expands_without_overwriting_normal_sidebar_preference() {
+        let mut snapshot = empty_snapshot();
+        snapshot.sidebar_collapsed = true;
+        snapshot.workspace.update(
+            nana_ui::WorkspaceMutation::SetRegionCollapsed(RegionId::Resources, true),
+            std::time::Duration::ZERO,
+        );
+        snapshot.settings_open = true;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = events.clone();
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| sink_events.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        for (settings, automations) in [(true, false), (false, true)] {
+            snapshot.settings_open = settings;
+            snapshot.automations_open = automations;
+            handles.sync(&mut document, &snapshot).unwrap();
+            let model = document
+                .context_mut()
+                .read(handles.shell, |shell| shell.model.clone())
+                .unwrap();
+            assert!(!model
+                .layout()
+                .region(&RegionId::Resources)
+                .unwrap()
+                .collapsed_value());
+            assert!(!document
+                .context_mut()
+                .activate_node(handles.sidebar_toggle.stable_id())
+                .unwrap());
+            assert!(events.lock().unwrap().is_empty());
+            let adopted = handles.live_workspace_model(&mut document).unwrap();
+            assert!(adopted
+                .layout()
+                .region(&RegionId::Resources)
+                .unwrap()
+                .collapsed_value());
+        }
+        snapshot.automations_open = false;
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert!(document
+            .context_mut()
+            .read(handles.shell, |shell| shell
+                .model
+                .layout()
+                .region(&RegionId::Resources)
+                .unwrap()
+                .collapsed_value())
+            .unwrap());
+        assert!(document
+            .context_mut()
+            .activate_node(handles.sidebar_toggle.stable_id())
+            .unwrap());
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some(ShellIntent::ToggleSidebar)
+        ));
+    }
+
+    #[test]
     fn settings_open_selects_settings_primary() {
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.settings_open = true;
@@ -8633,8 +8981,9 @@ mod tests {
 
     #[test]
     fn composer_dock_stays_centered_when_chat_column_is_capped() {
-        let (mut document, handles, _primary) =
-            mounted_primary(&snapshot_with_empty_primary_pane());
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.heading.clear();
+        let (mut document, handles, _primary) = mounted_primary(&snapshot);
         document
             .context_mut()
             .layout_document(
@@ -8661,6 +9010,12 @@ mod tests {
             "composer dock must stay centered in the conversation pane: \
              root_center={root_center}, dock_center={dock_center}"
         );
+        let timeline = world.layout_box(handles.timeline_list.stable_id()).unwrap();
+        assert!((timeline.width - 788.0).abs() < 0.5, "{timeline:?}");
+        assert!(
+            (timeline.x + timeline.width / 2.0 - root_center).abs() < 0.5,
+            "timeline and composer must share their horizontal center: {timeline:?}"
+        );
     }
 
     #[test]
@@ -8669,11 +9024,12 @@ mod tests {
         snapshot.permission_selection = "readonly".to_owned();
         snapshot.composer_permission_menu_open = true;
         let (mut document, handles, _primary) = mounted_primary(&snapshot);
+        let document_id = document.document();
         document
             .context_mut()
             .layout_document(
-                DocumentId::new(PRIMARY_DOCUMENT).expect("primary document id"),
-                nana_ui::runtime::LayoutViewport::new(1400.0, 900.0),
+                document_id,
+                nana_ui::runtime::LayoutViewport::new(960.0, 600.0),
             )
             .expect("layout open permission menu");
         let world = document.context().world();
@@ -8695,44 +9051,50 @@ mod tests {
                 .and_then(|style| style.background),
             None
         );
-        let menu_style = world
-            .node_style(handles.permission_menu.stable_id())
-            .expect("permission menu style");
-        assert_eq!(
-            menu_style.layout.position,
-            nana_ui::runtime::PositionSpec::Static
-        );
+        for item in handles.permission_items.values() {
+            let bounds = world
+                .layout_box(item.stable_id())
+                .expect("permission item bounds");
+            assert!(bounds.width > 0.0 && bounds.height > 0.0, "{bounds:?}");
+            assert!(
+                bounds.x >= 0.0
+                    && bounds.y >= 0.0
+                    && bounds.x + bounds.width <= 960.5
+                    && bounds.y + bounds.height <= 600.5,
+                "{bounds:?}"
+            );
+        }
         let open_toolbar = world
             .layout_box(handles.composer_toolbar.stable_id())
-            .expect("open toolbar");
+            .expect("open toolbar bounds");
         let open_trigger = world
             .layout_box(handles.permission_menu.stable_id())
             .expect("open trigger");
-        let open_item = world.layout_box(ask_item).expect("open menu item");
-        assert!(
-            open_item.y + open_item.height <= open_trigger.y + 1.0,
-            "permission items must open above the trigger: trigger={open_trigger:?} item={open_item:?}"
-        );
         drop(document);
         let (mut closed_document, closed_handles, _primary) =
             mounted_primary(&snapshot_with_empty_primary_pane());
+        let document_id = closed_document.document();
         closed_document
             .context_mut()
             .layout_document(
-                DocumentId::new(PRIMARY_DOCUMENT).expect("primary document id"),
-                nana_ui::runtime::LayoutViewport::new(1400.0, 900.0),
+                document_id,
+                nana_ui::runtime::LayoutViewport::new(960.0, 600.0),
             )
             .expect("layout closed permission menu");
         assert!(closed_handles.permission_items.is_empty());
         let closed_world = closed_document.context().world();
-        let closed_toolbar = closed_world
-            .layout_box(closed_handles.composer_toolbar.stable_id())
-            .expect("closed toolbar");
-        let closed_trigger = closed_world
-            .layout_box(closed_handles.permission_menu.stable_id())
-            .expect("closed trigger");
-        assert_eq!(closed_toolbar, open_toolbar);
-        assert_eq!(closed_trigger, open_trigger);
+        assert_eq!(
+            closed_world
+                .layout_box(closed_handles.composer_toolbar.stable_id())
+                .expect("closed toolbar bounds"),
+            open_toolbar
+        );
+        assert_eq!(
+            closed_world
+                .layout_box(closed_handles.permission_menu.stable_id())
+                .expect("closed trigger"),
+            open_trigger
+        );
     }
 
     #[test]
@@ -8774,6 +9136,130 @@ mod tests {
                 handles.worktree_slot.stable_id()
             ]
         );
+    }
+
+    #[test]
+    fn narrow_main_composer_keeps_all_toolbar_groups_inside_the_dock() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.workspace =
+            crate::desktop::initial_workspace(&crate::storage::NativeSidebarTreeState::default())
+                .model()
+                .clone();
+        snapshot.worktree_label = Some("当前目录".into());
+        snapshot.conversation_controls.can_optimize = true;
+        snapshot.can_send = true;
+        snapshot.inspector_kind = "iab".into();
+        snapshot.inspector_title = "浏览器".into();
+        snapshot.workspace.update(
+            nana_ui::WorkspaceMutation::SetRegionVisible(RegionId::Inspector, true),
+            std::time::Duration::ZERO,
+        );
+        snapshot.workspace.update(
+            nana_ui::WorkspaceMutation::SetRegionSize(RegionId::Inspector, 420.0),
+            std::time::Duration::ZERO,
+        );
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let output = events.clone();
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| output.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        handles.sync(&mut document, &snapshot).unwrap();
+        let doc = DocumentId::new(PRIMARY_DOCUMENT).unwrap();
+        for viewport_width in [960.0, 1035.0, 1160.0, 960.0] {
+            snapshot.workspace.update(
+                nana_ui::WorkspaceMutation::SetViewport {
+                    width: viewport_width,
+                    height: 600.0,
+                },
+                std::time::Duration::ZERO,
+            );
+            handles.sync(&mut document, &snapshot).unwrap();
+            let ids = document.context().world().document_order(doc);
+            document.context_mut().resolve_styles(&ids).unwrap();
+            document
+                .context_mut()
+                .shape_text(&ids, &mut nana_ui::NanaTextShaper::default())
+                .unwrap();
+            document
+                .context_mut()
+                .layout_document(
+                    doc,
+                    nana_ui::runtime::LayoutViewport::new(viewport_width, 600.0),
+                )
+                .unwrap();
+            let world = document.context().world();
+            let dock = world.layout_box(handles.composer_dock.stable_id()).unwrap();
+
+            let mut nodes = vec![handles.extras.stable_id(), handles.send.stable_id()];
+            nodes.extend(
+                handles
+                    .conversation_controls
+                    .debug_targets()
+                    .into_iter()
+                    .filter(|(id, _)| matches!(id.as_str(), "model" | "reasoning" | "optimize"))
+                    .map(|(_, id)| id),
+            );
+            let boxes: Vec<_> = nodes
+                .into_iter()
+                .map(|id| world.layout_box(id).unwrap())
+                .collect();
+            let inspector = world.layout_box(handles.inspector.stable_id()).unwrap();
+            let body = world
+                .layout_box(handles.conversation_body.stable_id())
+                .unwrap();
+            let heading = world.layout_box(handles.heading.stable_id()).unwrap();
+            assert!(inspector.width >= 420.0 - 1.0, "{inspector:?}");
+            assert!(
+                body.x + body.width <= inspector.x + 1.0,
+                "{body:?} {inspector:?}"
+            );
+            assert!(
+                dock.x + dock.width <= inspector.x + 1.0,
+                "{dock:?} {inspector:?}"
+            );
+            assert!(
+                heading.width > 0.0
+                    && heading.x >= body.x
+                    && heading.x + heading.width <= inspector.x + 1.0,
+                "{heading:?} {inspector:?}"
+            );
+            assert!((heading.x + heading.width / 2.0 - body.x - body.width / 2.0).abs() <= 1.0);
+            assert_eq!(
+                world
+                    .node_style(handles.heading.stable_id())
+                    .unwrap()
+                    .text_horizontal_alignment,
+                nana_ui::runtime::TextHorizontalAlignment::Center
+            );
+            for (index, bounds) in boxes.iter().enumerate() {
+                assert!(
+                    bounds.width > 0.0
+                        && bounds.x >= dock.x
+                        && bounds.x + bounds.width <= dock.x + dock.width + 1.0
+                        && bounds.y + bounds.height <= dock.y + dock.height + 1.0,
+                    "{viewport_width}: control must fit the dock: {bounds:?} {dock:?}"
+                );
+                for other in &boxes[index + 1..] {
+                    assert!(
+                        bounds.x + bounds.width <= other.x + 1.0
+                            || other.x + other.width <= bounds.x + 1.0
+                            || bounds.y + bounds.height <= other.y + 1.0
+                            || other.y + other.height <= bounds.y + 1.0,
+                        "toolbar controls overlap: {bounds:?} {other:?}"
+                    );
+                }
+            }
+            assert!(document
+                .context_mut()
+                .activate_node(handles.send.stable_id())
+                .unwrap());
+            assert!(matches!(
+                events.lock().unwrap().pop(),
+                Some(ShellIntent::SubmitTurn)
+            ));
+        }
     }
 
     #[test]
@@ -8830,14 +9316,7 @@ mod tests {
             .node(handles.conversation_body.stable_id())
             .map(|node| node.children.clone())
             .unwrap_or_default();
-        assert_eq!(
-            body,
-            vec![
-                handles.heading_slot.stable_id(),
-                handles.error.stable_id(),
-                handles.timeline_scroll.stable_id(),
-            ]
-        );
+        assert_eq!(body, vec![handles.heading_slot.stable_id()]);
     }
 
     #[test]
@@ -8868,18 +9347,13 @@ mod tests {
             .node(handles.composer.stable_id())
             .and_then(|node| node.parent)
             .expect("composer dock");
-        assert_eq!(
-            document
-                .context()
-                .world()
-                .node(dock)
-                .map(|node| node.children.clone())
-                .unwrap_or_default(),
-            vec![
-                handles.completion_slot.stable_id(),
-                handles.composer.stable_id(),
-                handles.composer_toolbar.stable_id(),
-            ]
+        let dock_children = document.context().world().node(dock).unwrap().children;
+        let position = |id| dock_children.iter().position(|child| *child == id).unwrap();
+        assert!(
+            position(handles.completion_slot.stable_id()) < position(handles.composer.stable_id())
+        );
+        assert!(
+            position(handles.composer.stable_id()) < position(handles.composer_toolbar.stable_id())
         );
         assert_eq!(
             document
@@ -8895,6 +9369,88 @@ mod tests {
                 .get("slash-status")
                 .map(|item| item.stable_id())
         );
+    }
+
+    #[test]
+    fn automation_actions_keep_keyboard_focus_across_projection_updates() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.automations_open = true;
+        snapshot.automations = vec![ShellAutomationRow {
+            id: "workflow".into(),
+            label: "工作流".into(),
+            selected: true,
+        }];
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| captured.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        handles.sync(&mut document, &snapshot).unwrap();
+        let document_id = DocumentId::new(PRIMARY_DOCUMENT).unwrap();
+        document
+            .context_mut()
+            .layout_document(
+                document_id,
+                nana_ui::runtime::LayoutViewport::new(1180.0, 760.0),
+            )
+            .unwrap();
+        let run = handles.pane_buttons["auto-run"].stable_id();
+        assert!(document.context_mut().focus_node(document_id, run).unwrap());
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert_eq!(document.context().world().focused(document_id), Some(run));
+        assert!(document.context_mut().activate_node(run).unwrap());
+        assert!(events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, ShellIntent::RunAutomation)));
+    }
+
+    #[test]
+    fn footer_more_menu_keeps_every_action_inside_the_window() {
+        for (width, height) in [(960.0, 600.0), (1440.0, 900.0)] {
+            let mut snapshot = snapshot_with_empty_primary_pane();
+            let (mut document, mut handles, _) = mounted_primary(&snapshot);
+            let document_id = DocumentId::new(PRIMARY_DOCUMENT).unwrap();
+            document
+                .context_mut()
+                .layout_document(
+                    document_id,
+                    nana_ui::runtime::LayoutViewport::new(width, height),
+                )
+                .unwrap();
+            snapshot.titlebar_menu_open = true;
+            handles.sync(&mut document, &snapshot).unwrap();
+            document
+                .context_mut()
+                .layout_document(
+                    document_id,
+                    nana_ui::runtime::LayoutViewport::new(width, height),
+                )
+                .unwrap();
+            let menu = handles.titlebar_menu.unwrap();
+            let nana_ui::runtime::ComponentGeometry::MenuSurface { options, .. } = document
+                .context()
+                .world()
+                .component_geometry(menu.stable_id())
+                .unwrap()
+            else {
+                panic!("expected menu geometry");
+            };
+            assert!(!options.is_empty());
+            for option in options {
+                let bounds = option.bounds;
+                assert!(
+                    bounds.x >= 0.0
+                        && bounds.y >= 0.0
+                        && bounds.x + bounds.width <= width
+                        && bounds.y + bounds.height <= height,
+                    "menu item is outside {width}x{height}: {bounds:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -9248,11 +9804,69 @@ mod tests {
     }
 
     #[test]
-    fn long_timeline_materializes_only_the_visible_window() {
+    fn completed_turn_reveals_branch_actions_without_new_timeline_rows() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.timeline = vec![ShellTimelineRow {
+            selected_text: None,
+            attachments: Vec::new(),
+            images: Vec::new(),
+            id: "reply".into(),
+            title: String::new(),
+            role: "assistant".into(),
+            status: "completed".into(),
+            can_branch: true,
+            can_apply: false,
+            markdown: "已完成".into(),
+            expanded: true,
+            can_expand: false,
+            can_retry: false,
+            can_copy: true,
+        }];
+        snapshot.can_interrupt = true;
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        assert!(!handles.timeline_content["reply"]
+            .debug_targets()
+            .iter()
+            .any(|(id, _)| id == "fork"));
+        snapshot.can_interrupt = false;
+        handles.sync(&mut document, &snapshot).unwrap();
+        let fork = handles.timeline_content["reply"]
+            .debug_targets()
+            .into_iter()
+            .find(|(id, _)| id == "fork")
+            .expect("completed reply exposes fork")
+            .1;
+        assert!(document
+            .context()
+            .world()
+            .node(fork)
+            .unwrap()
+            .parent
+            .is_some());
+        snapshot.pending_blocks_send = true;
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert!(document
+            .context()
+            .world()
+            .node(fork)
+            .unwrap()
+            .parent
+            .is_none());
+    }
+
+    fn virtual_timeline_snapshot() -> PrimaryShellSnapshot {
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.timeline = (0..50)
             .map(|index| ShellTimelineRow {
+                selected_text: None,
+                attachments: Vec::new(),
+                images: Vec::new(),
                 id: format!("event-{index}"),
+                title: String::new(),
+                role: "assistant".into(),
+                status: "completed".into(),
+                can_branch: false,
+                can_apply: false,
                 markdown: format!("行 {index}"),
                 expanded: false,
                 can_expand: false,
@@ -9263,7 +9877,34 @@ mod tests {
         snapshot.timeline_layout = VirtualListLayout::new(std::iter::repeat(40.0).take(50));
         snapshot.timeline_scroll_offset = 0.0;
         snapshot.timeline_viewport_extent = 80.0;
-        let (document, handles, _primary) = mounted_primary(&snapshot);
+        snapshot
+    }
+
+    fn settle_timeline(
+        document: &mut nana_ui::runtime::RuntimeDocument,
+        handles: &mut ShellHandles,
+        width: f32,
+        height: f32,
+    ) {
+        for _ in 0..24 {
+            document
+                .context_mut()
+                .layout_document(
+                    DocumentId::new(PRIMARY_DOCUMENT).unwrap(),
+                    nana_ui::runtime::LayoutViewport::new(width, height),
+                )
+                .unwrap();
+            if handles.on_timeline_presented(document).unwrap().is_none() {
+                return;
+            }
+        }
+        panic!("timeline measurement must converge without another input event");
+    }
+
+    #[test]
+    fn long_timeline_materializes_only_the_visible_window() {
+        let mut snapshot = virtual_timeline_snapshot();
+        let (document, mut handles, _primary) = mounted_primary(&snapshot);
         let children = document
             .context()
             .world()
@@ -9283,6 +9924,393 @@ mod tests {
                 .node(handles.timeline_scroll.stable_id())
                 .map(|node| node.children),
             Some(vec![handles.timeline_list.stable_id()])
+        );
+        let mut document = document;
+        document
+            .context_mut()
+            .layout_document(
+                DocumentId::new(PRIMARY_DOCUMENT).unwrap(),
+                nana_ui::runtime::LayoutViewport::new(1180.0, 760.0),
+            )
+            .unwrap();
+        let world = document.context().world();
+        let scroll = world
+            .layout_box(handles.timeline_scroll.stable_id())
+            .unwrap();
+        let composer = world.layout_box(handles.composer_dock.stable_id()).unwrap();
+        assert!(
+            scroll.height > 0.0 && scroll.y + scroll.height <= composer.y,
+            "timeline viewport must end above the composer: {scroll:?} {composer:?}"
+        );
+        snapshot.timeline_layout = VirtualListLayout::new(std::iter::repeat(72.0).take(50));
+        snapshot.timeline_viewport_extent = scroll.height;
+        snapshot.timeline_scroll_offset = snapshot.timeline_layout.total_extent() - scroll.height;
+        handles.sync(&mut document, &snapshot).unwrap();
+        let document_id = DocumentId::new(PRIMARY_DOCUMENT).unwrap();
+        document
+            .context_mut()
+            .layout_document(
+                document_id,
+                nana_ui::runtime::LayoutViewport::new(1180.0, 760.0),
+            )
+            .unwrap();
+        document
+            .context_mut()
+            .scroll_to(
+                handles.timeline_scroll,
+                ScrollOffset {
+                    x: 0.0,
+                    y: snapshot.timeline_scroll_offset,
+                },
+            )
+            .unwrap();
+        handles.scroll_timeline_to_end(&mut document).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let world = document.context().world();
+        let viewport = world
+            .layout_box(handles.timeline_scroll.stable_id())
+            .unwrap();
+        let offset = world
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        let last = handles
+            .timeline_virtual
+            .entity(&"event-49".to_owned())
+            .unwrap();
+        let last = world.layout_box(last.stable_id()).unwrap();
+        assert!((last.y + last.height - offset - viewport.y - viewport.height).abs() <= 1.0,
+            "at end the final row must reach the viewport bottom without estimated whitespace: {viewport:?} offset={offset} last={last:?}");
+        assert!(last.y + last.height - offset > viewport.y,
+            "scrolling to the end must expose the final row, not estimated blank space: {viewport:?} offset={offset} last={last:?}");
+        for pass in 0..8 {
+            snapshot.timeline_scroll_offset = document
+                .context()
+                .world()
+                .scroll_offset(handles.timeline_scroll.stable_id())
+                .unwrap()
+                .y;
+            handles.sync(&mut document, &snapshot).unwrap();
+            settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+            let world = document.context().world();
+            let viewport = world
+                .layout_box(handles.timeline_scroll.stable_id())
+                .unwrap();
+            let offset = world
+                .scroll_offset(handles.timeline_scroll.stable_id())
+                .unwrap()
+                .y;
+            let last = handles
+                .timeline_virtual
+                .entity(&"event-49".to_owned())
+                .expect("tail row remains mounted after feedback");
+            let last = world.layout_box(last.stable_id()).unwrap();
+            assert!((last.y + last.height - offset - viewport.y - viewport.height).abs() <= 1.0,
+                "tail must remain stable after feedback {pass}: {viewport:?} offset={offset} last={last:?}");
+        }
+        for (width, height) in [(960.0, 600.0), (1440.0, 900.0)] {
+            settle_timeline(&mut document, &mut handles, width, height);
+            let world = document.context().world();
+            let metrics = world
+                .scroll_metrics(handles.timeline_scroll.stable_id())
+                .unwrap();
+            let offset = world
+                .scroll_offset(handles.timeline_scroll.stable_id())
+                .unwrap()
+                .y;
+            assert!(
+                (offset - metrics.max_offset().y).abs() <= 1.0,
+                "a viewport resize preserves an existing tail anchor"
+            );
+        }
+    }
+
+    #[test]
+    fn measured_timeline_preserves_user_anchor_through_reorder_resize_and_content_change() {
+        let mut snapshot = virtual_timeline_snapshot();
+        snapshot.composer_task_id = Some("measured-task".into());
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        document
+            .context_mut()
+            .scroll_to(handles.timeline_scroll, ScrollOffset { x: 0.0, y: 600.0 })
+            .unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let offset = document
+            .context()
+            .world()
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        let (key, inset) = handles.timeline_measurements.anchor(offset).unwrap();
+        let identity = handles.timeline_virtual.entity(&key).unwrap();
+        // Prepending/reordering must preserve the business row, not its old index.
+        snapshot.timeline.rotate_right(3);
+        snapshot.timeline_scroll_offset = offset;
+        handles.sync(&mut document, &snapshot).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        assert_eq!(handles.timeline_virtual.entity(&key), Some(identity));
+        let actual = document
+            .context()
+            .world()
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        assert_eq!(
+            handles.timeline_measurements.anchor(actual),
+            Some((key.clone(), inset))
+        );
+        // A current row's changed content must not reuse its old measured height.
+        let row = snapshot
+            .timeline
+            .iter_mut()
+            .find(|row| row.id == key)
+            .unwrap();
+        row.markdown =
+            "A real paragraph that wraps across the narrow conversation viewport. ".repeat(8);
+        handles.sync(&mut document, &snapshot).unwrap();
+        settle_timeline(&mut document, &mut handles, 960.0, 600.0);
+        let actual = document
+            .context()
+            .world()
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        assert_eq!(
+            handles.timeline_measurements.anchor(actual),
+            Some((key.clone(), inset))
+        );
+        let narrow_height = document
+            .context()
+            .world()
+            .layout_box(identity.stable_id())
+            .unwrap()
+            .height;
+        settle_timeline(&mut document, &mut handles, 1440.0, 900.0);
+        let wide_height = document
+            .context()
+            .world()
+            .layout_box(identity.stable_id())
+            .unwrap()
+            .height;
+        assert!(
+            wide_height < narrow_height,
+            "width invalidation must remeasure wrapped content"
+        );
+        let actual = document
+            .context()
+            .world()
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        assert_eq!(
+            handles.timeline_measurements.anchor(actual),
+            Some((key, inset))
+        );
+        // A stable frame must not create an endless redraw loop.
+        assert!(handles
+            .on_timeline_presented(&mut document)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn measured_timeline_paging_footer_tail_and_task_switch_share_scroll_coordinates() {
+        let mut snapshot = virtual_timeline_snapshot();
+        snapshot.composer_task_id = Some("old-task".into());
+        snapshot.timeline_can_load_earlier = true;
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let world = document.context().world();
+        let header = handles.load_earlier.unwrap();
+        assert!(world.is_mounted(header.stable_id()));
+        let header_box = world.layout_box(header.stable_id()).unwrap();
+        let viewport = world
+            .layout_box(handles.timeline_scroll.stable_id())
+            .unwrap();
+        assert!(
+            header_box.height > 0.0 && header_box.y >= viewport.y + viewport.height,
+            "paging footer must retain its original position outside the scrollport"
+        );
+        assert_eq!(
+            world
+                .scroll_offset(handles.timeline_scroll.stable_id())
+                .unwrap()
+                .y,
+            0.0
+        );
+        handles.scroll_timeline_to_end(&mut document).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let world = document.context().world();
+        let offset = world
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        let last = world
+            .layout_box(
+                handles
+                    .timeline_virtual
+                    .entity(&"event-49".into())
+                    .unwrap()
+                    .stable_id(),
+            )
+            .unwrap();
+        assert!((last.y + last.height - offset - viewport.y - viewport.height).abs() <= 1.0);
+        assert!(handles
+            .measured_timeline_content_extent_for_task(Some("different-task"))
+            .is_none());
+        assert_eq!(
+            handles.measured_timeline_content_extent(),
+            world
+                .scroll_metrics(handles.timeline_scroll.stable_id())
+                .map(|metrics| metrics.content_height)
+        );
+        // A future task's intent must survive a presentation of the old tree.
+        handles
+            .scroll_timeline_to_end_for_task(&mut document, Some("new-task"))
+            .unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        snapshot.composer_task_id = Some("new-task".into());
+        snapshot.timeline_can_load_earlier = false;
+        snapshot.timeline_scroll_offset = 0.0;
+        handles.sync(&mut document, &snapshot).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let world = document.context().world();
+        assert!(
+            (world
+                .scroll_offset(handles.timeline_scroll.stable_id())
+                .unwrap()
+                .y
+                - world
+                    .scroll_metrics(handles.timeline_scroll.stable_id())
+                    .unwrap()
+                    .max_offset()
+                    .y)
+                .abs()
+                <= 1.0
+        );
+        // An unrelated switch has no tail intent and starts at its supplied offset.
+        snapshot.composer_task_id = Some("third-task".into());
+        handles.sync(&mut document, &snapshot).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        assert_eq!(
+            document
+                .context()
+                .world()
+                .scroll_offset(handles.timeline_scroll.stable_id())
+                .unwrap()
+                .y,
+            0.0
+        );
+    }
+
+    #[test]
+    fn measured_timeline_user_scroll_wins_over_pending_correction_and_streaming_sync() {
+        let mut snapshot = virtual_timeline_snapshot();
+        snapshot.composer_task_id = Some("streaming-task".into());
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        handles.scroll_timeline_to_end(&mut document).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        snapshot.timeline.last_mut().unwrap().markdown = "a longer final paragraph ".repeat(50);
+        handles.sync(&mut document, &snapshot).unwrap();
+        document
+            .context_mut()
+            .layout_document(
+                DocumentId::new(PRIMARY_DOCUMENT).unwrap(),
+                nana_ui::runtime::LayoutViewport::new(1180.0, 760.0),
+            )
+            .unwrap();
+        assert!(
+            handles
+                .on_timeline_presented(&mut document)
+                .unwrap()
+                .unwrap()
+                .redraw
+        );
+        // The correction is queued, but a real scroll followed by streaming data
+        // must be authoritative before the next presented callback.
+        document
+            .context_mut()
+            .scroll_to(handles.timeline_scroll, ScrollOffset { x: 0.0, y: 600.0 })
+            .unwrap();
+        let offset = document
+            .context()
+            .world()
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        let anchor = handles.timeline_measurements.anchor(offset);
+        snapshot
+            .timeline
+            .last_mut()
+            .unwrap()
+            .markdown
+            .push_str(" next streamed token");
+        handles.sync(&mut document, &snapshot).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let actual = document
+            .context()
+            .world()
+            .scroll_offset(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .y;
+        assert_eq!(handles.timeline_measurements.anchor(actual), anchor);
+        let max = document
+            .context()
+            .world()
+            .scroll_metrics(handles.timeline_scroll.stable_id())
+            .unwrap()
+            .max_offset()
+            .y;
+        assert!(
+            actual < max - 1.0,
+            "user upscroll must release tail following"
+        );
+    }
+
+    #[test]
+    fn measured_timeline_retains_active_content_and_releases_inactive_row_nodes() {
+        let mut snapshot = virtual_timeline_snapshot();
+        for row in &mut snapshot.timeline {
+            row.can_copy = true;
+        }
+        let (mut document, mut handles, _) = mounted_primary(&snapshot);
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        let key = "event-0".to_owned();
+        let root = handles.timeline_virtual.entity(&key).unwrap();
+        let targets = handles.timeline_content[&key].debug_targets();
+        let button = targets.iter().find(|(name, _)| name == "copy").unwrap().1;
+        document
+            .context_mut()
+            .focus_node(DocumentId::new(PRIMARY_DOCUMENT).unwrap(), button)
+            .unwrap();
+        handles.scroll_timeline_to_end(&mut document).unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        assert_eq!(handles.timeline_virtual.entity(&key), Some(root));
+        assert_eq!(handles.timeline_content[&key].debug_targets(), targets);
+        document
+            .context_mut()
+            .clear_focus(DocumentId::new(PRIMARY_DOCUMENT).unwrap())
+            .unwrap();
+        settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+        // Cycle through the same finite window. Temporary row components and
+        // their parked optional children must not accumulate on each remount.
+        let mut counts = Vec::new();
+        for _ in 0..3 {
+            document
+                .context_mut()
+                .scroll_to(handles.timeline_scroll, ScrollOffset { x: 0.0, y: 0.0 })
+                .unwrap();
+            settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+            handles.scroll_timeline_to_end(&mut document).unwrap();
+            settle_timeline(&mut document, &mut handles, 1180.0, 760.0);
+            assert!(document.context().world().node(root.stable_id()).is_none());
+            counts.push(document.context().world().len());
+        }
+        assert_eq!(
+            counts[1], counts[2],
+            "unmounted timeline views must release owned nodes: {counts:?}"
         );
     }
 
@@ -9436,20 +10464,259 @@ mod tests {
     }
 
     #[test]
-    fn provider_settings_use_form_fields() {
+    fn quota_toolbar_groups_readable_controls_and_wraps_without_truncation() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.settings_open = true;
+        let model = SettingsModel::new("quota", [nana_ui::SettingsTab::new("quota", "用量与额度")])
+            .unwrap();
+        snapshot.settings.state = SettingsState::new(&model);
+        snapshot.settings.model = model;
+        snapshot.settings.quota_days_label = "30 天".into();
+        snapshot.settings.quota_backend_label = "all".into();
+        let (mut document, handles, _) = mounted_primary(&snapshot);
+        let document_id = document.document();
+        let toolbar = handles
+            .quota_toolbar
+            .expect("quota actions share one toolbar");
+        let controls = ["refresh-quota", "cycle-quota-days", "cycle-quota-backend"]
+            .map(|id| handles.product_actions[id]);
+        let text_nodes = controls.map(|view| view.stable_id());
+        let mut shaper = nana_ui::NanaTextShaper::default();
+        let context = document.context_mut();
+        assert_eq!(
+            context.world().node(toolbar.stable_id()).unwrap().children,
+            controls.map(|view| view.stable_id())
+        );
+        for width in [700.0, 260.0, 700.0] {
+            context
+                .update_component(toolbar, |view, _| {
+                    *view = quota::toolbar(if width < 300.0 { 800.0 } else { 1180.0 })
+                        .width(LengthSpec::Px(width));
+                })
+                .unwrap();
+            context
+                .layout_document(
+                    document_id,
+                    nana_ui::runtime::LayoutViewport::new(1180.0, 760.0),
+                )
+                .unwrap();
+            context.shape_text(&text_nodes, &mut shaper).unwrap();
+            context
+                .layout_document(
+                    document_id,
+                    nana_ui::runtime::LayoutViewport::new(1180.0, 760.0),
+                )
+                .unwrap();
+            let boxes = controls.map(|view| context.world().layout_box(view.stable_id()).unwrap());
+            assert!((boxes[0].y - boxes[1].y).abs() < 0.5);
+            assert!(boxes[1].x >= boxes[0].x + boxes[0].width + 7.5);
+            if width > 300.0 {
+                assert!((boxes[2].y - boxes[0].y).abs() < 0.5);
+                assert!(boxes[2].x >= boxes[1].x + boxes[1].width + 7.5);
+            } else {
+                assert!(boxes[2].y >= boxes[0].y + boxes[0].height + 7.5);
+            }
+            for ((control, bounds), (label, minimum)) in controls.into_iter().zip(boxes).zip([
+                ("刷新用量", 104.0),
+                ("近 30 天", 104.0),
+                ("范围：全部后端", 168.0),
+            ]) {
+                assert!(bounds.width >= minimum - 0.5);
+                let Some(nana_ui::runtime::ComponentGeometry::Button { label: text, .. }) =
+                    context.world().component_geometry(control.stable_id())
+                else {
+                    panic!("real button geometry");
+                };
+                assert_eq!(text.content.as_ref(), label);
+                let measured = context.world().text_metrics(control.stable_id()).unwrap();
+                assert!(measured.width > 0.0);
+                assert!(
+                    (text.bounds.width - measured.width).abs() < 0.5,
+                    "full shaped label must fit without truncation: {text:?}, measured={measured:?}"
+                );
+                assert!(
+                    text.bounds.x >= bounds.x
+                        && text.bounds.x + text.bounds.width <= bounds.x + bounds.width + 0.5
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn credentials_use_secure_input_and_dispatch_normal_save() {
+        use crate::runtime_surface::SurfaceControl;
+        use crate::shell::ProviderMessage;
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.settings_open = true;
         let model = SettingsModel::new(
-            "provider",
-            [nana_ui::SettingsTab::new("provider", "模型服务")],
+            "credentials",
+            [nana_ui::SettingsTab::new("credentials", "凭据")],
         )
-        .expect("settings model");
+        .unwrap();
         snapshot.settings.state = SettingsState::new(&model);
         snapshot.settings.model = model;
-        snapshot.settings.provider_secret = "secret".to_owned();
-        let (_document, handles, _) = mounted_primary(&snapshot);
-        assert!(handles.form_wrappers.contains_key("provider_secret"));
-        assert!(handles.form_switches.is_empty());
+        snapshot.settings.controls = vec![
+            SurfaceControl::section("credentials", "凭据"),
+            SurfaceControl::secret("secret", "API 密钥", "", |value| {
+                ShellIntent::ProviderCommand(ProviderMessage::SecretChanged(value))
+            }),
+            SurfaceControl::action(
+                "save",
+                "保存凭据",
+                ShellIntent::ProviderCommand(ProviderMessage::SaveCredential),
+            ),
+        ];
+        let intents = Arc::new(Mutex::new(Vec::new()));
+        let received = intents.clone();
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| received.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        handles.sync(&mut document, &snapshot).unwrap();
+        let nodes = handles.settings_surface.debug_nodes();
+        let secret_id = nodes.iter().find(|(id, ..)| id == "secret").unwrap().1;
+        let save_id = nodes.iter().find(|(id, ..)| id == "save").unwrap().1;
+        let editor = Entity::<nana_ui::runtime::TextInput>::from_stable_id(secret_id);
+        let context = document.context_mut();
+        assert!(context.read(editor, |field| field.secure).unwrap());
+        let document_id = DocumentId::new(PRIMARY_DOCUMENT).unwrap();
+        assert!(context.focus_node(document_id, secret_id).unwrap());
+        assert!(context
+            .replace_focused_text(document_id, "test-credential")
+            .unwrap());
+        assert!(context.activate_node(save_id).unwrap());
+        let events = intents.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, ShellIntent::ProviderCommand(ProviderMessage::SecretChanged(value)) if value == "test-credential")));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ShellIntent::ProviderCommand(ProviderMessage::SaveCredential)
+        )));
+    }
+
+    #[test]
+    fn extension_dialog_survives_shell_reassembly_and_reopens_after_cancel() {
+        use crate::runtime_extensions::{ExtensionBrowserSnapshot, ExtensionEditorSnapshot};
+        use crate::runtime_surface::SurfaceControl;
+        use crate::shell::ExtensionsMessage;
+
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.settings_open = true;
+        let model = SettingsModel::new(
+            "extensions",
+            [nana_ui::SettingsTab::new("extensions", "技能").full_page(true)],
+        )
+        .unwrap();
+        snapshot.settings.state = SettingsState::new(&model);
+        snapshot.settings.model = model;
+        let editor = ExtensionEditorSnapshot {
+            title: "创建技能".into(),
+            controls: vec![SurfaceControl::field(
+                "skill_id",
+                "名称",
+                "",
+                false,
+                |value| ShellIntent::ExtensionsCommand(ExtensionsMessage::SkillIdChanged(value)),
+            )],
+            actions: vec![SurfaceControl::action(
+                "extension-editor-cancel",
+                "取消",
+                ShellIntent::ExtensionsCommand(ExtensionsMessage::CancelEditor),
+            )],
+            busy: false,
+        };
+        snapshot.settings.extensions = Some(ExtensionBrowserSnapshot {
+            tab: "extensions".into(),
+            query: String::new(),
+            entries: vec![],
+            selected: None,
+            title: "技能".into(),
+            detail_actions: vec![],
+            toolbar: vec![],
+            detail: vec![],
+            editor: Some(editor.clone()),
+        });
+        let intents = Arc::new(Mutex::new(Vec::new()));
+        let received = intents.clone();
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| received.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        let doc = document.document();
+        let host = handles.overlay_host.unwrap();
+        for cycle in 0..2 {
+            let started = cycle * 1_000;
+            document
+                .context_mut()
+                .advance_animations(std::time::Duration::from_millis(started));
+            snapshot.settings.extensions.as_mut().unwrap().editor = Some(editor.clone());
+            handles.sync(&mut document, &snapshot).unwrap();
+            let dialog = handles.extensions.dialog_id().unwrap();
+            snapshot.title_context = format!("shell reassembly {cycle}");
+            handles.sync(&mut document, &snapshot).unwrap();
+            // A second sync exercises activate_overlay after the shell has reconciled its slots.
+            handles.sync(&mut document, &snapshot).unwrap();
+            let cx = document.context_mut();
+            cx.layout_document(doc, nana_ui::runtime::LayoutViewport::new(960.0, 800.0))
+                .unwrap();
+            cx.advance_animations(std::time::Duration::from_millis(started + 400));
+            assert_eq!(
+                cx.read(handles.shell, |shell| shell.overlays.clone())
+                    .unwrap(),
+                vec![dialog]
+            );
+            assert_eq!(
+                cx.world().node(dialog).unwrap().parent,
+                Some(host.stable_id())
+            );
+            assert!(cx.world().is_mounted(dialog));
+            assert_eq!(
+                cx.world().overlay_host(host.stable_id()).unwrap().active,
+                Some(dialog)
+            );
+            let nodes = handles.extensions.debug_nodes();
+            let field = nodes.iter().find(|(id, _)| id == "skill_id").unwrap().1;
+            assert!(cx.focus_node(doc, field).unwrap());
+            cx.select_all_focused_text(doc).unwrap();
+            assert!(cx
+                .replace_focused_text(doc, "review-after-reassembly")
+                .unwrap());
+            assert!(intents.lock().unwrap().iter().any(|intent| matches!(intent,
+                ShellIntent::ExtensionsCommand(ExtensionsMessage::SkillIdChanged(value)) if value == "review-after-reassembly")));
+            let cancel = nodes
+                .iter()
+                .find(|(id, _)| id == "extension-editor-cancel")
+                .unwrap()
+                .1;
+            assert!(cx.activate_node(cancel).unwrap());
+            assert!(matches!(
+                intents.lock().unwrap().pop(),
+                Some(ShellIntent::ExtensionsCommand(
+                    ExtensionsMessage::CancelEditor
+                ))
+            ));
+            snapshot.settings.extensions.as_mut().unwrap().editor = None;
+            handles.sync(&mut document, &snapshot).unwrap();
+            assert!(
+                document.context().world().contains(dialog),
+                "retain dialog during exit animation"
+            );
+            for frame in 1..=25 {
+                document
+                    .context_mut()
+                    .advance_animations(std::time::Duration::from_millis(
+                        started + 400 + frame * 16,
+                    ));
+                handles.sync(&mut document, &snapshot).unwrap();
+            }
+            assert!(handles.extensions.dialog_id().is_none());
+            assert!(!document.context().world().contains(dialog));
+            assert!(document
+                .context_mut()
+                .read(handles.shell, |shell| shell.overlays.is_empty())
+                .unwrap());
+        }
     }
 
     #[test]

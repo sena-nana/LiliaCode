@@ -23,7 +23,8 @@ pub(crate) fn conversation_is_visible(cx: &UiModuleContext<'_>) -> bool {
     {
         return false;
     }
-    !(cx.shows(ShellProjectPage::Overview)
+    !(cx.shows(ShellProjectPage::Sessions)
+        || cx.shows(ShellProjectPage::Overview)
         || cx.shows(ShellProjectPage::Clone)
         || cx.shows(ShellProjectPage::Roadmap)
         || cx.shows(ShellProjectPage::Memory)
@@ -62,3 +63,6 @@ impl Feature for ShellUiFeature {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod project_refresh_tests;

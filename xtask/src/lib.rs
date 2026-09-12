@@ -7,6 +7,7 @@ pub mod android;
 pub mod boundary;
 pub mod icons;
 pub mod installer_smoke;
+mod model_fixture;
 pub mod performance;
 pub mod pin;
 pub mod release;

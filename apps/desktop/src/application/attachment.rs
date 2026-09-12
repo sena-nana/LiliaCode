@@ -69,6 +69,43 @@ pub enum DesktopAttachmentError {
 }
 
 impl DesktopApplication {
+    pub fn capture_composer_clipboard(
+        &self,
+    ) -> Result<Option<(String, Vec<ChatAttachment>)>, DesktopAttachmentError> {
+        let files = self.capture_clipboard_file_attachments()?;
+        if !files.is_empty() {
+            return Ok(Some((String::new(), files)));
+        }
+        if let Some(image) = self.capture_clipboard_image_attachment()? {
+            return Ok(Some((String::new(), vec![image])));
+        }
+        self.capture_composer_clipboard_text()
+    }
+
+    pub fn capture_composer_clipboard_text(
+        &self,
+    ) -> Result<Option<(String, Vec<ChatAttachment>)>, DesktopAttachmentError> {
+        let text = match self.inner.host.execute(
+            &self.inner.host_context,
+            DesktopHostAction::ReadClipboardText,
+        )? {
+            DesktopHostResult::ClipboardText(Some(text)) if !text.is_empty() => text,
+            DesktopHostResult::ClipboardText(_) => return Ok(None),
+            _ => return Err(DesktopAttachmentError::UnexpectedHostResult),
+        };
+        if text.len() > MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES {
+            return Err(DesktopAttachmentError::InvalidClipboardText {
+                message: "剪贴板文本过大，无法粘贴。".into(),
+            });
+        }
+        if clipboard_text_should_be_attachment(&text) {
+            let attachment = self.cache_clipboard_text_attachment(&text)?;
+            Ok(Some((String::new(), vec![attachment])))
+        } else {
+            Ok(Some((text, Vec::new())))
+        }
+    }
+
     pub fn read_clipboard_file_paths(&self) -> Result<Vec<PathBuf>, DesktopAttachmentError> {
         match self.inner.host.execute(
             &self.inner.host_context,
@@ -449,6 +486,80 @@ mod tests {
                 Ok(DesktopHostResult::Completed)
             }
         }
+    }
+
+    #[test]
+    fn rich_clipboard_capture_prioritizes_files_then_image_and_uses_utf16_text_boundary() {
+        use std::sync::Mutex;
+        #[derive(Default)]
+        struct Payload {
+            files: Vec<PathBuf>,
+            image: bool,
+            text: String,
+        }
+        struct Host(Arc<Mutex<Payload>>);
+        impl crate::application::DesktopHost for Host {
+            fn execute(
+                &self,
+                _: &crate::application::DesktopHostContext,
+                action: DesktopHostAction,
+            ) -> Result<DesktopHostResult, crate::application::DesktopHostError> {
+                let payload = self.0.lock().unwrap();
+                Ok(match action {
+                    DesktopHostAction::ReadClipboardFilePaths => {
+                        DesktopHostResult::ClipboardFilePaths(payload.files.clone())
+                    }
+                    DesktopHostAction::ReadClipboardImage => {
+                        DesktopHostResult::ClipboardImage(payload.image.then(|| {
+                            DesktopClipboardImage {
+                                width: 1,
+                                height: 1,
+                                rgba: vec![255; 4],
+                            }
+                        }))
+                    }
+                    DesktopHostAction::ReadClipboardText => {
+                        DesktopHostResult::ClipboardText(Some(payload.text.clone()))
+                    }
+                    _ => DesktopHostResult::Completed,
+                })
+            }
+        }
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join("paste.txt");
+        fs::write(&file, "file authority").unwrap();
+        let payload = Arc::new(Mutex::new(Payload {
+            files: vec![file.clone(), file.clone()],
+            image: true,
+            text: "text".into(),
+        }));
+        let app = DesktopApplication::bootstrap(
+            crate::application::DesktopApplicationConfig::new(home.path(), "rich-clipboard")
+                .unwrap(),
+            Arc::new(Host(payload.clone())),
+        )
+        .unwrap();
+        let (text, files) = app.capture_composer_clipboard().unwrap().unwrap();
+        assert!(text.is_empty());
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, file.to_string_lossy());
+        payload.lock().unwrap().files.clear();
+        let (_, images) = app.capture_composer_clipboard().unwrap().unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(image::image_dimensions(&images[0].path).unwrap(), (1, 1));
+        payload.lock().unwrap().image = false;
+        payload.lock().unwrap().text = "😀".repeat(999) + "a";
+        let (text, files) = app.capture_composer_clipboard().unwrap().unwrap();
+        assert_eq!(text.encode_utf16().count(), 1999);
+        assert!(files.is_empty());
+        payload.lock().unwrap().text.push('b');
+        let (text, files) = app.capture_composer_clipboard().unwrap().unwrap();
+        assert!(text.is_empty());
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            fs::read_to_string(&files[0].path).unwrap(),
+            payload.lock().unwrap().text
+        );
     }
 
     #[test]
