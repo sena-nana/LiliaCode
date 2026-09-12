@@ -6,6 +6,7 @@ mod ports;
 
 #[cfg(debug_assertions)]
 mod agent_debug;
+mod architecture_panel;
 mod ask_user;
 mod cli_import;
 mod conversation_suggestions;
@@ -17,6 +18,7 @@ mod desktop;
 mod document_editor;
 mod host;
 mod iab_panel;
+mod image_textures;
 mod journal_export;
 mod kernel_host;
 mod markdown_images;
@@ -25,8 +27,13 @@ mod pending_import;
 mod project_files_panel;
 mod provider_ai_settings;
 mod runtime_compat;
+mod runtime_conversation;
+mod runtime_empty_suggestions;
+mod runtime_extensions;
 mod runtime_layout;
+mod runtime_pending;
 mod runtime_shell;
+mod runtime_surface;
 mod runtime_windows;
 mod shell;
 mod shell_integration;
@@ -38,6 +45,7 @@ pub mod target_ids;
 mod task_session;
 mod terminal_view;
 mod text_editor_state;
+mod todo_panel;
 mod ui_module;
 mod updater;
 mod windows_identity;
@@ -135,7 +143,8 @@ fn run_application() -> i32 {
         return 2;
     }
 
-    if let Ok(icon) = nana_ui::window_icon_from_png(include_bytes!("../assets/icons/128x128@2x.png"))
+    if let Ok(icon) =
+        nana_ui::window_icon_from_png(include_bytes!("../assets/icons/128x128@2x.png"))
     {
         nana_ui_platform::register_application_icon(icon);
     }

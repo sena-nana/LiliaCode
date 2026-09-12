@@ -36,6 +36,8 @@ pub struct RoadmapModule {
     description: String,
     due_date: String,
     error: Option<String>,
+    editor_dirty: bool,
+    loaded_project: Option<lilia_contracts::ProjectId>,
 }
 
 impl RoadmapModule {
@@ -62,7 +64,7 @@ impl RoadmapModule {
     /// Restores the milestone a window remembered, falling back to the first one
     /// when the saved id no longer exists.
     pub fn restore_selection(&mut self, milestone_id: Option<String>) {
-        self.selected = milestone_id
+        let selected = milestone_id
             .filter(|selected| self.has(selected))
             .or_else(|| {
                 self.roadmap
@@ -70,6 +72,10 @@ impl RoadmapModule {
                     .first()
                     .map(|milestone| milestone.id.clone())
             });
+        if self.editor_dirty && self.selected == selected {
+            return;
+        }
+        self.selected = selected;
         self.load_selected();
     }
 
@@ -105,6 +111,15 @@ impl RoadmapModule {
         };
         match application.project_roadmap(&project_id) {
             Ok(roadmap) => {
+                let preserve_draft = self.editor_dirty
+                    && self.loaded_project.as_ref() == Some(&project_id)
+                    && self.selected.as_ref().is_some_and(|selected| {
+                        roadmap
+                            .milestones
+                            .iter()
+                            .any(|milestone| milestone.id == *selected)
+                    });
+                self.loaded_project = Some(project_id);
                 self.roadmap = roadmap;
                 if !self
                     .selected
@@ -117,7 +132,9 @@ impl RoadmapModule {
                         .first()
                         .map(|milestone| milestone.id.clone());
                 }
-                self.load_selected();
+                if !preserve_draft {
+                    self.load_selected();
+                }
                 self.error = None;
             }
             Err(error) => self.error = Some(format!("无法读取路线图：{error}")),
@@ -137,6 +154,7 @@ impl RoadmapModule {
     /// Refills the editor fields from the selected milestone, so an edit always
     /// starts from what is stored rather than from the previous selection.
     fn load_selected(&mut self) {
+        self.editor_dirty = false;
         match self.milestone() {
             Some(milestone) => {
                 let title = milestone.title.clone();
@@ -206,7 +224,10 @@ impl RoadmapModule {
             due_date,
         };
         match application.update_milestone(&project_id, &milestone_id, patch) {
-            Ok(_) => self.refresh(cx),
+            Ok(_) => {
+                self.editor_dirty = false;
+                self.refresh(cx)
+            }
             Err(error) => {
                 self.error = Some(format!("无法保存里程碑：{error}"));
                 UiModuleOutcome::dirty()
@@ -361,16 +382,19 @@ impl UiModule for RoadmapModule {
             RoadmapMessage::Select(milestone_id) => self.select(milestone_id),
             RoadmapMessage::TitleChanged(value) => {
                 self.title = value;
+                self.editor_dirty = true;
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
             RoadmapMessage::DescriptionChanged(value) => {
                 self.description = value;
+                self.editor_dirty = true;
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
             RoadmapMessage::DueDateChanged(value) => {
                 self.due_date = value;
+                self.editor_dirty = true;
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
@@ -400,6 +424,10 @@ impl UiModule for RoadmapModule {
     fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
         // The editor title is a composer-region input, rendered outside the
         // roadmap page's own body, so it travels regardless of the active page.
+        into.milestone_editor_identity = cx
+            .selected_project()
+            .zip(self.selected.as_ref())
+            .map(|(project, milestone)| (project.as_str().to_owned(), milestone.clone()));
         into.milestone_title = self.title.clone();
         into.milestone_description = self.description.clone();
         into.milestone_due_date = self.due_date.clone();
@@ -410,14 +438,33 @@ impl UiModule for RoadmapModule {
         if !cx.shows(ShellProjectPage::Roadmap) {
             return;
         }
-        into.project_page_body = self.error.clone().unwrap_or_else(|| {
-            self.roadmap
-                .milestones
-                .iter()
-                .map(|milestone| milestone.title.clone())
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
+        let tasks = cx
+            .workspace()
+            .and_then(|workspace| workspace.snapshot().ok())
+            .map(|snapshot| snapshot.tasks)
+            .unwrap_or_default();
+        into.project_page_body = self
+            .error
+            .clone()
+            .unwrap_or_else(|| format!("{} 个里程碑", self.roadmap.milestones.len()));
+        into.roadmap_tasks = self
+            .selected
+            .as_ref()
+            .map(|selected| {
+                tasks
+                    .iter()
+                    .map(|task| {
+                        (
+                            task.id.as_str().to_owned(),
+                            task.title.clone(),
+                            self.roadmap.links.iter().any(|link| {
+                                link.milestone_id == *selected && link.task_id == task.id.as_str()
+                            }),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         into.roadmap_cards = self
             .roadmap
             .milestones
@@ -425,10 +472,29 @@ impl UiModule for RoadmapModule {
             .map(|milestone| ShellRoadmapCard {
                 id: milestone.id.clone(),
                 title: milestone.title.clone(),
-                status: crate::desktop::milestone_status_label(milestone.status).to_owned(),
+                status: {
+                    let linked = tasks
+                        .iter()
+                        .filter(|task| {
+                            self.roadmap.links.iter().any(|link| {
+                                link.milestone_id == milestone.id
+                                    && link.task_id == task.id.as_str()
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let completed = linked
+                        .iter()
+                        .filter(|task| task.status == lilia_contracts::ProductTaskStatus::Done)
+                        .count();
+                    format!(
+                        "{} · {completed}/{} 已完成",
+                        crate::desktop::milestone_status_label(milestone.status),
+                        linked.len()
+                    )
+                },
                 date: milestone
                     .due_date
-                    .map(|due| due.to_string())
+                    .map(crate::desktop::format_civil_date)
                     .unwrap_or_else(|| "无截止日期".to_owned()),
             })
             .collect();

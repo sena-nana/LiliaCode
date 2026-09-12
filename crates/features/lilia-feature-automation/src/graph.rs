@@ -8,6 +8,8 @@ use super::{AutomationEdge, AutomationNode};
 pub enum AutomationGraphError {
     #[error("automation node id must be unique: {node_id}")]
     DuplicateNodeId { node_id: String },
+    #[error("automation edge id must be unique: {edge_id}")]
+    DuplicateEdgeId { edge_id: String },
     #[error("a non-empty automation graph requires one trigger node")]
     MissingTrigger,
     #[error("an automation graph supports exactly one trigger node")]
@@ -41,7 +43,13 @@ pub fn validate_automation_graph(
         _ => return Err(AutomationGraphError::MultipleTriggers),
     }
 
+    let mut edge_ids = BTreeSet::new();
     for edge in edges {
+        if !edge_ids.insert(&edge.id) {
+            return Err(AutomationGraphError::DuplicateEdgeId {
+                edge_id: edge.id.clone(),
+            });
+        }
         if !ids.contains(&edge.source) {
             return Err(AutomationGraphError::DanglingEdge {
                 edge_id: edge.id.clone(),
@@ -180,6 +188,8 @@ pub fn automation_active_outgoing_edges<'a>(
                     output.get("routeKind").and_then(JsonValue::as_str) == Some("switch")
                         && !has_exact_selected_edge
                 }
+                Some("output" | "success") if selected_handles.is_empty() => true,
+                Some("output") if selected_handles.contains("success") => true,
                 Some(handle) => selected_handles.contains(handle),
                 None => {
                     selected_handles.is_empty()
@@ -264,6 +274,21 @@ mod tests {
     }
 
     #[test]
+    fn graph_rejects_duplicate_edge_identity_across_distinct_ports() {
+        let nodes = vec![node("trigger", "trigger"), node("tool", "tool")];
+        let edges = [
+            edge("same", "trigger", "tool", Some("true")),
+            edge("same", "trigger", "tool", Some("false")),
+        ];
+        assert_eq!(
+            validate_automation_graph(&nodes, &edges),
+            Err(AutomationGraphError::DuplicateEdgeId {
+                edge_id: "same".into()
+            })
+        );
+    }
+
+    #[test]
     fn topological_order_is_deterministic_across_input_order() {
         let nodes = vec![
             node("trigger", "trigger"),
@@ -338,6 +363,51 @@ mod tests {
                 .map(|edge| edge.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["success"]
+        );
+    }
+
+    #[test]
+    fn native_and_historical_normal_ports_advance_without_activating_branch_ports() {
+        let edges = vec![
+            edge("native", "node", "one", Some("output")),
+            edge("historical", "node", "two", Some("success")),
+            edge("false", "node", "three", Some("false")),
+        ];
+        let normal = automation_active_outgoing_edges(
+            &edges,
+            "node",
+            &serde_json::json!({ "recorded": true }),
+        );
+        assert_eq!(
+            normal
+                .iter()
+                .map(|edge| edge.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["native", "historical"]
+        );
+        let resumed = automation_active_outgoing_edges(
+            &edges,
+            "node",
+            &serde_json::json!({ "selectedHandle": "success" }),
+        );
+        assert_eq!(
+            resumed
+                .iter()
+                .map(|edge| edge.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["native", "historical"]
+        );
+        let branch = automation_active_outgoing_edges(
+            &edges,
+            "node",
+            &serde_json::json!({ "selectedHandle": "false" }),
+        );
+        assert_eq!(
+            branch
+                .iter()
+                .map(|edge| edge.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["false"]
         );
     }
 }

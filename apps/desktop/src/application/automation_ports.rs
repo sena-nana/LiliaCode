@@ -32,6 +32,8 @@ impl DesktopApplication {
         &self,
         run_id: &str,
     ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
+        let _execution = self.inner.automation_execution.enter(run_id);
+        let _effect = super::automation_dispatch::AutomationEffectGuard::enter();
         let repository = self.automation_service();
         AutomationExecutionEngine::new(Arc::new(self.clone())).execute_run(&repository, run_id)
     }
@@ -41,6 +43,8 @@ impl DesktopApplication {
         run_id: &str,
         input: AutomationResumeRunInput,
     ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
+        let _execution = self.inner.automation_execution.enter(run_id);
+        let _effect = super::automation_dispatch::AutomationEffectGuard::enter();
         let repository = self.automation_service();
         AutomationExecutionEngine::new(Arc::new(self.clone())).resume_human(
             &repository,
@@ -53,6 +57,8 @@ impl DesktopApplication {
         &self,
         input: AutomationCompleteAgentInput,
     ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
+        let _execution = self.inner.automation_execution.enter(&input.run_id);
+        let _effect = super::automation_dispatch::AutomationEffectGuard::enter();
         let repository = self.automation_service();
         AutomationExecutionEngine::new(Arc::new(self.clone())).complete_agent(&repository, input)
     }
@@ -61,6 +67,7 @@ impl DesktopApplication {
         &self,
         run_id: &str,
     ) -> Result<AutomationRunDetail, AutomationExecutionError> {
+        let _execution = self.inner.automation_execution.enter(run_id);
         let repository = self.automation_service();
         let detail = repository.execution_run_detail(run_id)?.ok_or_else(|| {
             AutomationExecutionError::RunNotFound {

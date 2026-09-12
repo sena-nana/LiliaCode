@@ -75,6 +75,7 @@ impl NativeDebugTimeline {
             .push(TaskTimelineItem {
                 id: event_id,
                 sequence: u64::MAX.saturating_sub(10_000).saturating_add(sequence),
+                turn_id: None,
                 kind: kind.to_owned(),
                 title: title.to_owned(),
                 message_role: None,

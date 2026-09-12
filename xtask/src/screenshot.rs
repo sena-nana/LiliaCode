@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use crate::agent_debug::{capture_window, require_ok, Session};
+use crate::agent_debug::{
+    capture_window, require_interactive_desktop_session, require_ok, Session,
+};
 use crate::{repo_root, Result, XtaskError};
 
 /// The window reports ready before the first frames settle, so the capture waits
@@ -11,11 +13,31 @@ use crate::{repo_root, Result, XtaskError};
 const SETTLE: Duration = Duration::from_millis(1_200);
 
 pub fn run(arguments: &[String]) -> Result {
-    if !cfg!(target_os = "windows") {
+    if !cfg!(any(target_os = "windows", target_os = "macos")) {
         return Err(XtaskError::blocker(
-            "windows_required",
-            "desktop screenshots require Windows with a real WGPU desktop",
+            "desktop_required",
+            "desktop screenshots require macOS or Windows with a real WGPU desktop",
         ));
+    }
+    require_interactive_desktop_session()?;
+    if arguments == ["--matrix"] {
+        for (width, height) in [(960, 600), (1440, 900)] {
+            for theme in ["light", "dark"] {
+                let session =
+                    Session::start_with_viewport("screenshot", Some((width, height, theme)))?;
+                require_ok(
+                    &session.request(&serde_json::json!({"command": "observe"}))?,
+                    "observe",
+                )?;
+                thread::sleep(SETTLE);
+                let output = session
+                    .run_dir
+                    .join(format!("desktop-{width}x{height}-{theme}.png"));
+                capture_window(session.pid(), &output)?;
+                println!("screenshot: ok ({})", output.display());
+            }
+        }
+        return Ok(());
     }
     let output = parse_output(arguments)?;
     let session = Session::start("screenshot")?;
@@ -52,7 +74,10 @@ fn parse_output(arguments: &[String]) -> Result<Option<PathBuf>> {
 }
 
 fn usage() -> XtaskError {
-    XtaskError::failure("usage", "usage: cargo xtask screenshot [--out <png>]")
+    XtaskError::failure(
+        "usage",
+        "usage: cargo xtask screenshot [--out <png> | --matrix]",
+    )
 }
 
 #[cfg(test)]

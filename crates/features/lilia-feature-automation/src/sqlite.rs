@@ -275,7 +275,8 @@ impl AutomationStore for SqliteAutomationStore {
         let scope_json = json_text(&scope, "scope_json")?;
         let draft_json = json_text(&draft, "draft_json")?;
         let now = now_millis();
-        self.connection.lock()
+        self.connection
+            .lock()
             .execute(
                 r#"INSERT INTO automation_workflows
                    (id, name, enabled, scope_json, draft_json, published_version_id,
@@ -446,6 +447,19 @@ impl AutomationStore for SqliteAutomationStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| AutomationStoreError::storage("begin automation run", error))?;
         let workflow = required_workflow(&transaction, &input.workflow_id)?;
+        if !input.trigger.id.trim().is_empty() {
+            let previous: Option<String> = transaction.query_row(
+                "SELECT id FROM automation_runs WHERE workflow_id = ?1 AND json_extract(trigger_json, '$.id') = ?2 LIMIT 1",
+                params![input.workflow_id, input.trigger.id],
+                |row| row.get(0),
+            ).optional().map_err(|error| AutomationStoreError::storage("read prior automation signal", error))?;
+            if let Some(run_id) = previous {
+                let run = run_on(&transaction, &run_id)?
+                    .expect("the selected run exists in this transaction");
+                let nodes = run_nodes_on(&transaction, &run_id)?;
+                return Ok(AutomationRunDetail { run, nodes });
+            }
+        }
         let version_id = workflow.published_version_id.clone().ok_or_else(|| {
             AutomationStoreError::PublishedVersionRequired {
                 workflow_id: input.workflow_id.clone(),
@@ -464,6 +478,14 @@ impl AutomationStore for SqliteAutomationStore {
             });
         }
         validate_automation_graph(&version.snapshot.nodes, &version.snapshot.edges)?;
+        if input.trigger.kind != "manual"
+            && (!workflow.enabled
+                || !crate::automation_signal_matches(&version.snapshot, &input.trigger))
+        {
+            return Err(AutomationStoreError::SignalNotMatched {
+                workflow_id: workflow.id,
+            });
+        }
         if let Some(run_id) = active_run_id(&transaction, &workflow.id)? {
             return Err(AutomationStoreError::ActiveRunExists {
                 workflow_id: workflow.id,
@@ -1387,6 +1409,47 @@ mod tests {
             .nodes
             .iter()
             .all(|node| node.status == AutomationRunStatus::Pending));
+    }
+
+    #[test]
+    fn repeated_signal_after_reopen_returns_the_same_run_and_nodes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("automation.sqlite3");
+        let input = AutomationBeginRunInput {
+            workflow_id: "workflow-1".to_owned(),
+            trigger: signal("durable-product-event-42"),
+        };
+        let mut original = {
+            let mut store = published_store(&path);
+            store.try_begin_run(input.clone()).unwrap()
+        };
+        let mut reopened = SqliteAutomationStore::open(&path).unwrap();
+        let mut replay = reopened.try_begin_run(input).unwrap();
+        original
+            .nodes
+            .sort_by(|left, right| left.node_id.cmp(&right.node_id));
+        replay
+            .nodes
+            .sort_by(|left, right| left.node_id.cmp(&right.node_id));
+        assert_eq!(replay, original);
+        assert_eq!(reopened.list_runs(Some("workflow-1")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn begin_signal_checks_published_trigger_and_enabled_state_inside_transaction() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("automation.sqlite3");
+        let mut store = published_store(&path);
+        let mut trigger = signal("mismatched-signal");
+        trigger.kind = "task_changed".to_owned();
+        assert!(matches!(
+            store.try_begin_run(AutomationBeginRunInput {
+                workflow_id: "workflow-1".to_owned(),
+                trigger
+            }),
+            Err(AutomationStoreError::SignalNotMatched { .. })
+        ));
+        assert!(store.list_runs(Some("workflow-1")).unwrap().is_empty());
     }
 
     #[test]

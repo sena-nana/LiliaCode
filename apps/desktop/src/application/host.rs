@@ -21,6 +21,10 @@ impl From<&DesktopApplicationConfig> for DesktopHostContext {
 }
 
 pub trait DesktopHost: Send + Sync {
+    fn uses_hosted_file_dialog(&self) -> bool {
+        false
+    }
+
     /// Executes one OS integration request.
     ///
     /// Credential and single-instance implementations must scope their storage

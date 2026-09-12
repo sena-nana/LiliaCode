@@ -127,6 +127,7 @@ pub fn extensions_snapshot(
     let runtime_skill_ids = skill_catalog
         .catalog
         .iter()
+        .filter(|entry| entry.available)
         .map(|skill| skill.skill_id.as_str())
         .collect::<BTreeSet<_>>();
     let mut skills = skill_registry
@@ -816,10 +817,12 @@ fn resolve_mcp_credentials(
     Ok(resolved)
 }
 
+type McpCredentialBackup = (McpCredentialKind, String, Option<Vec<u8>>);
+
 fn read_mcp_credentials(
     host: &dyn ExtensionsHost,
     entry: &AgentkitMcpRegistryEntry,
-) -> Result<Vec<(McpCredentialKind, String, Option<Vec<u8>>)>, ExtensionsError> {
+) -> Result<Vec<McpCredentialBackup>, ExtensionsError> {
     let mut values = Vec::new();
     for (kind, names) in [
         (McpCredentialKind::Environment, &entry.env_secret_names),
@@ -839,7 +842,7 @@ fn read_mcp_credentials(
 fn delete_mcp_credentials(
     host: &dyn ExtensionsHost,
     entry: &AgentkitMcpRegistryEntry,
-    backup: &[(McpCredentialKind, String, Option<Vec<u8>>)],
+    backup: &[McpCredentialBackup],
 ) -> Result<(), ExtensionsError> {
     for (index, (kind, name, _)) in backup.iter().enumerate() {
         if let Err(error) = delete_mcp_credential(host, &entry.server_id, *kind, name) {
@@ -853,7 +856,7 @@ fn delete_mcp_credentials(
 fn restore_mcp_credentials(
     host: &dyn ExtensionsHost,
     entry: &AgentkitMcpRegistryEntry,
-    backup: &[(McpCredentialKind, String, Option<Vec<u8>>)],
+    backup: &[McpCredentialBackup],
 ) -> Result<(), ExtensionsError> {
     for (kind, name, secret) in backup {
         if let Some(secret) = secret {

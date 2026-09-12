@@ -29,6 +29,12 @@ pub fn prepare(application: &DesktopApplication) -> Result<(), String> {
     if std::env::var("LILIA_AGENT_DEBUG_SEED").as_deref() != Ok("1") {
         return Ok(());
     }
+    if std::env::var("LILIA_AGENT_DEBUG_RESUME").as_deref() == Ok("1") {
+        return prepare_model_credential(application);
+    }
+    if std::env::var("LILIA_AGENT_DEBUG_PAGINATION").as_deref() == Ok("1") {
+        prepare_pagination(application)?;
+    }
     let project_id = ProjectId::new(PROJECT_ID).map_err(|error| error.to_string())?;
     let task_id = TaskId::new(TASK_ID).map_err(|error| error.to_string())?;
     let client = application
@@ -155,33 +161,10 @@ pub fn prepare(application: &DesktopApplication) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
     }
     seed_corrupt_architecture_snapshot(application, &project_id)?;
+    seed_usage(application, &project_id)?;
 
-    let endpoint = std::env::var("LILIA_AGENT_DEBUG_MODEL_ENDPOINT")
-        .map_err(|_| "LILIA_AGENT_DEBUG_MODEL_ENDPOINT is required for seeded replay")?;
+    prepare_model_credential(application)?;
     let runtime = application.authority().shared_runtime();
-    if runtime
-        .inner()
-        .credentials()
-        .primary_usable_credential()
-        .is_none()
-    {
-        runtime
-            .inner()
-            .credentials()
-            .login(ProductCredentialLoginInput {
-                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.into(),
-                kind: CredentialKind::ApiKey,
-                secret_material: "sk-native-agent-debug-fixture".into(),
-                account_label: Some("Native Agent Debug".into()),
-                source: Some("agent_debug_fixture".into()),
-            })
-            .map_err(|error| error.to_string())?;
-    }
-    runtime.inner().set_model_endpoint_override(Some(endpoint));
-    runtime
-        .inner()
-        .refresh_product_profile(None)
-        .map_err(|error| error.to_string())?;
     let mcp_task_id = TaskId::new(MCP_ELICITATION_TASK_ID).map_err(|error| error.to_string())?;
     runtime
         .inner()
@@ -252,6 +235,111 @@ pub fn prepare(application: &DesktopApplication) -> Result<(), String> {
     Ok(())
 }
 
+fn prepare_model_credential(application: &DesktopApplication) -> Result<(), String> {
+    let endpoint = std::env::var("LILIA_AGENT_DEBUG_MODEL_ENDPOINT")
+        .map_err(|_| "LILIA_AGENT_DEBUG_MODEL_ENDPOINT is required for seeded replay")?;
+    let runtime = application.authority().shared_runtime();
+    if runtime
+        .inner()
+        .credentials()
+        .primary_usable_credential()
+        .is_none()
+    {
+        runtime
+            .inner()
+            .credentials()
+            .login(ProductCredentialLoginInput {
+                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.into(),
+                kind: CredentialKind::ApiKey,
+                secret_material: "sk-native-agent-debug-fixture".into(),
+                account_label: Some("Native Agent Debug".into()),
+                source: Some("agent_debug_fixture".into()),
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    runtime.inner().set_model_endpoint_override(Some(endpoint));
+    runtime
+        .inner()
+        .refresh_product_profile(None)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn seed_usage(application: &DesktopApplication, primary_project: &ProjectId) -> Result<(), String> {
+    let client = application
+        .authority()
+        .client()
+        .map_err(|error| error.to_string())?;
+    let secondary_project =
+        ProjectId::new("native-agent-debug-usage-project").map_err(|error| error.to_string())?;
+    if client.products().get_project(&secondary_project).is_err() {
+        client
+            .create_project(secondary_project.clone(), "用量图表验收")
+            .map_err(|error| error.to_string())?;
+    }
+    let today = lilia_feature_usage::day_start(lilia_feature_usage::now_millis());
+    for index in 0..3_i64 {
+        let task_id = TaskId::new(format!("native-agent-debug-usage-task-{index}"))
+            .map_err(|error| error.to_string())?;
+        if client.products().get_task(&task_id).is_err() {
+            client
+                .create_task(
+                    task_id.clone(),
+                    Some(if index == 0 {
+                        primary_project.clone()
+                    } else {
+                        secondary_project.clone()
+                    }),
+                    format!("用量会话 {}", index + 1),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        for day in 0..7_i64 {
+            let factor = (index + 1) * (day + 1);
+            let created_at = today - day * 86_400_000 + 12 * 3_600_000;
+            for kind in ["usage", "tool"] {
+                let payload = if kind == "usage" {
+                    json!({"inputTokens": 1000 * factor, "outputTokens": 200 * factor,
+                        "cacheReadTokens": 300 * factor, "cacheCreationTokens": 100 * factor,
+                        "totalTokens": 1600 * factor, "createdAt": created_at})
+                } else {
+                    json!({"toolName": (["read_file", "apply_patch", "run_tests"][index as usize]),
+                        "createdAt": created_at})
+                };
+                application
+                    .authority()
+                    .apply_projection(TimelineProjectionCommand::UpsertTimelineEvent {
+                        event: TimelineProjectionEvent {
+                            id: ProjectionEventId::new(format!(
+                                "native-agent-debug-{kind}-{index}-{day}"
+                            )),
+                            task_id: task_id.clone(),
+                            agent_session: AgentSessionRef::new(format!(
+                                "native-agent-debug-usage-{index}"
+                            ))
+                            .map_err(|error| error.to_string())?,
+                            sequence: day as u64 * 2 + if kind == "usage" { 1 } else { 2 },
+                            turn_id: Some(format!("native-agent-debug-usage-{index}-{day}")),
+                            kind: kind.to_owned(),
+                            status: "completed".to_owned(),
+                            title: if kind == "usage" {
+                                "用量"
+                            } else {
+                                "工具调用"
+                            }
+                            .to_owned(),
+                            summary: None,
+                            payload,
+                            projected: true,
+                        },
+                    })
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn seed_corrupt_architecture_snapshot(
     application: &DesktopApplication,
     project_id: &ProjectId,
@@ -310,8 +398,50 @@ fn seed_extensions(application: &DesktopApplication) -> Result<(), String> {
     let paths = application.config().data_paths();
     let mcp_path = mcp_registry_path(&paths);
     let skills_path = skills_registry_path(&paths);
-    let workspace = std::env::var("LILIA_AGENT_DEBUG_WORKSPACE")
-        .unwrap_or_else(|_| application.config().home().display().to_string());
+    let fixture_root = application.config().home().join("agent-debug-fixtures");
+    let skill_root = application.config().home().join("skills");
+    let skill_path = skill_root.join("native-debug-skill");
+    std::fs::create_dir_all(&skill_path).map_err(|error| error.to_string())?;
+    std::fs::write(skill_path.join("SKILL.md"),
+        "---\nname: native-debug-skill\ndescription: Local Native UI acceptance fixture\n---\nDescribe the selected code. Do not invoke tools.\n")
+        .map_err(|error| error.to_string())?;
+    let plugin_path = fixture_root.join("empty-plugin");
+    let plugin_skill = plugin_path.join("skills/native-ui-fixture");
+    std::fs::create_dir_all(&plugin_skill).map_err(|error| error.to_string())?;
+    std::fs::write(plugin_skill.join("SKILL.md"),
+        "---\nname: native-ui-fixture\ndescription: Inert local acceptance documentation\n---\nThis package contains only local documentation.\n")
+        .map_err(|error| error.to_string())?;
+    std::fs::write(plugin_path.join("lilia-plugin.json"), serde_json::to_vec_pretty(&json!({
+        "schemaVersion": 1, "pluginId": "native-debug-empty-plugin", "name": "Native Local Fixture",
+        "pluginVersion": "1.0.0", "description": "Local package without executable contributions",
+        "contributions": { "skills": ["skills/native-ui-fixture"] }
+    })).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+    lilia_storage::load_plugin_manifest(&plugin_path)
+        .map_err(|error| format!("validate local debug Plugin: {error}"))?;
+    let hooks_path = lilia_storage::user_hooks_document_path(&paths);
+    if !hooks_path.exists() {
+        lilia_storage::save_hooks_document(
+            &hooks_path,
+            &lilia_storage::AgentkitHooksDocument {
+                version: 1,
+                revision: 0,
+                enabled: false,
+                handlers: vec![lilia_storage::AgentkitHookHandler {
+                    id: "native-debug-disabled-hook".to_owned(),
+                    event: lilia_feature_hooks::HookEvent::UserPromptSubmit
+                        .as_str()
+                        .to_owned(),
+                    matcher: None,
+                    handler_type: "command".to_owned(),
+                    command: Some("native-debug-disabled-hook".to_owned()),
+                    command_windows: None,
+                    timeout_seconds: Some(10),
+                    status_message: None,
+                }],
+            },
+        )
+        .map_err(|error| format!("write disabled debug Hooks: {error}"))?;
+    }
     if !mcp_path.exists() {
         let registry = AgentkitMcpRegistry {
             version: 1,
@@ -339,21 +469,54 @@ fn seed_extensions(application: &DesktopApplication) -> Result<(), String> {
             version: 1,
             revision: 0,
             secret_free: true,
-            user_skill_roots: vec![workspace.clone()],
+            user_skill_roots: vec![skill_root.display().to_string()],
             packages: vec![AgentkitSkillPackageRef {
                 skill_id: "native-debug-skill".to_owned(),
-                path: workspace,
-                registered_from: "agent-debug".to_owned(),
+                path: skill_path.display().to_string(),
+                registered_from: "lilia.desktop.skill-manager".to_owned(),
                 scope: "user".to_owned(),
                 description: "Native debug Skill".to_owned(),
                 enabled: true,
             }],
         };
-        std::fs::write(
-            &skills_path,
-            serde_json::to_vec_pretty(&registry).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| format!("write debug Skills registry: {error}"))?;
+        lilia_storage::save_skills_registry(&paths, &registry)
+            .map_err(|error| format!("write debug Skills registry: {error}"))?;
+    }
+    Ok(())
+}
+
+fn prepare_pagination(application: &DesktopApplication) -> Result<(), String> {
+    let client = application
+        .authority()
+        .client()
+        .map_err(|error| error.to_string())?;
+    let project_id =
+        ProjectId::new("native-agent-debug-zz-pagination").map_err(|error| error.to_string())?;
+    if client.products().get_project(&project_id).is_err() {
+        let mut project = lilia_contracts::Project::new(project_id.clone(), "ZZ 会话分页验收")
+            .map_err(|error| error.to_string())?;
+        project.sort_order = 10_000;
+        client
+            .products()
+            .create_entity(ProductEntity::Project(project))
+            .map_err(|error| error.to_string())?;
+    }
+    for index in 1..=105 {
+        let task_id = TaskId::new(format!("native-pagination-{index:03}"))
+            .map_err(|error| error.to_string())?;
+        if client.products().get_task(&task_id).is_err() {
+            let mut task = lilia_contracts::ProductTask::new(
+                task_id,
+                Some(project_id.clone()),
+                format!("分页会话 {index:03}"),
+            )
+            .map_err(|error| error.to_string())?;
+            task.sort_order = index;
+            client
+                .products()
+                .create_entity(ProductEntity::Task(task))
+                .map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
 }

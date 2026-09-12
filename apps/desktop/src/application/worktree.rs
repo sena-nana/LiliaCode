@@ -8,7 +8,70 @@ use crate::application::{DesktopApplication, DesktopApplicationError};
 
 pub use lilia_feature_worktree::*;
 
+struct WorktreeOperationGuard {
+    application: DesktopApplication,
+    task_id: TaskId,
+}
+
+impl Drop for WorktreeOperationGuard {
+    fn drop(&mut self) {
+        self.application
+            .inner
+            .worktree_operations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.task_id);
+    }
+}
+
 impl DesktopApplication {
+    pub(crate) fn ensure_task_worktree_idle(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<(), DesktopApplicationError> {
+        if self
+            .inner
+            .worktree_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("worktree operations"))?
+            .contains(task_id)
+        {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "worktree",
+                message: "工作树操作尚未完成，请完成后重试。".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    fn begin_worktree_operation(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<WorktreeOperationGuard, DesktopApplicationError> {
+        let _submission = self
+            .inner
+            .turn_submission
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        self.ensure_task_worktree_idle(task_id)?;
+        let runtime = self.task_runtime_snapshot(task_id);
+        if runtime.turn_id.is_some() || runtime.queued_turns > 0 {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "worktree",
+                message: "请先停止当前任务，再更改工作树。".to_owned(),
+            });
+        }
+        self.inner
+            .worktree_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("worktree operations"))?
+            .insert(task_id.clone());
+        Ok(WorktreeOperationGuard {
+            application: self.clone(),
+            task_id: task_id.clone(),
+        })
+    }
+
     pub fn set_initial_worktree_intent(
         &self,
         task_id: &TaskId,
@@ -141,6 +204,7 @@ impl DesktopApplication {
         task_id: &TaskId,
         parent_directory: Option<&Path>,
     ) -> Result<DesktopTaskWorktree, DesktopApplicationError> {
+        let _operation = self.begin_worktree_operation(task_id)?;
         let (task, project_id, base) = self.task_repository(task_id)?;
         if self.task_worktree(task_id)?.is_some() {
             return Err(DesktopWorktreeError::AlreadyBound(task_id.clone()).into());
@@ -212,6 +276,7 @@ impl DesktopApplication {
         task_id: &TaskId,
         worktree_path: &Path,
     ) -> Result<DesktopTaskWorktree, DesktopApplicationError> {
+        let _operation = self.begin_worktree_operation(task_id)?;
         let (_, project_id, base) = self.task_repository(task_id)?;
         if self.task_worktree(task_id)?.is_some() {
             return Err(DesktopWorktreeError::AlreadyBound(task_id.clone()).into());
@@ -255,6 +320,7 @@ impl DesktopApplication {
     }
 
     pub fn clear_task_worktree(&self, task_id: &TaskId) -> Result<bool, DesktopApplicationError> {
+        let _operation = self.begin_worktree_operation(task_id)?;
         self.get_task(task_id)?;
         let changed = self
             .inner
@@ -274,6 +340,7 @@ impl DesktopApplication {
         &self,
         task_id: &TaskId,
     ) -> Result<DesktopWorktreeMergeResult, DesktopApplicationError> {
+        let _operation = self.begin_worktree_operation(task_id)?;
         let worktree = self
             .task_worktree(task_id)?
             .ok_or_else(|| DesktopWorktreeError::NotBound(task_id.clone()))?;
@@ -299,6 +366,7 @@ impl DesktopApplication {
         &self,
         task_id: &TaskId,
     ) -> Result<DesktopWorktreeMergeResult, DesktopApplicationError> {
+        let _operation = self.begin_worktree_operation(task_id)?;
         let worktree = self
             .task_worktree(task_id)?
             .ok_or_else(|| DesktopWorktreeError::NotBound(task_id.clone()))?;
@@ -555,5 +623,97 @@ mod tests {
         assert!(application.retry_initial_worktree(&task_id).unwrap());
         assert_eq!(application.initial_worktree_intent(&task_id).unwrap(), None);
         assert!(application.task_worktree(&task_id).unwrap().is_some());
+    }
+    #[test]
+    fn worktree_operation_gate_blocks_turn_admission_and_releases_after_failure() {
+        let root = TempDir::new().unwrap();
+        let repo = root.path().join("repo");
+        initialize_repository(&repo);
+        let (application, task_id) = application(&repo);
+        application
+            .execute_composer_command(
+                &task_id,
+                crate::application::DesktopComposerCommand::SetContent(
+                    "Preserve this draft".into(),
+                ),
+            )
+            .unwrap();
+        let before = application.composer_state(&task_id).unwrap();
+        let operation = application.begin_worktree_operation(&task_id).unwrap();
+        assert!(application.begin_worktree_operation(&task_id).is_err());
+        for result in [
+            application.start_composer_turn(&task_id).map(|_| ()),
+            application.submit_composer(&task_id).map(|_| ()),
+            application
+                .start_task_turn(crate::application::DesktopTurnRequest::new(
+                    task_id.clone(),
+                    "direct",
+                ))
+                .map(|_| ()),
+            application
+                .start_task_turn_idempotent(
+                    crate::application::DesktopTurnRequest::new(task_id.clone(), "automation"),
+                    "worktree-gate",
+                )
+                .map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(DesktopApplicationError::InvalidInput {
+                    field: "worktree",
+                    ..
+                })
+            ));
+        }
+        assert_eq!(application.composer_state(&task_id).unwrap(), before);
+        assert!(application
+            .task_runtime_snapshot(&task_id)
+            .turn_id
+            .is_none());
+        drop(operation);
+        assert!(application.ensure_task_worktree_idle(&task_id).is_ok());
+        assert!(application
+            .attach_task_worktree(&task_id, &root.path().join("missing"))
+            .is_err());
+        assert!(application.ensure_task_worktree_idle(&task_id).is_ok());
+        let binding = application
+            .create_task_worktree(&task_id, Some(root.path()))
+            .unwrap();
+        assert!(Path::new(&binding.worktree_path).exists());
+        assert!(application.ensure_task_worktree_idle(&task_id).is_ok());
+        let result = application
+            .cleanup_task_worktree_and_archive(&task_id)
+            .unwrap();
+        assert!(result.removed && result.archived);
+        assert!(application.ensure_task_worktree_idle(&task_id).is_ok());
+    }
+
+    #[test]
+    fn worktree_operation_gate_rejects_running_tasks_without_changing_binding() {
+        let root = TempDir::new().unwrap();
+        let repo = root.path().join("repo");
+        initialize_repository(&repo);
+        let (application, task_id) = application(&repo);
+        let binding = application
+            .create_task_worktree(&task_id, Some(root.path()))
+            .unwrap();
+        application.inner.agent.enqueue_with_turn_id(
+            crate::application::DesktopTurnRequest::new(task_id.clone(), "running"),
+            "held-turn".into(),
+        );
+        assert!(application.clear_task_worktree(&task_id).is_err());
+        assert!(application
+            .cleanup_task_worktree_and_archive(&task_id)
+            .is_err());
+        assert!(application
+            .merge_task_worktree_and_archive(&task_id)
+            .is_err());
+        assert_eq!(
+            application.task_worktree(&task_id).unwrap(),
+            Some(binding.clone())
+        );
+        assert!(Path::new(&binding.worktree_path).exists());
+        assert!(!application.get_task(&task_id).unwrap().archived);
+        assert!(application.ensure_task_worktree_idle(&task_id).is_ok());
     }
 }

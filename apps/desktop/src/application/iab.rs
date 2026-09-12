@@ -48,6 +48,13 @@ pub struct DesktopIabSubmission {
 }
 
 impl DesktopApplication {
+    pub fn prepare_iab_snapshot(
+        &self,
+        input: DesktopIabSnapshotInput,
+    ) -> Result<(DesktopIabSnapshot, DesktopTurnRequest), DesktopApplicationError> {
+        build_iab_turn(input)
+    }
+
     pub fn submit_iab_snapshot(
         &self,
         input: DesktopIabSnapshotInput,

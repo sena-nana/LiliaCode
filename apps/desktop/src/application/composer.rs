@@ -118,17 +118,18 @@ impl DesktopApplication {
         session_branch: Option<DesktopSessionBranchAnchor>,
     ) -> Result<DesktopTurnDispatch, DesktopApplicationError> {
         self.ensure_initial_worktree_ready(task_id)?;
+        let submission = self
+            .inner
+            .turn_submission
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        self.ensure_task_worktree_idle(task_id)?;
         let composer = self.composer_state(task_id)?;
         let mut request = composer.turn_request();
         request.session_branch = session_branch;
         request.workspace_path = self.task_workspace_path(task_id)?;
         let request = self.prepare_task_turn_request(request)?;
         self.promote_composer_task_if_draft(&composer)?;
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
         let turn_id = format!("native-turn-{}", Uuid::new_v4());
         let cleared = self
             .inner
@@ -176,6 +177,7 @@ impl DesktopApplication {
             .turn_submission
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        self.ensure_task_worktree_idle(task_id)?;
         let composer = self.composer_state(task_id)?;
         if session_branch.is_none()
             && composer.effective_attachments().next().is_none()

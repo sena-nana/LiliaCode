@@ -40,6 +40,15 @@ const SUBAGENT_TOOL_PLUGIN_ID: &str = "lilia.plugin.agent.custom-subagent";
 const SUBAGENT_TOOL_RUNNER_ID: &str = "lilia.agent.custom-subagent.runner";
 const SUBAGENT_TOOL_PROTOCOL: &str = "lilia.agent.custom-subagent.tool@1";
 const SUBAGENT_TASK_TIMEOUT: Duration = Duration::from_secs(90);
+const MCP_TOOL_PLUGIN_ID: &str = "lilia.plugin.agent.shared-mcp";
+const MCP_TOOL_PROTOCOL: &str = "lilia.agent.shared-mcp.tool@1";
+
+#[derive(Clone, Debug)]
+struct SharedMcpToolProtocol;
+impl SdkProtocol for SharedMcpToolProtocol {
+    const PROTOCOL_ID: &'static str = MCP_TOOL_PROTOCOL;
+}
+impl ProtocolSpec for SharedMcpToolProtocol {}
 const PROJECT_ARCHITECTURE_TOOL_NAME: &str = "update_project_architecture";
 const PROJECT_ARCHITECTURE_CONTRACT_JSON: &str =
     include_str!("../../lilia-contracts/contracts/architecture-contract.json");
@@ -95,6 +104,64 @@ pub(crate) struct AgentKitHost {
     runtime: Arc<HostRuntime>,
     next_task: AtomicU64,
     subagents: Option<Arc<LiveSubagentToolRuntime>>,
+    mcp_calls: SharedMcpCalls,
+}
+
+type SharedMcpCalls = Arc<Mutex<SharedMcpCallState>>;
+
+#[derive(Default)]
+struct SharedMcpCallState {
+    active: BTreeMap<String, (String, String, mutsuki_agent_plugin_mcp::McpCancellation)>,
+    turns: BTreeMap<(String, String), (u64, bool)>,
+}
+
+pub(crate) struct SharedMcpTurnGuard {
+    calls: SharedMcpCalls,
+    key: (String, String),
+    generation: u64,
+}
+impl SharedMcpTurnGuard {
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+impl Drop for SharedMcpTurnGuard {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.calls.lock() {
+            if state
+                .turns
+                .get(&self.key)
+                .map(|(generation, _)| *generation)
+                != Some(self.generation)
+            {
+                return;
+            }
+            state.turns.remove(&self.key);
+            for (session, turn, cancellation) in state.active.values() {
+                if session == &self.key.0 && turn == &self.key.1 {
+                    cancellation.cancel();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn mcp_registration_hooks() -> &'static Mutex<BTreeMap<String, Box<dyn FnOnce() + Send>>> {
+    static HOOKS: OnceLock<Mutex<BTreeMap<String, Box<dyn FnOnce() + Send>>>> = OnceLock::new();
+    HOOKS.get_or_init(Mutex::default)
+}
+
+struct SharedMcpCallGuard {
+    calls: SharedMcpCalls,
+    task_id: String,
+}
+impl Drop for SharedMcpCallGuard {
+    fn drop(&mut self) {
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.active.remove(&self.task_id);
+        }
+    }
 }
 
 impl AgentKitHost {
@@ -144,7 +211,20 @@ impl AgentKitHost {
         tool_access: ToolAccess,
         subagents: Option<Arc<LiveSubagentToolRuntime>>,
     ) -> AgentResult<Self> {
+        let mcp_names = bundle
+            .mcp
+            .catalog(None, None)?
+            .tools
+            .into_iter()
+            .map(|tool| tool.namespaced_name)
+            .collect::<std::collections::BTreeSet<_>>();
         let mut product_tools = bundle.routed_model_tools();
+        for descriptor in &mut product_tools {
+            if mcp_names.contains(&descriptor.name) {
+                descriptor.target_protocol_id = MCP_TOOL_PROTOCOL.into();
+                descriptor.target_payload_mode = ToolTargetPayloadMode::ExecutionRequest;
+            }
+        }
         if !product_tools
             .iter()
             .any(|descriptor| descriptor.name == PROJECT_ARCHITECTURE_TOOL_NAME)
@@ -156,6 +236,7 @@ impl AgentKitHost {
             .filter(|descriptor| {
                 tool_access.allows(descriptor)
                     && (enable_workspace_tools
+                        || mcp_names.contains(&descriptor.name)
                         || matches!(
                             &descriptor.execution,
                             AgentToolExecution::Interaction { .. }
@@ -199,6 +280,13 @@ impl AgentKitHost {
         let mut manifests = bundle.core.manifests();
         let mut native_tools = native_coding_tool_plugin(client.clone(), bundle.clone()).build();
         manifests.push(native_tools.manifest.clone());
+        let mcp_calls = SharedMcpCalls::default();
+        if let Some(runtime) = subagents.as_ref() {
+            let _ = runtime.parent_calls.set(mcp_calls.clone());
+        }
+        let mut mcp_tools =
+            shared_mcp_tool_plugin(client.clone(), bundle.mcp.clone(), mcp_calls.clone()).build();
+        manifests.push(mcp_tools.manifest.clone());
         let mut subagent_tools = subagents.as_ref().map(|runtime| {
             native_subagent_tool_plugin(client.clone(), Arc::clone(runtime)).build()
         });
@@ -215,6 +303,9 @@ impl AgentKitHost {
         }
         bootstrapper.register_async_handler(bundle.core.model_async_handler());
         for runner in native_tools.runners.drain(..) {
+            bootstrapper.register_builtin_runner(runner);
+        }
+        for runner in mcp_tools.runners.drain(..) {
             bootstrapper.register_builtin_runner(runner);
         }
         if let Some(plugin) = subagent_tools.as_mut() {
@@ -262,6 +353,7 @@ impl AgentKitHost {
             runtime,
             next_task: AtomicU64::new(1),
             subagents,
+            mcp_calls,
         })
     }
 
@@ -329,6 +421,91 @@ impl AgentKitHost {
         self.runtime.cancel_task(handle).map_err(runtime_error)
     }
 
+    pub(crate) fn begin_mcp_turn(
+        &self,
+        session: &str,
+        turn: &str,
+    ) -> AgentResult<SharedMcpTurnGuard> {
+        let key = (session.to_owned(), turn.to_owned());
+        let mut state = self
+            .mcp_calls
+            .lock()
+            .map_err(|_| AgentError::provider_unavailable("MCP active calls unavailable"))?;
+        if state.turns.contains_key(&key) {
+            return Err(AgentError::invalid_input("MCP turn is already active"));
+        }
+        static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+        let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
+        state.turns.insert(key.clone(), (generation, true));
+        Ok(SharedMcpTurnGuard {
+            calls: self.mcp_calls.clone(),
+            key,
+            generation,
+        })
+    }
+
+    pub(crate) fn cancel_mcp(&self, session_id: &str, turn_id: &str) -> AgentResult<()> {
+        let mut calls = self
+            .mcp_calls
+            .lock()
+            .map_err(|_| AgentError::provider_unavailable("MCP active calls unavailable"))?;
+        if let Some(open) = calls
+            .turns
+            .get_mut(&(session_id.to_owned(), turn_id.to_owned()))
+        {
+            open.1 = false;
+        }
+        for (session, turn, cancellation) in calls.active.values() {
+            if session == session_id && turn == turn_id {
+                cancellation.cancel();
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn before_mcp_registration(session: &str, hook: impl FnOnce() + Send + 'static) {
+        mcp_registration_hooks()
+            .lock()
+            .unwrap()
+            .insert(session.into(), Box::new(hook));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mcp_turn_cancelled(&self, session: &str, turn: &str) -> bool {
+        self.mcp_calls
+            .lock()
+            .unwrap()
+            .turns
+            .get(&(session.into(), turn.into()))
+            .is_none_or(|(_, open)| !open)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_mcp_turn_admission(&self, session: &str, turn: &str) {
+        let key = (session.into(), turn.into());
+        let generation = self
+            .mcp_calls
+            .lock()
+            .unwrap()
+            .turns
+            .get(&key)
+            .map(|entry| entry.0);
+        let Some(generation) = generation else {
+            return;
+        };
+        drop(SharedMcpTurnGuard {
+            calls: self.mcp_calls.clone(),
+            key,
+            generation,
+        });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mcp_turn_count(&self) -> usize {
+        self.mcp_calls.lock().unwrap().turns.len()
+    }
+
     pub(crate) fn cancel_subagents(&self, parent_session_id: &str) -> AgentResult<usize> {
         self.subagents
             .as_ref()
@@ -375,11 +552,18 @@ impl ToolAccess {
     }
 }
 
+struct ActiveSubagent {
+    handle: TaskHandle,
+    session_id: String,
+    turn_id: String,
+}
+
 struct LiveSubagentToolRuntime {
     child_host: Arc<AgentKitHost>,
     definitions: BTreeMap<String, NativeSubagentDefinition>,
     results: Mutex<BTreeMap<String, Value>>,
-    active: Mutex<BTreeMap<String, Vec<TaskHandle>>>,
+    active: Mutex<BTreeMap<String, Vec<ActiveSubagent>>>,
+    parent_calls: OnceLock<SharedMcpCalls>,
     gates: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
 }
 
@@ -393,6 +577,7 @@ impl LiveSubagentToolRuntime {
                 .collect(),
             results: Mutex::new(BTreeMap::new()),
             active: Mutex::new(BTreeMap::new()),
+            parent_calls: OnceLock::new(),
             gates: Mutex::new(BTreeMap::new()),
         }
     }
@@ -546,29 +731,60 @@ impl LiveSubagentToolRuntime {
             &child_request.profile_id,
             &definition.name,
         )?;
-        child_request.session_id = Some(child_session_id);
-        child_request.turn_id = Some(child_turn_id);
+        let admission = self
+            .child_host
+            .begin_mcp_turn(&child_session_id, &child_turn_id)?;
+        child_request.session_id = Some(child_session_id.clone());
+        child_request.turn_id = Some(child_turn_id.clone());
         child_request.permission_mode = AgentPermissionMode::ReadOnly;
         child_request.max_steps = 8;
         child_request.metadata = Some(json!({
             "parentSessionId": parent_session_id,
             "parentTurnId": parent_turn_id,
+            "turn_id": child_turn_id,
+            "mcpAdmission": admission.generation(),
             "subagentId": definition.id,
             "subagentName": definition.name,
             "callId": call_id,
         }));
-        let handle = self.child_host.submit(
-            "custom-subagent",
-            AGENT_RUN_PROTOCOL,
-            serde_json::to_value(child_request)
-                .map_err(|error| AgentError::invalid_input(error.to_string()))?,
-        )?;
-        self.active
-            .lock()
-            .map_err(|_| AgentError::provider_unavailable("subagent active state unavailable"))?
-            .entry(parent_session_id.clone())
-            .or_default()
-            .push(handle.clone());
+        let handle = {
+            let mut active = self.active.lock().map_err(|_| {
+                AgentError::provider_unavailable("subagent active state unavailable")
+            })?;
+            let parent_calls = self.parent_calls.get().ok_or_else(|| {
+                AgentError::provider_unavailable("subagent parent lifecycle unavailable")
+            })?;
+            let generation = context
+                .and_then(|metadata| metadata.get("mcpAdmission"))
+                .and_then(Value::as_u64);
+            let admitted = parent_calls
+                .lock()
+                .map_err(|_| AgentError::provider_unavailable("parent turn state unavailable"))?
+                .turns
+                .get(&(parent_session_id.clone(), parent_turn_id.clone()))
+                .is_some_and(|(current, open)| *open && Some(*current) == generation);
+            if !admitted {
+                return Err(AgentError::new(
+                    "agent.subagent.cancelled",
+                    "Parent turn is no longer active",
+                ));
+            }
+            let handle = self.child_host.submit(
+                "custom-subagent",
+                AGENT_RUN_PROTOCOL,
+                serde_json::to_value(child_request)
+                    .map_err(|error| AgentError::invalid_input(error.to_string()))?,
+            )?;
+            active
+                .entry(parent_session_id.clone())
+                .or_default()
+                .push(ActiveSubagent {
+                    handle: handle.clone(),
+                    session_id: child_session_id,
+                    turn_id: child_turn_id,
+                });
+            handle
+        };
         let output = self.child_host.wait(&handle, SUBAGENT_TASK_TIMEOUT);
         self.remove_active(&parent_session_id, &handle)?;
         let run: AgentRunResult = serde_json::from_value(output?)
@@ -647,7 +863,7 @@ impl LiveSubagentToolRuntime {
             .lock()
             .map_err(|_| AgentError::provider_unavailable("subagent active state unavailable"))?;
         if let Some(handles) = active.get_mut(parent_session_id) {
-            handles.retain(|candidate| candidate.task_id != handle.task_id);
+            handles.retain(|candidate| candidate.handle.task_id != handle.task_id);
             if handles.is_empty() {
                 active.remove(parent_session_id);
             }
@@ -662,11 +878,118 @@ impl LiveSubagentToolRuntime {
             .map_err(|_| AgentError::provider_unavailable("subagent active state unavailable"))?
             .remove(parent_session_id)
             .unwrap_or_default();
-        for handle in &handles {
-            self.child_host.cancel(handle)?;
+        for child in &handles {
+            self.child_host
+                .cancel_mcp(&child.session_id, &child.turn_id)?;
+            self.child_host.cancel(&child.handle)?;
         }
         Ok(handles.len())
     }
+}
+
+fn shared_mcp_tool_plugin(
+    client: RuntimeClientRef,
+    service: Arc<mutsuki_agent_plugin_mcp::SharedMcpService>,
+    calls: SharedMcpCalls,
+) -> PluginBuilder {
+    let descriptor = mutsuki_agent_sdk::orchestration_runner(
+        "lilia.agent.shared-mcp.runner",
+        MCP_TOOL_PLUGIN_ID,
+    )
+    .accepts::<SharedMcpToolProtocol>()
+    .build();
+    PluginBuilder::new(MCP_TOOL_PLUGIN_ID)
+        .protocol::<SharedMcpToolProtocol>()
+        .runner(Box::new(TaskAwaitRunnerAdapter::new(
+            descriptor,
+            client,
+            Box::new(move |_context, task| {
+                let service = service.clone();
+                let calls = calls.clone();
+                Box::pin(async move {
+                    let result = (|| -> AgentResult<Value> {
+                        let request: AgentToolExecuteRequest =
+                            serde_json::from_value(task.payload.clone().into())
+                                .map_err(|error| AgentError::invalid_input(error.to_string()))?;
+                        if request.approval.as_ref().is_some_and(|approval| {
+                            approval.decision.decision
+                                != mutsuki_agent_contracts::PermissionDecisionKind::Approved
+                        }) {
+                            return Err(AgentError::new(
+                                "agent.permission.denied",
+                                "MCP tool approval was not granted",
+                            ));
+                        }
+                        let control = mutsuki_agent_plugin_mcp::McpRequestControl::default();
+                        let session = request.session_id.as_deref().ok_or_else(|| {
+                            AgentError::invalid_input("MCP call session is required")
+                        })?;
+                        let turn = request
+                            .context
+                            .as_ref()
+                            .and_then(|context| context.get("turn_id"))
+                            .and_then(Value::as_str)
+                            .filter(|turn| !turn.is_empty())
+                            .ok_or_else(|| {
+                                AgentError::invalid_input("MCP call turn is required")
+                            })?;
+                        #[cfg(test)]
+                        {
+                            let hook = mcp_registration_hooks().lock().unwrap().remove(session);
+                            if let Some(hook) = hook {
+                                hook();
+                            }
+                        }
+                        {
+                            let mut state = calls.lock().map_err(|_| {
+                                AgentError::provider_unavailable("MCP active calls unavailable")
+                            })?;
+                            let generation = request
+                                .context
+                                .as_ref()
+                                .and_then(|context| context.get("mcpAdmission"))
+                                .and_then(Value::as_u64);
+                            if !state
+                                .turns
+                                .get(&(session.to_owned(), turn.to_owned()))
+                                .is_some_and(|(admitted, open)| {
+                                    *open && Some(*admitted) == generation
+                                })
+                            {
+                                return Err(AgentError::new(
+                                    "agent.mcp.cancelled",
+                                    "MCP turn was cancelled",
+                                ));
+                            }
+                            state.active.insert(
+                                task.task_id.clone(),
+                                (
+                                    session.to_owned(),
+                                    turn.to_owned(),
+                                    control.cancellation.clone(),
+                                ),
+                            );
+                        }
+                        let _guard = SharedMcpCallGuard {
+                            calls,
+                            task_id: task.task_id.clone(),
+                        };
+                        serde_json::to_value(service.call_tool(
+                            &request.name,
+                            request.input,
+                            &control,
+                        )?)
+                        .map_err(|error| AgentError::invalid_input(error.to_string()))
+                    })()
+                    .map_err(|error| {
+                        mutsuki_agent_sdk::runtime_failure(MCP_TOOL_PLUGIN_ID, &task.task_id, error)
+                    })?;
+                    let mut completed = RunnerResult::completed(task.task_id);
+                    completed.output = Some(result);
+                    Ok(completed)
+                })
+            }),
+        )))
 }
 
 fn native_subagent_tool_plugin(

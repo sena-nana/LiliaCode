@@ -385,6 +385,16 @@ impl DesktopTodoStore {
         let Some(mut todo) = current else {
             return Ok(None);
         };
+        if matches!(
+            todo.guide_status,
+            Some(DesktopTodoGuideStatus::Queued | DesktopTodoGuideStatus::Sent)
+        ) && (update.text.is_some()
+            || update.done.is_some()
+            || update.order.is_some()
+            || update.priority.is_some())
+        {
+            return Ok(None);
+        }
         if let Some(text) = update.text {
             todo.text = normalized_text(&text)?;
         }
@@ -427,7 +437,7 @@ impl DesktopTodoStore {
         let task_id = self
             .connection()
             .query_row(
-                "SELECT task_id FROM task_todos WHERE id = ?1 AND source = 'lilia'",
+                "SELECT task_id FROM task_todos WHERE id = ?1 AND source = 'lilia' AND (guide_status IS NULL OR guide_status != 'queued')",
                 params![id],
                 |row| row.get::<_, String>(0),
             )
@@ -443,7 +453,7 @@ impl DesktopTodoStore {
         }
         self.connection()
             .execute(
-                "DELETE FROM task_todos WHERE id = ?1 AND source = 'lilia'",
+                "DELETE FROM task_todos WHERE id = ?1 AND source = 'lilia' AND (guide_status IS NULL OR guide_status != 'queued')",
                 params![id],
             )
             .map_err(|error| DesktopTodoError::Storage {
@@ -834,6 +844,81 @@ mod tests {
         assert_eq!(store.list(&task_id).unwrap(), vec![updated.clone()]);
         assert_eq!(store.delete(&created.id).unwrap(), Some(task_id.clone()));
         assert!(store.list(&task_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn queued_guide_content_is_immutable_until_dispatch_lifecycle_finishes() {
+        let store = DesktopTodoStore::in_memory().unwrap();
+        let task_id = TaskId::new("queued-guide").unwrap();
+        let todo = store
+            .create(DesktopTodoCreate {
+                task_id: task_id.clone(),
+                text: "keep queued payload".into(),
+                priority: DesktopTodoPriority::Normal,
+                attachments: Vec::new(),
+                conversation_references: Vec::new(),
+                workflow: None,
+            })
+            .unwrap();
+        store
+            .update(
+                &todo.id,
+                DesktopTodoUpdate {
+                    guide_status: Some(DesktopTodoGuideStatus::Queued),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(store
+            .update(
+                &todo.id,
+                DesktopTodoUpdate {
+                    text: Some("changed".into()),
+                    priority: Some(DesktopTodoPriority::High),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .is_none());
+        assert!(store.delete(&todo.id).unwrap().is_none());
+        let queued = store.list(&task_id).unwrap().remove(0);
+        assert_eq!(queued.text, todo.text);
+        assert_eq!(queued.priority, todo.priority);
+        store
+            .update(
+                &todo.id,
+                DesktopTodoUpdate {
+                    guide_status: Some(DesktopTodoGuideStatus::Pending),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(store
+            .update(
+                &todo.id,
+                DesktopTodoUpdate {
+                    text: Some("retry after cancellation".into()),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .is_some());
+        store
+            .update(
+                &todo.id,
+                DesktopTodoUpdate {
+                    guide_status: Some(DesktopTodoGuideStatus::Sent),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(store
+            .select_pending_guide_by_id(&task_id, &todo.id)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
