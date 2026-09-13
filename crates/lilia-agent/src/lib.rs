@@ -27,7 +27,8 @@ pub use anthropic_adapter::{
     DEFAULT_ANTHROPIC_ENDPOINT, DEFAULT_ANTHROPIC_MODEL, ENV_ANTHROPIC_ENDPOINT,
 };
 pub use browser::{
-    BrowserCancellation, BrowserError, BrowserScopeAuthority, BrowserSessions, TaskBrowserHost,
+    BrowserArtifactSink, BrowserCancellation, BrowserError, BrowserScopeAuthority, BrowserSessions,
+    TaskBrowserHost,
 };
 pub use credential::{
     CredentialDescriptorView, CredentialHealthSnapshot, InMemoryProductCredentialRegistry,

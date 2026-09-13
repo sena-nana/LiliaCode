@@ -67,9 +67,14 @@ impl LiliaDataPaths {
         self.db_dir().join(LEGACY_DESKTOP_DB_FILE)
     }
 
+    /// Product artifact materializations under the shared LILIA_HOME.
+    pub fn product_artifacts_root(&self) -> PathBuf {
+        self.home.join("artifacts")
+    }
+
     pub fn ensure_layout(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.home())?;
-        for sub in ["config", "db", "cache"] {
+        for sub in ["config", "db", "cache", "artifacts"] {
             std::fs::create_dir_all(self.home.join(sub))?;
         }
         Ok(())

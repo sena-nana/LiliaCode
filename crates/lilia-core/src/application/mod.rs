@@ -7,4 +7,5 @@ pub use agent_port::{
     AgentKitClientPort, AgentKitPortError, NativeAgentCapabilitySnapshot, UnavailableAgentKitPort,
 };
 pub use binding_service::SessionBindingService;
+pub use product_entities::BrowserScreenshotInput;
 pub use store::{InMemoryProductStore, ProductRepository, ProductServices};

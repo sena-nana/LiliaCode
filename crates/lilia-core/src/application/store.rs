@@ -28,6 +28,11 @@ pub trait ProductRepository: Send + Sync {
     ) -> ProductResult<ProductEntity>;
     fn get_entity(&self, kind: ProductEntityKind, id: &str) -> ProductResult<ProductEntity>;
     fn list_entities(&self, kind: ProductEntityKind) -> ProductResult<Vec<ProductEntity>>;
+    fn find_artifact_by_content_hash(
+        &self,
+        task_id: &TaskId,
+        content_hash: &str,
+    ) -> ProductResult<Option<lilia_contracts::ProductArtifact>>;
     fn create_entity_command(
         &self,
         meta: &ProductCommandMeta,
@@ -236,6 +241,33 @@ impl ProductRepository for Mutex<InMemoryProductStore> {
         };
         entities.sort_by(|left, right| left.id().cmp(right.id()));
         Ok(entities)
+    }
+
+    fn find_artifact_by_content_hash(
+        &self,
+        task_id: &TaskId,
+        content_hash: &str,
+    ) -> ProductResult<Option<lilia_contracts::ProductArtifact>> {
+        let store = lock_store(self)?;
+        Ok(store
+            .entities
+            .values()
+            .filter_map(|entity| match entity {
+                ProductEntity::Artifact(artifact)
+                    if artifact.task_id == *task_id
+                        && artifact.provenance.as_deref() == Some("browser.screenshot")
+                        && artifact.content_hash.as_deref() == Some(content_hash) =>
+                {
+                    Some(artifact)
+                }
+                _ => None,
+            })
+            .max_by(|left, right| {
+                left.revision
+                    .cmp(&right.revision)
+                    .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+            })
+            .cloned())
     }
 
     fn create_entity_command(
@@ -1306,6 +1338,15 @@ impl ProductServices {
 
     pub fn list_entities(&self, kind: ProductEntityKind) -> ProductResult<Vec<ProductEntity>> {
         self.repository.list_entities(kind)
+    }
+
+    pub fn find_artifact_by_content_hash(
+        &self,
+        task_id: &TaskId,
+        content_hash: &str,
+    ) -> ProductResult<Option<lilia_contracts::ProductArtifact>> {
+        self.repository
+            .find_artifact_by_content_hash(task_id, content_hash)
     }
 
     pub fn create_entity_command(

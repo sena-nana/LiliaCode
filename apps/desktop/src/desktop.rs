@@ -19,13 +19,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::application::DesktopComposerTurnRequest;
 use crate::application::DesktopTodoGuideStatus;
 use crate::application::{
-    ApplicationWorkspaceSurface, ArchitectureChangeStatus, ArchitecturePermission,
-    AutomationRunDetail, AutomationRunStatus, AutomationWorkflow, CODING_TOOLS_PANEL_ID,
+    clipboard_text_should_be_attachment, describe_attachment_paths,
+    preview_automatic_turn_selection, ApplicationWorkspaceSurface, ArchitectureChangeStatus,
+    ArchitecturePermission, AutomationRunDetail, AutomationRunStatus, AutomationWorkflow,
     ChatAttachment, ChatAttachmentKind, ChatContextSearchResult, ChatConversationReference,
-    CredentialImportDecision, DOCUMENT_WORKSPACE_ITEM_KIND, DesktopAgentInteractionError,
-    DesktopAgentInteractionSettings, DesktopAgentInteractionSettingsUpdate,
-    DesktopAgentRuntimeSettings, DesktopAgentRuntimeSettingsUpdate, DesktopApplication,
-    DesktopApplicationConfig, DesktopApplicationError, DesktopApplicationSuggestionModelPort,
+    CredentialImportDecision, DesktopAgentInteractionError, DesktopAgentInteractionSettings,
+    DesktopAgentInteractionSettingsUpdate, DesktopAgentRuntimeSettings,
+    DesktopAgentRuntimeSettingsUpdate, DesktopApplication, DesktopApplicationConfig,
+    DesktopApplicationError, DesktopApplicationSuggestionModelPort,
     DesktopArchitectureInteractionDecision, DesktopAssistantAiModelsResult,
     DesktopAssistantAiProbeInput, DesktopAssistantAiTestResult, DesktopAutomaticTurnSelection,
     DesktopCodeSearchMode, DesktopCodeSearchScope, DesktopCodingServicesSnapshot, DesktopCommand,
@@ -53,15 +54,14 @@ use crate::application::{
     DesktopTurnState, DesktopUpdateState, DesktopWorkspaceCodeSearchHit,
     DesktopWorkspaceCodeSearchResult, DesktopWorkspaceListing, DesktopWorkspaceProject,
     DesktopWorkspaceSession, DesktopWorkspaceSessionId, DesktopWorkspaceSnapshot,
-    DesktopWorkspaceTask, DesktopWorktreeSelectionMode, DockSlot, IAB_PANEL_ID,
-    MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES, MemoryScope, MemoryUpsertInput, MilestoneDueDateUpdate,
-    MilestoneStatus, PaneId, PaneNode, PanelId, PanelLayoutSnapshot, PanelState,
-    ProjectArchitectureChange, ProjectArchitectureGraph, ProjectFilesSnapshot,
+    DesktopWorkspaceTask, DesktopWorktreeSelectionMode, DockSlot, MemoryScope, MemoryUpsertInput,
+    MilestoneDueDateUpdate, MilestoneStatus, PaneId, PaneNode, PanelId, PanelLayoutSnapshot,
+    PanelState, ProjectArchitectureChange, ProjectArchitectureGraph, ProjectFilesSnapshot,
     ProjectFilesViewState, ProjectQuery, ProjectWorkspaceSurface, QuotaUsageStats,
-    QuotaUsageStatsInput, RemoteControlStatus, SplitAxis, TASK_INSPECTOR_PANEL_ID,
-    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND, TITLE_UPDATE_ACTION_KIND, TaskQuery,
-    WorkspaceItem, WorkspaceItemId, WorkspaceItemResolve, clipboard_text_should_be_attachment,
-    describe_attachment_paths, preview_automatic_turn_selection,
+    QuotaUsageStatsInput, RemoteControlStatus, SplitAxis, TaskQuery, WorkspaceItem,
+    WorkspaceItemId, WorkspaceItemResolve, CODING_TOOLS_PANEL_ID, DOCUMENT_WORKSPACE_ITEM_KIND,
+    IAB_PANEL_ID, MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES, TASK_INSPECTOR_PANEL_ID,
+    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND, TITLE_UPDATE_ACTION_KIND,
 };
 use crate::application::{
     ApprovalChanged, ArchitectureChanged, AssistantAiSettingsChanged, ComposerChanged,
@@ -74,16 +74,17 @@ use crate::application::{
 };
 
 use crate::module::extensions::{
-    ExtensionsCommand, ExtensionsJob, ExtensionsModule, ExtensionsModuleMessage, ExtensionsOutcome,
-    HookSourceOperation, McpContentKind, McpContentOperation, McpRegistryOperation,
-    PluginRegistryOperation, SkillRegistryOperation, load_native_hooks, mcp_credential_draft_key,
-    mcp_credential_kind_key, mcp_prompt_preview, mcp_resource_preview, parse_hook_handlers_draft,
+    load_native_hooks, mcp_credential_draft_key, mcp_credential_kind_key, mcp_prompt_preview,
+    mcp_resource_preview, parse_hook_handlers_draft, ExtensionsCommand, ExtensionsJob,
+    ExtensionsModule, ExtensionsModuleMessage, ExtensionsOutcome, HookSourceOperation,
+    McpContentKind, McpContentOperation, McpRegistryOperation, PluginRegistryOperation,
+    SkillRegistryOperation,
 };
 use crate::module::task::{TaskMoveTarget, TaskParentTarget};
 use crate::runtime_compat::{
-    HostedProgramContext, HostedProgramUpdate, HostedUiCommand, HostedUpdateExt,
-    HostedWindowAction, HostedWindowCommand, HostedWindowEvent, HostedWindowGeometry,
-    HostedWindowId, HostedWindowSettings, tool_window_settings, window_event_id,
+    tool_window_settings, window_event_id, HostedProgramContext, HostedProgramUpdate,
+    HostedUiCommand, HostedUpdateExt, HostedWindowAction, HostedWindowCommand, HostedWindowEvent,
+    HostedWindowGeometry, HostedWindowId, HostedWindowSettings,
 };
 use crate::text_editor_state::TextEditorState;
 use lilia_contracts::{
@@ -98,35 +99,36 @@ use lilia_kernel::{JobContext, JobEvent, JobId, JobRequest, JobState};
 use mutsuki_agent_contracts::InteractionResolution;
 use nana_ui::runtime::RuntimeDocument;
 use nana_ui::{
-    ActionDescriptor, ActionId, ActionPickerState, ActionRegistry, AppearanceEvent,
-    AppearanceSettings, Colors, CommandPaletteEvent, CommandPaletteItem, ContextPredicate,
-    DropdownEvent, DropdownOption, GraphCanvasEvent, GraphEdge as CanvasGraphEdge, GraphEndpoint,
-    GraphModel, GraphNode as CanvasGraphNode, GraphPoint, GraphPort, GraphPortKind, GraphPortSide,
-    GraphSelection, GraphSize, GraphViewport, Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer,
-    KeyContext, KeyInput, KeyModifiers, KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect,
-    MarkdownImage, NarrowBehavior, NativeMarkdown, RegionId, RegionRole, RegionState,
-    RuntimeProgram, RuntimeRedraw, SettingsModel, SettingsState, SettingsTab, SettingsTabId,
-    SplitAxis as NanaSplitAxis, SplitPaneAction, SplitPaneController, ThemeMode, ThemeModeExt,
-    ThemeTokens, TreeDropPosition as NanaTreeDropPosition, WindowChromeEvent, WindowChromeState,
-    WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel, window_material_effect,
+    window_material_effect, ActionDescriptor, ActionId, ActionPickerState, ActionRegistry,
+    AppearanceEvent, AppearanceSettings, Colors, CommandPaletteEvent, CommandPaletteItem,
+    ContextPredicate, DropdownEvent, DropdownOption, GraphCanvasEvent,
+    GraphEdge as CanvasGraphEdge, GraphEndpoint, GraphModel, GraphNode as CanvasGraphNode,
+    GraphPoint, GraphPort, GraphPortKind, GraphPortSide, GraphSelection, GraphSize, GraphViewport,
+    Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer, KeyContext, KeyInput, KeyModifiers,
+    KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect, MarkdownImage, NarrowBehavior,
+    NativeMarkdown, RegionId, RegionRole, RegionState, RuntimeProgram, RuntimeRedraw,
+    SettingsModel, SettingsState, SettingsTab, SettingsTabId, SplitAxis as NanaSplitAxis,
+    SplitPaneAction, SplitPaneController, ThemeMode, ThemeModeExt, ThemeTokens,
+    TreeDropPosition as NanaTreeDropPosition, WindowChromeEvent, WindowChromeState,
+    WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel,
 };
 use nana_ui_platform::WindowId;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[cfg(debug_assertions)]
 use crate::agent_debug::{
-    DebugCommand, DebugObservation, DebugRequest, DebugState, DebugWindowGeometry,
-    DebugWorkspaceItem, DebugWorkspacePane, DebugWorkspaceSplit, DebugWorkspaceWindow,
-    failure_response, frame_response, snapshot_response, success_response,
+    failure_response, frame_response, snapshot_response, success_response, DebugCommand,
+    DebugObservation, DebugRequest, DebugState, DebugWindowGeometry, DebugWorkspaceItem,
+    DebugWorkspacePane, DebugWorkspaceSplit, DebugWorkspaceWindow,
 };
 use crate::ask_user::{AskUserAction, AskUserDraft, AskUserMode, AskUserOutcome, AskUserSpec};
 use crate::conversation_suggestions::ConversationSuggestionState;
-use crate::data_import::{NativeDataImportState, legacy_instance_identity};
+use crate::data_import::{legacy_instance_identity, NativeDataImportState};
 use crate::debug_timeline::{DebugTimelineAction, NativeDebugTimeline};
 use crate::document_editor::{is_document_editor_item, select_document_editor_range};
 use crate::host::NativeDesktopHost;
-use crate::markdown_images::{LoadedMarkdownImage, load_markdown_image};
+use crate::markdown_images::{load_markdown_image, LoadedMarkdownImage};
 use crate::module::documents::{DocumentDefinitionOutcome, DocumentMessage, DocumentsModule};
 use crate::navigation::WindowRoute;
 use crate::project_files_panel;
@@ -138,19 +140,19 @@ use crate::shell::{
 };
 use crate::shell_integration::{NativeShellIntegration, ShellCommand};
 use crate::storage::{
+    lilia_home, load_appearance, load_conversation_status_state, load_sidebar_display_mode,
+    load_sidebar_tree_state, load_theme, load_window_state, load_workspace_topology_state,
+    merge_auxiliary_window_state, merge_conversation_status_window_state,
+    normalize_conversation_status_opacity, save_appearance, save_sidebar_display_mode,
+    save_sidebar_tree_state, save_theme, NativeConversationStatusStateWriter,
+    NativeConversationStatusWindowState, NativeMemorySettingsStore, NativeSidebarDisplayMode,
+    NativeSidebarTreeState, NativeWindowSnapshot, NativeWindowState, NativeWindowStateWriter,
+    NativeWorkspaceTopologyState, NativeWorkspaceTopologyStateWriter, NativeWorkspaceWindowState,
     LILIA_INSTANCE_IDENTITY, NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION,
-    NativeConversationStatusStateWriter, NativeConversationStatusWindowState,
-    NativeMemorySettingsStore, NativeSidebarDisplayMode, NativeSidebarTreeState,
-    NativeWindowSnapshot, NativeWindowState, NativeWindowStateWriter, NativeWorkspaceTopologyState,
-    NativeWorkspaceTopologyStateWriter, NativeWorkspaceWindowState, lilia_home, load_appearance,
-    load_conversation_status_state, load_sidebar_display_mode, load_sidebar_tree_state, load_theme,
-    load_window_state, load_workspace_topology_state, merge_auxiliary_window_state,
-    merge_conversation_status_window_state, normalize_conversation_status_opacity, save_appearance,
-    save_sidebar_display_mode, save_sidebar_tree_state, save_theme,
 };
 use crate::target_ids;
 use crate::task_session::{PendingActionView, TaskSessionView, TaskTimelineItem};
-use crate::terminal_view::{TerminalViewMessage, terminal_plain_text};
+use crate::terminal_view::{terminal_plain_text, TerminalViewMessage};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HostedContextMenuEvent<T> {
@@ -2497,9 +2499,7 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::DeleteMemory => {
                 Message::Memory(MemoryMessage::Delete)
             }
-            crate::runtime_shell::ShellIntent::MemoryAction(message) => {
-                Message::Memory(message)
-            }
+            crate::runtime_shell::ShellIntent::MemoryAction(message) => Message::Memory(message),
             crate::runtime_shell::ShellIntent::MovePaneToWindow => {
                 Message::WorkspaceWindow(WorkspaceWindowMessage::MoveWorkspaceItemToNewWindow(
                     self.require_movable_workspace_item_id(),
@@ -4938,8 +4938,12 @@ impl DesktopProgram {
                     composer_plus_open: false,
                     composer_permission_menu_open: false,
                     composer_worktree_menu_open: false,
-                    branch_label: pending_session_branch_label(self.pending_session_branch.as_ref()),
-                    review_target: pending_review_target(self.pending_review_slash_workflow.as_ref()),
+                    branch_label: pending_session_branch_label(
+                        self.pending_session_branch.as_ref(),
+                    ),
+                    review_target: pending_review_target(
+                        self.pending_review_slash_workflow.as_ref(),
+                    ),
                     review_value: pending_review_value(self.pending_review_slash_workflow.as_ref()),
                     can_manage_todos: self.current_selected_task().is_some()
                         && !self.composer_is_locked(),
@@ -6414,8 +6418,7 @@ impl DesktopProgram {
                                 if let Err(error) =
                                     self.kernel.session().set_task_completed(&task_id, true)
                                 {
-                                    self.error_message =
-                                        Some(format!("无法完成任务：{error}"));
+                                    self.error_message = Some(format!("无法完成任务：{error}"));
                                 } else {
                                     self.refresh_tasks();
                                 }
@@ -6424,8 +6427,7 @@ impl DesktopProgram {
                                 if let Err(error) =
                                     self.kernel.session().set_task_completed(&task_id, false)
                                 {
-                                    self.error_message =
-                                        Some(format!("无法重新打开任务：{error}"));
+                                    self.error_message = Some(format!("无法重新打开任务：{error}"));
                                 } else {
                                     self.refresh_tasks();
                                 }
@@ -11466,20 +11468,14 @@ impl DesktopProgram {
                         Message::Composer(ComposerMessage::TaskPopupToggleGoalMode(window_id))
                     }
                     ComposerAction::NewGuide => {
-                        self.apply_todo_action(
-                            window_id,
-                            crate::todo_panel::TodoAction::NewGuide,
-                        );
+                        self.apply_todo_action(window_id, crate::todo_panel::TodoAction::NewGuide);
                         if window_id == HostedWindowId::PRIMARY && self.todo_ui.editor.is_some() {
                             self.activate_inspector_panel(TASK_INSPECTOR_PANEL_ID);
                         }
                         return None;
                     }
                     ComposerAction::EditGoal => {
-                        self.apply_todo_action(
-                            window_id,
-                            crate::todo_panel::TodoAction::EditGoal,
-                        );
+                        self.apply_todo_action(window_id, crate::todo_panel::TodoAction::EditGoal);
                         if window_id == HostedWindowId::PRIMARY && self.todo_ui.editor.is_some() {
                             self.activate_inspector_panel(TASK_INSPECTOR_PANEL_ID);
                         }
@@ -23131,8 +23127,7 @@ impl DesktopProgram {
                             .filter(|id| {
                                 tasks.iter().any(|task| {
                                     task.id.as_str() == **id
-                                        && task.status
-                                            == lilia_contracts::ProductTaskStatus::Done
+                                        && task.status == lilia_contracts::ProductTaskStatus::Done
                                 })
                             })
                             .count();
@@ -30345,6 +30340,7 @@ impl RuntimeProgram for DesktopProgram {
                     Arc::new(crate::application::ProductBrowserScopeAuthority::new(
                         application.project_task_services().0,
                     )),
+                    Some(application.authority().clone()),
                 )
             },
             main_window_geometry,
@@ -34456,10 +34452,13 @@ mod tests {
                 "nodePositions": { "ui": { "x": 2_000_000.0, "y": 0.0 } }
             }
         });
-        assert!(
-            restore_architecture_workspace_layout(Some(&corrupt), 2, &mut restored, &mut viewport,)
-                .is_err()
-        );
+        assert!(restore_architecture_workspace_layout(
+            Some(&corrupt),
+            2,
+            &mut restored,
+            &mut viewport,
+        )
+        .is_err());
         assert_eq!(restored, before_graph);
         assert_eq!(viewport, before_viewport);
     }
@@ -34470,16 +34469,12 @@ mod tests {
             parse_automation_node_config(r#"{"prompt":"继续"}"#).unwrap()["prompt"],
             "继续"
         );
-        assert!(
-            parse_automation_node_config("[]")
-                .unwrap_err()
-                .contains("JSON 对象")
-        );
-        assert!(
-            parse_automation_node_config("{")
-                .unwrap_err()
-                .contains("有效 JSON")
-        );
+        assert!(parse_automation_node_config("[]")
+            .unwrap_err()
+            .contains("JSON 对象"));
+        assert!(parse_automation_node_config("{")
+            .unwrap_err()
+            .contains("有效 JSON"));
     }
 
     #[test]
@@ -35021,15 +35016,13 @@ mod tests {
             handlers[0].command_windows.as_deref(),
             Some("powershell -File hook.ps1")
         );
-        assert!(
-            edit_hook_handler_draft(
-                &draft,
-                0,
-                HookHandlerDraftField::TimeoutSeconds,
-                "301".to_owned(),
-            )
-            .is_err()
-        );
+        assert!(edit_hook_handler_draft(
+            &draft,
+            0,
+            HookHandlerDraftField::TimeoutSeconds,
+            "301".to_owned(),
+        )
+        .is_err());
     }
 }
 

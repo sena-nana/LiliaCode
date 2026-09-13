@@ -30,6 +30,7 @@ use lilia_contracts::{
     AgentSessionBinding, AgentSessionRef, ProductApprovalDecision, ProductResult, TaskId,
     TimelineProjectionCommand, TimelineProjectionEvent,
 };
+pub use lilia_core::BrowserScreenshotInput;
 use lilia_core::{
     AgentKitClientPort, AgentKitPortError, InMemoryProductStore, NativeAgentCapabilitySnapshot,
     ProductRepository,

@@ -1,12 +1,24 @@
 use lilia_contracts::{
     AgentSessionRef, ArtifactId, ArtifactMaterializationStatus, AssignmentId, BindingId,
-    ConversationId, ExpectedRevision, MilestoneId, ProductArtifact, ProductAssignment,
-    ProductConversation, ProductEntity, ProductEntityKind, ProductMilestone, ProductResult,
-    ProductWorkflow, ProductWorkflowRun, ProjectAsset, ProjectAssetId, ProjectAssetKind, ProjectId,
-    TaskId, WorkflowId, WorkflowRunId,
+    ConversationId, ExpectedRevision, IdempotencyKey, MilestoneId, ProductArtifact,
+    ProductAssignment, ProductCommandMeta, ProductConversation, ProductEntity, ProductEntityKind,
+    ProductMilestone, ProductResult, ProductWorkflow, ProductWorkflowRun, ProjectAsset,
+    ProjectAssetId, ProjectAssetKind, ProjectId, TaskId, WorkflowId, WorkflowRunId,
 };
 
 use super::ProductServices;
+
+pub struct BrowserScreenshotInput {
+    pub task_id: TaskId,
+    pub project_id: lilia_contracts::ProjectId,
+    pub agent_session: AgentSessionRef,
+    pub artifact_id: ArtifactId,
+    pub artifact_ref: String,
+    pub resource_ref: String,
+    pub content_hash: String,
+    pub size_bytes: u64,
+    pub command_id: String,
+}
 
 impl ProductServices {
     pub fn create_conversation(
@@ -160,6 +172,79 @@ impl ProductServices {
         entity_artifact(self.update_entity(ProductEntity::Artifact(artifact), expected)?)
     }
 
+    /// Record a fully materialized browser screenshot as one idempotent product event.
+    pub fn record_browser_screenshot(
+        &self,
+        input: BrowserScreenshotInput,
+    ) -> ProductResult<lilia_contracts::ProductCommandResult<ProductEntity>> {
+        let BrowserScreenshotInput {
+            task_id,
+            project_id,
+            agent_session,
+            artifact_id,
+            artifact_ref,
+            resource_ref,
+            content_hash,
+            size_bytes,
+            command_id,
+        } = input;
+        let task = self.get_task(&task_id)?;
+        if task.project_id.as_ref() != Some(&project_id) {
+            return Err(lilia_contracts::ProductError::InvalidState {
+                message: "browser artifact task is outside the target project".into(),
+            });
+        }
+        let project = self.get_project(&project_id)?;
+        if project.archive != lilia_contracts::ProjectArchiveState::Active {
+            return Err(lilia_contracts::ProductError::InvalidState {
+                message: "archived projects cannot receive browser artifacts".into(),
+            });
+        }
+        if task.archived {
+            return Err(lilia_contracts::ProductError::InvalidState {
+                message: "archived tasks cannot receive browser artifacts".into(),
+            });
+        }
+        if content_hash.len() != 64
+            || !content_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(lilia_contracts::ProductError::InvalidInput {
+                field: "content_hash".into(),
+                message: "browser screenshot content_hash must be a SHA-256 hex digest".into(),
+            });
+        }
+        if !lilia_contracts::is_opaque_browser_resource_ref(&resource_ref) {
+            return Err(lilia_contracts::ProductError::InvalidInput {
+                field: "resource_ref".into(),
+                message: "browser screenshot resource_ref must be opaque".into(),
+            });
+        }
+        let mut artifact = ProductArtifact::new(
+            artifact_id,
+            task_id,
+            agent_session,
+            artifact_ref,
+            "image/png",
+        )?;
+        artifact.content_hash = Some(content_hash);
+        artifact.source_event_id = Some(command_id.clone());
+        artifact.provenance = Some("browser.screenshot".into());
+        artifact.set_materialization(
+            ArtifactMaterializationStatus::Materialized,
+            Some(resource_ref),
+        )?;
+        artifact.size_bytes = Some(size_bytes);
+        let meta =
+            ProductCommandMeta::create(command_id.clone(), IdempotencyKey::new(command_id)?)?;
+        self.create_entity_command(
+            &meta,
+            ProductEntity::Artifact(artifact),
+            "browser_screenshot_captured",
+        )
+    }
+
     pub fn create_project_asset(
         &self,
         id: ProjectAssetId,
@@ -265,5 +350,91 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn browser_screenshot_is_task_project_bound_and_command_idempotent() {
+        let products = ProductServices::new(Arc::new(Mutex::new(InMemoryProductStore::new())));
+        let project = products
+            .create_project(ProjectId::new("browser-project").unwrap(), "Browser")
+            .unwrap();
+        let task = products
+            .create_task(
+                TaskId::new("browser-task").unwrap(),
+                Some(project.id.clone()),
+                "Capture",
+            )
+            .unwrap();
+        let ordinary = products
+            .attach_artifact(
+                ArtifactId::new("ordinary-artifact").unwrap(),
+                task.id.clone(),
+                lilia_contracts::AgentSessionRef::new("session").unwrap(),
+                "ordinary-ref",
+                "text/plain",
+            )
+            .unwrap();
+        let mut ordinary = ordinary;
+        ordinary.content_hash = Some("a".repeat(64));
+        products
+            .update_entity(
+                ProductEntity::Artifact(ordinary),
+                ExpectedRevision::new(1).unwrap(),
+            )
+            .unwrap();
+        let input = || {
+            products.record_browser_screenshot(BrowserScreenshotInput {
+                task_id: task.id.clone(),
+                project_id: project.id.clone(),
+                agent_session: lilia_contracts::AgentSessionRef::new("session").unwrap(),
+                artifact_id: ArtifactId::new("browser-artifact").unwrap(),
+                artifact_ref: "browser.screenshot:hash".into(),
+                resource_ref: "resource://browser/project/task/hash.png".into(),
+                content_hash: "a".repeat(64),
+                size_bytes: 4,
+                command_id: "browser-command".into(),
+            })
+        };
+        let first = input().unwrap();
+        let duplicate = input().unwrap();
+        assert!(!first.duplicate);
+        assert!(duplicate.duplicate);
+        assert_eq!(
+            products
+                .list_entities(ProductEntityKind::Artifact)
+                .unwrap()
+                .len(),
+            2
+        );
+        let events = products
+            .product_events(&lilia_contracts::PageRequest::default())
+            .unwrap();
+        let browser_events = events
+            .items
+            .iter()
+            .filter(|event| event.action == "browser_screenshot_captured")
+            .collect::<Vec<_>>();
+        assert_eq!(browser_events.len(), 1);
+        assert_eq!(browser_events[0].command_id, "browser-command");
+        let other = products
+            .create_task(
+                TaskId::new("other-task").unwrap(),
+                Some(project.id),
+                "Other",
+            )
+            .unwrap();
+        assert!(products
+            .record_browser_screenshot(BrowserScreenshotInput {
+                task_id: other.id,
+                project_id: ProjectId::new("missing-project").unwrap(),
+                agent_session: lilia_contracts::AgentSessionRef::new("session").unwrap(),
+                artifact_id: ArtifactId::new("other-artifact").unwrap(),
+                artifact_ref: "ref".into(),
+                resource_ref: "resource://browser/project/other".into(),
+                content_hash: "a".repeat(64),
+                size_bytes: 4,
+                command_id: "other-command".into(),
+            })
+            .is_err());
     }
 }

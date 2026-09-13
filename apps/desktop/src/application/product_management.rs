@@ -65,7 +65,38 @@ impl DesktopApplication {
         project_id: &ProjectId,
         patch: DesktopProjectPatch,
     ) -> Result<lilia_contracts::Project, DesktopApplicationError> {
-        Ok(self.project_tasks().update_project(project_id, patch)?)
+        let archived = patch.archived == Some(true);
+        let project = self.project_tasks().update_project(project_id, patch)?;
+        if archived {
+            let task_ids = self
+                .inner
+                .authority
+                .client()?
+                .products()
+                .list_entities(lilia_contracts::ProductEntityKind::Task)?
+                .into_iter()
+                .filter_map(|entity| match entity {
+                    lilia_contracts::ProductEntity::Task(task)
+                        if task.project_id.as_ref() == Some(project_id) =>
+                    {
+                        Some(task.id)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let sink = crate::application::DesktopBrowserArtifactSink::new(
+                self.inner.authority.clone(),
+                self.config().home().to_path_buf(),
+            );
+            for task_id in task_ids {
+                let _ = sink.cleanup_browser_artifacts_for_task(
+                    &task_id,
+                    u64::MAX,
+                    &Default::default(),
+                );
+            }
+        }
+        Ok(project)
     }
 
     pub fn project_removal_preview(
@@ -79,6 +110,29 @@ impl DesktopApplication {
         &self,
         project_id: &ProjectId,
     ) -> Result<ProductProjectRemovalOutcome, DesktopApplicationError> {
+        let task_ids = self
+            .inner
+            .authority
+            .client()?
+            .products()
+            .list_entities(lilia_contracts::ProductEntityKind::Task)?
+            .into_iter()
+            .filter_map(|entity| match entity {
+                lilia_contracts::ProductEntity::Task(task)
+                    if task.project_id.as_ref() == Some(project_id) =>
+                {
+                    Some(task.id)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let sink = crate::application::DesktopBrowserArtifactSink::new(
+            self.inner.authority.clone(),
+            self.config().home().to_path_buf(),
+        );
+        for task_id in &task_ids {
+            let _ = sink.cleanup_browser_artifacts_for_task(task_id, u64::MAX, &Default::default());
+        }
         Ok(self.project_tasks().remove_project(project_id)?)
     }
 
@@ -156,7 +210,15 @@ impl DesktopApplication {
         task_id: &TaskId,
         archived: bool,
     ) -> Result<ProductTaskArchiveOutcome, DesktopApplicationError> {
-        Ok(self.project_tasks().set_task_archived(task_id, archived)?)
+        let result = self.project_tasks().set_task_archived(task_id, archived)?;
+        if archived {
+            let sink = crate::application::DesktopBrowserArtifactSink::new(
+                self.inner.authority.clone(),
+                self.config().home().to_path_buf(),
+            );
+            let _ = sink.cleanup_browser_artifacts_for_task(task_id, u64::MAX, &Default::default());
+        }
+        Ok(result)
     }
 
     pub fn update_task_dependencies(
@@ -197,8 +259,8 @@ impl DesktopApplication {
 #[cfg(test)]
 mod tests {
     use crate::application::composer::DesktopComposerTurnRequest;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use lilia_contracts::{
         ExpectedRevision, ProductConversationStatus, ProductEntity, ProductEntityKind,
@@ -360,11 +422,10 @@ mod tests {
         assert!(archived.conversations.iter().all(|conversation| {
             conversation.archived && conversation.status == ProductConversationStatus::Closed
         }));
-        assert!(
-            app.query_tasks(TaskQuery::for_project(project.id.clone()))
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .query_tasks(TaskQuery::for_project(project.id.clone()))
+            .unwrap()
+            .is_empty());
         assert_eq!(
             app.query_tasks(TaskQuery::for_project(project.id.clone()).including_archived())
                 .unwrap()
@@ -380,11 +441,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(
-            app.query_projects(ProjectQuery::default())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .query_projects(ProjectQuery::default())
+            .unwrap()
+            .is_empty());
         assert_eq!(
             app.query_projects(ProjectQuery {
                 include_archived: true,
@@ -425,11 +485,10 @@ mod tests {
         assert!(outcome.archived_conversations.iter().all(|conversation| {
             conversation.archived && conversation.status == ProductConversationStatus::Closed
         }));
-        assert!(
-            app.query_tasks(TaskQuery::for_project(project.id.clone()))
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .query_tasks(TaskQuery::for_project(project.id.clone()))
+            .unwrap()
+            .is_empty());
         assert!(app.get_task(&first.id).unwrap().archived);
         assert!(app.get_task(&second.id).unwrap().archived);
         assert!(!app.get_task(&other.id).unwrap().archived);

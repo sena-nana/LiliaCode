@@ -28,8 +28,13 @@ pub struct ProductArtifact {
     pub agent_session: AgentSessionRef,
     pub source_event_id: Option<String>,
     pub artifact_ref: String,
+    /// Content identity for deduplicating materialized artifacts.
+    #[serde(default)]
+    pub content_hash: Option<String>,
     pub resource_ref: Option<String>,
     pub media_type: String,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
     pub materialization: ArtifactMaterializationStatus,
     pub retention: ArtifactRetention,
     pub provenance: Option<String>,
@@ -97,8 +102,10 @@ impl ProductArtifact {
             agent_session,
             source_event_id: None,
             artifact_ref,
+            content_hash: None,
             resource_ref: None,
             media_type,
+            size_bytes: None,
             materialization: ArtifactMaterializationStatus::Referenced,
             retention: ArtifactRetention::Session,
             provenance: None,
@@ -199,6 +206,7 @@ impl ProjectAsset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn materialized_artifact_requires_resource_reference() {
@@ -242,5 +250,28 @@ mod tests {
             asset.transition_proposal(ProjectAssetProposalStatus::Rejected),
             Err(crate::ProductError::InvalidState { .. })
         ));
+    }
+
+    #[test]
+    fn browser_artifact_optional_fields_are_backward_compatible() {
+        let artifact: ProductArtifact = serde_json::from_value(json!({
+            "id": "artifact-legacy",
+            "taskId": "task-legacy",
+            "agentSession": "session-legacy",
+            "sourceEventId": null,
+            "artifactRef": "legacy",
+            "resourceRef": null,
+            "mediaType": "image/png",
+            "materialization": "referenced",
+            "retention": "session",
+            "provenance": null,
+            "revision": 1
+        }))
+        .unwrap();
+        assert_eq!(artifact.content_hash, None);
+        assert_eq!(artifact.size_bytes, None);
+        let encoded = serde_json::to_value(&artifact).unwrap();
+        assert!(encoded.get("contentHash").is_some());
+        assert!(encoded.get("sizeBytes").is_some());
     }
 }

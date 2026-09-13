@@ -17,6 +17,19 @@ use crate::timeline::{ProjectionApplyResult, TimelineProjectionRepository};
 
 const SCHEMA_VERSION: i64 = 1;
 
+type TimelineEventRow = (
+    String,
+    String,
+    i64,
+    Option<String>,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    i64,
+);
+
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY NOT NULL,
@@ -301,15 +314,61 @@ impl TimelineProjectionRepository for SqliteTimelineProjectionStore {
                     .optional()
                     .map_err(db_err)?
                     .unwrap_or(false);
-                if exists {
-                    return Ok(ProjectionApplyResult::DuplicateIgnored);
-                }
                 let payload = serde_json::to_string(&event.payload).map_err(|err| {
                     ProductError::InvalidInput {
                         field: "payload".into(),
                         message: err.to_string(),
                     }
                 })?;
+                if exists {
+                    let existing: TimelineEventRow = conn
+                        .query_row(
+                            "SELECT task_id, agent_session, sequence, turn_id, kind, status, title, summary, payload, projected FROM timeline_projection_events WHERE id = ?1",
+                            params![event.id.as_str()],
+                            |row| {
+                                Ok((
+                                    row.get(0)?,
+                                    row.get(1)?,
+                                    row.get(2)?,
+                                    row.get(3)?,
+                                    row.get(4)?,
+                                    row.get(5)?,
+                                    row.get(6)?,
+                                    row.get(7)?,
+                                    row.get(8)?,
+                                    row.get(9)?,
+                                ))
+                            },
+                        )
+                        .map_err(db_err)?;
+                    if existing.0 == event.task_id.as_str()
+                        && existing.1 == event.agent_session.as_str()
+                        && existing.2 == event.sequence as i64
+                        && existing.3 == event.turn_id
+                        && existing.4 == event.kind
+                        && existing.5 == event.status
+                        && existing.6 == event.title
+                        && existing.7 == event.summary
+                        && existing.8 == payload
+                        && existing.9 == if event.projected { 1 } else { 0 }
+                    {
+                        return Ok(ProjectionApplyResult::DuplicateIgnored);
+                    }
+                    conn.execute(
+                        r#"UPDATE timeline_projection_events
+                           SET task_id = ?1, agent_session = ?2, sequence = ?3, turn_id = ?4,
+                               kind = ?5, status = ?6, title = ?7, summary = ?8, payload = ?9,
+                               projected = ?10
+                           WHERE id = ?11"#,
+                        params![
+                            event.task_id.as_str(), event.agent_session.as_str(), event.sequence as i64,
+                            event.turn_id, event.kind, event.status, event.title, event.summary,
+                            payload, if event.projected { 1 } else { 0 }, event.id.as_str()
+                        ],
+                    ).map_err(db_err)?;
+                    Self::bump_cursor(conn, event.agent_session.as_str(), event.sequence)?;
+                    return Ok(ProjectionApplyResult::Updated);
+                }
                 conn.execute(
                     r#"INSERT INTO timeline_projection_events
                        (id, task_id, agent_session, sequence, turn_id, kind, status, title, summary, payload, projected)
@@ -852,6 +911,34 @@ mod tests {
             payload: json!({ "projected": true }),
             projected: true,
         }
+    }
+
+    #[test]
+    fn sqlite_projection_updates_when_non_status_fields_change() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("lilia-proj-update-{nanos}.db"));
+        let _ = std::fs::remove_file(&path);
+        let store = SqliteTimelineProjectionStore::open(&path).unwrap();
+        let session = AgentSessionRef::new("sess-update").unwrap();
+        store
+            .apply(TimelineProjectionCommand::UpsertTimelineEvent {
+                event: sample_event(session.as_str(), 1),
+            })
+            .unwrap();
+        let mut changed = sample_event(session.as_str(), 1);
+        changed.title = "changed".into();
+        changed.summary = Some("changed summary".into());
+        assert_eq!(
+            store
+                .apply(TimelineProjectionCommand::UpsertTimelineEvent { event: changed })
+                .unwrap(),
+            ProjectionApplyResult::Updated
+        );
+        assert_eq!(store.list_for_session(&session)[0].title, "changed");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

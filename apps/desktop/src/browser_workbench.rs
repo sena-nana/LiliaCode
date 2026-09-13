@@ -561,6 +561,7 @@ impl BrowserWorkbench {
         home: std::path::PathBuf,
         wake: std::sync::Arc<dyn Fn() + Send + Sync>,
         authority: std::sync::Arc<dyn lilia_agent::BrowserScopeAuthority>,
+        product_authority: Option<lilia_service::ServiceAuthority>,
     ) -> Self {
         let pending_wake = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let pending = pending_wake.clone();
@@ -570,9 +571,23 @@ impl BrowserWorkbench {
             }
         });
         let (host, bridge) = crate::platform::browser::UiBrowserHost::new(wake.clone());
-        let sessions = std::sync::Arc::new(lilia_agent::BrowserSessions::with_authority(
-            bridge, authority,
-        ));
+        let sessions = match product_authority {
+            Some(product_authority) => {
+                let sink =
+                    std::sync::Arc::new(crate::application::DesktopBrowserArtifactSink::new(
+                        product_authority,
+                        home.clone(),
+                    ));
+                std::sync::Arc::new(
+                    lilia_agent::BrowserSessions::with_authority_and_artifact_sink(
+                        bridge, authority, sink,
+                    ),
+                )
+            }
+            None => std::sync::Arc::new(lilia_agent::BrowserSessions::with_authority(
+                bridge, authority,
+            )),
+        };
         host.attach_sessions(&sessions);
         Self {
             host,
@@ -1025,11 +1040,11 @@ impl BrowserWorkbench {
         scale: f32,
     ) -> Result<(), String> {
         use windows::{
+            core::Interface,
             Win32::{
                 Foundation::{HWND, RECT},
                 Graphics::DirectComposition::IDCompositionVisual,
             },
-            core::Interface,
         };
         self.regions.insert(id, (scale, regions.to_vec()));
         for (resource, (window, visual)) in &self.visuals {
@@ -1458,15 +1473,13 @@ mod tests {
         view.sync(document.context_mut(), target, &presentation)
             .unwrap();
         assert!(!document.context().world().contains(row));
-        assert!(
-            !document
-                .context()
-                .world()
-                .node(view.root.stable_id())
-                .unwrap()
-                .children
-                .contains(&panel)
-        );
+        assert!(!document
+            .context()
+            .world()
+            .node(view.root.stable_id())
+            .unwrap()
+            .children
+            .contains(&panel));
         let root = view.root.stable_id();
         let recovery = view.recovery.stable_id();
         view.dispose(document.context_mut()).unwrap();
@@ -1487,6 +1500,7 @@ mod tests {
             std::env::temp_dir().join("browser-selection-test"),
             std::sync::Arc::new(|| {}),
             std::sync::Arc::new(Authority),
+            None,
         );
         let task = lilia_contracts::TaskId::new("task-a").unwrap();
         let other = lilia_contracts::TaskId::new("task-b").unwrap();
