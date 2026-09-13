@@ -1,12 +1,13 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
 
 use lilia_contracts::{
-    ArtifactProjection, ChatContextUsage, PendingProjection, ProductError, ProductTask, Project,
-    ProjectArchiveState, ProjectId, SidebarNavigationContribution, TaskId,
-    TimelineProjectionCursor, TimelineProjectionEvent, TimelineProjectionPage, TodoProjection,
+    ArtifactProjection, ChatContextUsage, PendingProjection, ProductEntity, ProductEntityKind,
+    ProductError, ProductTask, Project, ProjectArchiveState, ProjectId,
+    SidebarNavigationContribution, TaskId, TimelineProjectionCursor, TimelineProjectionEvent,
+    TimelineProjectionPage, TodoProjection,
 };
 use lilia_service::{ServiceAuthority, ServiceAuthorityError};
 use lilia_storage::Db;
@@ -389,7 +390,7 @@ impl DesktopApplication {
         } else {
             lilia_storage::SqliteAgentRuntimeStateStore::open_in_memory()?
         };
-        Ok(Self {
+        let application = Self {
             inner: Arc::new(DesktopApplicationInner {
                 config,
                 authority,
@@ -444,7 +445,32 @@ impl DesktopApplication {
                 hook_execution,
                 contribution_host,
             }),
-        })
+        };
+        if application.inner.authority.data_paths().is_some() {
+            let sink = crate::application::DesktopBrowserArtifactSink::new(
+                application.inner.authority.clone(),
+                application.inner.config.home().to_path_buf(),
+            );
+            if let Ok(entities) = application.inner.authority.client().and_then(|client| {
+                client
+                    .products()
+                    .list_entities(ProductEntityKind::Task)
+                    .map_err(|error| ServiceAuthorityError::Product(error.to_string()))
+            }) {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|value| value.as_millis() as u64)
+                    .unwrap_or_default();
+                let policy = lilia_storage::ArtifactRetentionPolicy::default();
+                for entity in entities {
+                    if let ProductEntity::Task(task) = entity {
+                        let _ = sink.rebuild_browser_projections(&task.id);
+                        let _ = sink.cleanup_browser_artifacts_for_task(&task.id, now_ms, &policy);
+                    }
+                }
+            }
+        }
+        Ok(application)
     }
 
     pub fn config(&self) -> &DesktopApplicationConfig {
@@ -784,8 +810,8 @@ pub enum DesktopApplicationError {
 mod tests {
     use std::collections::BTreeMap;
     use std::io::{Read, Write};
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     use lilia_agent::ProductCredentialLoginInput;
@@ -1128,13 +1154,11 @@ mod tests {
             "fn entry() {}"
         );
         app.mark_document_saved(document.id, revision).unwrap();
-        assert!(
-            !clone
-                .document_snapshot(document.id)
-                .unwrap()
-                .buffer
-                .is_dirty()
-        );
+        assert!(!clone
+            .document_snapshot(document.id)
+            .unwrap()
+            .buffer
+            .is_dirty());
     }
 
     #[test]
@@ -1330,15 +1354,14 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
-            app.inner
-                .turn_submissions
-                .queue()
-                .unwrap()
-                .list(&task_id)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .inner
+            .turn_submissions
+            .queue()
+            .unwrap()
+            .list(&task_id)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1598,26 +1621,22 @@ mod tests {
             restarted.task_runtime_snapshot(&task_id)
         );
         assert!(!workspace.join("must-not-exist.txt").exists());
-        assert!(
-            restarted
-                .task_session_snapshot(&task_id)
-                .unwrap()
-                .pending
-                .iter()
-                .any(|pending| {
-                    pending.request_id == request_id
-                        && pending.status == PendingProjectionStatus::Cancelled
-                })
-        );
-        assert!(
-            restarted
-                .inner
-                .turn_submissions
-                .queue()
-                .unwrap()
-                .list(&task_id)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(restarted
+            .task_session_snapshot(&task_id)
+            .unwrap()
+            .pending
+            .iter()
+            .any(|pending| {
+                pending.request_id == request_id
+                    && pending.status == PendingProjectionStatus::Cancelled
+            }));
+        assert!(restarted
+            .inner
+            .turn_submissions
+            .queue()
+            .unwrap()
+            .list(&task_id)
+            .unwrap()
+            .is_empty());
     }
 }

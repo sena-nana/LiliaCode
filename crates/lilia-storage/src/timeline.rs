@@ -114,8 +114,15 @@ pub(crate) fn apply_command_to_maps(
     match command {
         TimelineProjectionCommand::UpsertTimelineEvent { event } => {
             let key = event.id.as_str().to_string();
-            if events.contains_key(&key) {
-                return ProjectionApplyResult::DuplicateIgnored;
+            if let Some(existing) = events.get(&key) {
+                if existing == &event {
+                    return ProjectionApplyResult::DuplicateIgnored;
+                }
+                let session_id = event.agent_session.as_str().to_string();
+                let sequence = event.sequence;
+                events.insert(key, event);
+                bump_cursor(cursors, &session_id, sequence);
+                return ProjectionApplyResult::Updated;
             }
             let session_id = event.agent_session.as_str().to_string();
             let sequence = event.sequence;

@@ -2,14 +2,14 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, Weak, mpsc};
+use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
 use lilia_agent::{BrowserCancellation, BrowserError, BrowserSessions, TaskBrowserHost};
 use lilia_contracts::{BrowserHostRequest, BrowserHostRequestKind};
 use lilia_contracts::{BrowserOperation, BrowserPage, BrowserRequest, BrowserScope, BrowserTarget};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use webview2_com::{
     CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR,
@@ -19,10 +19,10 @@ use webview2_com::{
     NavigationCompletedEventHandler, NavigationStartingEventHandler,
     NewWindowRequestedEventHandler, SourceChangedEventHandler, StateChangedEventHandler,
 };
+use windows::core::{Interface, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::IDCompositionVisual;
-use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
-use windows::core::{Interface, PCWSTR, PWSTR};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
 #[path = "browser_requests.rs"]
 mod requests;
@@ -35,21 +35,25 @@ struct Reply {
     epoch: u64,
 }
 impl Reply {
+    fn clear_operation(&self) {
+        if self.epoch == self.tab.operation_epoch.get() {
+            self.tab.active.set(false);
+            self.tab.capturing.set(false);
+            self.tab.operation_token.borrow_mut().take();
+        }
+    }
+
     fn send(
         self,
         value: Result<BrowserPage, BrowserError>,
     ) -> Result<(), mpsc::SendError<Result<BrowserPage, BrowserError>>> {
-        if self.epoch == self.tab.operation_epoch.get() {
-            self.tab.active.set(false);
-        }
+        self.clear_operation();
         self.sender.send(value)
     }
 }
 impl Drop for Reply {
     fn drop(&mut self) {
-        if self.epoch == self.tab.operation_epoch.get() {
-            self.tab.active.set(false);
-        }
+        self.clear_operation();
     }
 }
 type Completion = Box<dyn FnOnce(Result<Value, BrowserError>)>;
@@ -151,7 +155,6 @@ struct Tab {
     controller: ICoreWebView2Controller,
     composition: ICoreWebView2CompositionController,
     view: ICoreWebView2,
-    artifacts: PathBuf,
     active: Cell<bool>,
     capturing: Cell<bool>,
     visible: Cell<bool>,
@@ -159,7 +162,7 @@ struct Tab {
     operation_epoch: Cell<u64>,
     operation_token: RefCell<Option<BrowserCancellation>>,
     navigating: Cell<bool>,
-    pending_observation: RefCell<Option<(BrowserCancellation, Option<String>, Reply)>>,
+    pending_observation: RefCell<Option<(BrowserCancellation, Option<Vec<u8>>, Reply)>>,
 }
 
 struct ComApartment(Result<(), BrowserError>);
@@ -302,7 +305,6 @@ impl UiBrowserHost {
         let tabs = self.tabs.clone();
         let events = self.events.clone();
         let sessions = self.sessions.clone();
-        let artifacts = profile.join("screenshots");
         let creating = self.creating.clone();
         let immediate_scope = scope.clone();
         let wake = self.wake.clone();
@@ -372,7 +374,6 @@ impl UiBrowserHost {
                                     controller,
                                     composition,
                                     view,
-                                    artifacts,
                                     active: Cell::new(false),
                                     capturing: Cell::new(false),
                                     visible: Cell::new(false),
@@ -832,6 +833,7 @@ fn blank_page() -> BrowserPage {
         title: String::new(),
         targets: vec![],
         screenshot_artifact: None,
+        screenshot_bytes: None,
     }
 }
 
@@ -850,6 +852,7 @@ fn current_page(view: &ICoreWebView2) -> Result<BrowserPage, BrowserError> {
         title: CoTaskMemPWSTR::from(title).to_string(),
         targets: vec![],
         screenshot_artifact: None,
+        screenshot_bytes: None,
     })
 }
 
@@ -907,7 +910,7 @@ fn cdp(
     }
 }
 
-fn observe(tab: Rc<Tab>, token: BrowserCancellation, screenshot: Option<String>, reply: Reply) {
+fn observe(tab: Rc<Tab>, token: BrowserCancellation, screenshot: Option<Vec<u8>>, reply: Reply) {
     if token.is_cancelled() {
         let _ = reply.send(Err(BrowserError::Cancelled));
         return;
@@ -936,7 +939,7 @@ fn observe(tab: Rc<Tab>, token: BrowserCancellation, screenshot: Option<String>,
 fn observe_accessibility(
     tab: Rc<Tab>,
     token: BrowserCancellation,
-    screenshot: Option<String>,
+    screenshot: Option<Vec<u8>>,
     reply: Reply,
 ) {
     let view = tab.view.clone();
@@ -971,7 +974,8 @@ fn observe_accessibility(
                     .collect();
                 let mut page = current_page(&tab.view)?;
                 page.targets = targets;
-                page.screenshot_artifact = screenshot;
+                page.screenshot_artifact = None;
+                page.screenshot_bytes = screenshot;
                 Ok(page)
             });
             let _ = reply.send(result);
@@ -1165,13 +1169,10 @@ fn run_operation(
                     let bytes = base64::engine::general_purpose::STANDARD
                         .decode(data)
                         .map_err(host_error)?;
-                    std::fs::create_dir_all(&tab.artifacts).map_err(host_error)?;
-                    let path = tab.artifacts.join(format!("{}.png", digest_hex(&bytes)));
-                    std::fs::write(&path, bytes).map_err(host_error)?;
-                    Ok(path.to_string_lossy().into_owned())
+                    Ok(bytes)
                 });
                 match artifact {
-                    Ok(path) => observe(tab, final_token, Some(path), reply),
+                    Ok(bytes) => observe(tab, final_token, Some(bytes), reply),
                     Err(error) => {
                         let _ = reply.send(Err(error));
                     }
@@ -1251,6 +1252,11 @@ fn install_events(
         };
         tab.document_epoch.set(tab.document_epoch.get() + 1);
         tab.navigation_epoch.set(tab.navigation_epoch.get() + 1);
+        if tab.active.get() && tab.capturing.get() {
+            if let Some(token) = tab.operation_token.borrow().as_ref() {
+                token.cancel();
+            }
+        }
         if !tab.active.get() {
             if let Some(sessions) = navigation_sessions.borrow().upgrade() {
                 if let Some(mut page) = navigation_url
@@ -1259,6 +1265,7 @@ fn install_events(
                         title: String::new(),
                         targets: Vec::new(),
                         screenshot_artifact: None,
+                        screenshot_bytes: None,
                     })
                     .or_else(|| current_page(&tab.view).ok())
                 {
@@ -1277,6 +1284,11 @@ fn install_events(
         if let Some(tab) = source_tab.upgrade() {
             tab.document_epoch.set(tab.document_epoch.get() + 1);
             tab.navigation_epoch.set(tab.navigation_epoch.get() + 1);
+            if tab.active.get() && tab.capturing.get() {
+                if let Some(token) = tab.operation_token.borrow().as_ref() {
+                    token.cancel();
+                }
+            }
             if !tab.active.get() {
                 if let Some(sessions) = source_sessions.borrow().upgrade() {
                     if let Ok(page) = current_page(&tab.view) {
@@ -1421,6 +1433,11 @@ fn install_events(
         let handler = DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, _| {
             if let Some(tab) = weak_tab.upgrade() {
                 tab.document_epoch.set(tab.document_epoch.get() + 1);
+                if tab.active.get() && tab.capturing.get() {
+                    if let Some(token) = tab.operation_token.borrow().as_ref() {
+                        token.cancel();
+                    }
+                }
                 if !tab.active.get() {
                     if let Some(sessions) = sessions.borrow().upgrade() {
                         if let Ok(state) = sessions.state(&tab.scope) {

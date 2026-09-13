@@ -64,6 +64,19 @@ pub trait BrowserScopeAuthority: Send + Sync {
     fn validate(&self, scope: &BrowserScope) -> Result<(), BrowserError>;
 }
 
+/// Application-owned persistence hook for successful Agent screenshots.
+/// The browser domain never knows Product storage details or exposes paths.
+pub trait BrowserArtifactSink: Send + Sync {
+    fn record_screenshot(
+        &self,
+        scope: &BrowserScope,
+        session: &str,
+        turn: &str,
+        bytes: &[u8],
+        cancellation: &BrowserCancellation,
+    ) -> Result<String, BrowserError>;
+}
+
 struct Tab {
     state: BrowserState,
     active: Option<BrowserCancellation>,
@@ -78,9 +91,27 @@ pub struct BrowserSessions {
     agent_scopes: Mutex<BTreeMap<String, BrowserScope>>,
     selected_scopes: Mutex<BTreeMap<lilia_contracts::TaskId, BrowserScope>>,
     cancelled_turns: Mutex<BTreeSet<(String, String)>>,
+    artifact_sink: Option<Arc<dyn BrowserArtifactSink>>,
+    /// Serializes cancellation/invalidation with the short artifact commit
+    /// critical section so a user cancel cannot interleave with persistence.
+    artifact_commit: Mutex<()>,
 }
 
 impl BrowserSessions {
+    fn release_active(&self, scope: &BrowserScope, token: &BrowserCancellation) {
+        if let Ok(mut tabs) = self.tabs.lock() {
+            if let Some(tab) = tabs.get_mut(&scope.tab_id) {
+                if tab
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| Arc::ptr_eq(&active.0, &token.0))
+                {
+                    tab.active = None;
+                }
+            }
+        }
+    }
+
     pub fn new(host: Arc<dyn TaskBrowserHost>) -> Self {
         Self {
             host,
@@ -91,6 +122,8 @@ impl BrowserSessions {
             agent_scopes: Mutex::new(BTreeMap::new()),
             selected_scopes: Mutex::new(BTreeMap::new()),
             cancelled_turns: Mutex::new(BTreeSet::new()),
+            artifact_sink: None,
+            artifact_commit: Mutex::new(()),
         }
     }
 
@@ -100,6 +133,16 @@ impl BrowserSessions {
     ) -> Self {
         let mut sessions = Self::new(host);
         sessions.authority = Some(authority);
+        sessions
+    }
+
+    pub fn with_authority_and_artifact_sink(
+        host: Arc<dyn TaskBrowserHost>,
+        authority: Arc<dyn BrowserScopeAuthority>,
+        artifact_sink: Arc<dyn BrowserArtifactSink>,
+    ) -> Self {
+        let mut sessions = Self::with_authority(host, authority);
+        sessions.artifact_sink = Some(artifact_sink);
         sessions
     }
 
@@ -322,7 +365,70 @@ impl BrowserSessions {
             tabs.get_mut(&request.scope.tab_id).unwrap().active = Some(token.clone());
         }
         let result = self.host.execute(request, &token);
-        self.validate_scope(&request.scope)?;
+        if let Err(error) = self.validate_scope(&request.scope) {
+            self.release_active(&request.scope, &token);
+            return Err(error);
+        }
+        let mut result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.release_active(&request.scope, &token);
+                if matches!(error, BrowserError::Cancelled) {
+                    if let Ok(mut tabs) = self.tabs.lock() {
+                        if let Some(tab) = tabs.get_mut(&request.scope.tab_id) {
+                            if tab.state.lifecycle == request.lifecycle
+                                && tab.state.page_version == request.page_version
+                            {
+                                tab.state.page_version += 1;
+                                tab.state.page.targets.clear();
+                            }
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        };
+        if matches!(
+            request.operation,
+            lilia_contracts::BrowserOperation::Screenshot
+        ) {
+            let _artifact_commit = self
+                .artifact_commit
+                .lock()
+                .expect("browser artifact commit lock");
+            let (session, turn) = match agent {
+                Some(value) => value,
+                None => {
+                    self.release_active(&request.scope, &token);
+                    return Err(BrowserError::Unavailable);
+                }
+            };
+            if token.is_cancelled() {
+                self.release_active(&request.scope, &token);
+                return Err(BrowserError::Cancelled);
+            }
+            let bytes = match result.screenshot_bytes.take() {
+                Some(bytes) => bytes,
+                None => {
+                    self.release_active(&request.scope, &token);
+                    return Err(BrowserError::Host("Screenshot is unavailable".into()));
+                }
+            };
+            let sink = self.artifact_sink.as_ref();
+            let resource = match sink {
+                Some(sink) => sink.record_screenshot(&request.scope, session, turn, &bytes, &token),
+                None => Err(BrowserError::Unavailable),
+            };
+            let resource = match resource {
+                Ok(resource) => resource,
+                Err(error) => {
+                    self.release_active(&request.scope, &token);
+                    return Err(error);
+                }
+            };
+            result.screenshot_artifact = Some(resource);
+            result.screenshot_bytes = None;
+        }
         let mut tabs = self.tabs.lock().expect("browser sessions");
         let tab = tabs
             .get_mut(&request.scope.tab_id)
@@ -353,7 +459,7 @@ impl BrowserSessions {
         // Even a failed input may have affected the page before the host reports failure.
         tab.state.page_version += 1;
         tab.state.page.targets.clear();
-        tab.state.page = result?;
+        tab.state.page = result;
         Ok(tab.state.clone())
     }
 
@@ -363,6 +469,10 @@ impl BrowserSessions {
         page: BrowserPage,
     ) -> Result<BrowserState, BrowserError> {
         self.validate_scope(scope)?;
+        let _artifact_commit = self
+            .artifact_commit
+            .lock()
+            .expect("browser artifact commit lock");
         let state = {
             let mut tabs = self.tabs.lock().expect("browser sessions");
             Self::tab(&tabs, scope)?;
@@ -397,6 +507,10 @@ impl BrowserSessions {
         scope: &BrowserScope,
         control: Option<BrowserControl>,
     ) -> Result<BrowserState, BrowserError> {
+        let _artifact_commit = self
+            .artifact_commit
+            .lock()
+            .expect("browser artifact commit lock");
         self.private_inputs
             .lock()
             .expect("browser private inputs")
@@ -421,6 +535,10 @@ impl BrowserSessions {
     }
 
     pub fn close(&self, scope: &BrowserScope) -> Result<(), BrowserError> {
+        let _artifact_commit = self
+            .artifact_commit
+            .lock()
+            .expect("browser artifact commit lock");
         self.selected_scopes
             .lock()
             .expect("browser selected scopes")
@@ -464,6 +582,7 @@ mod tests {
             title: title.into(),
             targets: vec![],
             screenshot_artifact: None,
+            screenshot_bytes: None,
         }
     }
     fn request(state: &BrowserState) -> BrowserRequest {
@@ -660,6 +779,68 @@ mod tests {
         assert_eq!(worker.join().unwrap(), Err(BrowserError::Cancelled));
         assert!(!sessions.is_busy(&first.scope));
         assert_eq!(sessions.state(&first.scope).unwrap().page.title, "original");
+    }
+
+    #[test]
+    fn successful_agent_screenshot_materializes_bytes_once_and_returns_opaque_ref() {
+        struct Allow;
+        impl BrowserScopeAuthority for Allow {
+            fn validate(&self, _: &BrowserScope) -> Result<(), BrowserError> {
+                Ok(())
+            }
+        }
+        struct ScreenshotHost;
+        impl TaskBrowserHost for ScreenshotHost {
+            fn execute(
+                &self,
+                request: &BrowserRequest,
+                _: &BrowserCancellation,
+            ) -> Result<BrowserPage, BrowserError> {
+                assert!(matches!(request.operation, BrowserOperation::Screenshot));
+                let mut result = page("captured");
+                result.screenshot_bytes = Some(vec![137, 80, 78, 71]);
+                Ok(result)
+            }
+            fn cancel(&self, _: &BrowserScope) {}
+        }
+        struct Sink(AtomicBool);
+        impl BrowserArtifactSink for Sink {
+            fn record_screenshot(
+                &self,
+                _: &BrowserScope,
+                session: &str,
+                turn: &str,
+                bytes: &[u8],
+                _: &BrowserCancellation,
+            ) -> Result<String, BrowserError> {
+                assert_eq!(session, "session");
+                assert_eq!(turn, "turn");
+                assert_eq!(bytes, [137, 80, 78, 71]);
+                assert!(!self.0.swap(true, Ordering::AcqRel));
+                Ok("resource://browser/project/task/hash.png".into())
+            }
+        }
+        let sink = Arc::new(Sink(AtomicBool::new(false)));
+        let sessions = BrowserSessions::with_authority_and_artifact_sink(
+            Arc::new(ScreenshotHost),
+            Arc::new(Allow),
+            sink.clone(),
+        );
+        let initial = sessions
+            .register(scope("screenshot"), page("original"))
+            .unwrap();
+        sessions
+            .bind_agent("session".into(), initial.scope.clone())
+            .unwrap();
+        let mut request = request(&initial);
+        request.operation = BrowserOperation::Screenshot;
+        let result = sessions.execute_agent("session", "turn", &request).unwrap();
+        assert_eq!(
+            result.page.screenshot_artifact.as_deref(),
+            Some("resource://browser/project/task/hash.png")
+        );
+        assert!(result.page.screenshot_bytes.is_none());
+        assert!(!sessions.is_busy(&initial.scope));
     }
     #[test]
     fn authority_revocation_between_host_steps_cancels_before_input() {

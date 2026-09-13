@@ -16,7 +16,7 @@ Windows `UiBrowserHost` 在应用 STA UI 线程创建 WebView2 composition contr
 
 新窗口需要先 `create_for_request` 准备同项目、同任务的目标 tab，再 `respond(NewWindow)`。目标复用 opener 的 CoreWebView2Environment，必须尚未导航；成功后由 WebView2 原生请求导航，保留 window.open 的 opener/WindowProxy 语义。参见 [WebView2 NewWindowRequested 合同](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/icorewebview2newwindowrequestedeventargs)；文件选择拦截使用 [CDP Page.setInterceptFileChooserDialog](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-setInterceptFileChooserDialog)。
 
-权限卡、文件选择器、目标窗格与宿主票据已接线，完整实际上传/下载仍待真实窗口验收。截图目前保存在项目 profile 下的 screenshots 目录，后续应接入 Product artifact 保留策略。macOS/Linux 没有 WebView2 实现，不能宣称浏览后端可用。全量 DOM 观察及复杂页面的输出成本仍需性能实测。
+权限卡、文件选择器、目标窗格与宿主票据已接线，完整实际上传/下载仍待真实窗口验收。截图由 WebView2 以 PNG bytes 返回给应用 artifact sink；宿主不把 profile 下的绝对路径作为产品结果。sink 在 `LILIA_HOME/artifacts/<project-hash>/<task-hash>/screenshots/<content-hash>.png` 通过临时文件和原子 rename 物化，并以 `ProductArtifact`、`ArtifactProjection` 与时间线 artifact 事件作为可恢复事实。相同任务和内容 hash 重试时复用既有 opaque resource ref，不重复产品事件；投影失败可从 `browser.screenshot` ProductArtifact 重建。保留策略只清理任务隔离目录中的未 pinned 物料，缺失文件保留元数据并标记 `inaccessible`；profile 下历史 `screenshots` 仅作为兼容/清理来源。macOS/Linux 没有 WebView2 实现，不能宣称浏览后端可用。全量 DOM 观察及复杂页面的输出成本仍需性能实测。
 
 
 运行期间的 Product 权威由 `BrowserScopeAuthority` 注入，桌面适配器只依赖 ProjectTaskService。注册、绑定、恢复控制、实际执行前及异步结果提交前重新验证任务存在、未归档、仍属于原项目且项目处于 Active；失效关闭生命周期并撤销绑定与私密票据。无权威的 BrowserSessions 不允许执行。人工导航、文件请求批准也执行相同校验；拒绝保持可用以释放原生 deferral。UI 更新停用失效宿主，但保留原工作区记录，不能仅靠 UI 的更新时机阻止跨项目操作。

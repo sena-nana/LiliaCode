@@ -56,8 +56,8 @@ pub use automation::{
 };
 pub use binding::{AgentSessionBinding, AgentSessionRef};
 pub use browser::{
-    BrowserControl, BrowserOperation, BrowserPage, BrowserRequest, BrowserScope, BrowserState,
-    BrowserTarget, BROWSER_CONTRACT_JSON,
+    is_opaque_browser_resource_ref, BrowserControl, BrowserOperation, BrowserPage, BrowserRequest,
+    BrowserScope, BrowserState, BrowserTarget, BROWSER_CONTRACT_JSON,
 };
 pub use browser::{
     BrowserHostDecision, BrowserHostRequest, BrowserHostRequestKind, BrowserTabRestoration,

@@ -744,6 +744,31 @@ impl ProductRepository for SqliteProductStore {
         }
     }
 
+    fn find_artifact_by_content_hash(
+        &self,
+        task_id: &TaskId,
+        content_hash: &str,
+    ) -> ProductResult<Option<lilia_contracts::ProductArtifact>> {
+        Ok(self
+            .list_entities(ProductEntityKind::Artifact)?
+            .into_iter()
+            .filter_map(|entity| match entity {
+                ProductEntity::Artifact(artifact)
+                    if artifact.task_id == *task_id
+                        && artifact.provenance.as_deref() == Some("browser.screenshot")
+                        && artifact.content_hash.as_deref() == Some(content_hash) =>
+                {
+                    Some(artifact)
+                }
+                _ => None,
+            })
+            .max_by(|left, right| {
+                left.revision
+                    .cmp(&right.revision)
+                    .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+            }))
+    }
+
     fn create_entity_command(
         &self,
         meta: &ProductCommandMeta,

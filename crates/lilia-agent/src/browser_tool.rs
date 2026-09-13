@@ -497,6 +497,7 @@ mod tests {
             title: String::new(),
             targets: vec![],
             screenshot_artifact: None,
+            screenshot_bytes: None,
         }
     }
 
