@@ -10,22 +10,74 @@ pub use lilia_feature_suggestions::types::{
     DesktopSuggestionModelRequest, DesktopSuggestionSessionThreadRef, DesktopSuggestionSourceProbe,
 };
 pub use model::{
-    request_model_completion, ConversationSuggestionModelPort,
-    DesktopApplicationSuggestionModelPort,
+    ConversationSuggestionModelPort, DesktopApplicationSuggestionModelPort,
+    request_model_completion,
 };
 pub use settings::{
-    DesktopConversationSuggestionError, DesktopConversationSuggestionSettings,
-    DesktopConversationSuggestionSource, CONVERSATION_SUGGESTION_SETTINGS_KEY,
+    CONVERSATION_SUGGESTION_SETTINGS_KEY, DesktopConversationSuggestionError,
+    DesktopConversationSuggestionSettings, DesktopConversationSuggestionSource,
 };
 
 use cache::{build_cache_key, cache_scope_key};
 use lilia_feature_suggestions::generation::{
     build_generation_prompt, materialize_items, parse_model_suggestions,
 };
+use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
 use scope::summarize_scope_sources;
+use std::sync::{Arc, Mutex};
 
 use crate::application::ConversationSuggestionsChanged;
 use crate::application::{DesktopApplication, DesktopApplicationError};
+
+/// Serializes model generation with cache publication for one desktop process.
+#[derive(Clone, Default)]
+pub struct DesktopConversationSuggestionGenerationService {
+    generation: Arc<Mutex<()>>,
+}
+
+impl DesktopConversationSuggestionGenerationService {
+    pub(crate) fn generate<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, DesktopApplicationError>,
+    ) -> Result<T, DesktopApplicationError> {
+        let _guard = self
+            .generation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        operation()
+    }
+}
+
+pub struct ConversationSuggestionGenerationServiceKey;
+
+impl ServiceKey for ConversationSuggestionGenerationServiceKey {
+    type Value = DesktopConversationSuggestionGenerationService;
+    const NAME: &'static str = "lilia.suggestions.generation";
+}
+
+pub struct ConversationSuggestionGenerationServiceFeature {
+    service: DesktopConversationSuggestionGenerationService,
+}
+
+impl ConversationSuggestionGenerationServiceFeature {
+    pub fn new(service: DesktopConversationSuggestionGenerationService) -> Self {
+        Self { service }
+    }
+}
+
+impl Feature for ConversationSuggestionGenerationServiceFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.suggestion-generation").expect("nonempty feature id")
+    }
+
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<ConversationSuggestionGenerationServiceKey>()]
+    }
+
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        cx.provide::<ConversationSuggestionGenerationServiceKey>(self.service.clone())
+    }
+}
 
 impl DesktopApplication {
     pub fn conversation_suggestion_sources(
@@ -54,11 +106,22 @@ impl DesktopApplication {
         force_refresh: bool,
         models: &dyn ConversationSuggestionModelPort,
     ) -> Result<Vec<DesktopSuggestionItem>, DesktopApplicationError> {
-        let _generation = self
-            .inner
-            .conversation_suggestion_generation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.conversation_suggestion_generation_service()
+            .generate(|| self.generate_conversation_suggestions(project_id, force_refresh, models))
+    }
+
+    pub fn conversation_suggestion_generation_service(
+        &self,
+    ) -> DesktopConversationSuggestionGenerationService {
+        self.inner.conversation_suggestion_generation.clone()
+    }
+
+    fn generate_conversation_suggestions(
+        &self,
+        project_id: Option<&str>,
+        force_refresh: bool,
+        models: &dyn ConversationSuggestionModelPort,
+    ) -> Result<Vec<DesktopSuggestionItem>, DesktopApplicationError> {
         let settings = self.conversation_suggestion_settings()?;
         if !settings.enabled {
             return Ok(Vec::new());
@@ -110,6 +173,7 @@ impl DesktopApplication {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use tempfile::TempDir;
 
@@ -205,6 +269,48 @@ mod tests {
     }
 
     #[test]
+    fn generation_service_serializes_overlapping_generations() {
+        let service = DesktopConversationSuggestionGenerationService::default();
+        let (first_acquired_sender, first_acquired_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let first = service.clone();
+        let first_thread = std::thread::spawn(move || {
+            first
+                .generate(|| {
+                    first_acquired_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        first_acquired_receiver.recv().unwrap();
+
+        let (second_attempt_sender, second_attempt_receiver) = std::sync::mpsc::channel();
+        let (second_completed_sender, second_completed_receiver) = std::sync::mpsc::channel();
+        let second = service.clone();
+        let second_thread = std::thread::spawn(move || {
+            second_attempt_sender.send(()).unwrap();
+            second
+                .generate(|| {
+                    second_completed_sender.send(()).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        second_attempt_receiver.recv().unwrap();
+        assert!(
+            second_completed_receiver
+                .recv_timeout(Duration::from_millis(50))
+                .is_err()
+        );
+
+        release_sender.send(()).unwrap();
+        second_completed_receiver.recv().unwrap();
+        first_thread.join().unwrap();
+        second_thread.join().unwrap();
+    }
+
+    #[test]
     fn generation_uses_unfinished_product_facts_and_reuses_the_durable_cache() {
         let (_home, application, task_id) = suggestion_app();
         let model = RecordingModel::new(task_id.clone());
@@ -248,10 +354,12 @@ mod tests {
                 source: DesktopConversationSuggestionSource::AssistantAi,
             })
             .unwrap();
-        assert!(application
-            .conversation_suggestions(None, true, &model)
-            .unwrap()
-            .is_empty());
+        assert!(
+            application
+                .conversation_suggestions(None, true, &model)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
     }
 }

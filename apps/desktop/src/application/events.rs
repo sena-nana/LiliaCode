@@ -190,6 +190,8 @@ impl Event for InteractionChanged {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFilesChanged {
     pub project_id: ProjectId,
+    pub workspace_root: std::path::PathBuf,
+    pub revision: u64,
 }
 
 impl Event for ProjectFilesChanged {

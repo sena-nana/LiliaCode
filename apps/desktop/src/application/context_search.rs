@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use ignore::WalkBuilder;
 use lilia_contracts::{ChatContextSearchMatch, ChatContextSearchResult, ProjectId, TaskId};
 
-use crate::application::{describe_attachment_path, DesktopApplication, DesktopApplicationError};
+use crate::application::{DesktopApplication, DesktopApplicationError, describe_attachment_path};
 
 const DEFAULT_CONTEXT_SEARCH_LIMIT: usize = 12;
 const MAX_CONTEXT_SEARCH_LIMIT: usize = 50;
@@ -32,7 +32,7 @@ pub fn search_context_attachments(
     }
 }
 
-impl DesktopApplication {
+impl crate::application::ComposerInputService {
     pub fn search_task_context_attachments(
         &self,
         task_id: &TaskId,
@@ -64,6 +64,29 @@ impl DesktopApplication {
             query,
             limit,
         ))
+    }
+}
+
+impl DesktopApplication {
+    pub fn search_task_context_attachments(
+        &self,
+        task_id: &TaskId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ChatContextSearchResult>, DesktopApplicationError> {
+        self.inner
+            .composer_input
+            .search_task_context_attachments(task_id, query, limit)
+    }
+    pub fn search_project_context_attachments(
+        &self,
+        project_id: &ProjectId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ChatContextSearchResult>, DesktopApplicationError> {
+        self.inner
+            .composer_input
+            .search_project_context_attachments(project_id, query, limit)
     }
 }
 

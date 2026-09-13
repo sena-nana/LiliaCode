@@ -1407,6 +1407,7 @@ mod tests {
         agent_activations: Mutex<Vec<AutomationAgentActivation>>,
         tool_output: Mutex<Option<JsonValue>>,
         fail_tool: Mutex<bool>,
+        cancel_during_tool: Mutex<bool>,
     }
 
     struct StaticRepository {
@@ -1455,6 +1456,12 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(context.idempotency_key.clone());
+            if *self.cancel_during_tool.lock().unwrap() {
+                let repository = self.repository.lock().unwrap().clone().unwrap();
+                AutomationExecutionEngine::new(Arc::new(TestPorts::default()))
+                    .cancel_run(&repository, &context.idempotency_key.run_id)
+                    .unwrap();
+            }
             if *self.fail_tool.lock().unwrap() {
                 return Err(AutomationPortError::new("test tool failed"));
             }
@@ -1588,6 +1595,7 @@ mod tests {
         service.publish(&workflow.id).unwrap();
         let detail = service
             .try_begin_run(AutomationBeginRunInput {
+                expected_version_id: None,
                 workflow_id: workflow.id,
                 trigger: AutomationSignalEnvelope {
                     id: "signal".to_owned(),
@@ -1658,6 +1666,42 @@ mod tests {
                 node_id: "tool".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn cancellation_during_tool_prevents_late_output_and_following_nodes() {
+        let (service, begun) = begin_run(
+            vec![
+                node("trigger", "trigger", serde_json::json!({})),
+                node(
+                    "tool",
+                    "tool",
+                    serde_json::json!({"action":"create_task","title":"First"}),
+                ),
+                node(
+                    "next",
+                    "tool",
+                    serde_json::json!({"action":"create_task","title":"Second"}),
+                ),
+            ],
+            vec![edge("trigger", "tool", None), edge("tool", "next", None)],
+            serde_json::json!({}),
+        );
+        let (ports, engine) = engine(&service);
+        *ports.cancel_during_tool.lock().unwrap() = true;
+        let _ = engine.execute_run(&service, &begun.run.id);
+        let detail = service.run_detail(&begun.run.id).unwrap().unwrap();
+        assert_eq!(detail.run.status, AutomationRunStatus::Cancelled);
+        assert_eq!(
+            state(&detail, "tool").status,
+            AutomationRunStatus::Cancelled
+        );
+        assert_eq!(
+            state(&detail, "next").status,
+            AutomationRunStatus::Cancelled
+        );
+        assert!(state(&detail, "tool").output.is_none());
+        assert_eq!(ports.tool_keys.lock().unwrap().len(), 1);
     }
 
     #[test]

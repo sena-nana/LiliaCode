@@ -11,9 +11,7 @@ mod service;
 use std::sync::Arc;
 
 use lilia_contracts::ProductError;
-use lilia_kernel::{
-    Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef,
-};
+use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
 use lilia_service::ServiceAuthorityError;
 
 pub use events::{

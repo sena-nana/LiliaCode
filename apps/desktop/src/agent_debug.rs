@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) fn retained_key_event(chord: &str) -> nana_ui_platform::InputEvent {
@@ -359,6 +359,7 @@ pub struct DebugObservation {
     pub inspector_region_extent: Option<f32>,
     pub coding_tools_dock_open: bool,
     pub coding_tools_panel_extent: Option<f32>,
+    pub browser_states: Vec<serde_json::Value>,
     pub iab_dock_open: bool,
     pub iab_browser_attached: bool,
     pub iab_browser_ready: bool,
@@ -813,6 +814,7 @@ impl DebugObservation {
                     .clone(),
             );
         let iab = serde_json::json!({
+            "browserStates": &self.browser_states,
             "iabDockOpen": self.iab_dock_open,
             "iabBrowserAttached": self.iab_browser_attached,
             "iabBrowserReady": self.iab_browser_ready,
@@ -1869,6 +1871,7 @@ mod tests {
             inspector_region_extent: Some(352.0),
             coding_tools_dock_open: true,
             coding_tools_panel_extent: Some(360.0),
+            browser_states: vec![],
             iab_dock_open: false,
             iab_browser_attached: false,
             iab_browser_ready: false,

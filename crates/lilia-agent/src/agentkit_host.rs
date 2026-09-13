@@ -105,6 +105,7 @@ pub(crate) struct AgentKitHost {
     next_task: AtomicU64,
     subagents: Option<Arc<LiveSubagentToolRuntime>>,
     mcp_calls: SharedMcpCalls,
+    browser: Option<Arc<crate::BrowserSessions>>,
 }
 
 type SharedMcpCalls = Arc<Mutex<SharedMcpCallState>>;
@@ -171,6 +172,7 @@ impl AgentKitHost {
         credentials: Arc<dyn CredentialBroker>,
         enable_workspace_tools: bool,
         subagents: &[NativeSubagentDefinition],
+        browser: Option<Arc<crate::BrowserSessions>>,
     ) -> AgentResult<Self> {
         let enabled_subagents = subagents
             .iter()
@@ -187,6 +189,7 @@ impl AgentKitHost {
                 enable_workspace_tools,
                 ToolAccess::ReadOnly,
                 None,
+                None,
             )?);
             Some(Arc::new(LiveSubagentToolRuntime::new(
                 child_host,
@@ -200,6 +203,7 @@ impl AgentKitHost {
             enable_workspace_tools,
             ToolAccess::Full,
             subagent_runtime,
+            browser,
         )
     }
 
@@ -210,6 +214,7 @@ impl AgentKitHost {
         enable_workspace_tools: bool,
         tool_access: ToolAccess,
         subagents: Option<Arc<LiveSubagentToolRuntime>>,
+        browser: Option<Arc<crate::BrowserSessions>>,
     ) -> AgentResult<Self> {
         let mcp_names = bundle
             .mcp
@@ -225,6 +230,9 @@ impl AgentKitHost {
                 descriptor.target_payload_mode = ToolTargetPayloadMode::ExecutionRequest;
             }
         }
+        if browser.is_some() {
+            product_tools.push(crate::browser_tool::descriptor());
+        }
         if !product_tools
             .iter()
             .any(|descriptor| descriptor.name == PROJECT_ARCHITECTURE_TOOL_NAME)
@@ -237,6 +245,7 @@ impl AgentKitHost {
                 tool_access.allows(descriptor)
                     && (enable_workspace_tools
                         || mcp_names.contains(&descriptor.name)
+                        || descriptor.name == crate::browser_tool::TOOL
                         || matches!(
                             &descriptor.execution,
                             AgentToolExecution::Interaction { .. }
@@ -265,6 +274,14 @@ impl AgentKitHost {
                     .map_err(protocol_error)?,
                 ),
             };
+            let adapter = if let Some(sessions) = &browser {
+                Arc::new(crate::browser_tool::PrivateBrowserAdapter::new(
+                    adapter,
+                    sessions.clone(),
+                )) as Arc<dyn ModelProtocolAdapter>
+            } else {
+                adapter
+            };
             let model = ModelGateway::with_default_provider(plan.provider.provider_id.clone());
             model.register(Arc::new(AdapterBackedModelProvider::new(
                 plan.provider.clone(),
@@ -287,6 +304,12 @@ impl AgentKitHost {
         let mut mcp_tools =
             shared_mcp_tool_plugin(client.clone(), bundle.mcp.clone(), mcp_calls.clone()).build();
         manifests.push(mcp_tools.manifest.clone());
+        let mut browser_tools = browser
+            .clone()
+            .map(|sessions| crate::browser_tool::plugin(client.clone(), sessions).build());
+        if let Some(plugin) = browser_tools.as_ref() {
+            manifests.push(plugin.manifest.clone());
+        }
         let mut subagent_tools = subagents.as_ref().map(|runtime| {
             native_subagent_tool_plugin(client.clone(), Arc::clone(runtime)).build()
         });
@@ -307,6 +330,11 @@ impl AgentKitHost {
         }
         for runner in mcp_tools.runners.drain(..) {
             bootstrapper.register_builtin_runner(runner);
+        }
+        if let Some(plugin) = browser_tools.as_mut() {
+            for runner in plugin.runners.drain(..) {
+                bootstrapper.register_builtin_runner(runner);
+            }
         }
         if let Some(plugin) = subagent_tools.as_mut() {
             for runner in plugin.runners.drain(..) {
@@ -354,6 +382,7 @@ impl AgentKitHost {
             next_task: AtomicU64::new(1),
             subagents,
             mcp_calls,
+            browser,
         })
     }
 
@@ -363,6 +392,24 @@ impl AgentKitHost {
         protocol_id: &str,
         payload: serde_json::Value,
     ) -> AgentResult<TaskHandle> {
+        if protocol_id == AGENT_RUN_PROTOCOL {
+            if let (Some(browser), Ok(request)) = (
+                &self.browser,
+                serde_json::from_value::<AgentRunRequest>(payload.clone()),
+            ) {
+                for decision in request.permission_decisions {
+                    if decision.decision
+                        != mutsuki_agent_contracts::PermissionDecisionKind::Approved
+                    {
+                        browser
+                            .private_inputs
+                            .lock()
+                            .expect("browser private inputs")
+                            .discard_call(&decision.session_id, &decision.action_id);
+                    }
+                }
+            }
+        }
         let id = self.next_task.fetch_add(1, Ordering::Relaxed);
         self.runtime
             .submit_task(Task::new(
@@ -1110,6 +1157,60 @@ fn runtime_error(error: RuntimeFailure) -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_without_local_workspace_is_registered_through_the_real_tool_runner() {
+        struct Host;
+        impl crate::TaskBrowserHost for Host {
+            fn execute(
+                &self,
+                _: &lilia_contracts::BrowserRequest,
+                _: &crate::BrowserCancellation,
+            ) -> Result<lilia_contracts::BrowserPage, crate::BrowserError> {
+                Err(crate::BrowserError::Unavailable)
+            }
+            fn cancel(&self, _: &lilia_contracts::BrowserScope) {}
+        }
+        for (access, expected) in [(ToolAccess::Full, true), (ToolAccess::ReadOnly, false)] {
+            let bootstrap = crate::NativeRuntimeBootstrap::embedded_reference().unwrap();
+            let host = AgentKitHost::build_host(
+                bootstrap.bundle().clone(),
+                None,
+                crate::model_turn::adapter_credential_broker(
+                    bootstrap.credentials().broker().clone(),
+                ),
+                false,
+                access,
+                None,
+                Some(Arc::new(crate::BrowserSessions::for_test(Arc::new(Host)))),
+            )
+            .unwrap();
+            let handle = host
+                .submit(
+                    "list-browser",
+                    mutsuki_agent_contracts::AGENT_TOOL_LIST_PROTOCOL,
+                    json!({}),
+                )
+                .unwrap();
+            let output = host.wait(&handle, Duration::from_secs(5)).unwrap();
+            let listed: mutsuki_agent_contracts::AgentToolListResult =
+                serde_json::from_value(output).unwrap();
+            let browser = listed
+                .tools
+                .iter()
+                .find(|tool| tool.name == crate::browser_tool::TOOL);
+            assert_eq!(browser.is_some(), expected);
+            if let Some(browser) = browser {
+                assert!(browser.requires_approval);
+                assert_eq!(browser.side_effect, ToolSideEffect::ExternalWrite);
+            }
+            assert!(listed
+                .tools
+                .iter()
+                .all(|tool| tool.name == crate::browser_tool::TOOL
+                    || matches!(tool.execution, AgentToolExecution::Interaction { .. })));
+        }
+    }
 
     #[test]
     fn architecture_tool_is_a_typed_model_visible_interaction() {

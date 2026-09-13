@@ -1,7 +1,7 @@
 use crate::application::{
-    timeline_retry_context, ChatAttachment, ChatContextUsage, DesktopGoalSnapshot,
-    DesktopTaskRunBlock, DesktopTaskSessionSnapshot, DesktopTaskTodo, DesktopTaskWorktree,
-    TITLE_UPDATE_ACTION_KIND,
+    ChatAttachment, ChatContextUsage, DesktopGoalSnapshot, DesktopTaskRunBlock,
+    DesktopTaskSessionSnapshot, DesktopTaskTodo, DesktopTaskWorktree, TITLE_UPDATE_ACTION_KIND,
+    timeline_retry_context,
 };
 use lilia_contracts::{
     PendingProjectionStatus, TimelineProjectionCursor, TimelineProjectionEvent,
@@ -70,6 +70,8 @@ pub(crate) struct TaskSessionView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingActionView {
+    pub(crate) task_id: Option<lilia_contracts::TaskId>,
+    pub(crate) turn_id: Option<String>,
     pub(crate) request_id: String,
     pub(crate) kind: String,
     pub(crate) prompt: String,
@@ -134,6 +136,8 @@ impl TaskSessionView {
             .pending
             .iter()
             .map(|item| PendingActionView {
+                task_id: Some(item.task_id.clone()),
+                turn_id: item.turn_id.clone(),
                 request_id: item.request_id.clone(),
                 kind: item.kind.clone(),
                 prompt: item
@@ -540,6 +544,46 @@ mod tests {
     }
 
     #[test]
+    fn pending_view_preserves_authoritative_task_and_turn_for_stop() {
+        let task_id = TaskId::new("pending-source-task").unwrap();
+        let snapshot = DesktopTaskSessionSnapshot {
+            task: lilia_contracts::ProductTask::new(task_id.clone(), None, "task").unwrap(),
+            run_block: None,
+            goal: None,
+            context_usage: None,
+            timeline: vec![],
+            timeline_before_cursor: None,
+            timeline_has_more_before: false,
+            artifacts: vec![],
+            todos: vec![],
+            task_todos: vec![],
+            worktree: None,
+            pending: vec![lilia_contracts::PendingProjection {
+                id: "pending".into(),
+                task_id: task_id.clone(),
+                agent_session: AgentSessionRef::new("session-source").unwrap(),
+                sequence: 1,
+                turn_id: Some("turn-source".into()),
+                request_id: "request".into(),
+                kind: "plan_approval".into(),
+                status: PendingProjectionStatus::Open,
+                prompt: None,
+                action_revision: Some(1),
+                payload: Value::Null,
+            }],
+        };
+        let mut view = TaskSessionView::from_snapshot(snapshot.clone());
+        assert_eq!(view.pending[0].task_id.as_ref(), Some(&task_id));
+        assert_eq!(view.pending[0].turn_id.as_deref(), Some("turn-source"));
+        let mut refreshed = snapshot;
+        refreshed.pending[0].turn_id = Some("turn-next".into());
+        let queued_source = view.pending[0].clone();
+        view.apply_projection_delta(refreshed);
+        assert_eq!(view.pending[0].turn_id.as_deref(), Some("turn-next"));
+        assert_eq!(queued_source.turn_id.as_deref(), Some("turn-source"));
+    }
+
+    #[test]
     fn task_session_state_orders_timeline_and_derives_pending_counts() {
         let state = TaskSessionView::from_facts(
             "实现原生预览".to_owned(),
@@ -591,6 +635,8 @@ mod tests {
                 PendingProjectionStatus::Cancelled,
             ],
             vec![PendingActionView {
+                task_id: None,
+                turn_id: None,
                 request_id: "approval-1".to_owned(),
                 kind: "permission_approval".to_owned(),
                 prompt: "允许写入文件".to_owned(),
@@ -624,6 +670,8 @@ mod tests {
             0,
             vec![PendingProjectionStatus::Open],
             vec![PendingActionView {
+                task_id: None,
+                turn_id: None,
                 request_id: "title-review-1".to_owned(),
                 kind: TITLE_UPDATE_ACTION_KIND.to_owned(),
                 prompt: "建议更新标题".to_owned(),
@@ -645,6 +693,8 @@ mod tests {
             0,
             vec![PendingProjectionStatus::Open],
             vec![PendingActionView {
+                task_id: None,
+                turn_id: None,
                 request_id: "ask-open".to_owned(),
                 kind: "ask_user".to_owned(),
                 prompt: "Choose".to_owned(),
@@ -739,9 +789,8 @@ mod tests {
             vec![],
             vec![],
         );
-        let rows = crate::module::timeline::TimelineModule::rows(&view, |_| false);
+        let rows = crate::module::timeline::TimelineModule::default().rows(&view);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].status, "success");
         assert_eq!(rows[0].markdown, "已完成");
         assert_eq!(
             view.timeline.len(),

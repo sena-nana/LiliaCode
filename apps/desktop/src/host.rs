@@ -3,7 +3,7 @@ use crate::application::{
     DesktopFileDialogRequest, DesktopHost, DesktopHostAction, DesktopHostContext, DesktopHostError,
     DesktopHostResult, DesktopSecret, DesktopUpdateAction,
 };
-use lilia_platform::{clipboard, dialog, launcher, power, CredentialEntry, PlatformError};
+use lilia_platform::{CredentialEntry, PlatformError, clipboard, dialog, launcher, power};
 
 const LEGACY_AI_CREDENTIAL_SERVICE: &str = "com.lilia.desktop.ai";
 const LEGACY_ASSISTANT_AI_ACCOUNT: &str = "assistant-ai";
@@ -28,6 +28,13 @@ impl DesktopHost for NativeDesktopHost {
             DesktopHostAction::FileDialog(request) => Ok(DesktopHostResult::FileDialogSelection(
                 open_file_dialog(request),
             )),
+            DesktopHostAction::SaveFileDialog {
+                request,
+                suggested_filename,
+            } => Ok(DesktopHostResult::FileDialogSelection(dialog::save(
+                platform_file_dialog(request),
+                &suggested_filename,
+            ))),
             DesktopHostAction::Credential(action) => return credential(context, action),
             DesktopHostAction::ReadClipboardText => {
                 clipboard::read_text().map(DesktopHostResult::ClipboardText)
@@ -66,7 +73,7 @@ impl DesktopHost for NativeDesktopHost {
                     "native_desktop_host_unavailable",
                     "this host capability is not available in LiliaCode",
                     false,
-                ))
+                ));
             }
         }
         .map_err(host_error)
@@ -87,7 +94,11 @@ fn open_file_dialog(request: DesktopFileDialogRequest) -> Vec<std::path::PathBuf
         return paths;
     }
 
-    dialog::pick(dialog::FileDialogRequest {
+    dialog::pick(platform_file_dialog(request))
+}
+
+fn platform_file_dialog(request: DesktopFileDialogRequest) -> dialog::FileDialogRequest {
+    dialog::FileDialogRequest {
         title: request.title,
         initial_directory: request.initial_directory,
         filters: request
@@ -100,7 +111,7 @@ fn open_file_dialog(request: DesktopFileDialogRequest) -> Vec<std::path::PathBuf
             .collect(),
         select_directories: request.select_directories,
         multiple: request.multiple,
-    })
+    }
 }
 
 pub(crate) fn hosted_file_dialog_request(
@@ -450,9 +461,11 @@ mod tests {
                 target_key: "agentkit.provider-secret".to_owned(),
             },
         ];
-        assert!(valid
-            .iter()
-            .all(|entry| valid_import_credential_entry(source_identity, entry)));
+        assert!(
+            valid
+                .iter()
+                .all(|entry| valid_import_credential_entry(source_identity, entry))
+        );
 
         let arbitrary_source = DesktopCredentialImportEntry {
             source_service: "untrusted.service".to_owned(),

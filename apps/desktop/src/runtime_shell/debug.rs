@@ -281,40 +281,21 @@ impl ShellHandles {
     }
 
     fn retained_targets(&self, context: &AppContext) -> BTreeMap<String, StableNodeId> {
+        let composer = &self.task_view.composer_view;
         let mut targets = BTreeMap::from([
             (
-                "lilia.ui.automation.canvas".into(),
-                self.automation_canvas.stable_id(),
-            ),
-            (
-                "lilia.ui.automation.scroll".into(),
-                self.automation_inspector_scroll.stable_id(),
-            ),
-            (
                 "lilia.ui.timeline.scroll".into(),
-                self.timeline_scroll.stable_id(),
-            ),
-            (
-                "lilia.ui.automation.new".into(),
-                self.automations_new.stable_id(),
-            ),
-            (
-                "lilia.ui.automation.refresh".into(),
-                self.automations_refresh.stable_id(),
-            ),
-            (
-                "lilia.ui.field.session-search".into(),
-                self.session_search_input.stable_id(),
+                self.task_view.timeline_view.timeline_scroll.stable_id(),
             ),
             (
                 target_ids::COMPOSER_INPUT.to_owned(),
-                self.composer.stable_id(),
+                composer.composer.stable_id(),
             ),
             (
                 "lilia.ui.new-conversation".into(),
                 self.new_conversation.stable_id(),
             ),
-            ("lilia.ui.send".into(), self.send.stable_id()),
+            ("lilia.ui.send".into(), composer.send.stable_id()),
             (
                 "lilia.ui.sidebar.search".into(),
                 self.search_toggle.stable_id(),
@@ -328,18 +309,46 @@ impl ShellHandles {
                 "lilia.ui.sidebar.scroll".into(),
                 self.sidebar_scroll.stable_id(),
             ),
-            ("lilia.ui.composer.plus".into(), self.plus_menu.stable_id()),
+            (
+                "lilia.ui.composer.plus".into(),
+                composer.plus_menu.stable_id(),
+            ),
             (
                 "lilia.ui.composer.permission".into(),
-                self.permission_menu.stable_id(),
+                composer.permission_menu.stable_id(),
+            ),
+            ("lilia.ui.composer.model".into(), composer.model.stable_id()),
+            (
+                "lilia.ui.composer.reasoning".into(),
+                composer.reasoning.stable_id(),
+            ),
+            (
+                "lilia.ui.composer.review-target".into(),
+                composer.review_target.stable_id(),
+            ),
+            (
+                "lilia.ui.composer.review-value".into(),
+                composer.review_value.stable_id(),
+            ),
+            (
+                "lilia.ui.composer.review-submit".into(),
+                composer.review_submit.stable_id(),
+            ),
+            (
+                "lilia.ui.composer.review-cancel".into(),
+                composer.review_cancel.stable_id(),
             ),
             (
                 "lilia.ui.composer.worktree".into(),
-                self.worktree_menu.stable_id(),
+                composer.worktree_menu.stable_id(),
             ),
             (
-                "lilia.ui.memory.task-menu".into(),
-                self.memory_task_menu.stable_id(),
+                "lilia.ui.project.scroll".into(),
+                self.project_page.stable_id(),
+            ),
+            (
+                "lilia.ui.todo.input".into(),
+                self.todo_panel.input.stable_id(),
             ),
         ]);
         for (id, node) in &self.footer_nav {
@@ -348,35 +357,24 @@ impl ShellHandles {
         for (id, node) in &self.row_tool_buttons {
             targets.insert(format!("lilia.ui.sidebar.tool.{id}"), node.stable_id());
         }
-        if let Ok(Some(back)) = context.read(self.automations_sidebar, |sidebar| sidebar.top) {
-            targets.insert("lilia.ui.automation.back".into(), back);
-        }
-        for (id, node) in self.iab.debug_targets() {
-            targets.insert(format!("lilia.ui.iab.{id}"), node);
-        }
-        for (id, node) in &self.architecture_details.controls {
-            targets.insert(format!("lilia.ui.architecture.{id}"), node.stable_id());
-        }
-        if let Some(chart) = self.quota_chart {
+        if let Some(chart) = self.settings_view.quota_chart {
             targets.insert("lilia.ui.quota.trend".into(), chart.stable_id());
+        }
+        for (name, chart) in &self.settings_view.quota_donuts {
+            targets.insert(
+                format!("lilia.ui.settings.quota-{name}-chart"),
+                chart.stable_id(),
+            );
         }
         for (id, node) in &self.todo_panel.controls {
             targets.insert(format!("lilia.ui.todo.{id}"), node.stable_id());
         }
-        targets.insert(
-            "lilia.ui.todo.input".into(),
-            self.todo_panel.input.stable_id(),
-        );
         if let Some(menu) = self.titlebar_menu {
             targets.insert("lilia.ui.menu.window".into(), menu.stable_id());
         }
         if let Some(menu) = self.more_menu {
             targets.insert("lilia.ui.menu.project".into(), menu.stable_id());
         }
-        targets.insert(
-            "lilia.ui.project.scroll".into(),
-            self.project_page.stable_id(),
-        );
         if let Some(button) = self.confirm_commit {
             targets.insert("lilia.ui.confirm.commit".into(), button.stable_id());
         }
@@ -386,36 +384,52 @@ impl ShellHandles {
         if let Some(viewer) = self.image_viewer {
             targets.insert("lilia.ui.image.viewer".into(), viewer.stable_id());
         }
-        for (id, node) in &self.memory_icons {
-            targets.insert(format!("lilia.ui.composer.{id}"), node.stable_id());
+        for (id, field) in &self.project_fields.editors {
+            targets.insert(format!("lilia.ui.field.{id}"), field.stable_id());
         }
-        if let Some((_, project, user)) = self.memory_scope_radio {
-            targets.insert(
-                "lilia.ui.action.memory-scope-project".into(),
-                project.stable_id(),
-            );
-            targets.insert("lilia.ui.action.memory-scope-user".into(), user.stable_id());
+        for (id, field) in &self.settings_view.fields.editors {
+            targets.insert(format!("lilia.ui.field.{id}"), field.stable_id());
+            targets.insert(format!("lilia.ui.settings.{id}"), field.stable_id());
         }
-        if let Some(number) = self.memory_cooldown_input {
-            targets.insert("lilia.ui.field.memory-cooldown".into(), number.stable_id());
-        }
-        for (id, node) in &self.form_fields {
-            targets.insert(format!("lilia.ui.field.{id}"), node.stable_id());
-        }
-        for (id, node) in &self.memory_checkboxes {
+        for (id, node) in &self.settings_view.form_switches {
             targets.insert(format!("lilia.ui.switch.{id}"), node.stable_id());
+            targets.insert(format!("lilia.ui.settings.{id}"), node.stable_id());
         }
-        for (id, node) in &self.form_switches {
-            targets.insert(format!("lilia.ui.switch.{id}"), node.stable_id());
-        }
-        for (id, node) in &self.product_actions {
+        for (id, node) in &self.settings_view.product_actions {
             targets.insert(format!("lilia.ui.action.{id}"), node.stable_id());
+            targets.insert(format!("lilia.ui.settings.{id}"), node.stable_id());
+            if let Some(rest) = id.strip_prefix("action:") {
+                targets.insert(format!("lilia.ui.settings.{rest}"), node.stable_id());
+            }
+        }
+        for (id, node) in self.settings_view.extensions.debug_nodes() {
+            targets.insert(format!("lilia.ui.settings.{id}"), node);
         }
         for (id, node) in &self.extra_buttons {
             targets.insert(format!("lilia.ui.composer.{id}"), node.stable_id());
         }
-        for (id, node) in &self.completion_items {
+        for (id, node) in &composer.extra_buttons {
+            targets.insert(format!("lilia.ui.composer.{id}"), node.stable_id());
+        }
+        for (id, node) in &composer.completion_items {
             targets.insert(format!("lilia.ui.completion.{id}"), node.stable_id());
+            targets.insert(format!("lilia.ui.composer.{id}"), node.stable_id());
+        }
+        for (id, node) in &self.task_view.timeline_view.timeline_markdown {
+            targets.insert(format!("lilia.ui.timeline.markdown.{id}"), node.stable_id());
+        }
+        for (id, node) in &self.task_view.timeline_view.timeline_actions {
+            if let Some(event_id) = id.strip_prefix("fork-") {
+                targets.insert(
+                    format!("lilia.ui.timeline.{event_id}.fork"),
+                    node.stable_id(),
+                );
+            } else if let Some(event_id) = id.strip_prefix("continue-") {
+                targets.insert(
+                    format!("lilia.ui.timeline.{event_id}.continue"),
+                    node.stable_id(),
+                );
+            }
         }
         for (id, node) in &self.pane_buttons {
             targets.insert(format!("lilia.ui.pane.{id}"), node.stable_id());
@@ -423,57 +437,78 @@ impl ShellHandles {
         for (id, node) in &self.project_cards {
             targets.insert(format!("lilia.ui.project-card.{id}"), node.stable_id());
         }
-        for (id, node) in &self.plus_items {
+        for (id, node) in &composer.plus_items {
             targets.insert(format!("lilia.ui.plus.{id}"), node.stable_id());
         }
-        for (id, node) in &self.memory_task_items {
-            targets.insert(format!("lilia.ui.memory.task.{id}"), node.stable_id());
-        }
-        for (id, node) in self.conversation_controls.debug_targets() {
-            targets.insert(format!("lilia.ui.composer.{id}"), node);
-        }
-        for (id, node) in self.pending.debug_targets() {
+        for (id, node) in self.task_view.pending_view.debug_nodes() {
             targets.insert(format!("lilia.ui.pending.{id}"), node);
         }
-        for (event, content) in &self.timeline_content {
-            for (id, node) in content.debug_targets() {
-                targets.insert(format!("lilia.ui.timeline.{event}.{id}"), node);
+        for (id, node) in self.automation_view.debug_nodes() {
+            targets.insert(format!("lilia.ui.automation.{id}"), node);
+        }
+        for (id, row) in &self.automation_view.rows {
+            targets.insert(format!("lilia.ui.pane.auto-{id}"), row.stable_id());
+        }
+        if let Some(memory) = &self.memory_view {
+            for (id, node) in memory.debug_nodes() {
+                targets.insert(format!("lilia.ui.{id}"), node);
+                match id.as_str() {
+                    "switch.memory-enabled" => {
+                        targets.insert(target_ids::MEMORY_TOGGLE.to_owned(), node);
+                    }
+                    "switch.memory-global" => {
+                        targets.insert(target_ids::MEMORY_SETTINGS_GLOBAL.to_owned(), node);
+                    }
+                    "switch.memory-baseline" => {
+                        targets.insert(target_ids::MEMORY_SETTINGS_BASELINE.to_owned(), node);
+                    }
+                    "switch.memory-task-enabled" => {
+                        targets.insert(target_ids::TASK_MEMORY_TOGGLE.to_owned(), node);
+                    }
+                    "composer.memory-task-reset" => {
+                        targets.insert(target_ids::TASK_MEMORY_RESET_COOLDOWN.to_owned(), node);
+                    }
+                    _ => {}
+                }
             }
         }
-        for (id, node) in self.extensions.debug_nodes() {
-            targets.insert(format!("lilia.ui.settings.{id}"), node);
-        }
-        for (prefix, surface) in [
-            ("settings", &self.settings_surface),
-            ("automation", &self.automation_surface),
-        ] {
-            for (id, node, editor) in surface.debug_nodes() {
-                targets.insert(
-                    format!("lilia.ui.{prefix}.{id}"),
-                    editor.map(|node| node.stable_id()).unwrap_or(node),
-                );
+        if let Some(roadmap) = &self.roadmap_view {
+            for (id, node) in roadmap.debug_nodes() {
+                targets.insert(format!("lilia.ui.{id}"), node);
             }
         }
-        if let Ok(Some(assembly)) = context.read(self.settings_page, |page| page.assembly.clone()) {
-            if let Some(scroll) = assembly.scroll {
-                targets.insert("lilia.ui.settings.content-scroll".into(), scroll);
-            }
+        for (id, node) in &self.task_rows {
+            targets.insert(format!("lilia.ui.sidebar.row.{id}"), node.stable_id());
         }
-        if let Ok(Some(assembly)) =
-            context.read(self.settings_sidebar, |sidebar| sidebar.assembly.clone())
-        {
+        let _ = context.read(self.settings_view.settings_sidebar, |sidebar| {
+            let Some(assembly) = &sidebar.assembly else {
+                return;
+            };
             if let Some(body) = assembly.body {
                 targets.insert("lilia.ui.settings.scroll".into(), body);
             }
             if let Some(back) = assembly.back_row {
                 targets.insert("lilia.ui.settings.back".into(), back);
             }
-            for (tab, node) in assembly.tab_rows {
-                targets.insert(format!("lilia.ui.settings.tab.{}", tab.as_str()), node);
+            for (id, node) in &assembly.tab_rows {
+                targets.insert(format!("lilia.ui.settings.tab.{id}"), *node);
             }
-        }
-        for (id, node) in &self.task_rows {
-            targets.insert(format!("lilia.ui.sidebar.row.{id}"), node.stable_id());
+        });
+        let _ = context.read(self.settings_view.settings_page, |page| {
+            if let Some(scroll) = page.assembly.as_ref().and_then(|assembly| assembly.scroll) {
+                targets.insert("lilia.ui.settings.content-scroll".into(), scroll);
+            }
+        });
+        targets.insert(
+            "lilia.ui.settings.appearance-sidebar".into(),
+            self.settings_view.sidebar_mode.stable_id(),
+        );
+        targets.insert(
+            "lilia.ui.settings.worktree-mode".into(),
+            self.settings_view.worktree_mode.stable_id(),
+        );
+        if let Some(qr) = self.settings_view.remote_qr {
+            targets.insert("lilia.ui.settings.remote-qr".into(), qr.stable_id());
         }
         targets
     }
@@ -563,18 +598,27 @@ impl ShellHandles {
                         })).collect::<Vec<_>>()})
                 }).ok();
                 let chart = context.read(Entity::<nana_ui::runtime::DonutChart>::from_stable_id(node), |chart| {
-                    (chart.active, chart.active.and_then(|i| chart.slices.get(i).map(|slice| slice.value)),
-                     chart.active.and_then(|i| chart.labels.get(i).map(|label| label.to_string())))
-                }).ok().or_else(|| context.read(Entity::<TimeSeriesChart>::from_stable_id(node), |chart| {
-                    (chart.active, chart.active.and_then(|i| chart.values.get(i).copied()),
-                     chart.active.and_then(|i| chart.axis_labels.get(i).map(|label| label.to_string())))
+                    (
+                        chart.active,
+                        chart.active.and_then(|i| chart.slices.get(i).map(|slice| slice.value)),
+                        chart.active.and_then(|i| chart.labels.get(i).map(|label| label.to_string())),
+                        chart.active.and_then(|i| chart.tooltip(i)),
+                    )
+                }).ok().or_else(|| context.read(Entity::<nana_ui::runtime::TimeSeriesChart>::from_stable_id(node), |chart| {
+                    (
+                        chart.active,
+                        chart.active.and_then(|i| chart.values.get(i).copied()),
+                        chart.active.and_then(|i| chart.axis_labels.get(i).map(|label| label.to_string())),
+                        chart.active.and_then(|i| chart.tooltip(i)),
+                    )
                 }).ok());
-                let chart_hover = chart.map(|(active, value, label)| {
+                let chart_hover = chart.map(|(active, value, label, fallback)| {
                     let tooltip = context.world().node(node).into_iter().flat_map(|entry| entry.children)
                         .find_map(|child| context.read(Entity::<nana_ui::runtime::Tooltip>::from_stable_id(child), |tip| {
                             (!tip.style.layout.hidden && self.target_is_mounted(context, child))
                                 .then(|| tip.label.to_string())
-                        }).ok().flatten());
+                        }).ok().flatten())
+                        .or(fallback);
                     serde_json::json!({"active":active,"value":value,"label":label,"tooltip":tooltip})
                 });
                 let images = match context.world().component_geometry(node) {
@@ -589,17 +633,48 @@ impl ShellHandles {
                     }).collect::<Vec<_>>(),
                     _ => Vec::new(),
                 };
-                let graph_nodes = if node == self.automation_canvas.stable_id() {
-                    context.read(self.automation_canvas, |canvas| {
-                        canvas.model.nodes().iter().zip(canvas.paint_nodes().iter()).filter_map(|(model, paint)| {
-                            let px = bounds.x + paint.x + paint.width / 2.0;
-                            let py = bounds.y + paint.y + paint.title_height / 2.0;
-                            let (x, y) = context.world().layout_pointer_position(node, px, py)?;
-                            (context.world().hit_test(document.document(), x, y) == Some(node)).then(||
-                                serde_json::json!({"id":model.id,"x":x,"y":y,"width":paint.width,"height":paint.height}))
-                        }).collect::<Vec<_>>()
-                    }).unwrap_or_default()
-                } else { Vec::new() };
+                let graph_nodes = context
+                    .read(
+                        Entity::<nana_ui::runtime::GraphCanvas>::from_stable_id(node),
+                        |canvas| {
+                            let Some(bounds) = context.world().layout_box(node) else {
+                                return Vec::new();
+                            };
+                            canvas
+                                .model
+                                .nodes()
+                                .iter()
+                                .zip(canvas.paint_nodes().iter())
+                                .filter_map(|(model, paint)| {
+                                    let (x, y) = context.world().layout_pointer_position(
+                                        node,
+                                        bounds.x + paint.x + paint.width / 2.0,
+                                        bounds.y + paint.y + paint.title_height.max(1.0) / 2.0,
+                                    )?;
+                                    let document_id = DocumentId::new(PRIMARY_DOCUMENT)
+                                        .expect("primary document");
+                                    let mut hit = context.world().hit_test(document_id, x, y);
+                                    while hit.is_some() && hit != Some(node) {
+                                        hit = hit.and_then(|id| {
+                                            context
+                                                .world()
+                                                .node(id)
+                                                .and_then(|entry| entry.parent)
+                                        });
+                                    }
+                                    (hit == Some(node)).then(|| {
+                                        serde_json::json!({
+                                            "id": model.id.as_str(),
+                                            "x": x,
+                                            "y": y,
+                                        })
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        },
+                    )
+                    .ok()
+                    .unwrap_or_default();
                 let resize_grip = match context.world().component_geometry(node) {
                     Some(nana_ui::runtime::ComponentGeometry::TextInput { resize_grip: Some(grip), .. }) => {
                         context.world().layout_pointer_position(node, grip.x + grip.width / 2.0, grip.y + grip.height / 2.0)
@@ -729,6 +804,7 @@ impl ShellHandles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::DesktopComposerTurnRequest;
 
     fn reference_composer() -> crate::application::DesktopComposerState {
         let mut state = crate::application::DesktopComposerState::transient(
@@ -753,36 +829,12 @@ mod tests {
     }
 
     fn composer_snapshot(state: &crate::application::DesktopComposerState) -> PrimaryShellSnapshot {
-        use crate::application::DesktopComposerTurnRequest;
-        let automatic = crate::application::preview_automatic_turn_selection(
-            &state.turn_request(),
-            &Default::default(),
-            None,
-        );
         let mut snapshot = empty_snapshot();
-        snapshot.composer_disabled = false;
-        snapshot.composer = state.content.clone();
-        snapshot.composer_task_id = Some(state.task_id.to_string());
-        snapshot.composer_revision = state.revision;
-        snapshot.composer_atom_spans = state.content_atom_spans();
-        snapshot.conversation_controls.model = state.model.clone().unwrap_or_default();
-        snapshot.conversation_controls.model_label = format!("自动 · {}", automatic.model.unwrap());
-        snapshot.conversation_controls.reasoning = state
-            .reasoning_effort
-            .clone()
-            .or(automatic.reasoning_effort)
-            .unwrap();
-        snapshot.conversation_controls.models = vec![(String::new(), "自动选择".into())];
-        for family in ["openai", "anthropic"] {
-            for tier in ["light", "normal", "deep"] {
-                let model =
-                    lilia_contracts::auto_model_for_provider_family_tier(family, tier).unwrap();
-                snapshot
-                    .conversation_controls
-                    .models
-                    .push((model.into(), model.into()));
-            }
-        }
+        snapshot.composer.composer_disabled = false;
+        snapshot.composer.composer = state.content.clone();
+        snapshot.composer.composer_task_id = Some(state.task_id.to_string());
+        snapshot.composer.composer_revision = state.revision;
+        snapshot.composer.composer_atom_spans = state.content_atom_spans();
         snapshot
     }
 
@@ -802,131 +854,19 @@ mod tests {
             .unwrap();
     }
 
-    #[test]
-    fn composer_automatic_selection_accepts_continuous_reasoning_then_model_keys() {
-        use crate::application::{DesktopComposerCommand, DesktopComposerTurnRequest};
-        use crate::runtime_conversation::ConversationAction;
-        for keep_reference in [false, true] {
-            let mut state = reference_composer();
-            if !keep_reference {
-                state
-                    .apply_transient_command(DesktopComposerCommand::SetContent(
-                        "中文草稿\n第二行".into(),
-                    ))
-                    .unwrap();
-            }
-            let automatic = crate::application::preview_automatic_turn_selection(
-                &state.turn_request(),
-                &Default::default(),
-                None,
-            );
-            let events = Arc::new(Mutex::new(Vec::new()));
-            let sink_events = events.clone();
-            let (mut document, mut handles) = mount_primary_shell(
-                &composer_snapshot(&state),
-                Arc::new(move |intent| sink_events.lock().unwrap().push(intent)),
-            )
-            .unwrap();
-            refresh_composer(&mut handles, &mut document, &state);
-            for (target, reasoning) in [
-                ("lilia.ui.composer.reasoning", true),
-                ("lilia.ui.composer.model", false),
-            ] {
-                let field = Entity::<nana_ui::Dropdown>::from_stable_id(
-                    handles.retained_targets(document.context())[target],
-                );
-                let (selected, next, value) = document
-                    .context()
-                    .read(field, |field| {
-                        let nana_ui::DropdownSelection::Single(Some(value)) = &field.selection
-                        else {
-                            panic!("single selection")
-                        };
-                        let selected = field
-                            .options
-                            .iter()
-                            .position(|option| option.value == *value)
-                            .unwrap();
-                        let next = (selected + 1) % field.options.len();
-                        (selected, next, field.options[next].value.to_string())
-                    })
-                    .unwrap();
-                assert!(handles
-                    .act_retained_ui(&mut document, target, None)
-                    .unwrap());
-                assert_eq!(
-                    document
-                        .context()
-                        .read(field, |field| (field.opened, field.highlighted))
-                        .unwrap(),
-                    (true, Some(selected))
-                );
-                assert!(handles
-                    .key_retained_ui(&mut document, target, "ArrowDown")
-                    .unwrap());
-                assert_eq!(
-                    document
-                        .context()
-                        .read(field, |field| field.highlighted)
-                        .unwrap(),
-                    Some(next)
-                );
-                assert!(handles
-                    .key_retained_ui(&mut document, target, "Enter")
-                    .unwrap());
-                let action = events
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .rev()
-                    .find_map(|event| match event {
-                        ShellIntent::Conversation {
-                            action: ConversationAction::Reasoning(value),
-                            ..
-                        } if reasoning => Some(value.clone()),
-                        ShellIntent::Conversation {
-                            action: ConversationAction::Model(value),
-                            ..
-                        } if !reasoning => Some(value.clone()),
-                        _ => None,
-                    })
-                    .unwrap();
-                assert_eq!(action, value);
-                state
-                    .apply_transient_command(if reasoning {
-                        DesktopComposerCommand::SetModelSelection {
-                            model: automatic.model.clone(),
-                            reasoning_effort: Some(action),
-                        }
-                    } else {
-                        DesktopComposerCommand::SetModelSelection {
-                            model: Some(action),
-                            reasoning_effort: state.reasoning_effort.clone(),
-                        }
-                    })
-                    .unwrap();
-                refresh_composer(&mut handles, &mut document, &state);
-                let observed = handles.observe_retained_ui(&document);
-                let field = observed["targets"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|entry| entry["id"] == target)
-                    .unwrap();
-                assert_eq!(field["dropdown"]["opened"], false);
-                assert_eq!(field["dropdown"]["selection"], value);
-            }
-            assert_ne!(state.model, automatic.model);
-            assert_eq!(
-                state.turn_request().conversation_references.len(),
-                usize::from(keep_reference)
-            );
+    fn composer_set_content(event: &ShellIntent) -> Option<&str> {
+        match event {
+            ShellIntent::AddressedComposer {
+                action: ComposerInputAction::SetContent { value, .. },
+                ..
+            } => Some(value.as_str()),
+            _ => None,
         }
     }
 
     #[test]
     fn deleting_reference_atom_and_undo_redo_updates_visible_and_submitted_context() {
-        use crate::application::{DesktopComposerCommand, DesktopComposerTurnRequest};
+        use crate::application::DesktopComposerCommand;
         let mut state = reference_composer();
         let reference = state.conversation_references[0].clone();
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -940,35 +880,39 @@ mod tests {
         assert_eq!(
             document
                 .context()
-                .read(handles.composer, |area| area.atom_spans.len())
+                .read(handles.task_view.composer_view.composer, |area| area
+                    .atom_spans
+                    .len())
                 .unwrap(),
             1
         );
         for (key, expected) in [(None, 0), (Some("Meta+z"), 1), (Some("Meta+Shift+z"), 0)] {
             events.lock().unwrap().clear();
             if let Some(key) = key {
-                assert!(handles
-                    .key_retained_ui(&mut document, target_ids::COMPOSER_INPUT, key)
-                    .unwrap());
+                assert!(
+                    handles
+                        .key_retained_ui(&mut document, target_ids::COMPOSER_INPUT, key)
+                        .unwrap()
+                );
             } else {
-                assert!(handles
-                    .act_retained_ui(
-                        &mut document,
-                        target_ids::COMPOSER_INPUT,
-                        Some("中文草稿\n第二行")
-                    )
-                    .unwrap());
+                assert!(
+                    handles
+                        .act_retained_ui(
+                            &mut document,
+                            target_ids::COMPOSER_INPUT,
+                            Some("中文草稿\n第二行")
+                        )
+                        .unwrap()
+                );
             }
             let value = events
                 .lock()
                 .unwrap()
                 .iter()
                 .rev()
-                .find_map(|event| match event {
-                    ShellIntent::ComposerChanged(value) => Some(value.clone()),
-                    _ => None,
-                })
-                .unwrap();
+                .find_map(composer_set_content)
+                .unwrap()
+                .to_owned();
             state
                 .apply_transient_command(DesktopComposerCommand::SetContent(value))
                 .unwrap();
@@ -976,7 +920,9 @@ mod tests {
             assert_eq!(
                 document
                     .context()
-                    .read(handles.composer, |area| area.atom_spans.len())
+                    .read(handles.task_view.composer_view.composer, |area| area
+                        .atom_spans
+                        .len())
                     .unwrap(),
                 expected
             );
@@ -986,10 +932,12 @@ mod tests {
                 vec![reference.clone()],
                 "undo metadata stays retained"
             );
-            assert!(handles
-                .retained_targets(document.context())
-                .keys()
-                .all(|id| !id.contains("reference-remove-")));
+            assert!(
+                handles
+                    .retained_targets(document.context())
+                    .keys()
+                    .all(|id| !id.contains("reference-remove-"))
+            );
         }
     }
 
@@ -998,7 +946,7 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink_events = events.clone();
         let mut snapshot = empty_snapshot();
-        snapshot.composer_disabled = false;
+        snapshot.composer.composer_disabled = false;
         let (mut document, mut handles) = mount_primary_shell(
             &snapshot,
             Arc::new(move |intent| sink_events.lock().unwrap().push(intent)),
@@ -1015,41 +963,59 @@ mod tests {
                 .unwrap();
         };
         layout(&mut document);
-        assert!(handles
-            .act_retained_ui(
-                &mut document,
-                target_ids::COMPOSER_INPUT,
-                Some("草稿\n中文")
-            )
-            .unwrap());
-        assert!(events.lock().unwrap().iter().any(
-            |event| matches!(event, ShellIntent::ComposerChanged(value) if value == "草稿\n中文")
-        ));
-        assert!(handles
-            .act_retained_ui(
-                &mut document,
-                target_ids::COMPOSER_INPUT,
-                Some("第二次输入")
-            )
-            .unwrap());
-        assert!(events.lock().unwrap().iter().any(
-            |event| matches!(event, ShellIntent::ComposerChanged(value) if value == "第二次输入")
-        ));
-        assert!(!handles
-            .act_retained_ui(&mut document, "lilia.ui.send", None)
-            .unwrap());
-        snapshot.settings_open = true;
+        assert!(
+            handles
+                .act_retained_ui(
+                    &mut document,
+                    target_ids::COMPOSER_INPUT,
+                    Some("草稿\n中文")
+                )
+                .unwrap()
+        );
+        assert!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| composer_set_content(event) == Some("草稿\n中文"))
+        );
+        assert!(
+            handles
+                .act_retained_ui(
+                    &mut document,
+                    target_ids::COMPOSER_INPUT,
+                    Some("第二次输入")
+                )
+                .unwrap()
+        );
+        assert!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| composer_set_content(event) == Some("第二次输入"))
+        );
+        assert!(
+            !handles
+                .act_retained_ui(&mut document, "lilia.ui.send", None)
+                .unwrap()
+        );
+        snapshot.navigation = WindowRoute::Settings;
         handles.sync(&mut document, &snapshot).unwrap();
         layout(&mut document);
-        assert!(!handles
-            .act_retained_ui(
-                &mut document,
-                target_ids::COMPOSER_INPUT,
-                Some("must not replace")
-            )
-            .unwrap());
-        assert!(!handles
-            .act_retained_ui(&mut document, "missing", None)
-            .unwrap());
+        assert!(
+            !handles
+                .act_retained_ui(
+                    &mut document,
+                    target_ids::COMPOSER_INPUT,
+                    Some("must not replace")
+                )
+                .unwrap()
+        );
+        assert!(
+            !handles
+                .act_retained_ui(&mut document, "missing", None)
+                .unwrap()
+        );
     }
 }

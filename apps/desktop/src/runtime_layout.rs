@@ -10,6 +10,29 @@ const COMPOSER_SEND_SIZE: f32 = 30.0;
 const PILL_RADIUS: f32 = 999.0;
 pub(crate) const COMPOSER_CARD_RADIUS: f32 = 8.0;
 
+pub(crate) fn wrapping_controls_row(gap: f32) -> Stack {
+    Stack::row(gap)
+        .min_width(LengthSpec::Px(0.0))
+        .shrink(1.0)
+        .with_layout(|layout| {
+            layout.max_width = Some(LengthSpec::Percent(100.0));
+            layout.flex_wrap = nana_ui_core::FlexWrap::Wrap;
+        })
+}
+
+pub(crate) fn reconcile_children(
+    context: &mut AppContext,
+    parent: StableNodeId,
+    ordered: &[StableNodeId],
+) -> Result<(), FrameworkError> {
+    let ordered = ordered
+        .iter()
+        .copied()
+        .filter(|id| *id != parent && context.world().contains(*id))
+        .collect::<Vec<_>>();
+    context.reconcile_children(parent, &ordered).map(|_| ())
+}
+
 pub(crate) fn form_text_input(value: impl Into<String>) -> nana_ui::runtime::TextInput {
     let input = nana_ui::runtime::TextInput::new(value);
     let layout = Stack::from_layout(input.style.layout.clone())
@@ -136,6 +159,7 @@ pub(crate) fn pending_interaction_card() -> Card {
     let layout = Arc::make_mut(&mut card.style.layout);
     layout.direction = Some(nana_ui_core::FlexDirection::Column);
     layout.gap = Some(LengthSpec::Px(8.0));
+    layout.align_items = AlignSpec::Stretch;
     layout.border_radius = Some(COMPOSER_CARD_RADIUS);
     card
 }

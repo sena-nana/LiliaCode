@@ -132,7 +132,6 @@ impl LoadedMarkdownImage {
             ))
     }
 
-    #[cfg(test)]
     pub(crate) fn encoded_len(&self) -> usize {
         self.bytes.len()
     }
@@ -446,9 +445,11 @@ mod tests {
             budget
         ));
         assert!(matches!(images["old"], MarkdownImageLoadState::Evicted));
-        assert!(images
-            .values()
-            .all(|state| state.pending_request().is_none()));
+        assert!(
+            images
+                .values()
+                .all(|state| state.pending_request().is_none())
+        );
         assert_eq!(resident_image_bytes(&images), budget);
         assert!(images.get_mut("old").unwrap().request());
         assert_eq!(images["old"].pending_request(), Some(true));
@@ -519,9 +520,11 @@ mod tests {
             images["preview"],
             MarkdownImageLoadState::Ready(_)
         ));
-        assert!(images
-            .values()
-            .all(|state| state.pending_request().is_none()));
+        assert!(
+            images
+                .values()
+                .all(|state| state.pending_request().is_none())
+        );
         assert!(images.get_mut("other").unwrap().request());
         images.insert("other".into(), MarkdownImageLoadState::Loading);
         assert!(admit_loaded_image(
@@ -540,10 +543,12 @@ mod tests {
     fn svg_preview_contains_painted_pixels() {
         let image = loaded_image(br##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="2" fill="#ff0000"/></svg>"##.to_vec(), "image/svg+xml".into()).unwrap();
         assert_eq!((image.pixels.width, image.pixels.height), (4, 2));
-        assert!(image
-            .pixels
-            .rgba
-            .chunks_exact(4)
-            .all(|pixel| pixel == [255, 0, 0, 255]));
+        assert!(
+            image
+                .pixels
+                .rgba
+                .chunks_exact(4)
+                .all(|pixel| pixel == [255, 0, 0, 255])
+        );
     }
 }

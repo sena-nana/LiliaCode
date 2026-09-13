@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -15,35 +15,47 @@ use lilia_contracts::{
     PageRequest, ProductEntityKind, ProductEvent, ProductEventSequence, ProjectId, TaskId,
 };
 
+use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
+use lilia_service::ServiceAuthority;
+
 use crate::application::{
-    AutomationChanged, DesktopApplication, DesktopApplicationError, DesktopEvent, ProjectsChanged,
-    RoadmapChanged, TasksChanged,
+    AutomationChanged, DesktopApplication, DesktopApplicationError, DesktopEvent, DesktopEventBus,
+    ProjectsChanged, RoadmapChanged, TasksChanged,
 };
 
 pub const PRODUCT_CHANGE_FEED_SOURCE: &str = "product-change-feed";
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(750);
 const PAGE_LIMIT: u32 = 100;
 
-pub(crate) struct ProductChangeFeed {
+pub(crate) struct ProductChangeFeedState {
     cursor: AtomicU64,
     stop: AtomicBool,
     running: AtomicBool,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
-struct ProductChangeFeedRunGuard(DesktopApplication);
+/// Polls durable Product events and republishes scoped UI invalidations.
+///
+/// The feed owns its cursor and thread lifetime. It deliberately depends on
+/// the Product authority and event bus rather than the desktop composition
+/// root, so external changes cannot keep the application alive indirectly.
+#[derive(Clone)]
+pub struct ProductChangeFeedService {
+    authority: ServiceAuthority,
+    events: DesktopEventBus,
+    enabled: bool,
+    state: Arc<ProductChangeFeedState>,
+}
+
+struct ProductChangeFeedRunGuard(ProductChangeFeedService);
 
 impl Drop for ProductChangeFeedRunGuard {
     fn drop(&mut self) {
-        self.0
-            .inner
-            .product_change_feed
-            .running
-            .store(false, Ordering::SeqCst);
+        self.0.state.running.store(false, Ordering::SeqCst);
     }
 }
 
-impl Default for ProductChangeFeed {
+impl Default for ProductChangeFeedState {
     fn default() -> Self {
         Self {
             cursor: AtomicU64::new(0),
@@ -54,64 +66,63 @@ impl Default for ProductChangeFeed {
     }
 }
 
-impl DesktopApplication {
+impl ProductChangeFeedService {
+    pub(crate) fn new(authority: ServiceAuthority, events: DesktopEventBus) -> Self {
+        let enabled = authority.data_paths().is_some();
+        Self {
+            authority,
+            events,
+            enabled,
+            state: Arc::new(ProductChangeFeedState::default()),
+        }
+    }
+
     /// Advances the feed cursor to the latest durable sequence without emitting.
     /// Call before starting the poller so historical rows are not replayed.
-    pub fn seed_product_change_feed_cursor(&self) -> Result<u64, DesktopApplicationError> {
+    pub fn seed_cursor(&self) -> Result<u64, DesktopApplicationError> {
         let latest = self.latest_product_event_sequence()?;
-        self.inner
-            .product_change_feed
-            .cursor
-            .store(latest, Ordering::SeqCst);
+        self.state.cursor.store(latest, Ordering::SeqCst);
         Ok(latest)
     }
 
-    pub fn product_change_feed_cursor(&self) -> u64 {
-        self.inner.product_change_feed.cursor.load(Ordering::SeqCst)
+    pub fn cursor(&self) -> u64 {
+        self.state.cursor.load(Ordering::SeqCst)
     }
 
-    pub fn start_product_change_feed(&self) -> Result<(), DesktopApplicationError> {
-        self.start_product_change_feed_with_interval(DEFAULT_POLL_INTERVAL)
+    pub fn start(&self) -> Result<(), DesktopApplicationError> {
+        self.start_with_interval(DEFAULT_POLL_INTERVAL)
     }
 
-    pub fn start_product_change_feed_with_interval(
-        &self,
-        interval: Duration,
-    ) -> Result<(), DesktopApplicationError> {
-        if self.inner.authority.data_paths().is_none() {
+    pub fn start_with_interval(&self, interval: Duration) -> Result<(), DesktopApplicationError> {
+        if !self.enabled {
             return Ok(());
         }
-        let feed = &self.inner.product_change_feed;
-        if feed
+        if self
+            .state
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
             return Ok(());
         }
-        feed.stop.store(false, Ordering::SeqCst);
-        if feed.cursor.load(Ordering::SeqCst) == 0 {
-            if let Err(error) = self.seed_product_change_feed_cursor() {
-                feed.running.store(false, Ordering::SeqCst);
+        self.state.stop.store(false, Ordering::SeqCst);
+        if self.state.cursor.load(Ordering::SeqCst) == 0 {
+            if let Err(error) = self.seed_cursor() {
+                self.state.running.store(false, Ordering::SeqCst);
                 return Err(error);
             }
         }
-        let application = self.clone();
+        let service = self.clone();
         let interval = interval.max(Duration::from_millis(100));
         let handle = match thread::Builder::new()
             .name("lilia-product-change-feed".to_owned())
             .spawn(move || {
-                let _running = ProductChangeFeedRunGuard(application.clone());
+                let _running = ProductChangeFeedRunGuard(service.clone());
                 loop {
-                    if application
-                        .inner
-                        .product_change_feed
-                        .stop
-                        .load(Ordering::SeqCst)
-                    {
+                    if service.state.stop.load(Ordering::SeqCst) {
                         break;
                     }
-                    if let Err(error) = application.poll_product_change_feed() {
+                    if let Err(error) = service.poll() {
                         eprintln!("[product-change-feed] {error}");
                     }
                     thread::sleep(interval);
@@ -119,24 +130,25 @@ impl DesktopApplication {
             }) {
             Ok(handle) => handle,
             Err(error) => {
-                feed.running.store(false, Ordering::SeqCst);
+                self.state.running.store(false, Ordering::SeqCst);
                 return Err(DesktopApplicationError::InvalidInput {
                     field: "product_change_feed",
                     message: format!("failed to start durable change feed: {error}"),
                 });
             }
         };
-        *feed
+        *self
+            .state
             .thread
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle);
         Ok(())
     }
 
-    pub fn stop_product_change_feed(&self) {
-        let feed = &self.inner.product_change_feed;
-        feed.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = feed
+    pub fn stop(&self) {
+        self.state.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self
+            .state
             .thread
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -144,23 +156,19 @@ impl DesktopApplication {
         {
             let _ = handle.join();
         }
-        feed.running.store(false, Ordering::SeqCst);
+        self.state.running.store(false, Ordering::SeqCst);
     }
 
     /// Synchronously drains durable Product events after the feed cursor.
     /// Returns the DesktopEvents that were published (may be coalesced).
-    pub fn poll_product_change_feed(&self) -> Result<Vec<DesktopEvent>, DesktopApplicationError> {
+    pub fn poll(&self) -> Result<Vec<DesktopEvent>, DesktopApplicationError> {
         let mut published = Vec::new();
-        let mut cursor = self.inner.product_change_feed.cursor.load(Ordering::SeqCst);
+        let mut cursor = self.state.cursor.load(Ordering::SeqCst);
         loop {
-            let page = self
-                .inner
-                .authority
-                .client()?
-                .product_events(&PageRequest {
-                    after: Some(ProductEventSequence::new(cursor)),
-                    limit: PAGE_LIMIT,
-                })?;
+            let page = self.authority.client()?.product_events(&PageRequest {
+                after: Some(ProductEventSequence::new(cursor)),
+                limit: PAGE_LIMIT,
+            })?;
             if page.items.is_empty() {
                 break;
             }
@@ -173,10 +181,7 @@ impl DesktopApplication {
                 .last()
                 .map(|event| event.sequence.get())
                 .unwrap_or(cursor);
-            self.inner
-                .product_change_feed
-                .cursor
-                .store(cursor, Ordering::SeqCst);
+            self.state.cursor.store(cursor, Ordering::SeqCst);
             if page.next.is_none() || page.items.len() < PAGE_LIMIT as usize {
                 break;
             }
@@ -188,14 +193,10 @@ impl DesktopApplication {
         let mut after = ProductEventSequence::ORIGIN;
         let mut latest = 0_u64;
         loop {
-            let page = self
-                .inner
-                .authority
-                .client()?
-                .product_events(&PageRequest {
-                    after: if after.get() == 0 { None } else { Some(after) },
-                    limit: PAGE_LIMIT,
-                })?;
+            let page = self.authority.client()?.product_events(&PageRequest {
+                after: if after.get() == 0 { None } else { Some(after) },
+                limit: PAGE_LIMIT,
+            })?;
             if let Some(event) = page.items.last() {
                 latest = event.sequence.get();
                 after = event.sequence;
@@ -209,22 +210,87 @@ impl DesktopApplication {
 
     fn publish_change_feed_event(&self, notice: FeedNotice) -> DesktopEvent {
         match notice {
-            FeedNotice::Projects => self.emit_event(ProjectsChanged),
+            FeedNotice::Projects => self.events.publish(ProjectsChanged),
             FeedNotice::Tasks {
                 project_id,
                 task_id,
-            } => self.emit_event(TasksChanged {
+            } => self.events.publish(TasksChanged {
                 project_id,
                 task_id,
             }),
-            FeedNotice::Roadmap { project_id } => self.emit_event(RoadmapChanged {
+            FeedNotice::Roadmap { project_id } => self.events.publish(RoadmapChanged {
                 project_id,
                 milestone_id: None,
             }),
-            FeedNotice::Automation => self.emit_event(AutomationChanged {
+            FeedNotice::Automation => self.events.publish(AutomationChanged {
                 automation_id: None,
             }),
         }
+    }
+}
+
+pub struct ProductChangeFeedServiceKey;
+
+impl ServiceKey for ProductChangeFeedServiceKey {
+    type Value = ProductChangeFeedService;
+    const NAME: &'static str = "lilia.product-change-feed";
+}
+
+pub struct ProductChangeFeedFeature {
+    service: ProductChangeFeedService,
+}
+
+impl ProductChangeFeedFeature {
+    pub fn new(service: ProductChangeFeedService) -> Self {
+        Self { service }
+    }
+}
+
+impl Feature for ProductChangeFeedFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.product-change-feed").expect("nonempty feature id")
+    }
+
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<ProductChangeFeedServiceKey>()]
+    }
+
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        cx.provide::<ProductChangeFeedServiceKey>(self.service.clone())
+    }
+}
+
+impl DesktopApplication {
+    pub fn seed_product_change_feed_cursor(&self) -> Result<u64, DesktopApplicationError> {
+        self.product_change_feed_service().seed_cursor()
+    }
+
+    pub fn product_change_feed_cursor(&self) -> u64 {
+        self.product_change_feed_service().cursor()
+    }
+
+    pub fn start_product_change_feed(&self) -> Result<(), DesktopApplicationError> {
+        self.product_change_feed_service().start()
+    }
+
+    pub fn start_product_change_feed_with_interval(
+        &self,
+        interval: Duration,
+    ) -> Result<(), DesktopApplicationError> {
+        self.product_change_feed_service()
+            .start_with_interval(interval)
+    }
+
+    pub fn stop_product_change_feed(&self) {
+        self.product_change_feed_service().stop();
+    }
+
+    pub fn poll_product_change_feed(&self) -> Result<Vec<DesktopEvent>, DesktopApplicationError> {
+        self.product_change_feed_service().poll()
+    }
+
+    pub fn product_change_feed_service(&self) -> ProductChangeFeedService {
+        self.inner.product_change_feed.clone()
     }
 }
 
@@ -241,7 +307,7 @@ enum FeedNotice {
 }
 
 fn coalesce_product_events(
-    application: &DesktopApplication,
+    service: &ProductChangeFeedService,
     events: &[ProductEvent],
 ) -> Vec<FeedNotice> {
     let mut projects_changed = false;
@@ -254,17 +320,14 @@ fn coalesce_product_events(
             "project" => projects_changed = true,
             "task" => {
                 if let Ok(task_id) = TaskId::new(&event.entity_id) {
-                    let project_id = application
-                        .get_task(&task_id)
-                        .ok()
-                        .and_then(|task| task.project_id);
+                    let project_id = task_project_id(service, &task_id);
                     task_keys.insert((project_id, Some(task_id)));
                 } else {
                     projects_changed = true;
                 }
             }
             "conversation" => {
-                if let Some(kind) = conversation_event_kind(application, event) {
+                if let Some(kind) = conversation_event_kind(service, event) {
                     match kind {
                         FeedNotice::Tasks {
                             project_id,
@@ -278,7 +341,7 @@ fn coalesce_product_events(
                 }
             }
             "milestone" => {
-                if let Ok(project_id) = resolve_milestone_project(application, event) {
+                if let Ok(project_id) = resolve_milestone_project(service, event) {
                     roadmap_projects.insert(project_id);
                 } else {
                     projects_changed = true;
@@ -286,7 +349,7 @@ fn coalesce_product_events(
             }
             "workflow" | "workflow_run" => automation_changed = true,
             "binding" | "assignment" | "artifact" | "project_asset" => {
-                if let Some(kind) = loose_entity_event_kind(application, event) {
+                if let Some(kind) = loose_entity_event_kind(service, event) {
                     match kind {
                         FeedNotice::Tasks {
                             project_id,
@@ -322,12 +385,25 @@ fn coalesce_product_events(
     kinds
 }
 
+fn task_project_id(service: &ProductChangeFeedService, task_id: &TaskId) -> Option<ProjectId> {
+    let entity = service
+        .authority
+        .client()
+        .ok()?
+        .products()
+        .get_entity(ProductEntityKind::Task, task_id.as_str())
+        .ok()?;
+    match entity {
+        lilia_contracts::ProductEntity::Task(task) => task.project_id,
+        _ => None,
+    }
+}
+
 fn conversation_event_kind(
-    application: &DesktopApplication,
+    service: &ProductChangeFeedService,
     event: &ProductEvent,
 ) -> Option<FeedNotice> {
-    let entity = application
-        .inner
+    let entity = service
         .authority
         .client()
         .ok()?
@@ -345,11 +421,10 @@ fn conversation_event_kind(
 }
 
 fn resolve_milestone_project(
-    application: &DesktopApplication,
+    service: &ProductChangeFeedService,
     event: &ProductEvent,
 ) -> Result<ProjectId, DesktopApplicationError> {
-    let entity = application
-        .inner
+    let entity = service
         .authority
         .client()?
         .products()
@@ -364,7 +439,7 @@ fn resolve_milestone_project(
 }
 
 fn loose_entity_event_kind(
-    application: &DesktopApplication,
+    service: &ProductChangeFeedService,
     event: &ProductEvent,
 ) -> Option<FeedNotice> {
     let kind = match event.entity.as_str() {
@@ -374,8 +449,7 @@ fn loose_entity_event_kind(
         "project_asset" => ProductEntityKind::ProjectAsset,
         _ => return Some(FeedNotice::Projects),
     };
-    let entity = application
-        .inner
+    let entity = service
         .authority
         .client()
         .ok()?
@@ -489,13 +563,28 @@ mod tests {
 
         app.start_product_change_feed_with_interval(Duration::from_millis(100))
             .unwrap();
-        assert!(app.inner.product_change_feed.running.load(Ordering::SeqCst));
+        assert!(
+            app.product_change_feed_service()
+                .state
+                .running
+                .load(Ordering::SeqCst)
+        );
         app.stop_product_change_feed();
-        assert!(!app.inner.product_change_feed.running.load(Ordering::SeqCst));
+        assert!(
+            !app.product_change_feed_service()
+                .state
+                .running
+                .load(Ordering::SeqCst)
+        );
 
         app.start_product_change_feed_with_interval(Duration::from_millis(100))
             .unwrap();
-        assert!(app.inner.product_change_feed.running.load(Ordering::SeqCst));
+        assert!(
+            app.product_change_feed_service()
+                .state
+                .running
+                .load(Ordering::SeqCst)
+        );
         app.stop_product_change_feed();
     }
 }

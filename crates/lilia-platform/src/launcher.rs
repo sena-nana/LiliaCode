@@ -147,7 +147,10 @@ fn resolve(path: PathBuf, code: &'static str) -> PlatformResult<PathBuf> {
     path.canonicalize()
         .map(platform_compatible_path)
         .map_err(|error| {
-            PlatformError::rejected(code, format!("failed to resolve {}: {error}", path.display()))
+            PlatformError::rejected(
+                code,
+                format!("failed to resolve {}: {error}", path.display()),
+            )
         })
 }
 
@@ -212,7 +215,9 @@ mod tests {
             "external_uri_unsupported"
         );
         assert_eq!(
-            validated_external_uri("javascript:alert(1)").unwrap_err().code,
+            validated_external_uri("javascript:alert(1)")
+                .unwrap_err()
+                .code,
             "external_uri_unsupported"
         );
     }
@@ -233,7 +238,9 @@ mod tests {
             "workspace_directory_invalid"
         );
         assert_eq!(
-            validated_directory(directory.join("missing")).unwrap_err().code,
+            validated_directory(directory.join("missing"))
+                .unwrap_err()
+                .code,
             "workspace_directory_invalid"
         );
         std::fs::remove_dir_all(directory).unwrap();

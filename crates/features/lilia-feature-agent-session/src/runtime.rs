@@ -293,6 +293,23 @@ impl DesktopAgentRuntime {
         })
     }
 
+    pub fn request_cancel_at(
+        &self,
+        task_id: &TaskId,
+        expected_turn_id: &str,
+    ) -> Option<CancelSnapshot> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let active = state.tasks.get_mut(task_id.as_str())?.active.as_mut()?;
+        if active.turn_id != expected_turn_id {
+            return None;
+        }
+        active.cancellation_mode = Some(TurnCancellationMode::User);
+        Some(CancelSnapshot {
+            turn_id: active.turn_id.clone(),
+            session_id: active.session_id.clone(),
+        })
+    }
+
     pub fn request_automation_cancel(
         &self,
         task_id: &TaskId,
@@ -542,6 +559,44 @@ mod tests {
     use super::*;
     use crate::DesktopAutomationTurnCorrelation;
     use lilia_contracts::TaskId;
+
+    #[test]
+    fn delayed_user_stop_never_cancels_the_replacement_turn() {
+        let runtime = DesktopAgentRuntime::default();
+        let task = TaskId::new("stop-lifecycle").unwrap();
+        runtime.enqueue_idempotent(
+            DesktopTurnRequest::new(task.clone(), "first"),
+            "turn-a".into(),
+        );
+        runtime.enqueue_idempotent(
+            DesktopTurnRequest::new(task.clone(), "next"),
+            "turn-b".into(),
+        );
+        runtime.finish_and_activate_next(&task, "turn-a").unwrap();
+        assert!(runtime.request_cancel_at(&task, "turn-a").is_none());
+        assert_eq!(runtime.snapshot(&task).turn_id.as_deref(), Some("turn-b"));
+        assert_eq!(
+            runtime.state.lock().unwrap().tasks[task.as_str()]
+                .active
+                .as_ref()
+                .unwrap()
+                .cancellation_mode,
+            None
+        );
+        let cancelled = runtime.request_cancel_at(&task, "turn-b").unwrap();
+        assert_eq!(cancelled.turn_id, "turn-b");
+        assert_eq!(
+            runtime.state.lock().unwrap().tasks[task.as_str()]
+                .active
+                .as_ref()
+                .unwrap()
+                .cancellation_mode,
+            Some(TurnCancellationMode::User)
+        );
+        assert!(runtime
+            .request_cancel_at(&TaskId::new("other").unwrap(), "turn-b")
+            .is_none());
+    }
 
     #[test]
     fn idempotent_enqueue_reuses_an_active_turn_without_redispatch() {

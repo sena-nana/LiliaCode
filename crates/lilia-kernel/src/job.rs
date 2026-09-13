@@ -159,9 +159,15 @@ pub trait TaskRuntime: Send + Sync + 'static {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobState {
     Pending,
-    Running { progress: Value },
-    Completed { output: Value },
-    Failed { message: String },
+    Running {
+        progress: Value,
+    },
+    Completed {
+        output: Value,
+    },
+    Failed {
+        message: String,
+    },
     Cancelled,
     /// A newer submission took over this job's slot; the result is discarded.
     Superseded,
@@ -309,11 +315,7 @@ impl Jobs {
         Self::with_poll_interval(events, journal, DEFAULT_POLL_INTERVAL)
     }
 
-    pub fn with_poll_interval(
-        events: EventBus,
-        journal: Journal,
-        poll_interval: Duration,
-    ) -> Self {
+    pub fn with_poll_interval(events: EventBus, journal: Journal, poll_interval: Duration) -> Self {
         Self {
             inner: Arc::new(JobsInner {
                 runtime: RwLock::new(None),
@@ -393,7 +395,12 @@ impl Jobs {
                 state: JobState::Pending,
             });
         }
-        self.announce(id, &request.protocol, request.slot.as_ref(), JobState::Pending);
+        self.announce(
+            id,
+            &request.protocol,
+            request.slot.as_ref(),
+            JobState::Pending,
+        );
         self.ensure_worker();
         self.inner.wake.notify_all();
 
@@ -577,9 +584,7 @@ impl Jobs {
         state
             .inflight
             .iter()
-            .find(|record| {
-                record.protocol == protocol && record.idempotency_key == idempotency_key
-            })
+            .find(|record| record.protocol == protocol && record.idempotency_key == idempotency_key)
             .map(|record| JobHandle {
                 id: record.id,
                 protocol: record.protocol.clone(),

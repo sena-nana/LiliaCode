@@ -47,9 +47,7 @@ impl Feature for UsageFeature {
         let port = Arc::clone(&self.port);
         vec![JobProtocol::new(
             QUOTA_PROTOCOL,
-            Arc::new(move |payload, _context: &JobContext| {
-                run_quota_job(payload, port.as_ref())
-            }),
+            Arc::new(move |payload, _context: &JobContext| run_quota_job(payload, port.as_ref())),
         )]
     }
 
@@ -64,7 +62,6 @@ fn run_quota_job(payload: Value, port: &dyn UsagePort) -> Result<Value, String> 
     let stats = port.quota(input)?;
     serde_json::to_value(stats).map_err(|error| format!("invalid quota report: {error}"))
 }
-
 
 pub const DAY_MS: i64 = 86_400_000;
 pub const RECENT_LIMIT: usize = 20;
@@ -292,7 +289,6 @@ impl Aggregate {
         self.record_count = self.record_count.saturating_add(1);
     }
 }
-
 
 pub fn max_activity(current: Option<i64>, candidate: i64) -> Option<i64> {
     if candidate <= 0 {
@@ -644,4 +640,3 @@ pub fn now_millis() -> i64 {
         .try_into()
         .unwrap_or(i64::MAX)
 }
-

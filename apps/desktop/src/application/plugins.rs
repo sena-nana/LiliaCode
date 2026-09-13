@@ -70,12 +70,7 @@ impl DesktopApplication {
             uuid::Uuid::new_v4()
         ));
 
-        let (package, previous) = {
-            let _guard = self
-                .inner
-                .extension_registry
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("extension registry"))?;
+        let (package, previous) = self.extension_registry_service().mutate(|| {
             let mut registry = lilia_storage::load_plugins_registry(&paths)?.unwrap_or_default();
             ensure_plugin_revision(registry.revision, input.expected_registry_revision)?;
             let previous = registry.clone();
@@ -143,8 +138,8 @@ impl DesktopApplication {
                 let _ = fs::remove_dir_all(&destination);
                 return Err(error.into());
             }
-            (package, previous)
-        };
+            Ok((package, previous))
+        })?;
         if let Err(error) = self.reload_extension_contributions() {
             let _ = lilia_storage::save_plugins_registry(&paths, &previous);
             let _ = fs::remove_dir_all(&destination);
@@ -162,12 +157,7 @@ impl DesktopApplication {
     ) -> Result<DesktopPluginPackageView, DesktopApplicationError> {
         let plugin_id = normalized_plugin_id(plugin_id)?;
         let paths = self.config().data_paths();
-        let (package, previous, changed) = {
-            let _guard = self
-                .inner
-                .extension_registry
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("extension registry"))?;
+        let (package, previous, changed) = self.extension_registry_service().mutate(|| {
             let mut registry = lilia_storage::load_plugins_registry(&paths)?.unwrap_or_default();
             ensure_plugin_revision(registry.revision, expected_registry_revision)?;
             let previous = registry.clone();
@@ -184,11 +174,11 @@ impl DesktopApplication {
                 let updated = package.clone();
                 bump_plugin_revision(&mut registry)?;
                 lilia_storage::save_plugins_registry(&paths, &registry)?;
-                (updated, previous, true)
+                Ok((updated, previous, true))
             } else {
-                (package.clone(), previous, false)
+                Ok((package.clone(), previous, false))
             }
-        };
+        })?;
         if changed {
             if let Err(error) = self.reload_extension_contributions() {
                 let _ = lilia_storage::save_plugins_registry(&paths, &previous);
@@ -206,48 +196,45 @@ impl DesktopApplication {
     ) -> Result<(), DesktopApplicationError> {
         let plugin_id = normalized_plugin_id(plugin_id)?;
         let paths = self.config().data_paths();
-        let (backup, root, previous, mcp_servers) = {
-            let _guard = self
-                .inner
-                .extension_registry
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("extension registry"))?;
-            let mut registry = lilia_storage::load_plugins_registry(&paths)?.unwrap_or_default();
-            ensure_plugin_revision(registry.revision, expected_registry_revision)?;
-            let previous = registry.clone();
-            let index = registry
-                .packages
-                .iter()
-                .position(|package| package.plugin_id == plugin_id)
-                .ok_or_else(|| plugin_input_error("plugin_id", "Plugin is not installed"))?;
-            let package = registry.packages[index].clone();
-            if package.registered_from != PLUGIN_MANAGER_PROVENANCE {
-                return Err(plugin_input_error(
-                    "plugin_id",
-                    "imported Plugin packages are read-only",
-                ));
-            }
-            let loaded = validate_managed_plugin(&paths, &package)?;
-            let root = loaded.root;
-            registry.packages.remove(index);
-            let backup = lilia_storage::plugins_root_path(&paths).join(format!(
-                ".{}.{}.delete",
-                plugin_id,
-                uuid::Uuid::new_v4()
-            ));
-            if root.exists() {
-                fs::rename(&root, &backup)
-                    .map_err(|error| plugin_io_error("stage Plugin deletion", error))?;
-            }
-            bump_plugin_revision(&mut registry)?;
-            if let Err(error) = lilia_storage::save_plugins_registry(&paths, &registry) {
-                if backup.exists() && !root.exists() {
-                    let _ = fs::rename(&backup, &root);
+        let (backup, root, previous, mcp_servers) =
+            self.extension_registry_service().mutate(|| {
+                let mut registry =
+                    lilia_storage::load_plugins_registry(&paths)?.unwrap_or_default();
+                ensure_plugin_revision(registry.revision, expected_registry_revision)?;
+                let previous = registry.clone();
+                let index = registry
+                    .packages
+                    .iter()
+                    .position(|package| package.plugin_id == plugin_id)
+                    .ok_or_else(|| plugin_input_error("plugin_id", "Plugin is not installed"))?;
+                let package = registry.packages[index].clone();
+                if package.registered_from != PLUGIN_MANAGER_PROVENANCE {
+                    return Err(plugin_input_error(
+                        "plugin_id",
+                        "imported Plugin packages are read-only",
+                    ));
                 }
-                return Err(error.into());
-            }
-            (backup, root, previous, loaded.mcp_servers)
-        };
+                let loaded = validate_managed_plugin(&paths, &package)?;
+                let root = loaded.root;
+                registry.packages.remove(index);
+                let backup = lilia_storage::plugins_root_path(&paths).join(format!(
+                    ".{}.{}.delete",
+                    plugin_id,
+                    uuid::Uuid::new_v4()
+                ));
+                if root.exists() {
+                    fs::rename(&root, &backup)
+                        .map_err(|error| plugin_io_error("stage Plugin deletion", error))?;
+                }
+                bump_plugin_revision(&mut registry)?;
+                if let Err(error) = lilia_storage::save_plugins_registry(&paths, &registry) {
+                    if backup.exists() && !root.exists() {
+                        let _ = fs::rename(&backup, &root);
+                    }
+                    return Err(error.into());
+                }
+                Ok((backup, root, previous, loaded.mcp_servers))
+            })?;
         if let Err(error) = self.reload_extension_contributions() {
             let _ = lilia_storage::save_plugins_registry(&paths, &previous);
             if backup.exists() && !root.exists() {
@@ -272,16 +259,21 @@ impl DesktopApplication {
     }
 
     pub(crate) fn loaded_plugin_packages(&self) -> Vec<LoadedPluginPackage> {
-        let paths = self.config().data_paths();
-        lilia_storage::load_plugins_registry(&paths)
-            .ok()
-            .flatten()
-            .into_iter()
-            .flat_map(|registry| registry.packages)
-            .filter(|package| package.enabled)
-            .filter_map(|package| validate_managed_plugin(&paths, &package).ok())
-            .collect()
+        loaded_plugin_packages(&self.config().data_paths())
     }
+}
+
+pub(crate) fn loaded_plugin_packages(
+    paths: &lilia_storage::LiliaDataPaths,
+) -> Vec<LoadedPluginPackage> {
+    lilia_storage::load_plugins_registry(paths)
+        .ok()
+        .flatten()
+        .into_iter()
+        .flat_map(|registry| registry.packages)
+        .filter(|package| package.enabled)
+        .filter_map(|package| validate_managed_plugin(paths, &package).ok())
+        .collect()
 }
 
 fn plugin_package_view(
@@ -844,9 +836,11 @@ mod tests {
         assert!(enabled.enabled);
         assert!(enabled.runtime_available);
         let skills = application.extensions_snapshot().unwrap().skills;
-        assert!(skills
-            .iter()
-            .any(|skill| { skill.skill_id == "review" && skill.runtime_available }));
+        assert!(
+            skills
+                .iter()
+                .any(|skill| { skill.skill_id == "review" && skill.runtime_available })
+        );
         let server_id = "plugin.review-tools.remote";
         application
             .set_mcp_server_credential(
@@ -868,9 +862,11 @@ mod tests {
                 .present
         );
 
-        assert!(application
-            .set_plugin_package_enabled("review-tools", false, 1)
-            .is_err());
+        assert!(
+            application
+                .set_plugin_package_enabled("review-tools", false, 1)
+                .is_err()
+        );
         application
             .set_plugin_package_enabled("review-tools", false, 2)
             .unwrap();
@@ -907,9 +903,11 @@ mod tests {
             "changed",
         )
         .unwrap();
-        assert!(application
-            .set_plugin_package_enabled("review-tools", true, 1)
-            .is_err());
+        assert!(
+            application
+                .set_plugin_package_enabled("review-tools", true, 1)
+                .is_err()
+        );
         let view = application.plugin_packages().unwrap().2.remove(0);
         assert!(!view.runtime_available);
         assert!(!view.warnings.is_empty());

@@ -120,6 +120,12 @@ pub enum AutomationStoreError {
         "automation workflow must be published before it can run or be enabled: {workflow_id}"
     )]
     PublishedVersionRequired { workflow_id: String },
+    #[error("published automation version changed for {workflow_id}: expected {expected}, found {actual}")]
+    PublishedVersionChanged {
+        workflow_id: String,
+        expected: String,
+        actual: String,
+    },
     #[error("automation workflow version does not exist: {version_id}")]
     VersionNotFound { version_id: String },
     #[error(

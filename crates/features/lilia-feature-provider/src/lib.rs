@@ -150,10 +150,7 @@ fn run_credential_job(payload: Value, port: &dyn CredentialPort) -> Result<Value
     Ok(Value::Null)
 }
 
-fn run_assistant_probe_job(
-    payload: Value,
-    port: &dyn AssistantProbePort,
-) -> Result<Value, String> {
+fn run_assistant_probe_job(payload: Value, port: &dyn AssistantProbePort) -> Result<Value, String> {
     let request: AssistantProbeRequest = serde_json::from_value(payload)
         .map_err(|error| format!("invalid assistant probe request: {error}"))?;
     port.probe(request.ticket, request.kind)
@@ -380,9 +377,8 @@ impl AgentRuntimeSettingsState {
     }
 
     pub fn persist(&self, settings: &AgentRuntimeSettings) -> Result<(), ProviderError> {
-        let payload =
-            serde_json::to_value(StoredAgentRuntimeSettings::from(settings.clone()))
-                .map_err(|error| ProviderError::Persistence(error.to_string()))?;
+        let payload = serde_json::to_value(StoredAgentRuntimeSettings::from(settings.clone()))
+            .map_err(|error| ProviderError::Persistence(error.to_string()))?;
         self.store
             .put_setting(PROVIDER_RUNTIME_SETTINGS_KEY, &payload)
             .map_err(|error| ProviderError::Persistence(error.to_string()))
@@ -446,7 +442,6 @@ pub struct ProviderCredentialImportInput {
     pub permissions_summary: Option<String>,
     pub independent_revoke_uri: Option<String>,
 }
-
 
 pub fn normalize_optional(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
@@ -554,7 +549,6 @@ pub enum ProviderError {
     Runtime(String),
 }
 
-
 #[cfg(test)]
 mod assistant_probe_tests {
     use std::sync::Mutex;
@@ -597,9 +591,11 @@ mod assistant_probe_tests {
 
     #[test]
     fn a_probe_never_puts_the_draft_api_key_in_the_payload() {
-        let payload =
-            serde_json::to_value(AssistantProbeRequest::new(9, AssistantProbeKind::Connection))
-                .unwrap();
+        let payload = serde_json::to_value(AssistantProbeRequest::new(
+            9,
+            AssistantProbeKind::Connection,
+        ))
+        .unwrap();
 
         assert_eq!(
             payload,
@@ -615,10 +611,7 @@ mod assistant_probe_tests {
         )
         .expect_err("an unknown probe cannot run");
 
-        assert!(
-            error.contains("invalid assistant probe request"),
-            "{error}"
-        );
+        assert!(error.contains("invalid assistant probe request"), "{error}");
     }
 
     #[test]

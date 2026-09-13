@@ -49,6 +49,10 @@ pub trait DesktopHost: Send + Sync {
 pub enum DesktopHostAction {
     Window(DesktopWindowAction),
     FileDialog(DesktopFileDialogRequest),
+    SaveFileDialog {
+        request: DesktopFileDialogRequest,
+        suggested_filename: String,
+    },
     Tray(DesktopTrayAction),
     Shortcut(DesktopShortcutAction),
     Credential(DesktopCredentialAction),
@@ -60,7 +64,10 @@ pub enum DesktopHostAction {
     OpenTerminal(PathBuf),
     OpenCodeEditor(PathBuf),
     OpenExternal(String),
-    SetSystemAwake { active: bool, reason: String },
+    SetSystemAwake {
+        active: bool,
+        reason: String,
+    },
     NotifySecondInstance(DesktopSingleInstanceRequest),
     ForwardCli(DesktopCliRequest),
     Update(DesktopUpdateAction),

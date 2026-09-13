@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 
 use crate::application::{
-    normalize_model_pool, DesktopApplication, DesktopAssistantAiConfigurationUpdate,
-    DesktopAssistantAiModelPoolItem, DesktopAssistantAiSecretUpdate, DesktopAssistantAiSettings,
-    DesktopAssistantAiSettingsUpdate, DesktopConversationSuggestionSettings,
-    DesktopModelFeatureSettings, DesktopModelFeatureSettingsUpdate, DesktopModelPresetGroup,
-    DesktopSecret,
+    DesktopApplication, DesktopAssistantAiConfigurationUpdate, DesktopAssistantAiModelPoolItem,
+    DesktopAssistantAiSecretUpdate, DesktopAssistantAiSettings, DesktopAssistantAiSettingsUpdate,
+    DesktopConversationSuggestionSettings, DesktopModelFeatureSettings,
+    DesktopModelFeatureSettingsUpdate, DesktopModelPresetGroup, DesktopSecret,
+    normalize_model_pool,
 };
 use lilia_contracts::auto_model_for_provider_family_tier;
 

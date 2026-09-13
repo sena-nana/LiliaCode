@@ -1,11 +1,16 @@
-#[path = "desktop_settings_surface.rs"]
-mod settings_surface;
-pub(crate) use settings_surface::SettingsSurfaceAction;
-
+use crate::module::automation::controller::waiting_human_node;
+use crate::module::automation::editor::{
+    automation_node_config_boolean_field, automation_node_config_cycle_field,
+    automation_node_config_fields, automation_node_config_input_field,
+    parse_automation_node_config,
+};
+#[cfg(test)]
+use crate::module::automation::graph::automation_graph_model;
+#[cfg(test)]
+use lilia_feature_automation::{AutomationNode, AutomationNodePosition, AutomationScopeFilter};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(debug_assertions)]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -14,16 +19,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::application::DesktopComposerTurnRequest;
 use crate::application::DesktopTodoGuideStatus;
 use crate::application::{
-    describe_attachment_paths, preview_automatic_turn_selection, ApplicationWorkspaceSurface,
-    ArchitectureChangeStatus, ArchitecturePermission, AutomationBeginRunInput, AutomationNode,
-    AutomationNodePosition, AutomationResumeRunInput, AutomationRunDetail, AutomationRunStatus,
-    AutomationRunSummary, AutomationSaveDraftInput, AutomationScopeFilter,
-    AutomationSignalEnvelope, AutomationWorkflow, ChatAttachment, ChatAttachmentKind,
-    ChatContextSearchResult, ChatConversationReference, CredentialImportDecision,
-    DesktopAgentInteractionError, DesktopAgentInteractionSettings,
-    DesktopAgentInteractionSettingsUpdate, DesktopAgentRuntimeSettings,
-    DesktopAgentRuntimeSettingsUpdate, DesktopApplication, DesktopApplicationConfig,
-    DesktopApplicationError, DesktopApplicationSuggestionModelPort,
+    ApplicationWorkspaceSurface, ArchitectureChangeStatus, ArchitecturePermission,
+    AutomationRunDetail, AutomationRunStatus, AutomationWorkflow, CODING_TOOLS_PANEL_ID,
+    ChatAttachment, ChatAttachmentKind, ChatContextSearchResult, ChatConversationReference,
+    CredentialImportDecision, DOCUMENT_WORKSPACE_ITEM_KIND, DesktopAgentInteractionError,
+    DesktopAgentInteractionSettings, DesktopAgentInteractionSettingsUpdate,
+    DesktopAgentRuntimeSettings, DesktopAgentRuntimeSettingsUpdate, DesktopApplication,
+    DesktopApplicationConfig, DesktopApplicationError, DesktopApplicationSuggestionModelPort,
     DesktopArchitectureInteractionDecision, DesktopAssistantAiModelsResult,
     DesktopAssistantAiProbeInput, DesktopAssistantAiTestResult, DesktopAutomaticTurnSelection,
     DesktopCodeSearchMode, DesktopCodeSearchScope, DesktopCodingServicesSnapshot, DesktopCommand,
@@ -51,37 +53,37 @@ use crate::application::{
     DesktopTurnState, DesktopUpdateState, DesktopWorkspaceCodeSearchHit,
     DesktopWorkspaceCodeSearchResult, DesktopWorkspaceListing, DesktopWorkspaceProject,
     DesktopWorkspaceSession, DesktopWorkspaceSessionId, DesktopWorkspaceSnapshot,
-    DesktopWorkspaceTask, DesktopWorktreeSelectionMode, DiagnosticSeverity, DockSlot, MemoryScope,
-    MemoryUpsertInput, MilestoneDueDateUpdate, MilestoneStatus, PaneId, PaneNode, PanelId,
-    PanelLayoutSnapshot, PanelState, ProjectArchitectureChange, ProjectArchitectureGraph,
-    ProjectFilesSnapshot, ProjectFilesViewState, ProjectQuery, ProjectWorkspaceSurface,
-    QuotaUsageStats, QuotaUsageStatsInput, RemoteControlStatus, SplitAxis, TaskQuery,
-    WorkspaceItem, WorkspaceItemId, WorkspaceItemResolve, CODING_TOOLS_PANEL_ID,
-    DOCUMENT_WORKSPACE_ITEM_KIND, IAB_PANEL_ID, TASK_INSPECTOR_PANEL_ID, TASK_WORKSPACE_ITEM_KIND,
-    TERMINAL_WORKSPACE_ITEM_KIND, TITLE_UPDATE_ACTION_KIND,
+    DesktopWorkspaceTask, DesktopWorktreeSelectionMode, DockSlot, IAB_PANEL_ID,
+    MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES, MemoryScope, MemoryUpsertInput, MilestoneDueDateUpdate,
+    MilestoneStatus, PaneId, PaneNode, PanelId, PanelLayoutSnapshot, PanelState,
+    ProjectArchitectureChange, ProjectArchitectureGraph, ProjectFilesSnapshot,
+    ProjectFilesViewState, ProjectQuery, ProjectWorkspaceSurface, QuotaUsageStats,
+    QuotaUsageStatsInput, RemoteControlStatus, SplitAxis, TASK_INSPECTOR_PANEL_ID,
+    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND, TITLE_UPDATE_ACTION_KIND, TaskQuery,
+    WorkspaceItem, WorkspaceItemId, WorkspaceItemResolve, clipboard_text_should_be_attachment,
+    describe_attachment_paths, preview_automatic_turn_selection,
 };
 use crate::application::{
-    ApprovalChanged, ArchitectureChanged, AssistantAiSettingsChanged, AutomationChanged,
-    AutomationRunChanged, ComposerChanged, ConversationSuggestionSettingsChanged,
-    CredentialChanged, GitHubBindingChanged, GoalChanged, InteractionChanged, MemoryChanged,
-    ModelFeatureSettingsChanged, NavigationRequested, ProjectFilesChanged, ProjectSettingsChanged,
-    ProjectsChanged, ProviderChanged, RoadmapChanged, RouterModeSettingsChanged, TasksChanged,
-    TerminalChanged, TimelineChanged, TodosChanged, TurnRecoveryIssue, TurnStateChanged,
-    UpdateStateChanged, WorktreeChanged, WorktreeOperationCompleted, WorktreeOperationFailed,
+    ApprovalChanged, ArchitectureChanged, AssistantAiSettingsChanged, ComposerChanged,
+    ConversationSuggestionSettingsChanged, CredentialChanged, GitHubBindingChanged, GoalChanged,
+    InteractionChanged, MemoryChanged, ModelFeatureSettingsChanged, NavigationRequested,
+    ProjectFilesChanged, ProjectSettingsChanged, ProjectsChanged, ProviderChanged, RoadmapChanged,
+    RouterModeSettingsChanged, TasksChanged, TerminalChanged, TimelineChanged, TodosChanged,
+    TurnRecoveryIssue, TurnStateChanged, UpdateStateChanged, WorktreeChanged,
+    WorktreeOperationCompleted, WorktreeOperationFailed,
 };
 
 use crate::module::extensions::{
-    load_native_hooks, mcp_credential_draft_key, mcp_credential_kind_key, mcp_prompt_preview,
-    mcp_resource_preview, parse_hook_handlers_draft, ExtensionsCommand, ExtensionsJob,
-    ExtensionsModule, ExtensionsModuleMessage, ExtensionsOutcome, HookSourceOperation,
-    McpContentKind, McpContentOperation, McpRegistryOperation, PluginRegistryOperation,
-    SkillRegistryOperation,
+    ExtensionsCommand, ExtensionsJob, ExtensionsModule, ExtensionsModuleMessage, ExtensionsOutcome,
+    HookSourceOperation, McpContentKind, McpContentOperation, McpRegistryOperation,
+    PluginRegistryOperation, SkillRegistryOperation, load_native_hooks, mcp_credential_draft_key,
+    mcp_credential_kind_key, mcp_prompt_preview, mcp_resource_preview, parse_hook_handlers_draft,
 };
 use crate::module::task::{TaskMoveTarget, TaskParentTarget};
 use crate::runtime_compat::{
-    tool_window_settings, window_event_id, HostedProgramContext, HostedProgramUpdate,
-    HostedUiCommand, HostedUpdateExt, HostedWindowAction, HostedWindowCommand, HostedWindowEvent,
-    HostedWindowGeometry, HostedWindowId, HostedWindowSettings,
+    HostedProgramContext, HostedProgramUpdate, HostedUiCommand, HostedUpdateExt,
+    HostedWindowAction, HostedWindowCommand, HostedWindowEvent, HostedWindowGeometry,
+    HostedWindowId, HostedWindowSettings, tool_window_settings, window_event_id,
 };
 use crate::text_editor_state::TextEditorState;
 use lilia_contracts::{
@@ -96,60 +98,59 @@ use lilia_kernel::{JobContext, JobEvent, JobId, JobRequest, JobState};
 use mutsuki_agent_contracts::InteractionResolution;
 use nana_ui::runtime::RuntimeDocument;
 use nana_ui::{
-    window_material_effect, ActionDescriptor, ActionId, ActionPickerState, ActionRegistry,
-    AppearanceEvent, AppearanceSettings, Colors, CommandPaletteEvent, CommandPaletteItem,
-    ContextPredicate, DropdownEvent, DropdownOption, GraphCanvasEvent,
-    GraphEdge as CanvasGraphEdge, GraphEndpoint, GraphModel, GraphNode as CanvasGraphNode,
-    GraphPoint, GraphPort, GraphPortKind, GraphPortSide, GraphSelection, GraphSize, GraphViewport,
-    Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer, KeyContext, KeyInput, KeyModifiers,
-    KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect, MarkdownImage, NarrowBehavior,
-    NativeMarkdown, RegionId, RegionRole, RegionState, RuntimeProgram, RuntimeRedraw,
-    SettingsModel, SettingsState, SettingsTab, SettingsTabId, SplitAxis as NanaSplitAxis,
-    SplitPaneAction, SplitPaneController, ThemeMode, ThemeModeExt, ThemeTokens,
-    TreeDropPosition as NanaTreeDropPosition, WindowChromeEvent, WindowChromeState,
-    WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel,
+    ActionDescriptor, ActionId, ActionPickerState, ActionRegistry, AppearanceEvent,
+    AppearanceSettings, Colors, CommandPaletteEvent, CommandPaletteItem, ContextPredicate,
+    DropdownEvent, DropdownOption, GraphCanvasEvent, GraphEdge as CanvasGraphEdge, GraphEndpoint,
+    GraphModel, GraphNode as CanvasGraphNode, GraphPoint, GraphPort, GraphPortKind, GraphPortSide,
+    GraphSelection, GraphSize, GraphViewport, Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer,
+    KeyContext, KeyInput, KeyModifiers, KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect,
+    MarkdownImage, NarrowBehavior, NativeMarkdown, RegionId, RegionRole, RegionState,
+    RuntimeProgram, RuntimeRedraw, SettingsModel, SettingsState, SettingsTab, SettingsTabId,
+    SplitAxis as NanaSplitAxis, SplitPaneAction, SplitPaneController, ThemeMode, ThemeModeExt,
+    ThemeTokens, TreeDropPosition as NanaTreeDropPosition, WindowChromeEvent, WindowChromeState,
+    WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel, window_material_effect,
 };
 use nana_ui_platform::WindowId;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 #[cfg(debug_assertions)]
 use crate::agent_debug::{
-    failure_response, frame_response, snapshot_response, success_response, DebugCommand,
-    DebugObservation, DebugRequest, DebugState, DebugWindowGeometry, DebugWorkspaceItem,
-    DebugWorkspacePane, DebugWorkspaceSplit, DebugWorkspaceWindow,
+    DebugCommand, DebugObservation, DebugRequest, DebugState, DebugWindowGeometry,
+    DebugWorkspaceItem, DebugWorkspacePane, DebugWorkspaceSplit, DebugWorkspaceWindow,
+    failure_response, frame_response, snapshot_response, success_response,
 };
 use crate::ask_user::{AskUserAction, AskUserDraft, AskUserMode, AskUserOutcome, AskUserSpec};
 use crate::conversation_suggestions::ConversationSuggestionState;
-use crate::data_import::{legacy_instance_identity, NativeDataImportState};
+use crate::data_import::{NativeDataImportState, legacy_instance_identity};
 use crate::debug_timeline::{DebugTimelineAction, NativeDebugTimeline};
 use crate::document_editor::{is_document_editor_item, select_document_editor_range};
 use crate::host::NativeDesktopHost;
-use crate::iab_panel::IabPanelState;
-use crate::markdown_images::{load_markdown_image, LoadedMarkdownImage, MarkdownImageLoadState};
+use crate::markdown_images::{LoadedMarkdownImage, load_markdown_image};
 use crate::module::documents::{DocumentDefinitionOutcome, DocumentMessage, DocumentsModule};
+use crate::navigation::WindowRoute;
 use crate::project_files_panel;
 use crate::provider_ai_settings::ProviderAiSettingsState;
 use crate::shell::{
     ExtensionsMessage, GitHubMessage, HookHandlerDraftField, ImportMessage, ProjectCloneMessage,
-    ProjectMessage, ProviderMessage, QuotaMessage, RemoteMessage, SidebarMessage,
-    SuggestionsMessage, TaskMessage, UpdateMessage, WorktreeMessage,
+    ProjectMessage, ProviderMessage, QuotaMessage, RemoteMessage, SidebarMessage, TaskMessage,
+    UpdateMessage, WorktreeMessage,
 };
 use crate::shell_integration::{NativeShellIntegration, ShellCommand};
 use crate::storage::{
-    lilia_home, load_appearance, load_conversation_status_state, load_sidebar_display_mode,
-    load_sidebar_tree_state, load_theme, load_window_state, load_workspace_topology_state,
-    merge_auxiliary_window_state, merge_conversation_status_window_state,
-    normalize_conversation_status_opacity, save_appearance, save_sidebar_display_mode,
-    save_sidebar_tree_state, save_theme, NativeConversationStatusStateWriter,
-    NativeConversationStatusWindowState, NativeMemorySettingsStore, NativeSidebarDisplayMode,
-    NativeSidebarTreeState, NativeWindowSnapshot, NativeWindowState, NativeWindowStateWriter,
-    NativeWorkspaceTopologyState, NativeWorkspaceTopologyStateWriter, NativeWorkspaceWindowState,
     LILIA_INSTANCE_IDENTITY, NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION,
+    NativeConversationStatusStateWriter, NativeConversationStatusWindowState,
+    NativeMemorySettingsStore, NativeSidebarDisplayMode, NativeSidebarTreeState,
+    NativeWindowSnapshot, NativeWindowState, NativeWindowStateWriter, NativeWorkspaceTopologyState,
+    NativeWorkspaceTopologyStateWriter, NativeWorkspaceWindowState, lilia_home, load_appearance,
+    load_conversation_status_state, load_sidebar_display_mode, load_sidebar_tree_state, load_theme,
+    load_window_state, load_workspace_topology_state, merge_auxiliary_window_state,
+    merge_conversation_status_window_state, normalize_conversation_status_opacity, save_appearance,
+    save_sidebar_display_mode, save_sidebar_tree_state, save_theme,
 };
 use crate::target_ids;
 use crate::task_session::{PendingActionView, TaskSessionView, TaskTimelineItem};
-use crate::terminal_view::{terminal_plain_text, TerminalViewMessage};
+use crate::terminal_view::{TerminalViewMessage, terminal_plain_text};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HostedContextMenuEvent<T> {
@@ -182,8 +183,7 @@ const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 const SIDEBAR_MAX_WIDTH: f32 = 480.0;
 const COMPOSER_PLACEHOLDER: &str = "可向 agent 询问任何事，输入 @ 使用插件或提及文件";
 const MAX_MARKDOWN_IMAGE_CACHE_ENTRIES: usize = 64;
-const MAX_MARKDOWN_IMAGE_CACHE_BYTES: usize =
-    crate::markdown_images::MAX_MARKDOWN_IMAGE_RESIDENT_BYTES;
+const MAX_MARKDOWN_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MARKDOWN_IMAGE_WORKERS: usize = 2;
 const WORKSPACE_SPLIT_HANDLE_SIZE: f32 = 8.0;
 const MIN_WORKSPACE_SPLIT_RATIO: f32 = 0.1;
@@ -195,6 +195,11 @@ const SETTINGS_ACTION: &str = "workspace.settings";
 const TOGGLE_RESOURCES_ACTION: &str = "workspace.toggle_resources";
 const SAVE_DOCUMENT_ACTION: &str = "document.save";
 const TOGGLE_THEME_ACTION: &str = "appearance.toggle_theme";
+
+enum ClipboardTextPaste {
+    Inline(String),
+    Attachment(ChatAttachment),
+}
 
 fn native_action_registry() -> Result<ActionRegistry, String> {
     let mut registry = ActionRegistry::new();
@@ -447,13 +452,6 @@ struct CodingRefreshCommand {
 
 type CodingExchange = JobExchange<CodingRefreshCommand, CodingToolsRefreshResult>;
 
-#[derive(Debug, Clone, Default)]
-struct AutomationNodeInspectorDraft {
-    node_id: Option<String>,
-    title: String,
-    config: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct CodingToolsRefreshResult {
     project_id: Option<String>,
@@ -490,6 +488,41 @@ struct PromptRouteSuggestionState {
 struct PendingSessionBranch {
     task_id: TaskId,
     anchor: DesktopSessionBranchAnchor,
+}
+
+fn pending_session_branch_label(pending: Option<&PendingSessionBranch>) -> Option<String> {
+    pending.map(|pending| {
+        match pending.anchor.mode {
+            DesktopSessionBranchMode::Continue => "从这里继续",
+            DesktopSessionBranchMode::Fork => "从这里分叉",
+        }
+        .to_owned()
+    })
+}
+
+fn pending_review_target(pending: Option<&PendingReviewSlashWorkflow>) -> Option<String> {
+    pending.map(|pending| {
+        match pending.target_kind {
+            PendingReviewTargetKind::UncommittedChanges => "changes",
+            PendingReviewTargetKind::BaseBranch => "branch",
+            PendingReviewTargetKind::Commit => "commit",
+        }
+        .to_owned()
+    })
+}
+
+fn pending_review_value(pending: Option<&PendingReviewSlashWorkflow>) -> String {
+    pending
+        .map(|pending| pending.target_value.clone())
+        .unwrap_or_default()
+}
+
+#[derive(Clone, Debug)]
+enum MarkdownImageLoadState {
+    Pending { requested: bool },
+    Loading,
+    Ready(LoadedMarkdownImage),
+    Failed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -531,7 +564,6 @@ struct TaskPopupWindow {
     task_sessions: BTreeMap<TaskId, TaskSessionView>,
     session: Option<TaskSessionView>,
     conversation_suggestions: ConversationSuggestionState,
-    todo_ui: crate::todo_panel::TodoEditState,
     pending_session_branch: Option<PendingSessionBranch>,
     pending_review_slash_workflow: Option<PendingReviewSlashWorkflow>,
     turn_state: Option<(String, DesktopTurnState)>,
@@ -568,14 +600,6 @@ enum DraftWorktreeSelection {
     Existing(Option<PathBuf>),
 }
 
-/// 输入条工具条上互斥的下拉菜单；`Actions` 同时服务主窗口与任务弹窗。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ComposerMenu {
-    Actions(HostedWindowId),
-    Permission,
-    Worktree,
-}
-
 /// 工作树菜单里可直接落地的目标；“已有工作树”落地为打开目录选择器。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WorktreeMenuSelection {
@@ -602,13 +626,6 @@ impl TimelineSurfaceKey {
             Self::TaskPopup(window_id) => *window_id,
         }
     }
-
-    fn scrollable_id(&self) -> String {
-        match self {
-            Self::Main => "lilia-native-timeline-main".to_owned(),
-            Self::TaskPopup(window_id) => format!("lilia-native-timeline-popup-{}", window_id.0),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -622,19 +639,6 @@ impl Default for TimelineViewport {
         Self {
             offset: 0.0,
             extent: TIMELINE_DEFAULT_VIEWPORT_EXTENT,
-        }
-    }
-}
-
-impl TimelineViewport {
-    fn update(&mut self, offset: f32, extent: f32) {
-        self.offset = if offset.is_finite() {
-            offset.max(0.0)
-        } else {
-            0.0
-        };
-        if extent.is_finite() && extent > 0.0 {
-            self.extent = extent;
         }
     }
 }
@@ -688,9 +692,9 @@ pub(crate) enum SidebarMenuAction {
     CloneRepository,
     CreateCategory,
     OpenProject,
+    OpenProjectPopup,
     OpenProjectRoadmap,
     OpenProjectMemory,
-    OpenProjectPopup,
     ToggleProjectPinned,
     OpenProjectFileManager,
     OpenProjectCodeEditor,
@@ -713,9 +717,9 @@ impl SidebarMenuAction {
             Self::CloneRepository => "clone-repository",
             Self::CreateCategory => "create-category",
             Self::OpenProject => "open-project",
+            Self::OpenProjectPopup => "open-project-popup",
             Self::OpenProjectRoadmap => "open-project-roadmap",
             Self::OpenProjectMemory => "open-project-memory",
-            Self::OpenProjectPopup => "open-project-popup",
             Self::ToggleProjectPinned => "toggle-project-pinned",
             Self::OpenProjectFileManager => "open-project-file-manager",
             Self::OpenProjectCodeEditor => "open-project-code-editor",
@@ -739,9 +743,9 @@ fn sidebar_menu_action_label(action: SidebarMenuAction) -> &'static str {
         SidebarMenuAction::CloneRepository => "从 GitHub clone",
         SidebarMenuAction::CreateCategory => "创建空分类",
         SidebarMenuAction::OpenProject => "进入项目",
+        SidebarMenuAction::OpenProjectPopup => "在弹出窗口中创建对话",
         SidebarMenuAction::OpenProjectRoadmap => "路线图",
         SidebarMenuAction::OpenProjectMemory => "记忆",
-        SidebarMenuAction::OpenProjectPopup => "在弹出窗口中创建对话",
         SidebarMenuAction::ToggleProjectPinned => "置顶项目",
         SidebarMenuAction::OpenProjectFileManager => "在文件管理器中打开",
         SidebarMenuAction::OpenProjectCodeEditor => "在 VS Code 中打开",
@@ -751,7 +755,7 @@ fn sidebar_menu_action_label(action: SidebarMenuAction) -> &'static str {
         SidebarMenuAction::OpenTaskPopup => "在弹出窗口继续",
         SidebarMenuAction::AskTaskPopup => "在弹出窗口询问",
         SidebarMenuAction::ToggleTaskPinned => "置顶",
-        SidebarMenuAction::CompleteTask => "标为完成",
+        SidebarMenuAction::CompleteTask => "完成任务",
         SidebarMenuAction::ReopenTask => "重新打开",
         SidebarMenuAction::MergeTaskWorktree => "合并并删除",
         SidebarMenuAction::ArchiveTask => "归档",
@@ -850,6 +854,8 @@ pub(crate) enum ComposerAction {
     PasteFiles,
     TogglePlanMode,
     ToggleGoalMode,
+    NewGuide,
+    EditGoal,
 }
 
 type MessageSender = Arc<dyn Fn(Message) -> Result<(), String> + Send + Sync>;
@@ -862,30 +868,12 @@ struct ToolConsentDraft {
 
 #[derive(Debug, Clone)]
 pub enum AutomationMessage {
-    AddNode(String),
-    DeleteSelection,
-    Publish,
-    ToggleEnabled,
-    Delete,
-    SelectRun(String),
-    Resume,
-    CancelRun,
-    HumanResponse(String),
-    NodeTitle(String),
-    NodeConfig { field: String, value: Value },
-    ToggleConfig(String),
-    SaveNode,
-    ToggleInbox,
-    ToggleScope { field: String, value: String },
     OpenAutomations,
     CloseAutomations,
     RefreshAutomations,
     SelectAutomation(String),
     CreateAutomation,
     AutomationNameChanged(String),
-    SaveAutomationDraft,
-    RunAutomation,
-    AutomationGraph(GraphCanvasEvent),
 }
 
 pub use crate::module::roadmap::RoadmapMessage;
@@ -914,7 +902,6 @@ pub enum ConversationStatusMessage {
     ToggleConversationStatusOpacityPanel,
     ConversationStatusOpacityChanged(f32),
     OpenConversationStatusNewChat,
-    StopConversationStatusTask(TaskId),
 }
 
 #[derive(Debug, Clone)]
@@ -925,16 +912,19 @@ pub enum WorkspaceWindowMessage {
 
 #[derive(Debug, Clone)]
 pub enum ComposerMessage {
+    StopTurn {
+        window_id: HostedWindowId,
+        target: crate::runtime_shell::TurnStopTarget,
+    },
+    ToggleComposerActionMenu(HostedWindowId),
     ComposerAction {
         window_id: HostedWindowId,
         action: ComposerAction,
     },
-    TaskPopupComposerChanged {
-        window_id: HostedWindowId,
-        value: String,
-    },
-    SelectPermission(DesktopExecutionPermission),
-    SelectWorktree(WorktreeMenuSelection),
+    TogglePermissionMenu(HostedWindowId),
+    SelectPermission(HostedWindowId, DesktopExecutionPermission),
+    ToggleWorktreeMenu(HostedWindowId),
+    SelectWorktree(HostedWindowId, WorktreeMenuSelection),
     TaskPopupSelectSlashCommand {
         window_id: HostedWindowId,
         command: DesktopSlashCommand,
@@ -957,7 +947,6 @@ pub enum ComposerMessage {
         task_id: String,
     },
     TaskPopupSubmitTurn(HostedWindowId),
-    TaskPopupInterruptTurn(HostedWindowId),
     TaskPopupTogglePlanMode(HostedWindowId),
     TaskPopupToggleGoalMode(HostedWindowId),
     TaskPopupRespondApproval {
@@ -1038,7 +1027,6 @@ pub enum ComposerMessage {
     ToggleGoalMode,
     CyclePermission,
     SubmitTurn,
-    InterruptTurn,
     RespondApproval {
         request_id: String,
         approved: bool,
@@ -1065,12 +1053,6 @@ pub enum ComposerMessage {
 #[derive(Debug, Clone)]
 pub enum TimelineMessage {
     ToggleTimelineEvent(String),
-    LoadEarlierTimeline,
-    TimelineScrolled {
-        surface: TimelineSurfaceKey,
-        offset: f32,
-        viewport_extent: f32,
-    },
     ScrollTimelineToEnd(TimelineSurfaceKey),
     OpenMarkdownLink(String),
     CopyTimelineMarkdown {
@@ -1096,6 +1078,7 @@ pub enum SettingsMessage {
     SelectSettingsTab(SettingsTabId),
     Appearance(AppearanceEvent),
     SetSidebarDisplayMode(NativeSidebarDisplayMode),
+    RemotePcNameChanged(String),
     InjectDebugTimeline {
         window_id: HostedWindowId,
         action: DebugTimelineAction,
@@ -1167,6 +1150,7 @@ pub enum ChromeMessage {
 /// completion needs no pending slot in the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileDialogPurpose {
+    BrowserRequest(lilia_contracts::BrowserHostRequest),
     SidebarProjectFolder,
     ProjectWorktreeParent,
     ProjectCloneParent {
@@ -1176,16 +1160,10 @@ pub enum FileDialogPurpose {
     DraftWorktree {
         window_id: HostedWindowId,
     },
-    AttachWorktree {
+    AttachWorktree,
+    ComposerAttachments {
         window_id: HostedWindowId,
         task_id: TaskId,
-    },
-    ComposerAttachments {
-        select_directories: bool,
-    },
-    TaskPopupAttachments {
-        window_id: HostedWindowId,
-        select_directories: bool,
     },
     DataImportSource,
     PluginDirectory,
@@ -1200,6 +1178,12 @@ pub enum FileDialogPickFailure {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    BrowserPoll,
+    BrowserAction {
+        window_id: HostedWindowId,
+        resource: String,
+        action: crate::browser_workbench::BrowserAction,
+    },
     ProjectClone(ProjectCloneMessage),
     Project(ProjectMessage),
     KernelJob(JobEvent),
@@ -1235,7 +1219,6 @@ pub enum Message {
     Architecture(ArchitectureMessage),
     Terminal(TerminalViewMessage),
     ConversationStatus(ConversationStatusMessage),
-    Suggestions(SuggestionsMessage),
     Worktree(WorktreeMessage),
     Settings(SettingsMessage),
     Import(ImportMessage),
@@ -1274,7 +1257,8 @@ pub struct DesktopProgram {
     command_source_window: HostedWindowId,
     command_source_item: Option<WorkspaceItemId>,
     inspector_surface: InspectorSurface,
-    iab: IabPanelState,
+    #[cfg(target_os = "windows")]
+    browser: crate::browser_workbench::BrowserWorkbench,
     main_window_geometry: Option<NativeWindowState>,
     main_window_scale_factor: f32,
     workspace_splits: BTreeMap<WorkspaceSplitKey, WorkspaceSplitState>,
@@ -1285,7 +1269,6 @@ pub struct DesktopProgram {
     archived_projects: Vec<Project>,
     archived_tasks: Vec<ProductTask>,
     selected_project: Option<ProjectId>,
-    projects_overview_open: bool,
     project_dashboard: Vec<DesktopProjectDashboardSummary>,
     project_dashboard_error: Option<String>,
     inbox_selected: bool,
@@ -1338,7 +1321,6 @@ pub struct DesktopProgram {
     project_files: Option<ProjectFilesSnapshot>,
     project_files_error: Option<String>,
     terminal_snapshots: BTreeMap<DesktopTerminalSessionId, DesktopTerminalSnapshot>,
-    terminal_inputs: BTreeMap<DesktopTerminalSessionId, String>,
     terminal_scrollback: BTreeMap<DesktopTerminalSessionId, usize>,
     terminal_notices: BTreeMap<DesktopTerminalSessionId, String>,
     task_session: Option<TaskSessionView>,
@@ -1353,14 +1335,13 @@ pub struct DesktopProgram {
     pending_session_branch: Option<PendingSessionBranch>,
     pending_review_slash_workflow: Option<PendingReviewSlashWorkflow>,
     todo_draft: String,
-    todo_ui: crate::todo_panel::TodoEditState,
     editing_todo: Option<String>,
+    todo_ui: crate::todo_panel::TodoEditState,
     goal_draft: String,
     /// The task the in-flight worktree operation belongs to. Its slot is
     /// per-task, so the surface it blocks is the one showing that task.
     active_worktree_job: Option<(JobId, TaskId)>,
     worktree_confirmation: Option<WorktreeDangerAction>,
-    window_worktree_merge_confirmations: BTreeMap<HostedWindowId, TaskId>,
     pending_initial_worktrees: BTreeMap<TaskId, DesktopInitialWorktreeSelection>,
     interaction_drafts: BTreeMap<String, String>,
     ask_user_drafts: BTreeMap<String, AskUserDraft>,
@@ -1370,7 +1351,6 @@ pub struct DesktopProgram {
     task_action_error: Option<String>,
     last_copied_markdown: Option<(String, usize)>,
     markdown_images: BTreeMap<String, MarkdownImageLoadState>,
-    image_textures: crate::image_textures::ImageTextures,
     markdown_image_recency: BTreeMap<String, u64>,
     markdown_image_access_clock: u64,
     markdown_image_previews: BTreeMap<HostedWindowId, MarkdownImagePreview>,
@@ -1385,29 +1365,10 @@ pub struct DesktopProgram {
     file_drop_hovered_windows: BTreeSet<HostedWindowId>,
     attachment_previews: BTreeMap<HostedWindowId, ChatAttachment>,
     timeline_viewports: BTreeMap<TimelineSurfaceKey, TimelineViewport>,
-    pending_main_timeline_tail: Option<TaskId>,
     next_task_popup_window_id: u64,
     pending_window_commands: Vec<HostedWindowCommand>,
-    pending_file_dialogs: BTreeMap<u64, (HostedWindowId, FileDialogPurpose)>,
-    next_file_dialog_id: u64,
     pending_ui_commands: Vec<HostedUiCommand>,
-    settings_open: bool,
-    automations_open: bool,
-    automations: Vec<AutomationWorkflow>,
-    automation_dirty: BTreeSet<String>,
-    selected_automation: Option<String>,
-    automation_runs: Vec<AutomationRunSummary>,
-    selected_automation_run: Option<String>,
-    settings_confirmation: Option<SettingsSurfaceAction>,
-    automation_run_node: Option<String>,
-    automation_inspector_panel: String,
-    automation_run_detail: Option<AutomationRunDetail>,
-    automation_human_response: String,
-    automation_graph: GraphModel,
-    automation_viewport: GraphViewport,
-    automation_selection: Option<GraphSelection>,
-    automation_node_inspector: AutomationNodeInspectorDraft,
-    automation_error: Option<String>,
+    navigation: WindowRoute,
     coding_tools: Option<DesktopCodingServicesSnapshot>,
     coding_git: Option<DesktopGitStatus>,
     coding_git_diff: Option<DesktopGitDiff>,
@@ -1463,7 +1424,7 @@ pub struct DesktopProgram {
     active_extensions_job: Option<ExtensionsJob>,
     remote: Option<RemoteControlStatus>,
     remote_pc_name: String,
-    remote_next_refresh: Option<Instant>,
+    remote_revoke_device: Option<String>,
     active_remote_job: Option<JobId>,
     remote_error: Option<String>,
     shell: NativeShellIntegration,
@@ -1480,8 +1441,8 @@ pub struct DesktopProgram {
     window_state: NativeWindowStateWriter,
     workspace_topology_state: NativeWorkspaceTopologyStateWriter,
     workspace_topology_revision: u64,
+    restoring_workspace_topology: bool,
     message_sender: MessageSender,
-    pending_shell_intents: Arc<AtomicUsize>,
     appearance: AppearanceSettings,
     sidebar_display_mode: NativeSidebarDisplayMode,
     sidebar_tree_state: NativeSidebarTreeState,
@@ -1492,7 +1453,6 @@ pub struct DesktopProgram {
     sidebar_search_selection: usize,
     sidebar_menu: Option<SidebarMenuState>,
     titlebar_menu_open: bool,
-    composer_menu_open: Option<ComposerMenu>,
     sidebar_pending_task_archive: Option<TaskId>,
     sidebar_stopping_tasks: BTreeSet<TaskId>,
     sidebar_folder_drop_hovered: bool,
@@ -1506,9 +1466,64 @@ pub struct DesktopProgram {
     pending_debug_frame_response: Option<PendingDebugFrameResponse>,
     window_chrome: WindowChromeState,
     documents: HashMap<WindowId, RuntimeDocument>,
+    image_textures: crate::image_textures::ImageTextures,
     runtime_shell: Option<crate::runtime_shell::ShellHandles>,
     conversation_status_shell: Option<crate::runtime_windows::ConversationStatusHandles>,
     task_popup_shells: BTreeMap<WindowId, crate::runtime_windows::TaskPopupHandles>,
+}
+
+fn composer_target_matches(
+    target: &crate::runtime_shell::ComposerTarget,
+    current_task: Option<&TaskId>,
+    current_revision: Option<u64>,
+    current_content: Option<&str>,
+    check_revision: bool,
+) -> bool {
+    target.task_id.as_deref() == current_task.map(TaskId::as_str)
+        && (!check_revision
+            || match (current_revision, current_content) {
+                (Some(revision), Some(content)) => {
+                    revision == target.revision && content == target.content
+                }
+                (None, None) => {
+                    current_task.is_none() && target.revision == 0 && target.content.is_empty()
+                }
+                _ => false,
+            })
+}
+
+fn shell_pending_request(intent: &crate::runtime_shell::ShellIntent) -> Option<&str> {
+    use crate::runtime_shell::ShellIntent;
+    match intent {
+        ShellIntent::RespondApproval { request_id, .. }
+        | ShellIntent::RespondTitle { request_id, .. }
+        | ShellIntent::RespondPlan { request_id, .. }
+        | ShellIntent::RespondToolConsent { request_id, .. }
+        | ShellIntent::RespondArchitecture { request_id, .. }
+        | ShellIntent::RespondMcp { request_id, .. }
+        | ShellIntent::McpFieldChanged { request_id, .. }
+        | ShellIntent::McpRawJsonChanged { request_id, .. }
+        | ShellIntent::McpToggleOption { request_id, .. }
+        | ShellIntent::McpToggleBoolean { request_id, .. }
+        | ShellIntent::ToolConsentDraftChanged { request_id, .. }
+        | ShellIntent::PendingDraftChanged { request_id, .. }
+        | ShellIntent::SelectPendingOption { request_id, .. }
+        | ShellIntent::AskUserPending { request_id, .. } => Some(request_id),
+        _ => None,
+    }
+}
+
+fn addressed_pane_item_id(
+    layout: &PanelLayoutSnapshot,
+    window_id: HostedWindowId,
+    target: &crate::runtime_shell::ShellPaneTarget,
+) -> Option<WorkspaceItemId> {
+    if window_id != target.window_id {
+        return None;
+    }
+    let pane_id = PaneId::new(&target.pane_id).ok()?;
+    let item_id = WorkspaceItemId::new(&target.item_id).ok()?;
+    (layout.active_item(&pane_id).ok().flatten() == Some(&item_id)).then_some(item_id)
 }
 
 fn sidebar_navigation_target(target: SidebarNavigationTarget) -> DesktopNavigationTarget {
@@ -1518,27 +1533,16 @@ fn sidebar_navigation_target(target: SidebarNavigationTarget) -> DesktopNavigati
     }
 }
 
-fn sidebar_navigation_selected(
-    target: SidebarNavigationTarget,
-    settings_open: bool,
-    automations_open: bool,
-) -> bool {
+fn sidebar_navigation_selected(target: SidebarNavigationTarget, navigation: WindowRoute) -> bool {
     match target {
-        SidebarNavigationTarget::Settings => settings_open,
-        SidebarNavigationTarget::Automations => automations_open,
+        SidebarNavigationTarget::Settings => navigation.is_settings(),
+        SidebarNavigationTarget::Automations => navigation.is_automations(),
     }
 }
 
 impl DesktopProgram {
-    fn shell_intent_sink(&self) -> Arc<dyn Fn(crate::runtime_shell::ShellIntent) + Send + Sync> {
-        let sender = Arc::clone(&self.message_sender);
-        let pending = Arc::clone(&self.pending_shell_intents);
-        Arc::new(move |intent| {
-            pending.fetch_add(1, Ordering::Relaxed);
-            if sender(Message::Chrome(ChromeMessage::FromShell(intent))).is_err() {
-                pending.fetch_sub(1, Ordering::Relaxed);
-            }
-        })
+    fn message_from_shell_intent(intent: crate::runtime_shell::ShellIntent) -> Message {
+        Message::Chrome(ChromeMessage::FromShell(intent))
     }
 
     // A surface is busy exactly while its job is in flight. Mirroring that into a
@@ -1601,34 +1605,313 @@ impl DesktopProgram {
         &mut self,
         intent: crate::runtime_shell::ShellIntent,
     ) -> Option<HostedWindowAction> {
+        if let crate::runtime_shell::ShellIntent::AddressedPending { target, .. } = &intent {
+            let active = if target.window_id == HostedWindowId::PRIMARY {
+                self.current_selected_task()
+            } else {
+                self.task_popups
+                    .get(&target.window_id)
+                    .and_then(|popup| popup.active_task_id.clone())
+            };
+            let current = crate::module::composer::pending_view::PendingTarget {
+                window_id: target.window_id,
+                task_id: active.map(|id| id.to_string()),
+                request_id: target.request_id.clone(),
+            };
+            if !target.matches(&current)
+                || self
+                    .task_window_open_pending(target.window_id, &target.request_id)
+                    .is_none()
+            {
+                return None;
+            }
+        } else if let Some(request_id) = shell_pending_request(&intent) {
+            if self
+                .task_window_open_pending(HostedWindowId::PRIMARY, request_id)
+                .is_none()
+            {
+                return None;
+            }
+        }
         let message = match intent {
-            crate::runtime_shell::ShellIntent::OverlayPresenceChanged => return None,
+            crate::runtime_shell::ShellIntent::WorkspacePane {
+                window_id,
+                pane_id,
+                intent,
+            } => {
+                self.apply_workspace_pane_intent(window_id, &pane_id, *intent);
+                return None;
+            }
+            crate::runtime_shell::ShellIntent::AddressedTimeline { target, action } => {
+                return self.apply_addressed_timeline(target, action);
+            }
+            crate::runtime_shell::ShellIntent::AddressedComposer { target, action } => {
+                use crate::runtime_shell::ComposerInputAction;
+                if target.window_id != HostedWindowId::PRIMARY
+                    && !self.task_popups.contains_key(&target.window_id)
+                {
+                    return None;
+                }
+                let current = self.composer_surface_task(target.window_id);
+                let revision = self
+                    .window_composer(target.window_id)
+                    .map(|composer| composer.revision);
+                if !composer_target_matches(
+                    &target,
+                    current.as_ref(),
+                    revision,
+                    self.window_composer(target.window_id)
+                        .map(|composer| composer.content.as_str()),
+                    !matches!(&action, ComposerInputAction::Interrupt),
+                ) {
+                    if current.as_ref().map(TaskId::as_str) == target.task_id.as_deref()
+                        && current.is_some()
+                    {
+                        self.set_task_window_error(
+                            target.window_id,
+                            "输入内容已更新，请确认当前草稿后重试。".to_owned(),
+                        );
+                    }
+                    return None;
+                }
+                match action {
+                    ComposerInputAction::SetContent {
+                        value,
+                        expected_content,
+                    } => {
+                        if let Some(task_id) = current {
+                            if target.window_id == HostedWindowId::PRIMARY {
+                                self.pending_review_slash_workflow = None;
+                            } else if let Some(popup) = self.task_popups.get_mut(&target.window_id)
+                            {
+                                popup.pending_review_slash_workflow = None;
+                            }
+                            self.route_composer_message(
+                                target.window_id,
+                                crate::module::composer::ComposerMessage::SetContentAt {
+                                    task_id,
+                                    expected_revision: target.revision,
+                                    expected_content,
+                                    value,
+                                },
+                            );
+                            if self
+                                .task_popups
+                                .get(&target.window_id)
+                                .is_some_and(|popup| popup.draft.is_some())
+                            {
+                                self.refresh_conversation_suggestions(target.window_id, false);
+                            }
+                            return None;
+                        }
+                        if target.window_id != HostedWindowId::PRIMARY {
+                            return None;
+                        }
+                        Message::Composer(ComposerMessage::ComposerChanged(value))
+                    }
+                    ComposerInputAction::Submit if current.is_some() => {
+                        if target.window_id == HostedWindowId::PRIMARY {
+                            Message::Composer(ComposerMessage::SubmitTurn)
+                        } else {
+                            Message::Composer(ComposerMessage::TaskPopupSubmitTurn(
+                                target.window_id,
+                            ))
+                        }
+                    }
+                    ComposerInputAction::Interrupt if current.is_some() => {
+                        let turn_id = target.turn_id?;
+                        Message::Composer(ComposerMessage::StopTurn {
+                            window_id: target.window_id,
+                            target: crate::runtime_shell::TurnStopTarget {
+                                task_id: current?,
+                                turn_id,
+                            },
+                        })
+                    }
+                    ComposerInputAction::ToggleActions => Message::Composer(
+                        ComposerMessage::ToggleComposerActionMenu(target.window_id),
+                    ),
+                    ComposerInputAction::TogglePermission => {
+                        Message::Composer(ComposerMessage::TogglePermissionMenu(target.window_id))
+                    }
+                    ComposerInputAction::ToggleWorktree => {
+                        Message::Composer(ComposerMessage::ToggleWorktreeMenu(target.window_id))
+                    }
+                    ComposerInputAction::Plus(id) => {
+                        let action = match id.as_str() {
+                            "add-file" => ComposerAction::AddFile,
+                            "add-directory" => ComposerAction::AddDirectory,
+                            "reference" => ComposerAction::ReferenceConversation,
+                            "paste-text" => ComposerAction::PasteText,
+                            "paste-image" => ComposerAction::PasteImage,
+                            "paste-files" => ComposerAction::PasteFiles,
+                            "plan" => ComposerAction::TogglePlanMode,
+                            "goal" => ComposerAction::ToggleGoalMode,
+                            "new-guide" => ComposerAction::NewGuide,
+                            "edit-goal" => ComposerAction::EditGoal,
+                            _ => return None,
+                        };
+                        Message::Composer(ComposerMessage::ComposerAction {
+                            window_id: target.window_id,
+                            action,
+                        })
+                    }
+                    ComposerInputAction::Permission(id) => {
+                        Message::Composer(ComposerMessage::SelectPermission(
+                            target.window_id,
+                            crate::module::composer::presentation::permission_from_selection_id(
+                                &id,
+                            )?,
+                        ))
+                    }
+                    ComposerInputAction::Worktree(id) => {
+                        let selection = match id.as_str() {
+                            "current" => WorktreeMenuSelection::Current,
+                            "create" => WorktreeMenuSelection::Create,
+                            "existing" => WorktreeMenuSelection::Existing,
+                            _ => return None,
+                        };
+                        Message::Composer(ComposerMessage::SelectWorktree(
+                            target.window_id,
+                            selection,
+                        ))
+                    }
+                    ComposerInputAction::RefreshSuggestions => {
+                        self.refresh_conversation_suggestions(target.window_id, true);
+                        return None;
+                    }
+                    ComposerInputAction::ApplySuggestion(prompt) => {
+                        self.apply_conversation_suggestion(target.window_id, prompt);
+                        return None;
+                    }
+                    ComposerInputAction::RemoveAttachment(id) => {
+                        self.route_composer_message(
+                            target.window_id,
+                            crate::module::composer::ComposerMessage::ApplyCommand(
+                                DesktopComposerCommand::RemoveAttachment(id),
+                            ),
+                        );
+                        self.refresh_conversation_suggestions(target.window_id, false);
+                        return None;
+                    }
+                    ComposerInputAction::ApplySlash(name) => {
+                        let command = self
+                            .composer_slash_commands(target.window_id)
+                            .iter()
+                            .find(|item| item.command.name == name)?
+                            .command
+                            .clone();
+                        self.select_slash_command(target.window_id, command);
+                        return None;
+                    }
+                    ComposerInputAction::SelectConversationReference(task_id) => {
+                        self.route_composer_message(
+                            target.window_id,
+                            crate::module::composer::ComposerMessage::SelectConversationReference(
+                                task_id,
+                            ),
+                        );
+                        return None;
+                    }
+                    ComposerInputAction::SelectMention(path) => {
+                        self.route_composer_message(
+                            target.window_id,
+                            crate::module::composer::ComposerMessage::SelectContextAttachment(path),
+                        );
+                        return None;
+                    }
+                    ComposerInputAction::Reasoning(effort) => {
+                        self.update_composer_reasoning_selection(
+                            target.window_id,
+                            nana_ui::DropdownEvent::Select(effort),
+                        );
+                        return None;
+                    }
+                    ComposerInputAction::Model(model) => {
+                        self.update_composer_model_selection(
+                            target.window_id,
+                            nana_ui::DropdownEvent::Select(model),
+                        );
+                        return None;
+                    }
+                    ComposerInputAction::ClearBranch => {
+                        self.clear_session_branch(target.window_id);
+                        return None;
+                    }
+                    ComposerInputAction::ReviewTarget(id) => {
+                        let kind = match id.as_str() {
+                            "changes" => PendingReviewTargetKind::UncommittedChanges,
+                            "branch" => PendingReviewTargetKind::BaseBranch,
+                            "commit" => PendingReviewTargetKind::Commit,
+                            _ => return None,
+                        };
+                        self.select_review_workflow_target(target.window_id, kind);
+                        return None;
+                    }
+                    ComposerInputAction::ReviewValue(value) => {
+                        self.update_review_workflow_target(target.window_id, value);
+                        return None;
+                    }
+                    ComposerInputAction::SubmitReview => {
+                        self.submit_review_slash_workflow(target.window_id);
+                        return None;
+                    }
+                    ComposerInputAction::CancelReview => {
+                        self.clear_review_slash_workflow(target.window_id);
+                        return None;
+                    }
+                    _ => return None,
+                }
+            }
+            crate::runtime_shell::ShellIntent::SearchDocument {
+                target,
+                editor,
+                feedback,
+                query,
+                replacement,
+                action,
+            } => {
+                self.addressed_document_item(&target)?;
+                let matches = if target.window_id == HostedWindowId::PRIMARY {
+                    self.runtime_shell.as_ref().is_some_and(|handles| {
+                        handles.matches_document_search(&target, editor, feedback)
+                    })
+                } else {
+                    self.task_popup_shells
+                        .get(&target.window_id)
+                        .is_some_and(|handles| {
+                            handles.matches_document_search(&target, editor, feedback)
+                        })
+                };
+                if !matches {
+                    return None;
+                }
+                let document = self.documents.get_mut(&target.window_id)?;
+                if crate::runtime_shell::search_document(
+                    document.context_mut(),
+                    editor,
+                    feedback,
+                    &query,
+                    &replacement,
+                    action,
+                )
+                .is_err()
+                {
+                    self.set_task_window_error(
+                        target.window_id,
+                        "无法查找或替换，请重试。".to_owned(),
+                    );
+                }
+                return None;
+            }
             crate::runtime_shell::ShellIntent::Todo { window_id, action } => {
                 self.apply_todo_action(window_id, action);
                 return None;
             }
-            crate::runtime_shell::ShellIntent::Browser(action) => {
-                self.apply_iab_action(action);
-                return None;
+            crate::runtime_shell::ShellIntent::SessionPageChanged(offset) => {
+                Message::Task(TaskMessage::SessionPageChanged(offset))
             }
-            crate::runtime_shell::ShellIntent::Conversation { window_id, action } => {
-                self.apply_conversation_action(window_id, action);
-                return None;
-            }
-            crate::runtime_shell::ShellIntent::ProviderCommand(message) => {
-                Message::Provider(message)
-            }
-            crate::runtime_shell::ShellIntent::ExtensionsCommand(message) => {
-                Message::Extensions(message)
-            }
-            crate::runtime_shell::ShellIntent::RemoteCommand(message) => Message::Remote(message),
-            crate::runtime_shell::ShellIntent::AutomationCommand(message) => {
-                Message::Automation(message)
-            }
-            crate::runtime_shell::ShellIntent::SettingsCommand(action) => {
-                self.apply_settings_surface_action(action);
-                return None;
-            }
+            crate::runtime_shell::ShellIntent::OverlayPresenceChanged => return None,
             crate::runtime_shell::ShellIntent::ToggleSidebar => {
                 Message::WorkspaceLayout(WorkspaceLayoutMessage::Workspace(
                     WorkspaceAction::ToggleRegion(RegionId::Resources),
@@ -1759,7 +2042,10 @@ impl DesktopProgram {
                 }
             }
             crate::runtime_shell::ShellIntent::StopSidebarTask(task_id) => {
-                Message::Sidebar(SidebarMessage::SidebarStopTask(task_id))
+                Message::Composer(ComposerMessage::StopTurn {
+                    window_id: HostedWindowId::PRIMARY,
+                    target: task_id,
+                })
             }
             crate::runtime_shell::ShellIntent::SidebarMenuAction(id) => {
                 if id.is_empty() {
@@ -1809,8 +2095,8 @@ impl DesktopProgram {
                     Message::Project(ProjectMessage::ConfirmProjectConversationArchive)
                 } else if self.project_removal.is_some() {
                     Message::Project(ProjectMessage::ConfirmProjectRemoval)
-                } else if let Some(message) = self.confirm_settings_surface(true) {
-                    message
+                } else if self.remote_revoke_device.is_some() {
+                    Message::Remote(RemoteMessage::ConfirmRevokeDevice)
                 } else if matches!(self.update_state, DesktopUpdateState::Failed { .. }) {
                     Message::Update(UpdateMessage::Check)
                 } else {
@@ -1822,8 +2108,8 @@ impl DesktopProgram {
                     Message::Project(ProjectMessage::CancelProjectConversationArchive)
                 } else if self.project_removal.is_some() {
                     Message::Project(ProjectMessage::CancelProjectRemoval)
-                } else if let Some(message) = self.confirm_settings_surface(false) {
-                    message
+                } else if self.remote_revoke_device.is_some() {
+                    Message::Remote(RemoteMessage::CancelRevokeDevice)
                 } else {
                     Message::Update(UpdateMessage::DismissPrompt)
                 }
@@ -1907,100 +2193,6 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::MarkdownImageViewerInteraction => {
                 Message::Timeline(TimelineMessage::MarkdownImageViewerInteraction)
             }
-            crate::runtime_shell::ShellIntent::ComposerPlusOpen(open) => {
-                let menu = ComposerMenu::Actions(HostedWindowId::PRIMARY);
-                if open || self.composer_menu_open == Some(menu) {
-                    self.composer_menu_open = open.then_some(menu);
-                }
-                return None;
-            }
-            crate::runtime_shell::ShellIntent::ComposerPlus(action) => {
-                if matches!(action.as_str(), "new-guide" | "edit-goal") {
-                    self.composer_menu_open = None;
-                    self.apply_conversation_action(
-                        HostedWindowId::PRIMARY,
-                        if action == "new-guide" {
-                            crate::runtime_conversation::ConversationAction::NewGuide
-                        } else {
-                            crate::runtime_conversation::ConversationAction::EditGoal
-                        },
-                    );
-                    return None;
-                }
-                let action = match action.as_str() {
-                    "add-file" => ComposerAction::AddFile,
-                    "add-directory" => ComposerAction::AddDirectory,
-                    "reference" => ComposerAction::ReferenceConversation,
-                    "paste-text" => ComposerAction::PasteText,
-                    "paste-image" => ComposerAction::PasteImage,
-                    "paste-files" => ComposerAction::PasteFiles,
-                    "plan" => ComposerAction::TogglePlanMode,
-                    "goal" => ComposerAction::ToggleGoalMode,
-                    _ => return None,
-                };
-                Message::Composer(ComposerMessage::ComposerAction {
-                    window_id: HostedWindowId::PRIMARY,
-                    action,
-                })
-            }
-            crate::runtime_shell::ShellIntent::ComposerPermissionOpen(open) => {
-                if open || self.composer_menu_open == Some(ComposerMenu::Permission) {
-                    self.composer_menu_open = open.then_some(ComposerMenu::Permission);
-                }
-                return None;
-            }
-            crate::runtime_shell::ShellIntent::ComposerPermission(id) => {
-                match crate::runtime_shell::permission_from_selection_id(&id) {
-                    Some(permission) => {
-                        Message::Composer(ComposerMessage::SelectPermission(permission))
-                    }
-                    None => return None,
-                }
-            }
-            crate::runtime_shell::ShellIntent::ComposerWorktreeOpen(open) => {
-                let open = open
-                    && (self
-                        .draft_worktree_context(HostedWindowId::PRIMARY)
-                        .is_some()
-                        || self.current_selected_task().is_some());
-                if open || self.composer_menu_open == Some(ComposerMenu::Worktree) {
-                    self.composer_menu_open = open.then_some(ComposerMenu::Worktree);
-                }
-                return None;
-            }
-            crate::runtime_shell::ShellIntent::ComposerWorktree(id) => {
-                let selection = match id.as_str() {
-                    "current" => WorktreeMenuSelection::Current,
-                    "create" => WorktreeMenuSelection::Create,
-                    "existing" => WorktreeMenuSelection::Existing,
-                    _ => return None,
-                };
-                Message::Composer(ComposerMessage::SelectWorktree(selection))
-            }
-            crate::runtime_shell::ShellIntent::ApplySlash(name) => {
-                match self
-                    .composer_slash_commands(HostedWindowId::PRIMARY)
-                    .iter()
-                    .find(|item| item.command.name == name)
-                    .map(|item| item.command.clone())
-                {
-                    Some(command) => {
-                        Message::Composer(ComposerMessage::SelectSlashCommand(command))
-                    }
-                    None => return None,
-                }
-            }
-            crate::runtime_shell::ShellIntent::SelectMention(relative_path) => {
-                Message::Composer(ComposerMessage::SelectContextAttachment(relative_path))
-            }
-            crate::runtime_shell::ShellIntent::TimelineScrolled {
-                offset,
-                viewport_extent,
-            } => Message::Timeline(TimelineMessage::TimelineScrolled {
-                surface: TimelineSurfaceKey::Main,
-                offset,
-                viewport_extent,
-            }),
             crate::runtime_shell::ShellIntent::StartGitHubBinding => {
                 Message::GitHub(GitHubMessage::StartBinding)
             }
@@ -2054,9 +2246,6 @@ impl DesktopProgram {
             }
             crate::runtime_shell::ShellIntent::RefreshArchitecture => {
                 Message::Architecture(ArchitectureMessage::Refresh)
-            }
-            crate::runtime_shell::ShellIntent::ArchitectureHistory(id) => {
-                Message::Architecture(ArchitectureMessage::SelectHistory(id))
             }
             crate::runtime_shell::ShellIntent::RollbackArchitecture => {
                 Message::Architecture(ArchitectureMessage::Rollback)
@@ -2285,15 +2474,8 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::SaveMilestone => {
                 Message::Roadmap(RoadmapMessage::Save)
             }
-            crate::runtime_shell::ShellIntent::MemoryCommand(command) => Message::Memory(command),
-            crate::runtime_shell::ShellIntent::ToggleMilestoneTask(id) => {
-                Message::Roadmap(RoadmapMessage::ToggleTask(id))
-            }
-            crate::runtime_shell::ShellIntent::SessionSearchChanged(value) => {
-                Message::Task(TaskMessage::TaskSearchChanged(value))
-            }
-            crate::runtime_shell::ShellIntent::SessionPageChanged(offset) => {
-                Message::Task(TaskMessage::SessionPageChanged(offset))
+            crate::runtime_shell::ShellIntent::ToggleMilestoneTask(task_id) => {
+                Message::Roadmap(RoadmapMessage::ToggleTask(task_id))
             }
             crate::runtime_shell::ShellIntent::SelectMemory(id) => {
                 Message::Memory(MemoryMessage::Select(id))
@@ -2307,10 +2489,16 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::MemoryTagsChanged(value) => {
                 Message::Memory(MemoryMessage::TagsChanged(value))
             }
+            crate::runtime_shell::ShellIntent::ToggleMemoryScope => {
+                Message::Memory(MemoryMessage::ToggleScope)
+            }
             crate::runtime_shell::ShellIntent::NewMemory => Message::Memory(MemoryMessage::New),
             crate::runtime_shell::ShellIntent::SaveMemory => Message::Memory(MemoryMessage::Save),
-            crate::runtime_shell::ShellIntent::LoadEarlierTimeline => {
-                Message::Timeline(TimelineMessage::LoadEarlierTimeline)
+            crate::runtime_shell::ShellIntent::DeleteMemory => {
+                Message::Memory(MemoryMessage::Delete)
+            }
+            crate::runtime_shell::ShellIntent::MemoryAction(message) => {
+                Message::Memory(message)
             }
             crate::runtime_shell::ShellIntent::MovePaneToWindow => {
                 Message::WorkspaceWindow(WorkspaceWindowMessage::MoveWorkspaceItemToNewWindow(
@@ -2328,14 +2516,11 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::CloseSettings => {
                 Message::Settings(SettingsMessage::CloseSettings)
             }
-            crate::runtime_shell::ShellIntent::ComposerChanged(value) => {
-                Message::Composer(ComposerMessage::ComposerChanged(value))
-            }
-            crate::runtime_shell::ShellIntent::SubmitTurn => {
-                Message::Composer(ComposerMessage::SubmitTurn)
-            }
-            crate::runtime_shell::ShellIntent::InterruptTurn => {
-                Message::Composer(ComposerMessage::InterruptTurn)
+            crate::runtime_shell::ShellIntent::InterruptTurn(target) => {
+                Message::Composer(ComposerMessage::StopTurn {
+                    window_id: HostedWindowId::PRIMARY,
+                    target: target?,
+                })
             }
             crate::runtime_shell::ShellIntent::WindowChrome(event) => {
                 Message::Chrome(ChromeMessage::WindowChrome(event))
@@ -2352,6 +2537,13 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::Appearance(event) => {
                 Message::Settings(SettingsMessage::Appearance(event))
             }
+            crate::runtime_shell::ShellIntent::SetSidebarDisplayMode(mode) => Message::Settings(
+                SettingsMessage::SetSidebarDisplayMode(if mode == "unified" {
+                    crate::storage::NativeSidebarDisplayMode::Unified
+                } else {
+                    crate::storage::NativeSidebarDisplayMode::Grouped
+                }),
+            ),
             crate::runtime_shell::ShellIntent::ProjectNameChanged(value) => {
                 Message::Project(ProjectMessage::ProjectNameChanged(value))
             }
@@ -2386,11 +2578,60 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::RefreshExtensions => {
                 Message::Extensions(ExtensionsMessage::Refresh)
             }
+            crate::runtime_shell::ShellIntent::ExtensionsSearchChanged(value) => {
+                Message::Extensions(ExtensionsMessage::SearchChanged(value))
+            }
+            crate::runtime_shell::ShellIntent::ExtensionsCommand(message) => {
+                Message::Extensions(message)
+            }
+            crate::runtime_shell::ShellIntent::OpenPath(path) => {
+                if let Err(error) = self
+                    .kernel
+                    .session()
+                    .execute_host(DesktopHostAction::OpenPath(std::path::PathBuf::from(path)))
+                {
+                    self.error_message = Some(error.to_string());
+                }
+                return None;
+            }
             crate::runtime_shell::ShellIntent::ToggleRemoteHost => {
                 Message::Remote(RemoteMessage::ToggleHost)
             }
             crate::runtime_shell::ShellIntent::ToggleRemoteKeepAwake => {
                 Message::Remote(RemoteMessage::ToggleKeepAwake)
+            }
+            crate::runtime_shell::ShellIntent::RemoteNameChanged(value) => {
+                Message::Settings(SettingsMessage::RemotePcNameChanged(value))
+            }
+            crate::runtime_shell::ShellIntent::SaveRemoteName => {
+                Message::Remote(RemoteMessage::SavePcName)
+            }
+            crate::runtime_shell::ShellIntent::RefreshRemote => {
+                Message::Remote(RemoteMessage::Refresh)
+            }
+            crate::runtime_shell::ShellIntent::StartRemotePairing => {
+                Message::Remote(RemoteMessage::StartPairing)
+            }
+            crate::runtime_shell::ShellIntent::CancelRemotePairing => {
+                Message::Remote(RemoteMessage::CancelPairing)
+            }
+            crate::runtime_shell::ShellIntent::RevokeRemoteDevice(device_id) => {
+                Message::Remote(RemoteMessage::RevokeDevice(device_id))
+            }
+            crate::runtime_shell::ShellIntent::CopyPairingUri => {
+                Message::Remote(RemoteMessage::CopyPairingUri)
+            }
+            crate::runtime_shell::ShellIntent::SetProjectWorktreeMode(mode) => {
+                Message::Project(ProjectMessage::SetWorktreeMode(mode))
+            }
+            crate::runtime_shell::ShellIntent::PickProjectWorktreeParent => {
+                Message::Project(ProjectMessage::PickWorktreeParent)
+            }
+            crate::runtime_shell::ShellIntent::ProjectWorktreeInstructionsChanged(value) => {
+                Message::Project(ProjectMessage::WorktreeInstructionsChanged(value))
+            }
+            crate::runtime_shell::ShellIntent::ToggleWorktreeCleanup => {
+                Message::Project(ProjectMessage::ToggleWorktreeCleanup)
             }
             crate::runtime_shell::ShellIntent::CheckForUpdate => {
                 Message::Update(UpdateMessage::Check)
@@ -2404,53 +2645,66 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::ResetDataImport => {
                 Message::Import(ImportMessage::Reset)
             }
-            crate::runtime_shell::ShellIntent::ApplySuggestion { window_id, item_id } => {
-                Message::Suggestions(SuggestionsMessage::Apply { window_id, item_id })
-            }
-            crate::runtime_shell::ShellIntent::RefreshSuggestions(window_id) => {
-                Message::Suggestions(SuggestionsMessage::Refresh {
-                    window_id,
-                    force: true,
-                })
-            }
-            crate::runtime_shell::ShellIntent::DocumentChanged(value) => {
-                let Some(item_id) = self.active_document_item_id() else {
-                    return None;
-                };
-                Message::Document(DocumentMessage::EditorEdited {
+
+            crate::runtime_shell::ShellIntent::DocumentChanged {
+                target,
+                revision,
+                value,
+            } => {
+                let item_id = self.addressed_document_item(&target)?;
+                Message::Document(DocumentMessage::EditorReplaced {
                     item_id,
-                    action: value,
+                    expected_revision: revision,
+                    value,
                 })
             }
-            crate::runtime_shell::ShellIntent::SaveDocument => {
-                let Some(item_id) = self.active_document_item_id() else {
+            crate::runtime_shell::ShellIntent::SaveDocument(target) => Message::Document(
+                DocumentMessage::SaveEditor(self.addressed_document_item(&target)?),
+            ),
+            crate::runtime_shell::ShellIntent::DiscardDocument(target) => Message::Document(
+                DocumentMessage::DiscardEditor(self.addressed_document_item(&target)?),
+            ),
+            crate::runtime_shell::ShellIntent::OpenBrowser { window_id, task_id } => {
+                let task_id = TaskId::new(task_id).ok()?;
+                if self.composer_surface_task(window_id).as_ref() != Some(&task_id) {
                     return None;
-                };
-                Message::Document(DocumentMessage::SaveEditor(item_id))
+                }
+                self.open_task_browser(window_id, task_id);
+                return None;
             }
-            crate::runtime_shell::ShellIntent::DiscardDocument => {
-                let Some(item_id) = self.active_document_item_id() else {
+            crate::runtime_shell::ShellIntent::Browser { target, action } => {
+                let item = self.addressed_workspace_item(&target)?;
+                if item.kind.as_str() != "task-browser" {
                     return None;
-                };
-                Message::Document(DocumentMessage::DiscardEditor(item_id))
+                }
+                Message::BrowserAction {
+                    window_id: target.window_id,
+                    resource: item.id.as_str().to_owned(),
+                    action,
+                }
             }
-            crate::runtime_shell::ShellIntent::TerminalInput(value) => {
-                let Some(session_id) = self.active_terminal_session_id() else {
-                    return None;
-                };
-                Message::Terminal(TerminalViewMessage::InputChanged(session_id, value))
-            }
-            crate::runtime_shell::ShellIntent::TerminalSubmit => {
-                let Some(session_id) = self.active_terminal_session_id() else {
-                    return None;
-                };
-                Message::Terminal(TerminalViewMessage::Submit(session_id))
-            }
-            crate::runtime_shell::ShellIntent::TerminalInterrupt => {
-                let Some(session_id) = self.active_terminal_session_id() else {
-                    return None;
-                };
-                Message::Terminal(TerminalViewMessage::Interrupt(session_id))
+            crate::runtime_shell::ShellIntent::TerminalWrite {
+                target,
+                session_id,
+                bytes,
+            } => Message::Terminal(TerminalViewMessage::Write(
+                self.addressed_terminal_session(&target, &session_id)?,
+                bytes,
+            )),
+            crate::runtime_shell::ShellIntent::TerminalResize {
+                target,
+                session_id,
+                columns,
+                rows,
+            } => Message::Terminal(TerminalViewMessage::Resize(
+                self.addressed_terminal_session(&target, &session_id)?,
+                rows.clamp(2, 500),
+                columns.clamp(8, 1_000),
+            )),
+            crate::runtime_shell::ShellIntent::TerminalInterrupt { target, session_id } => {
+                Message::Terminal(TerminalViewMessage::Interrupt(
+                    self.addressed_terminal_session(&target, &session_id)?,
+                ))
             }
             crate::runtime_shell::ShellIntent::ToggleProjectFile(path) => {
                 Message::Project(ProjectMessage::ToggleProjectFileExpand(path))
@@ -2461,9 +2715,19 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::RefreshProjectFiles => {
                 Message::Project(ProjectMessage::RefreshProjectFiles)
             }
+            crate::runtime_shell::ShellIntent::ProviderSecretChanged(value) => {
+                Message::Provider(ProviderMessage::SecretChanged(value))
+            }
             crate::runtime_shell::ShellIntent::SaveProviderCredential => {
                 Message::Provider(ProviderMessage::SaveCredential)
             }
+            crate::runtime_shell::ShellIntent::RevokeProviderCredential {
+                credential_id,
+                revision,
+            } => Message::Provider(ProviderMessage::RevokeCredential {
+                credential_id,
+                revision,
+            }),
             crate::runtime_shell::ShellIntent::ProviderModelChanged(value) => {
                 Message::Provider(ProviderMessage::ModelChanged(value))
             }
@@ -2523,6 +2787,36 @@ impl DesktopProgram {
             }
             crate::runtime_shell::ShellIntent::ToggleSkill(id) => {
                 Message::Extensions(ExtensionsMessage::ToggleSkill(id))
+            }
+            crate::runtime_shell::ShellIntent::NewMcpServer => {
+                Message::Extensions(ExtensionsMessage::NewMcpServer)
+            }
+            crate::runtime_shell::ShellIntent::EditMcpServer(id) => {
+                Message::Extensions(ExtensionsMessage::EditMcpServer(id))
+            }
+            crate::runtime_shell::ShellIntent::McpServerIdChanged(value) => {
+                Message::Extensions(ExtensionsMessage::McpServerIdChanged(value))
+            }
+            crate::runtime_shell::ShellIntent::CycleMcpTransport => {
+                Message::Extensions(ExtensionsMessage::CycleMcpTransport)
+            }
+            crate::runtime_shell::ShellIntent::McpLocationChanged(value) => {
+                Message::Extensions(ExtensionsMessage::McpLocationChanged(value))
+            }
+            crate::runtime_shell::ShellIntent::McpArgsChanged(value) => {
+                Message::Extensions(ExtensionsMessage::McpArgsChanged(value))
+            }
+            crate::runtime_shell::ShellIntent::ToggleMcpEditorEnabled => {
+                Message::Extensions(ExtensionsMessage::ToggleMcpEditorEnabled)
+            }
+            crate::runtime_shell::ShellIntent::SaveMcpServer => {
+                Message::Extensions(ExtensionsMessage::SaveMcpServer)
+            }
+            crate::runtime_shell::ShellIntent::CancelMcpEditor => {
+                Message::Extensions(ExtensionsMessage::CancelMcpEditor)
+            }
+            crate::runtime_shell::ShellIntent::ToggleMcpServer(id) => {
+                Message::Extensions(ExtensionsMessage::ToggleMcpServer(id))
             }
             crate::runtime_shell::ShellIntent::ToggleTitlebarMenu => {
                 Message::Chrome(ChromeMessage::ToggleTitlebarMenu)
@@ -2609,13 +2903,25 @@ impl DesktopProgram {
                 return None;
             }
             crate::runtime_shell::ShellIntent::StopStatusTask(task_id) => {
-                Message::ConversationStatus(ConversationStatusMessage::StopConversationStatusTask(
-                    task_id,
-                ))
+                Message::Composer(ComposerMessage::StopTurn {
+                    window_id: HostedWindowId::PRIMARY,
+                    target: task_id,
+                })
             }
             crate::runtime_shell::ShellIntent::FocusWorkspacePane(id) => {
                 if let Ok(pane_id) = PaneId::new(id) {
                     self.execute_workspace_command(DesktopCommand::FocusPane(pane_id));
+                }
+                return None;
+            }
+            crate::runtime_shell::ShellIntent::Automation { target, action } => {
+                if self.navigation.is_automations() {
+                    self.route_automation(
+                        crate::module::automation::controller::AutomationModuleMessage::Action {
+                            target,
+                            action,
+                        },
+                    );
                 }
                 return None;
             }
@@ -2625,29 +2931,23 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::CreateAutomation => {
                 Message::Automation(AutomationMessage::CreateAutomation)
             }
-            crate::runtime_shell::ShellIntent::SaveAutomationDraft => {
-                Message::Automation(AutomationMessage::SaveAutomationDraft)
-            }
-            crate::runtime_shell::ShellIntent::RunAutomation => {
-                Message::Automation(AutomationMessage::RunAutomation)
-            }
+
             crate::runtime_shell::ShellIntent::RefreshAutomations => {
                 Message::Automation(AutomationMessage::RefreshAutomations)
             }
-            crate::runtime_shell::ShellIntent::AutomationGraph(event) => {
-                Message::Automation(AutomationMessage::AutomationGraph(event))
-            }
-            crate::runtime_shell::ShellIntent::TaskPopupComposerChanged { window_id, value } => {
-                Message::Composer(ComposerMessage::TaskPopupComposerChanged { window_id, value })
-            }
-            crate::runtime_shell::ShellIntent::TaskPopupSubmit(window_id) => {
-                Message::Composer(ComposerMessage::TaskPopupSubmitTurn(window_id))
-            }
-            crate::runtime_shell::ShellIntent::TaskPopupInterrupt(window_id) => {
-                Message::Composer(ComposerMessage::TaskPopupInterruptTurn(window_id))
-            }
-            crate::runtime_shell::ShellIntent::TaskPopupPending { window_id, intent } => {
-                match *intent {
+
+            crate::runtime_shell::ShellIntent::AddressedPending { target, action } => {
+                let window_id = target.window_id;
+                let intent = crate::runtime_shell::pending_action_intent(target.request_id, action);
+                if window_id == HostedWindowId::PRIMARY
+                    || matches!(
+                        &intent,
+                        crate::runtime_shell::ShellIntent::OpenMarkdownLink(_)
+                    )
+                {
+                    return self.apply_shell_intent(intent);
+                }
+                match intent {
                     crate::runtime_shell::ShellIntent::RespondApproval {
                         request_id,
                         approved,
@@ -2838,40 +3138,206 @@ impl DesktopProgram {
                             _ => AskUserAction::Select(value),
                         },
                     }),
-                    crate::runtime_shell::ShellIntent::InterruptTurn => {
-                        Message::Composer(ComposerMessage::TaskPopupInterruptTurn(window_id))
+                    crate::runtime_shell::ShellIntent::InterruptTurn(target) => {
+                        Message::Composer(ComposerMessage::StopTurn {
+                            window_id,
+                            target: target?,
+                        })
                     }
-                    other => {
-                        return self.apply_shell_intent(other);
-                    }
+                    _ => return None,
                 }
             }
         };
         self.update_message(message)
     }
 
-    fn active_document_item_id(&self) -> Option<WorkspaceItemId> {
-        let item_id = self.panel_layout.active_workspace_item().ok().flatten()?;
-        self.documents_module()
-            .is_some_and(|module| module.has_editor(item_id))
-            .then(|| item_id.clone())
+    fn addressed_workspace_item(
+        &self,
+        target: &crate::runtime_shell::ShellPaneTarget,
+    ) -> Option<WorkspaceItem> {
+        if target.window_id == HostedWindowId::PRIMARY {
+            let item_id =
+                addressed_pane_item_id(&self.panel_layout, HostedWindowId::PRIMARY, target)?;
+            self.workspace_items
+                .iter()
+                .find(|item| item.id == item_id)
+                .cloned()
+        } else {
+            let popup = self.task_popups.get(&target.window_id)?;
+            let snapshot = popup.workspace.snapshot().ok()?;
+            let item_id = addressed_pane_item_id(&snapshot.panel_layout, popup.id, target)?;
+            snapshot
+                .workspace_items
+                .into_iter()
+                .find(|item| item.id == item_id)
+        }
     }
 
-    fn active_terminal_session_id(&self) -> Option<DesktopTerminalSessionId> {
-        let item_id = self.panel_layout.active_workspace_item().ok().flatten()?;
-        let item = self
-            .workspace_items
-            .iter()
-            .find(|item| &item.id == item_id)?;
-        self.terminal_snapshot_for_item(item)
-            .map(|snapshot| snapshot.id)
+    fn apply_workspace_pane_intent(
+        &mut self,
+        window: HostedWindowId,
+        pane: &str,
+        intent: crate::runtime_shell::ShellIntent,
+    ) {
+        use crate::runtime_shell::ShellIntent;
+        let Ok(pane_id) = PaneId::new(pane) else {
+            return;
+        };
+        let snapshot = if window == HostedWindowId::PRIMARY {
+            self.application_workspace.snapshot().ok()
+        } else {
+            self.task_popups
+                .get(&window)
+                .and_then(|popup| popup.workspace.snapshot().ok())
+        };
+        let Some(snapshot) =
+            snapshot.filter(|snapshot| snapshot.panel_layout.pane_ids().contains(&pane_id))
+        else {
+            return;
+        };
+        let active_item = snapshot
+            .panel_layout
+            .active_item(&pane_id)
+            .ok()
+            .flatten()
+            .cloned();
+        let command = match intent {
+            ShellIntent::SelectPaneTab { item_id, .. } => match item_id
+                .and_then(|id| WorkspaceItemId::new(id).ok())
+            {
+                Some(item_id) => Some(DesktopCommand::ActivateWorkspaceItem { pane_id, item_id }),
+                None => Some(DesktopCommand::FocusPane(pane_id)),
+            },
+            ShellIntent::FocusWorkspacePane(_) => Some(DesktopCommand::FocusPane(pane_id)),
+            ShellIntent::SplitWorkspaceHorizontal | ShellIntent::SplitWorkspaceVertical => {
+                let axis = if matches!(intent, ShellIntent::SplitWorkspaceHorizontal) {
+                    SplitAxis::Horizontal
+                } else {
+                    SplitAxis::Vertical
+                };
+                if window == HostedWindowId::PRIMARY {
+                    self.split_workspace_pane(pane_id, axis);
+                } else {
+                    self.split_workspace_window_pane(window, pane_id, axis);
+                }
+                None
+            }
+            ShellIntent::ReorderPaneTab {
+                item_id, before, ..
+            } => WorkspaceItemId::new(item_id).ok().map(|item_id| {
+                DesktopCommand::MoveWorkspaceItem {
+                    item_id,
+                    target_pane_id: pane_id,
+                    before: before.and_then(|id| WorkspaceItemId::new(id).ok()),
+                }
+            }),
+            ShellIntent::ClosePaneTab { item_id } => {
+                if let Ok(item_id) = WorkspaceItemId::new(item_id) {
+                    if snapshot
+                        .panel_layout
+                        .pane_items(&pane_id)
+                        .unwrap_or_default()
+                        .contains(&item_id)
+                    {
+                        if window == HostedWindowId::PRIMARY {
+                            self.close_workspace_item(item_id);
+                        } else {
+                            self.close_workspace_window_item(window, item_id);
+                        }
+                    }
+                }
+                None
+            }
+            ShellIntent::TransferPaneTab {
+                source_strip,
+                target_strip,
+                item_id,
+                before,
+            } => {
+                if let Ok(item_id) = WorkspaceItemId::new(item_id) {
+                    self.transfer_workspace_tab(
+                        &source_strip,
+                        &target_strip,
+                        item_id,
+                        before.and_then(|id| WorkspaceItemId::new(id).ok()),
+                    );
+                }
+                None
+            }
+            ShellIntent::ResizeWorkspaceSplit {
+                first_pane_id,
+                second_pane_id,
+                ratio,
+            } => match (PaneId::new(first_pane_id), PaneId::new(second_pane_id)) {
+                (Ok(first_pane_id), Ok(second_pane_id)) => Some(DesktopCommand::ResizePaneSplit {
+                    first_pane_id,
+                    second_pane_id,
+                    ratio,
+                }),
+                _ => None,
+            },
+            ShellIntent::MovePaneToNext => {
+                if let Some(item) = active_item {
+                    if window == HostedWindowId::PRIMARY {
+                        self.move_workspace_item_to_next_pane(item);
+                    } else {
+                        self.move_workspace_window_item_to_next_pane(window, item);
+                    }
+                }
+                None
+            }
+            ShellIntent::MovePaneToWindow => {
+                if let Some(item) = active_item {
+                    if window == HostedWindowId::PRIMARY {
+                        self.move_workspace_item_to_new_window(item);
+                    } else {
+                        self.move_task_popup_item_to_main_pane(
+                            window,
+                            item,
+                            self.panel_layout.active_pane().clone(),
+                            None,
+                        );
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+        if let Some(command) = command {
+            if window == HostedWindowId::PRIMARY {
+                self.execute_workspace_command(command);
+            } else {
+                self.execute_workspace_window_command(window, command);
+            }
+        }
+    }
+
+    fn addressed_document_item(
+        &self,
+        target: &crate::runtime_shell::ShellPaneTarget,
+    ) -> Option<WorkspaceItemId> {
+        let item = self.addressed_workspace_item(target)?;
+        (item.kind.as_str() == DOCUMENT_WORKSPACE_ITEM_KIND).then_some(item.id)
+    }
+
+    fn addressed_terminal_session(
+        &self,
+        target: &crate::runtime_shell::ShellPaneTarget,
+        session: &str,
+    ) -> Option<DesktopTerminalSessionId> {
+        let item = self.addressed_workspace_item(target)?;
+        if item.kind.as_str() != TERMINAL_WORKSPACE_ITEM_KIND {
+            return None;
+        }
+        let session_id = item.terminal_session_id().ok().flatten()?;
+        (session_id.as_str() == session).then_some(session_id)
     }
 
     fn shell_titlebar_copy(&self) -> (String, String) {
-        if self.settings_open {
+        if self.navigation.is_settings() {
             return (PRODUCT_NAME.to_owned(), "设置".to_owned());
         }
-        if self.automations_open {
+        if self.navigation.is_automations() {
             return (PRODUCT_NAME.to_owned(), "自动化".to_owned());
         }
         if let Some(task) = self.current_selected_task().as_ref().and_then(|task_id| {
@@ -2927,6 +3393,7 @@ impl DesktopProgram {
                 depth: 0,
                 expanded: None,
                 can_stop: false,
+                stop_turn_id: None,
                 can_menu: false,
                 can_draft: false,
             });
@@ -2950,6 +3417,7 @@ impl DesktopProgram {
                             depth: 0,
                             expanded: None,
                             can_stop: false,
+                            stop_turn_id: None,
                             can_menu: false,
                             can_draft: false,
                         });
@@ -2976,6 +3444,7 @@ impl DesktopProgram {
                             depth: 0,
                             expanded: None,
                             can_stop: false,
+                            stop_turn_id: None,
                             can_menu: false,
                             can_draft: false,
                         });
@@ -3005,6 +3474,11 @@ impl DesktopProgram {
                     depth: 0,
                     expanded: None,
                     can_stop: true,
+                    stop_turn_id: self
+                        .kernel
+                        .session()
+                        .task_runtime_snapshot(&entry.task_id)
+                        .turn_id,
                     can_menu: false,
                     can_draft: false,
                 });
@@ -3031,6 +3505,7 @@ impl DesktopProgram {
                     depth: 0,
                     expanded: None,
                     can_stop: false,
+                    stop_turn_id: None,
                     can_menu: false,
                     can_draft: false,
                 });
@@ -3049,6 +3524,7 @@ impl DesktopProgram {
                     depth: 0,
                     expanded: None,
                     can_stop: false,
+                    stop_turn_id: None,
                     can_menu: true,
                     can_draft: false,
                 });
@@ -3064,6 +3540,7 @@ impl DesktopProgram {
             depth: 0,
             expanded: None,
             can_stop: false,
+            stop_turn_id: None,
             can_menu: false,
             can_draft: false,
         });
@@ -3077,6 +3554,7 @@ impl DesktopProgram {
                 depth: 0,
                 expanded: None,
                 can_stop: false,
+                stop_turn_id: None,
                 can_menu: false,
                 can_draft: false,
             });
@@ -3100,6 +3578,7 @@ impl DesktopProgram {
                     depth: 0,
                     expanded: Some(expanded),
                     can_stop: false,
+                    stop_turn_id: None,
                     can_menu: true,
                     can_draft: true,
                 });
@@ -3122,6 +3601,7 @@ impl DesktopProgram {
                         depth: (depth.saturating_add(1)) as u16,
                         expanded: None,
                         can_stop: false,
+                        stop_turn_id: None,
                         can_menu: true,
                         can_draft: false,
                     });
@@ -3136,6 +3616,7 @@ impl DesktopProgram {
                         depth: 1,
                         expanded: None,
                         can_stop: false,
+                        stop_turn_id: None,
                         can_menu: false,
                         can_draft: false,
                     });
@@ -3149,6 +3630,7 @@ impl DesktopProgram {
                         depth: 1,
                         expanded: None,
                         can_stop: false,
+                        stop_turn_id: None,
                         can_menu: false,
                         can_draft: false,
                     });
@@ -3165,6 +3647,7 @@ impl DesktopProgram {
             depth: 0,
             expanded: Some(self.sidebar_inbox_expanded()),
             can_stop: false,
+            stop_turn_id: None,
             can_menu: false,
             can_draft: false,
         });
@@ -3185,6 +3668,7 @@ impl DesktopProgram {
                     depth: depth as u16,
                     expanded: None,
                     can_stop: false,
+                    stop_turn_id: None,
                     can_menu: true,
                     can_draft: false,
                 });
@@ -3199,6 +3683,7 @@ impl DesktopProgram {
                     depth: 1,
                     expanded: None,
                     can_stop: false,
+                    stop_turn_id: None,
                     can_menu: false,
                     can_draft: false,
                 });
@@ -3212,6 +3697,7 @@ impl DesktopProgram {
                     depth: 1,
                     expanded: None,
                     can_stop: false,
+                    stop_turn_id: None,
                     can_menu: false,
                     can_draft: false,
                 });
@@ -3227,6 +3713,7 @@ impl DesktopProgram {
                 depth: 0,
                 expanded: None,
                 can_stop: false,
+                stop_turn_id: None,
                 can_menu: false,
                 can_draft: false,
             });
@@ -3247,6 +3734,28 @@ impl DesktopProgram {
                 busy: false,
             });
         }
+        if let Some(device_id) = &self.remote_revoke_device {
+            let name = self
+                .remote
+                .as_ref()
+                .and_then(|status| {
+                    status
+                        .trusted_devices
+                        .iter()
+                        .find(|device| device.id == *device_id)
+                        .map(|device| device.display_name.clone())
+                })
+                .unwrap_or_else(|| device_id.clone());
+            return Some(ShellConfirm {
+                kind: ShellConfirmKind::RevokeRemote,
+                title: "撤销设备".to_owned(),
+                message: format!("确认撤销“{name}”的远程访问？"),
+                confirm_label: "撤销".to_owned(),
+                cancel_label: "取消".to_owned(),
+                danger: true,
+                busy: false,
+            });
+        }
         if let Some(removal) = &self.project_removal {
             return Some(ShellConfirm {
                 kind: ShellConfirmKind::RemoveProject,
@@ -3262,9 +3771,6 @@ impl DesktopProgram {
                 danger: true,
                 busy: false,
             });
-        }
-        if let Some(confirm) = self.settings_surface_confirm() {
-            return Some(confirm);
         }
         if !self.update_prompt_is_visible() {
             return None;
@@ -3539,6 +4045,22 @@ impl DesktopProgram {
             None
         };
         Some(ShellPending {
+            stop_target: pending
+                .task_id
+                .clone()
+                .zip(pending.turn_id.clone())
+                .filter(|(task_id, turn_id)| {
+                    self.kernel
+                        .session()
+                        .task_runtime_snapshot(task_id)
+                        .turn_id
+                        .as_ref()
+                        == Some(turn_id)
+                })
+                .map(|(task_id, turn_id)| crate::runtime_shell::TurnStopTarget {
+                    task_id,
+                    turn_id,
+                }),
             request_id: pending.request_id.clone(),
             kind,
             title: title.to_owned(),
@@ -3585,7 +4107,7 @@ impl DesktopProgram {
                     .join("\n")
                 })
                 .unwrap_or_default(),
-            InspectorSurface::Iab => self.iab.active_url().to_owned(),
+            InspectorSurface::Iab => "浏览器".to_owned(),
         }
     }
 
@@ -3609,20 +4131,16 @@ impl DesktopProgram {
 
     fn shell_project_page(&self) -> Option<crate::runtime_shell::ShellProjectPage> {
         use crate::runtime_shell::ShellProjectPage;
-        if self.settings_open || self.automations_open || self.current_selected_task().is_some() {
+        if self.navigation.is_management() || self.current_selected_task().is_some() {
             return None;
         }
-        if self.projects_overview_open {
+        if self.navigation.is_projects() {
             return Some(ShellProjectPage::Overview);
         }
         match self.project_surface {
-            ProjectSurface::Tasks
-                if self.main_conversation_draft.is_none()
-                    && (self.selected_project.is_some() || self.inbox_selected) =>
-            {
-                Some(ShellProjectPage::Sessions)
+            ProjectSurface::Tasks => {
+                (self.main_conversation_draft.is_none()).then_some(ShellProjectPage::Sessions)
             }
-            ProjectSurface::Tasks => None,
             ProjectSurface::Settings => Some(ShellProjectPage::Settings),
             ProjectSurface::Clone => Some(ShellProjectPage::Clone),
             ProjectSurface::Roadmap => Some(ShellProjectPage::Roadmap),
@@ -3634,23 +4152,20 @@ impl DesktopProgram {
 
     fn shell_project_page_title(&self) -> String {
         match self.shell_project_page() {
-            Some(crate::runtime_shell::ShellProjectPage::Sessions) => "会话".to_owned(),
             Some(crate::runtime_shell::ShellProjectPage::Settings) => "项目设置".to_owned(),
             Some(crate::runtime_shell::ShellProjectPage::Clone) => "克隆仓库".to_owned(),
             Some(crate::runtime_shell::ShellProjectPage::Roadmap) => "路线图".to_owned(),
-            Some(crate::runtime_shell::ShellProjectPage::Memory) => "记忆".to_owned(),
+            Some(crate::runtime_shell::ShellProjectPage::Memory) => "Memory".to_owned(),
             Some(crate::runtime_shell::ShellProjectPage::Architecture) => "架构".to_owned(),
             Some(crate::runtime_shell::ShellProjectPage::Files) => "项目文件".to_owned(),
             Some(crate::runtime_shell::ShellProjectPage::Overview) => "项目".to_owned(),
+            Some(crate::runtime_shell::ShellProjectPage::Sessions) => "会话".to_owned(),
             None => String::new(),
         }
     }
 
     fn shell_project_page_body(&self) -> String {
         match self.shell_project_page() {
-            Some(crate::runtime_shell::ShellProjectPage::Overview) => {
-                self.project_dashboard_error.clone().unwrap_or_default()
-            }
             Some(crate::runtime_shell::ShellProjectPage::Clone) => {
                 self.project_clone_detail.clone().unwrap_or_default()
             }
@@ -3818,11 +4333,7 @@ impl DesktopProgram {
                 id: contribution.id.clone(),
                 label: contribution.label.to_owned(),
                 settings: matches!(contribution.target, SidebarNavigationTarget::Settings),
-                selected: sidebar_navigation_selected(
-                    contribution.target,
-                    self.settings_open,
-                    self.automations_open,
-                ),
+                selected: sidebar_navigation_selected(contribution.target, self.navigation),
             })
             .collect()
     }
@@ -3837,19 +4348,42 @@ impl DesktopProgram {
             .collect()
     }
 
+    fn automation_module(&self) -> &crate::module::automation::controller::AutomationController {
+        self.primary_module(
+            &crate::module::automation::controller::AutomationController::feature_id(),
+        )
+    }
+
+    fn automation_module_mut(
+        &mut self,
+    ) -> &mut crate::module::automation::controller::AutomationController {
+        self.primary_module_mut(
+            &crate::module::automation::controller::AutomationController::feature_id(),
+        )
+    }
+
+    fn route_automation(
+        &mut self,
+        message: crate::module::automation::controller::AutomationModuleMessage,
+    ) {
+        if let Some(outcome) = self.route_to_primary_module(
+            &crate::module::automation::controller::AutomationController::feature_id(),
+            Box::new(message),
+        ) {
+            self.apply_ui_module_outcome(outcome);
+        }
+    }
+
     fn primary_shell_snapshot(&self) -> crate::runtime_shell::PrimaryShellSnapshot {
         let mut snapshot = self.shell_owned_snapshot();
-        // Modules fold their own fields last, so a migrated domain overrides the
-        // shell's value for exactly the fields it claims and nothing else.
         let cx = self.primary_module_context();
         self.ui_modules.project(&cx, &mut snapshot);
-        self.resolve_timeline_images(&mut snapshot.timeline, self.task_session.as_ref());
+        self.resolve_timeline_images(&mut snapshot.timeline.rows, self.task_session.as_ref());
         if snapshot.project_page == Some(crate::runtime_shell::ShellProjectPage::Architecture)
             && self.inspector_region_is_visible()
         {
             snapshot.inspector_kind = "architecture".to_owned();
             snapshot.inspector_title = "节点".to_owned();
-            snapshot.inspector_body = architecture_inspector_body(&snapshot);
         }
         snapshot
     }
@@ -3973,15 +4507,25 @@ impl DesktopProgram {
     }
 
     fn active_application_surface(&self) -> Option<ApplicationWorkspaceSurface> {
-        if self.settings_open {
-            Some(ApplicationWorkspaceSurface::Settings)
-        } else if self.automations_open {
-            Some(ApplicationWorkspaceSurface::Automations)
-        } else if self.projects_overview_open {
-            Some(ApplicationWorkspaceSurface::Projects)
-        } else {
-            None
+        self.navigation.surface()
+    }
+
+    fn window_application_surface(&self, window: WindowId) -> Option<ApplicationWorkspaceSurface> {
+        if window == WindowId::PRIMARY {
+            return self.active_application_surface();
         }
+        let popup = self.task_popups.get(&window)?;
+        let snapshot = popup.workspace.snapshot().ok()?;
+        let item_id = snapshot
+            .panel_layout
+            .active_workspace_item()
+            .ok()
+            .flatten()?;
+        snapshot
+            .workspace_items
+            .iter()
+            .find(|item| &item.id == item_id)
+            .and_then(|item| item.application_surface().ok().flatten())
     }
 
     fn module_context(
@@ -3989,12 +4533,56 @@ impl DesktopProgram {
         window: WindowId,
         page: Option<crate::runtime_shell::ShellProjectPage>,
     ) -> crate::ui_module::UiModuleContext<'_> {
-        let settings_tab = self
-            .settings_open
-            .then(|| self.settings_state.active_tab().as_str().to_owned());
+        let settings_tab = if window == WindowId::PRIMARY {
+            self.navigation
+                .is_settings()
+                .then(|| self.settings_state.active_tab().as_str().to_owned())
+        } else {
+            self.task_popups
+                .get(&window)
+                .and_then(|popup| popup.workspace.snapshot().ok())
+                .and_then(|snapshot| {
+                    snapshot
+                        .panel_layout
+                        .active_workspace_item()
+                        .ok()
+                        .flatten()
+                        .cloned()
+                })
+                .and_then(|item_id| {
+                    self.task_popups
+                        .get(&window)
+                        .and_then(|popup| popup.workspace.snapshot().ok())
+                        .and_then(|snapshot| {
+                            snapshot
+                                .workspace_items
+                                .into_iter()
+                                .find(|item| item.id == item_id)
+                        })
+                })
+                .and_then(|item| item.serialized_state)
+                .and_then(|state| {
+                    state
+                        .get("activeTab")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+        };
         crate::ui_module::UiModuleContext::new(self.kernel.kernel(), window)
+            .sized(if window == WindowId::PRIMARY {
+                self.workspace.model().inline_size()
+            } else {
+                self.task_popups
+                    .get(&window)
+                    .and_then(|popup| {
+                        popup
+                            .geometry
+                            .map(|geometry| geometry.width as f32 / popup.scale_factor.max(0.1))
+                    })
+                    .unwrap_or(430.0)
+            })
             .showing(page)
-            .showing_surface(self.active_application_surface())
+            .showing_surface(self.window_application_surface(window))
             .showing_settings(settings_tab)
     }
 
@@ -4036,9 +4624,10 @@ impl DesktopProgram {
         window_id: HostedWindowId,
     ) -> &mut crate::ui_module::UiModuleHost {
         let registry = &self.ui_module_registry;
+        let cx = crate::ui_module::UiModuleContext::new(self.kernel.kernel(), window_id);
         self.ui_module_hosts.entry(window_id).or_insert_with(|| {
             registry
-                .host()
+                .host(&cx)
                 .expect("the UI module registry answers consistently")
         })
     }
@@ -4064,7 +4653,7 @@ impl DesktopProgram {
                     .find(|project| &project.id == project_id)
                     .map(|project| project.name.as_str())
             });
-        let heading = if self.settings_open || self.automations_open {
+        let heading = if self.navigation.is_management() {
             String::new()
         } else if self.main_conversation_draft.is_some() {
             conversation_empty_headline(location_name, false)
@@ -4096,7 +4685,7 @@ impl DesktopProgram {
                 .error_message
                 .clone()
                 .or_else(|| self.task_action_error.clone()),
-            settings_open: self.settings_open,
+            navigation: self.navigation,
             sidebar_collapsed: self
                 .workspace
                 .layout()
@@ -4124,81 +4713,28 @@ impl DesktopProgram {
             ),
             workspace: self.workspace.model().clone(),
             tasks: Vec::new(),
-            timeline: Vec::new(),
-            timeline_layout: nana_ui::VirtualListLayout::default(),
-            timeline_scroll_offset: self
-                .timeline_viewports
-                .get(&TimelineSurfaceKey::Main)
-                .map(|viewport| viewport.offset)
-                .unwrap_or(0.0),
-            timeline_viewport_extent: self
-                .timeline_viewports
-                .get(&TimelineSurfaceKey::Main)
-                .map(|viewport| viewport.extent)
-                .unwrap_or(TIMELINE_DEFAULT_VIEWPORT_EXTENT),
-            composer: String::new(),
-            composer_atom_spans: Vec::new(),
-            composer_project_id: self
-                .current_selected_project()
-                .map(|project| project.as_str().to_owned()),
-            composer_task_id: None,
-            composer_revision: 0,
-            conversation_controls: self.conversation_controls_snapshot(HostedWindowId::PRIMARY),
-            composer_height: crate::module::composer::textarea_height(
-                self.composer_module().composer_editor(),
-            ),
-            composer_placeholder: COMPOSER_PLACEHOLDER.to_owned(),
-            composer_disabled: self.composer_input_is_locked(),
-            can_send,
-            can_interrupt: self
-                .turn_state
-                .as_ref()
-                .is_some_and(|(_, state)| turn_state_is_active(state)),
-            pending_blocks_send,
+            timeline: crate::module::timeline::view::TimelineViewSnapshot {
+                target: crate::module::timeline::view::TimelineTarget {
+                    window_id: HostedWindowId::PRIMARY,
+                    task_id: self.current_selected_task().map(|id| id.to_string()),
+                },
+                rows: Vec::new(),
+                layout: nana_ui::VirtualListLayout::default(),
+                scroll_offset: self
+                    .timeline_viewports
+                    .get(&TimelineSurfaceKey::Main)
+                    .map(|viewport| viewport.offset)
+                    .unwrap_or(0.0),
+                viewport_extent: self
+                    .timeline_viewports
+                    .get(&TimelineSurfaceKey::Main)
+                    .map(|viewport| viewport.extent)
+                    .unwrap_or(TIMELINE_DEFAULT_VIEWPORT_EXTENT),
+                can_load_earlier: false,
+            },
             clone_repository: self.project_clone_repository.clone(),
             clone_parent: self.project_clone_parent.clone(),
-            milestone_editor_identity: None,
-            milestone_title: String::new(),
-            milestone_description: String::new(),
-            milestone_due_date: String::new(),
-            milestone_status_label: String::new(),
-            attachments: Vec::new(),
-            plan_mode: false,
-            goal_mode: false,
-            permission_label: permission_label(DesktopExecutionPermission::Ask).to_owned(),
-            permission_selection: crate::runtime_shell::permission_selection(
-                DesktopExecutionPermission::Ask,
-            )
-            .0
-            .to_owned(),
-            worktree_label: draft_worktree
-                .as_ref()
-                .map(draft_worktree_label)
-                .or_else(|| {
-                    self.current_selected_task().map(|_| {
-                        self.task_session
-                            .as_ref()
-                            .and_then(|session| session.worktree.as_ref())
-                            .map(|worktree| worktree.worktree_path.clone())
-                            .unwrap_or_else(|| "当前目录".to_owned())
-                    })
-                }),
-            worktree_selection: draft_worktree
-                .as_ref()
-                .map(draft_worktree_selection_id)
-                .unwrap_or_else(|| {
-                    if self
-                        .task_session
-                        .as_ref()
-                        .is_some_and(|session| session.worktree.is_some())
-                    {
-                        "existing"
-                    } else {
-                        "current"
-                    }
-                })
-                .to_owned(),
-            suggestions: self.conversation_suggestions_snapshot(HostedWindowId::PRIMARY),
+            roadmap: Default::default(),
             command_palette_open: self.command_picker.is_open(),
             command_palette_query: self.command_picker.query().to_owned(),
             command_palette_selected: self.command_picker.selected(),
@@ -4208,10 +4744,12 @@ impl DesktopProgram {
                 Vec::new()
             },
             settings: self.settings_shell_snapshot(),
-            // Written by the documents module's own projection.
             document: None,
             files: self.project_files_shell_snapshot(),
             terminal: self.active_terminal_shell_snapshot(),
+            browser: self
+                .active_workspace_item_id()
+                .and_then(|id| self.browser_presentation(id.as_str())),
             markdown_preview: self.primary_markdown_preview_snapshot(),
             inspector_title: if self.inspector_region_is_visible() {
                 match self.inspector_surface {
@@ -4235,35 +4773,7 @@ impl DesktopProgram {
                             .any(|item| item.id == item_id && item.capabilities.closable)
                     })
                 }),
-            automations_open: self.automations_open,
-            automations: if self.automations_open {
-                self.automations
-                    .iter()
-                    .map(|workflow| crate::runtime_shell::ShellAutomationRow {
-                        selected: self.selected_automation.as_deref() == Some(workflow.id.as_str()),
-                        id: workflow.id.clone(),
-                        label: if workflow.name.trim().is_empty() {
-                            "未命名自动化".to_owned()
-                        } else {
-                            workflow.name.clone()
-                        },
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            automation_controls: self.automation_surface_controls(),
-            automation_graph: if self.automations_open {
-                self.automation_graph.clone()
-            } else {
-                nana_ui::GraphModel::default()
-            },
-            automation_viewport: self.automation_viewport,
-            automation_selection: if self.automations_open {
-                self.automation_selection.clone()
-            } else {
-                None
-            },
+            automation: Default::default(),
             panes: {
                 let mut panes = Vec::new();
                 for pane_id in self.panel_layout.pane_ids() {
@@ -4292,6 +4802,12 @@ impl DesktopProgram {
                         id: pane_id.as_str().to_owned(),
                         document: self.shell_document_for_pane(&pane_id),
                         terminal: self.shell_terminal_for_pane(&pane_id),
+                        browser: self
+                            .panel_layout
+                            .active_item(&pane_id)
+                            .ok()
+                            .flatten()
+                            .and_then(|id| self.browser_presentation(id.as_str())),
                         items,
                     });
                 }
@@ -4300,27 +4816,9 @@ impl DesktopProgram {
             pane_layout: shell_pane_layout(&self.panel_layout.panes),
             inspector_body: self.shell_inspector_body(),
             inspector_todos: self.shell_inspector_todos(),
-            todo_panel: self.shell_todo_panel(HostedWindowId::PRIMARY),
+            todo_panel: self.todo_panel_snapshot(),
             confirm: self.shell_confirm(),
             pending: self.shell_pending(),
-            slash_items: Vec::new(),
-            mention_items: Vec::new(),
-            timeline_can_load_earlier: self
-                .task_session
-                .as_ref()
-                .is_some_and(|session| session.timeline_has_more_before),
-            composer_plus_open: matches!(
-                self.composer_menu_open,
-                Some(ComposerMenu::Actions(HostedWindowId::PRIMARY))
-            ),
-            composer_permission_menu_open: matches!(
-                self.composer_menu_open,
-                Some(ComposerMenu::Permission)
-            ),
-            composer_worktree_menu_open: matches!(
-                self.composer_menu_open,
-                Some(ComposerMenu::Worktree)
-            ),
             project_page,
             project_page_title: if project_page.is_some() {
                 self.shell_project_page_title()
@@ -4334,52 +4832,26 @@ impl DesktopProgram {
             },
             project_cards: if project_page == Some(crate::runtime_shell::ShellProjectPage::Overview)
             {
-                self.project_dashboard.iter().map(|project| crate::runtime_shell::ShellProjectCard {
-                    id: project.project_id.clone(),
-                    title: project.name.clone(),
-                    subtitle: format!("{}\n{} 个任务 · {} 个会话 · {} 活跃 · {} 阻塞 · {} 已完成\n{} tokens{}{}",
-                        project.workspace_path.as_deref().unwrap_or("未设置工作区"),
-                        project.task_count, project.session_count, project.active_count, project.blocked_count,
-                        project.status_counts.done, project.total_tokens,
-                        project.known_cost_usd.map(|cost| format!(" · ${cost:.2}")).unwrap_or_default(),
-                        project.recent_activity_at.map(|time| format!(" · 最近活动 {}", format_civil_date(time)))
-                            .unwrap_or_default()),
-                }).collect()
+                self.projects
+                    .iter()
+                    .map(|project| crate::runtime_shell::ShellProjectCard {
+                        id: project.id.as_str().to_owned(),
+                        title: project.name.clone(),
+                        subtitle: project
+                            .workspace_path
+                            .clone()
+                            .unwrap_or_else(|| "未设置工作区".to_owned()),
+                    })
+                    .collect()
             } else {
                 Vec::new()
             },
-            roadmap_cards: Vec::new(),
-            memory_cards: Vec::new(),
-            memory_draft_enabled: self.memory_module().draft_enabled(),
-            memory_editor_generation: self.memory_module().editor_generation(),
-            memory_selected: self.memory_module().selected().map(str::to_owned),
-            memory_title: String::new(),
-            memory_body: String::new(),
-            memory_tags: String::new(),
-            memory_scope_label: String::new(),
-            memory_enabled: None,
-            memory_global_enabled: true,
-            memory_baseline_enabled: true,
-            memory_cooldown: String::new(),
-            memory_task_enabled: None,
-            memory_task_menu_open: false,
-            memory_task_label: String::new(),
-            memory_task_options: Vec::new(),
-            roadmap_tasks: Vec::new(),
             session_search: String::new(),
             session_page: 0,
             session_page_count: 1,
             session_cards: Vec::new(),
-            // Written by the architecture module's own projection.
-            architecture_records: Vec::new(),
-            architecture_graph: nana_ui::GraphModel::default(),
-            architecture_viewport: nana_ui::GraphViewport::default(),
-            architecture_selection: None,
-            architecture_can_rollback: self.architecture_can_roll_back() && !self.tasks.is_empty(),
-            architecture_details: Default::default(),
-            iab: self.iab.snapshot(
-                self.current_selected_task().is_some() && !self.composer_input_is_locked(),
-            ),
+            memory: Default::default(),
+            architecture: Default::default(),
             inspector_kind: if self.inspector_region_is_visible() {
                 match self.inspector_surface {
                     InspectorSurface::CodingTools => "coding".to_owned(),
@@ -4396,14 +4868,90 @@ impl DesktopProgram {
                 .is_some_and(|item| item.capabilities.movable_across_windows),
             pane_can_move_next: self.panel_layout.pane_ids().len() > 1
                 && self.active_workspace_item_id().is_some(),
+            composer: {
+                let (model, model_label, models) =
+                    self.composer_model_dropdown_state(HostedWindowId::PRIMARY);
+                crate::module::composer::view::ComposerViewSnapshot {
+                    window_id: HostedWindowId::PRIMARY,
+                    composer: String::new(),
+                    composer_atom_spans: Vec::new(),
+                    composer_task_id: None,
+                    composer_revision: 0,
+                    composer_height: crate::module::composer::textarea_height(
+                        self.composer_module().composer_editor(),
+                    ),
+                    composer_placeholder: COMPOSER_PLACEHOLDER.to_owned(),
+                    composer_disabled: self.composer_input_is_locked(),
+                    can_send,
+                    can_open_browser: self.browser_available_for_window(HostedWindowId::PRIMARY),
+                    composer_turn_id: self
+                        .turn_state
+                        .as_ref()
+                        .filter(|(_, state)| turn_state_is_active(state))
+                        .map(|(turn_id, _)| turn_id.clone()),
+                    can_interrupt: self
+                        .turn_state
+                        .as_ref()
+                        .is_some_and(|(_, state)| turn_state_is_active(state)),
+                    pending_blocks_send,
+                    attachments: Vec::new(),
+                    plan_mode: false,
+                    goal_mode: false,
+                    permission_label: permission_label(DesktopExecutionPermission::Ask).to_owned(),
+                    permission_selection:
+                        crate::module::composer::presentation::permission_selection(
+                            DesktopExecutionPermission::Ask,
+                        )
+                        .0
+                        .to_owned(),
+                    reasoning: crate::module::composer::presentation::reasoning_selection(
+                        self.main_surface_composer()
+                            .and_then(|composer| composer.reasoning_effort.as_deref()),
+                    )
+                    .to_owned(),
+                    model,
+                    model_label,
+                    models,
+                    worktree_label: draft_worktree.as_ref().map(draft_worktree_label),
+                    worktree_selection: draft_worktree
+                        .as_ref()
+                        .map(draft_worktree_selection_id)
+                        .unwrap_or("current")
+                        .to_owned(),
+                    suggestions: self
+                        .conversation_suggestions
+                        .visible_item_ids()
+                        .filter_map(|id| {
+                            self.conversation_suggestions.prompt_for(id).map(|prompt| {
+                                crate::module::composer::presentation::ComposerSuggestion {
+                                    id: id.to_owned(),
+                                    label: prompt.chars().take(24).collect(),
+                                    prompt,
+                                }
+                            })
+                        })
+                        .collect(),
+                    suggestions_can_refresh: self.conversation_suggestions.can_refresh(),
+                    slash_items: Vec::new(),
+                    mention_items: Vec::new(),
+                    reference_items: Vec::new(),
+                    composer_plus_open: false,
+                    composer_permission_menu_open: false,
+                    composer_worktree_menu_open: false,
+                    branch_label: pending_session_branch_label(self.pending_session_branch.as_ref()),
+                    review_target: pending_review_target(self.pending_review_slash_workflow.as_ref()),
+                    review_value: pending_review_value(self.pending_review_slash_workflow.as_ref()),
+                    can_manage_todos: self.current_selected_task().is_some()
+                        && !self.composer_is_locked(),
+                    apply_failed: false,
+                }
+            },
         }
     }
 
-    /// 设置页关闭时只投影项目页仍要读的少量字段。其余集合与格式化字符串留空，
-    /// 由 `sync_settings_content` 在页面打开时补齐。
-    fn settings_shell_snapshot(&self) -> crate::runtime_shell::SettingsSnapshot {
-        if !self.settings_open {
-            return crate::runtime_shell::SettingsSnapshot {
+    fn settings_shell_snapshot(&self) -> crate::module::settings::view::SettingsSnapshot {
+        if !self.navigation.is_settings() {
+            return crate::module::settings::view::SettingsSnapshot {
                 project_name: self.project_name_edit.clone(),
                 project_workspace: self.project_workspace_edit.clone(),
                 project_error: self.project_settings_error.clone(),
@@ -4414,10 +4962,8 @@ impl DesktopProgram {
     }
 
     /// 设置页的骨架：只带 NanaUI 渲染结构必需的 model / state / appearance。
-    fn settings_shell_shape(&self) -> crate::runtime_shell::SettingsSnapshot {
-        crate::runtime_shell::SettingsSnapshot {
-            controls: Vec::new(),
-            extensions: None,
+    fn settings_shell_shape(&self) -> crate::module::settings::view::SettingsSnapshot {
+        crate::module::settings::view::SettingsSnapshot {
             model: self.settings_model.clone(),
             state: self.settings_state.clone(),
             appearance: self.appearance,
@@ -4430,16 +4976,29 @@ impl DesktopProgram {
             agent_actions: Vec::new(),
             quota_status: String::new(),
             extensions_status: String::new(),
+            extensions_search: String::new(),
+            extensions: None,
             remote_status: String::new(),
             remote_host_enabled: false,
             remote_keep_awake: false,
+            remote_pc_name: String::new(),
+            remote_pairing_active: false,
+            remote_pairing_uri: String::new(),
+            remote_devices: Vec::new(),
+            project_clone_parent: String::new(),
+            project_worktree_mode: String::new(),
+            project_worktree_parent: String::new(),
+            project_worktree_instructions: String::new(),
+            project_cleanup_on_archive: false,
             desktop_status: String::new(),
             data_status: String::new(),
             data_can_import: false,
+            provider_secret: String::new(),
             provider_model: String::new(),
             provider_openai_endpoint: String::new(),
             provider_anthropic_endpoint: String::new(),
             can_save_credential: false,
+            credentials: Vec::new(),
             custom_agents: Vec::new(),
             custom_agent_editor_open: false,
             custom_agent_name: String::new(),
@@ -4447,7 +5006,12 @@ impl DesktopProgram {
             custom_agent_instruction: String::new(),
             quota_days_label: String::new(),
             quota_backend_label: String::new(),
+            quota_values: Vec::new(),
+            quota_axis_labels: Vec::new(),
             quota_daily: Vec::new(),
+            quota_project_slices: Vec::new(),
+            quota_conversation_slices: Vec::new(),
+            quota_tool_slices: Vec::new(),
             skills: Vec::new(),
             skill_id: String::new(),
             skill_description: String::new(),
@@ -4461,13 +5025,15 @@ impl DesktopProgram {
             shortcut: String::new(),
             shortcut_capturing: false,
             shortcut_registered: false,
+            sidebar_display_mode: match self.sidebar_display_mode {
+                crate::storage::NativeSidebarDisplayMode::Unified => "unified".to_owned(),
+                crate::storage::NativeSidebarDisplayMode::Grouped => "grouped".to_owned(),
+            },
         }
     }
 
-    fn settings_shell_detail(&self) -> crate::runtime_shell::SettingsSnapshot {
-        crate::runtime_shell::SettingsSnapshot {
-            controls: self.settings_surface_controls(),
-            extensions: self.extension_browser_snapshot(),
+    fn settings_shell_detail(&self) -> crate::module::settings::view::SettingsSnapshot {
+        crate::module::settings::view::SettingsSnapshot {
             model: self.settings_model.clone(),
             state: self.settings_state.clone(),
             appearance: self.appearance,
@@ -4479,12 +5045,14 @@ impl DesktopProgram {
                 .provider
                 .providers
                 .iter()
-                .map(|provider| crate::runtime_shell::ShellProviderRow {
-                    selected: self.selected_provider.as_deref()
-                        == Some(provider.provider_id.as_str()),
-                    id: provider.provider_id.clone(),
-                    label: provider.display_name.clone(),
-                })
+                .map(
+                    |provider| crate::module::settings::presentation::ProviderRow {
+                        selected: self.selected_provider.as_deref()
+                            == Some(provider.provider_id.as_str()),
+                        id: provider.provider_id.clone(),
+                        label: provider.display_name.clone(),
+                    },
+                )
                 .collect(),
             provider_status: self.provider_error.clone().unwrap_or_else(|| {
                 if self.provider.broker_ready {
@@ -4497,33 +5065,16 @@ impl DesktopProgram {
             quota_status: self.quota_error.clone().unwrap_or_else(|| {
                 self.quota_usage
                     .as_ref()
-                    .map(|stats| {
-                        format!(
-                            "{} 天 · {}",
-                            stats.days,
-                            if stats.backend.is_empty() || stats.backend == "all" {
-                                "全部后端"
-                            } else {
-                                stats.backend.as_str()
-                            }
-                        )
-                    })
+                    .map(|stats| format!("{} 天 · {}", stats.days, stats.backend))
                     .unwrap_or_else(|| "尚未读取用量。".to_owned())
             }),
             extensions_status: String::new(),
+            extensions_search: self.extensions_module().query().to_owned(),
+            extensions: None,
             remote_status: self.remote_error.clone().unwrap_or_else(|| {
                 self.remote
                     .as_ref()
-                    .map(|status| {
-                        let state = match status.state.as_str() {
-                            "disabled" => "已关闭",
-                            "pairing" => "等待配对",
-                            "connected" => "已连接",
-                            "listening" => "等待连接",
-                            _ => "状态不可用",
-                        };
-                        format!("{} · {state}", status.pc_name)
-                    })
+                    .map(|status| format!("{} · {}", status.pc_name, status.state))
                     .unwrap_or_else(|| "远程控制未连接。".to_owned())
             }),
             remote_host_enabled: self
@@ -4534,6 +5085,44 @@ impl DesktopProgram {
                 .remote
                 .as_ref()
                 .is_some_and(|status| status.keep_awake_enabled),
+            remote_pc_name: self.remote_pc_name.clone(),
+            remote_pairing_active: self
+                .remote
+                .as_ref()
+                .is_some_and(|status| status.active_ticket.is_some()),
+            remote_pairing_uri: self
+                .remote
+                .as_ref()
+                .and_then(|status| status.active_ticket.as_ref())
+                .map(|ticket| ticket.pairing_uri.clone())
+                .unwrap_or_default(),
+            remote_devices: self
+                .remote
+                .as_ref()
+                .map(|status| {
+                    status
+                        .trusted_devices
+                        .iter()
+                        .filter(|device| device.trusted && device.revoked_at.is_none())
+                        .map(|device| (device.id.clone(), device.display_name.clone()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            project_clone_parent: self.project_clone_parent.clone(),
+            project_worktree_mode: self
+                .project_settings
+                .worktree
+                .default_mode
+                .as_str()
+                .to_owned(),
+            project_worktree_parent: self
+                .project_settings
+                .worktree
+                .parent_dir
+                .clone()
+                .unwrap_or_default(),
+            project_worktree_instructions: self.project_worktree_instructions.text(),
+            project_cleanup_on_archive: self.project_settings.worktree.cleanup_on_archive,
             desktop_status: match &self.update_state {
                 DesktopUpdateState::Idle => "未检查更新。".to_owned(),
                 DesktopUpdateState::Checking => "正在检查更新。".to_owned(),
@@ -4560,10 +5149,31 @@ impl DesktopProgram {
                 }
             }),
             data_can_import: self.data_import.can_execute(),
+            provider_secret: self.provider_secret.clone(),
             provider_model: self.provider_model.clone(),
             provider_openai_endpoint: self.provider_openai_endpoint.clone(),
             provider_anthropic_endpoint: self.provider_anthropic_endpoint.clone(),
             can_save_credential: !self.provider_busy() && !self.provider_secret.trim().is_empty(),
+            credentials: self
+                .provider
+                .credentials
+                .iter()
+                .filter(|credential| {
+                    self.selected_provider
+                        .as_deref()
+                        .is_some_and(|provider_id| credential.provider_id == provider_id)
+                })
+                .map(
+                    |credential| crate::module::settings::presentation::CredentialRow {
+                        id: credential.credential_id.clone(),
+                        revision: credential.revision,
+                        label: credential
+                            .account_label
+                            .clone()
+                            .unwrap_or_else(|| "已保存凭据".to_owned()),
+                    },
+                )
+                .collect(),
             custom_agents: Vec::new(),
             custom_agent_editor_open: false,
             custom_agent_name: String::new(),
@@ -4575,10 +5185,68 @@ impl DesktopProgram {
             } else {
                 self.quota_backend.clone()
             },
+            quota_values: self
+                .quota_usage
+                .as_ref()
+                .map(|stats| {
+                    stats
+                        .daily
+                        .iter()
+                        .map(|bucket| bucket.total_tokens as f64)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            quota_axis_labels: self
+                .quota_usage
+                .as_ref()
+                .map(|stats| {
+                    stats
+                        .daily
+                        .iter()
+                        .map(|bucket| bucket.day_start.to_string())
+                        .collect()
+                })
+                .unwrap_or_default(),
             quota_daily: self
                 .quota_usage
                 .as_ref()
                 .map(|stats| stats.daily.clone())
+                .unwrap_or_default(),
+            quota_project_slices: self
+                .quota_usage
+                .as_ref()
+                .map(|stats| {
+                    quota_chart_slices(
+                        stats
+                            .projects
+                            .iter()
+                            .map(|item| (item.project_name.clone(), item.total_tokens as f64)),
+                    )
+                })
+                .unwrap_or_default(),
+            quota_conversation_slices: self
+                .quota_usage
+                .as_ref()
+                .map(|stats| {
+                    quota_chart_slices(
+                        stats
+                            .conversations
+                            .iter()
+                            .map(|item| (item.task_title.clone(), item.total_tokens as f64)),
+                    )
+                })
+                .unwrap_or_default(),
+            quota_tool_slices: self
+                .quota_usage
+                .as_ref()
+                .map(|stats| {
+                    quota_chart_slices(
+                        stats
+                            .tools
+                            .iter()
+                            .map(|item| (item.label.clone(), item.call_count as f64)),
+                    )
+                })
                 .unwrap_or_default(),
             skills: Vec::new(),
             skill_id: String::new(),
@@ -4600,6 +5268,10 @@ impl DesktopProgram {
             shortcut: self.shell_shortcut_edit.clone(),
             shortcut_capturing: self.shell_shortcut_capturing,
             shortcut_registered: self.shell.shortcut_active(),
+            sidebar_display_mode: match self.sidebar_display_mode {
+                crate::storage::NativeSidebarDisplayMode::Unified => "unified".to_owned(),
+                crate::storage::NativeSidebarDisplayMode::Grouped => "grouped".to_owned(),
+            },
         }
     }
 
@@ -4646,12 +5318,11 @@ impl DesktopProgram {
             .find(|item| &item.id == item_id)?;
         let snapshot = self.terminal_snapshot_for_item(item)?;
         Some(crate::runtime_shell::ShellTerminalSnapshot {
+            item_id: item.id.as_str().to_owned(),
+            session_id: snapshot.id.as_str().to_owned(),
             output: terminal_plain_text(&snapshot),
-            input: self
-                .terminal_inputs
-                .get(&snapshot.id)
-                .cloned()
-                .unwrap_or_default(),
+            screen: crate::terminal_view::terminal_screen(&snapshot),
+            running: snapshot.process.is_running(),
             notice: self.terminal_notices.get(&snapshot.id).cloned(),
         })
     }
@@ -4659,39 +5330,29 @@ impl DesktopProgram {
     fn primary_markdown_preview_snapshot(
         &self,
     ) -> Option<crate::runtime_shell::ShellMarkdownPreview> {
-        self.markdown_preview_snapshot_for_window(HostedWindowId::PRIMARY)
-    }
-
-    fn markdown_preview_snapshot_for_window(
-        &self,
-        window_id: HostedWindowId,
-    ) -> Option<crate::runtime_shell::ShellMarkdownPreview> {
-        let preview = self.markdown_image_previews.get(&window_id)?;
+        let preview = self.markdown_image_previews.get(&HostedWindowId::PRIMARY)?;
         let metadata = match self.markdown_images.get(&preview.source) {
             Some(MarkdownImageLoadState::Ready(image)) => {
                 markdown_image_format_label(image.media_type()).to_owned()
             }
             Some(MarkdownImageLoadState::Loading) => "正在加载".to_owned(),
-            Some(MarkdownImageLoadState::Failed | MarkdownImageLoadState::Evicted) => {
-                "无法显示".to_owned()
-            }
+            Some(MarkdownImageLoadState::Failed) => "无法显示".to_owned(),
             _ => String::new(),
         };
         Some(crate::runtime_shell::ShellMarkdownPreview {
-            intrinsic_size: match self.markdown_images.get(&preview.source) {
-                Some(MarkdownImageLoadState::Ready(image)) => {
-                    Some((image.pixels.width, image.pixels.height))
-                }
-                _ => None,
-            },
-            source: preview.source.clone(),
             title: markdown_image_label(preview),
             metadata,
             texture_slot: matches!(
                 self.markdown_images.get(&preview.source),
                 Some(MarkdownImageLoadState::Ready(_))
             )
-            .then(|| format!("lilia.image-preview.{}", window_id.0)),
+            .then(|| format!("lilia.image-preview.{}", HostedWindowId::PRIMARY.0)),
+            intrinsic_size: match self.markdown_images.get(&preview.source) {
+                Some(MarkdownImageLoadState::Ready(image)) => {
+                    Some((image.pixels.width, image.pixels.height))
+                }
+                _ => None,
+            },
         })
     }
 
@@ -4711,8 +5372,15 @@ impl DesktopProgram {
     }
 
     fn mount_primary_shell(&mut self) {
+        self.prepare_primary_composer();
         let snapshot = self.primary_shell_snapshot();
-        match crate::runtime_shell::mount_primary_shell(&snapshot, self.shell_intent_sink()) {
+        let sender = Arc::clone(&self.message_sender);
+        match crate::runtime_shell::mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| {
+                let _ = sender(Self::message_from_shell_intent(intent));
+            }),
+        ) {
             Ok((document, handles)) => {
                 self.documents.insert(WindowId::PRIMARY, document);
                 self.runtime_shell = Some(handles);
@@ -4724,9 +5392,6 @@ impl DesktopProgram {
     }
 
     fn sync_primary_shell(&mut self) {
-        if self.pending_shell_intents.load(Ordering::Relaxed) != 0 {
-            return;
-        }
         let dismissals = self
             .runtime_shell
             .as_ref()
@@ -4750,33 +5415,15 @@ impl DesktopProgram {
         } else {
             self.adopt_live_workspace_model();
         }
+        self.prepare_primary_composer();
         let snapshot = self.primary_shell_snapshot();
-        let tail_task = self
-            .pending_main_timeline_tail
-            .clone()
-            .filter(|task| snapshot.composer_task_id.as_deref() == Some(task.as_str()));
         let commands = std::mem::take(&mut self.pending_ui_commands);
         let Some(document) = self.documents.get_mut(&WindowId::PRIMARY) else {
             return;
         };
         if let Some(handles) = self.runtime_shell.as_mut() {
-            match handles.sync(document, &snapshot) {
-                Ok(()) => {
-                    if let Some(task) = tail_task {
-                        match handles.scroll_timeline_to_end_for_task(document, Some(task.as_str()))
-                        {
-                            Ok(_) => self.pending_main_timeline_tail = None,
-                            Err(error) => {
-                                eprintln!("{PRODUCT_NAME} failed to scroll the retained timeline: {error}");
-                            }
-                        }
-                    } else {
-                        self.pending_main_timeline_tail = None;
-                    }
-                }
-                Err(error) => {
-                    eprintln!("{PRODUCT_NAME} failed to update workspace shell: {error}");
-                }
+            if let Err(error) = handles.sync(document, &snapshot) {
+                eprintln!("{PRODUCT_NAME} failed to update workspace shell: {error}");
             }
             if let Err(error) = handles.apply_ui_commands(document, WindowId::PRIMARY, commands) {
                 eprintln!("{PRODUCT_NAME} failed to apply workspace focus: {error}");
@@ -4802,6 +5449,11 @@ impl DesktopProgram {
                     project_name: entry.project_name.clone(),
                     status: status_label(entry.product_status).to_owned(),
                     phase: runtime_phase_label(&entry.runtime_phase).to_owned(),
+                    stop_turn_id: self
+                        .kernel
+                        .session()
+                        .task_runtime_snapshot(&entry.task_id)
+                        .turn_id,
                     can_stop: runtime_phase_is_processing(&entry.runtime_phase)
                         && !self.sidebar_stopping_tasks.contains(&entry.task_id),
                 })
@@ -4814,88 +5466,159 @@ impl DesktopProgram {
         window_id: HostedWindowId,
     ) -> Option<crate::runtime_windows::TaskPopupSnapshot> {
         let popup = self.task_popups.get(&window_id)?;
-        let mut timeline = popup
-            .session
-            .as_ref()
-            .map(|session| {
-                crate::module::timeline::TimelineModule::rows(session, |id| {
-                    self.timeline_module_for(window_id)
-                        .is_some_and(|module| module.is_toggled(id))
-                })
-            })
-            .unwrap_or_default();
-        self.resolve_timeline_images(&mut timeline, popup.session.as_ref());
-        for row in &mut timeline {
-            row.selected_text = self
-                .timeline_text_selection(window_id)
-                .filter(|selection| selection.event_id == row.id)
-                .map(|selection| selection.text);
-        }
-        let (composer, composer_task_id, composer_revision, composer_disabled) =
-            match self.window_composer(window_id) {
-                Some(state) => (
-                    state.content.clone(),
-                    Some(state.task_id.as_str().to_owned()),
-                    state.revision,
-                    false,
-                ),
-                None => (
-                    self.window_composer_module(window_id)
-                        .map(|module| module.composer_editor().text())
-                        .unwrap_or_default(),
-                    None,
-                    0,
-                    true,
-                ),
-            };
-        Some(crate::runtime_windows::TaskPopupSnapshot {
-            window_id,
-            suggestions: self.conversation_suggestions_snapshot(window_id),
-            theme: self.theme,
-            title: popup.title.clone(),
-            heading: if timeline.is_empty() {
-                conversation_empty_headline(
-                    Some(&popup.project_name)
-                        .filter(|name| !name.trim().is_empty())
-                        .map(String::as_str),
-                    popup.pending_session_branch.is_some(),
-                )
-            } else {
-                String::new()
+        let timeline = crate::module::timeline::view::TimelineViewSnapshot {
+            target: crate::module::timeline::view::TimelineTarget {
+                window_id,
+                task_id: popup
+                    .active_task_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned()),
             },
-            error: popup.error.clone(),
-            timeline,
-            composer,
-            composer_atom_spans: self
-                .window_composer(window_id)
-                .map(|state| state.content_atom_spans())
+            rows: {
+                let mut rows = popup
+                    .session
+                    .as_ref()
+                    .and_then(|session| {
+                        self.timeline_module_for(window_id)
+                            .map(|module| module.rows(session))
+                    })
+                    .unwrap_or_default();
+                self.resolve_timeline_images(&mut rows, popup.session.as_ref());
+                rows
+            },
+            layout: popup
+                .session
+                .as_ref()
+                .map(|session| session.timeline_layout.clone())
                 .unwrap_or_default(),
-            composer_task_id,
-            composer_revision,
-            composer_height: self
-                .window_composer_module(window_id)
-                .map(|module| crate::module::composer::textarea_height(module.composer_editor()))
-                .unwrap_or(32.0),
-            conversation_controls: self.conversation_controls_snapshot(window_id),
-            todo_panel: self.shell_todo_panel(window_id),
-            markdown_preview: self.markdown_preview_snapshot_for_window(window_id),
-            timeline_can_load_earlier: popup
+            scroll_offset: self
+                .timeline_viewports
+                .get(&TimelineSurfaceKey::TaskPopup(window_id))
+                .map(|viewport| viewport.offset)
+                .unwrap_or_default(),
+            viewport_extent: self
+                .timeline_viewports
+                .get(&TimelineSurfaceKey::TaskPopup(window_id))
+                .map(|viewport| viewport.extent)
+                .unwrap_or(720.0),
+            can_load_earlier: popup
                 .session
                 .as_ref()
                 .is_some_and(|session| session.timeline_has_more_before),
-            composer_disabled,
-            can_send: !self.window_worktree_busy(window_id)
-                && self
-                    .window_composer(window_id)
-                    .is_some_and(composer_has_turn_payload)
-                && popup
-                    .session
-                    .as_ref()
-                    .is_none_or(|session| session.blocking_pending_count == 0),
-            can_interrupt: popup
-                .turn_state
+        };
+        let module = self.window_composer_module(window_id)?;
+        let mut composer = module.view_snapshot(window_id);
+        composer.composer_disabled = module.composer().is_none()
+            || popup
+                .session
                 .as_ref()
-                .is_some_and(|(_, state)| turn_state_is_active(state)),
+                .is_some_and(|session| session.has_open_composer_interaction());
+        composer.can_send = self
+            .window_composer(window_id)
+            .is_some_and(composer_has_turn_payload);
+        composer.pending_blocks_send = popup
+            .session
+            .as_ref()
+            .is_some_and(|session| session.blocking_pending_count > 0);
+        composer.can_open_browser = self.browser_available_for_window(window_id);
+        composer.composer_turn_id = popup
+            .turn_state
+            .as_ref()
+            .filter(|(_, state)| turn_state_is_active(state))
+            .map(|(turn_id, _)| turn_id.clone());
+        composer.can_interrupt = composer.composer_turn_id.is_some();
+        if let Some((_, selection)) = self.draft_worktree_context(window_id) {
+            composer.worktree_label = Some(draft_worktree_label(&selection));
+            composer.worktree_selection = draft_worktree_selection_id(&selection).to_owned();
+        }
+        let (model, model_label, models) = self.composer_model_dropdown_state(window_id);
+        composer.model = model;
+        composer.model_label = model_label;
+        composer.models = models;
+        composer.suggestions_can_refresh = popup.conversation_suggestions.can_refresh();
+        composer.suggestions = popup
+            .conversation_suggestions
+            .visible_item_ids()
+            .filter_map(|id| {
+                popup.conversation_suggestions.prompt_for(id).map(|prompt| {
+                    crate::module::composer::presentation::ComposerSuggestion {
+                        id: id.to_owned(),
+                        label: prompt.chars().take(24).collect(),
+                        prompt,
+                    }
+                })
+            })
+            .collect();
+        composer.branch_label = pending_session_branch_label(popup.pending_session_branch.as_ref());
+        composer.review_target =
+            pending_review_target(popup.pending_review_slash_workflow.as_ref());
+        composer.review_value = pending_review_value(popup.pending_review_slash_workflow.as_ref());
+        composer.can_manage_todos = false;
+        let workspace = popup.workspace.snapshot().ok();
+        let panes = workspace
+            .as_ref()
+            .map(|workspace| {
+                workspace
+                    .panel_layout
+                    .pane_ids()
+                    .into_iter()
+                    .map(|pane_id| {
+                        let active_id = workspace.panel_layout.active_item(&pane_id).ok().flatten();
+                        let active = active_id.and_then(|id| {
+                            workspace.workspace_items.iter().find(|item| &item.id == id)
+                        });
+                        crate::runtime_shell::ShellPaneRow {
+                            id: pane_id.as_str().to_owned(),
+                            active: workspace.panel_layout.active_pane() == &pane_id,
+                            items: workspace
+                                .panel_layout
+                                .pane_items(&pane_id)
+                                .unwrap_or_default()
+                                .iter()
+                                .filter_map(|id| {
+                                    let item = workspace
+                                        .workspace_items
+                                        .iter()
+                                        .find(|item| &item.id == id)?;
+                                    Some(crate::runtime_shell::ShellPaneItem {
+                                        id: item.id.as_str().to_owned(),
+                                        title: item.title.clone(),
+                                        kind: item.kind.as_str().to_owned(),
+                                        selected: active_id == Some(&item.id),
+                                        closable: item.capabilities.closable,
+                                    })
+                                })
+                                .collect(),
+                            document: active
+                                .filter(|item| is_document_editor_item(item))
+                                .and_then(|item| self.shell_document_for_item(&item.id)),
+                            terminal: active
+                                .filter(|item| item.kind.as_str() == TERMINAL_WORKSPACE_ITEM_KIND)
+                                .and_then(|item| self.shell_terminal_for_item(item)),
+                            browser: active
+                                .and_then(|item| self.browser_presentation(item.id.as_str())),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(crate::runtime_windows::TaskPopupSnapshot {
+            window_id,
+            window_inline_size: popup
+                .geometry
+                .map(|geometry| geometry.width as f32 / popup.scale_factor.max(0.1))
+                .unwrap_or(430.0),
+            panes,
+            pane_layout: workspace
+                .as_ref()
+                .map(|workspace| shell_pane_layout(&workspace.panel_layout.panes))
+                .unwrap_or_default(),
+            theme: self.theme,
+            title: popup.title.clone(),
+            heading: popup.title.clone(),
+            error: popup.error.clone(),
+            timeline,
+            composer,
             pending: popup.session.as_ref().and_then(|session| {
                 self.pending_from_session(
                     session,
@@ -4909,15 +5632,18 @@ impl DesktopProgram {
     }
 
     fn sync_secondary_windows(&mut self) {
-        if self.pending_shell_intents.load(Ordering::Relaxed) != 0 {
-            return;
-        }
+        let sender = Arc::clone(&self.message_sender);
         if self.conversation_status_open {
             let snapshot = self.conversation_status_snapshot();
             if self.conversation_status_shell.is_none() {
                 match crate::runtime_windows::mount_conversation_status(
                     &snapshot,
-                    self.shell_intent_sink(),
+                    Arc::new({
+                        let sender = Arc::clone(&sender);
+                        move |intent| {
+                            let _ = sender(Self::message_from_shell_intent(intent));
+                        }
+                    }),
                 ) {
                     Ok((document, handles)) => {
                         self.documents
@@ -4949,8 +5675,15 @@ impl DesktopProgram {
                 continue;
             };
             if !self.task_popup_shells.contains_key(&window_id) {
-                match crate::runtime_windows::mount_task_popup(&snapshot, self.shell_intent_sink())
-                {
+                match crate::runtime_windows::mount_task_popup(
+                    &snapshot,
+                    Arc::new({
+                        let sender = Arc::clone(&sender);
+                        move |intent| {
+                            let _ = sender(Self::message_from_shell_intent(intent));
+                        }
+                    }),
+                ) {
                     Ok((document, handles)) => {
                         self.documents.insert(window_id, document);
                         self.task_popup_shells.insert(window_id, handles);
@@ -5164,7 +5897,7 @@ impl DesktopProgram {
     fn refresh_projects(&mut self) {
         self.execute_workspace_command(DesktopCommand::RefreshWorkspace);
         self.refresh_conversation_status_entries();
-        if self.projects_overview_open {
+        if self.navigation.is_projects() {
             self.refresh_project_dashboard();
         }
     }
@@ -5209,51 +5942,26 @@ impl DesktopProgram {
         }
     }
 
-    fn spawn_file_dialog(&mut self, purpose: FileDialogPurpose, request: DesktopFileDialogRequest) {
-        if let Some(paths) = crate::host::file_dialog_fixture(&request) {
-            let _ = (self.message_sender)(Message::FileDialogPicked {
-                purpose,
-                outcome: Ok(paths),
-            });
-            return;
-        }
+    /// Runs the OS picker on a worker thread. A nested modal loop must never
+    /// run inside event dispatch — the windowing system re-enters event
+    /// handling while the picker is up, which panics the winit re-entrancy
+    /// guard — so the blocking pick runs off the UI thread and the selection
+    /// returns as a message.
+    fn spawn_file_dialog(&self, purpose: FileDialogPurpose, request: DesktopFileDialogRequest) {
+        self.spawn_host_file_dialog(purpose, DesktopHostAction::FileDialog(request));
+    }
+
+    fn spawn_host_file_dialog(&self, purpose: FileDialogPurpose, action: DesktopHostAction) {
         let application = self.kernel.session().clone();
-        if !application.uses_hosted_file_dialog() {
-            let message_sender = Arc::clone(&self.message_sender);
-            std::thread::spawn(move || {
-                let outcome = match application.execute_host(DesktopHostAction::FileDialog(request))
-                {
-                    Ok(DesktopHostResult::FileDialogSelection(paths)) => Ok(paths),
-                    Ok(_) => Err(FileDialogPickFailure::UnrecognizedResult),
-                    Err(error) => Err(FileDialogPickFailure::Host(error.to_string())),
-                };
-                let _ = message_sender(Message::FileDialogPicked { purpose, outcome });
-            });
-            return;
-        }
-        let window = match &purpose {
-            FileDialogPurpose::DraftWorktree { window_id }
-            | FileDialogPurpose::AttachWorktree { window_id, .. }
-            | FileDialogPurpose::TaskPopupAttachments { window_id, .. } => *window_id,
-            _ => HostedWindowId::PRIMARY,
-        };
-        let Some(id) = self.next_file_dialog_id.checked_add(1) else {
-            let _ = (self.message_sender)(Message::FileDialogPicked {
-                purpose,
-                outcome: Err(FileDialogPickFailure::Host(
-                    "无法打开文件选择窗口，请重启后重试".into(),
-                )),
-            });
-            return;
-        };
-        self.next_file_dialog_id = id;
-        let dialog = crate::host::hosted_file_dialog_request(id, request);
-        self.pending_file_dialogs.insert(id, (window, purpose));
-        self.pending_window_commands
-            .push(HostedWindowCommand::OpenFileDialog {
-                id: window,
-                request: dialog,
-            });
+        let message_sender = Arc::clone(&self.message_sender);
+        std::thread::spawn(move || {
+            let outcome = match application.execute_host(action) {
+                Ok(DesktopHostResult::FileDialogSelection(paths)) => Ok(paths),
+                Ok(_) => Err(FileDialogPickFailure::UnrecognizedResult),
+                Err(error) => Err(FileDialogPickFailure::Host(error.to_string())),
+            };
+            let _ = message_sender(Message::FileDialogPicked { purpose, outcome });
+        });
     }
 
     fn apply_file_dialog_pick(
@@ -5262,6 +5970,38 @@ impl DesktopProgram {
         outcome: Result<Vec<PathBuf>, FileDialogPickFailure>,
     ) {
         match purpose {
+            FileDialogPurpose::BrowserRequest(ticket) => {
+                #[cfg(target_os = "windows")]
+                {
+                    use lilia_contracts::{BrowserHostDecision, BrowserHostRequestKind};
+                    let decision = match outcome {
+                        Ok(paths) if !paths.is_empty() => match &ticket.kind {
+                            BrowserHostRequestKind::Download { .. } => {
+                                BrowserHostDecision::Download {
+                                    path: paths[0].to_string_lossy().into_owned(),
+                                }
+                            }
+                            BrowserHostRequestKind::Upload { .. } => BrowserHostDecision::Upload {
+                                paths: paths
+                                    .iter()
+                                    .map(|path| path.to_string_lossy().into_owned())
+                                    .collect(),
+                            },
+                            BrowserHostRequestKind::NewWindow { .. } => BrowserHostDecision::Reject,
+                        },
+                        Ok(_) => BrowserHostDecision::Reject,
+                        Err(_) => {
+                            self.error_message = Some("无法打开文件选择器，请重试。".into());
+                            BrowserHostDecision::Reject
+                        }
+                    };
+                    if let Err(error) = self.browser.respond(&ticket, decision) {
+                        self.error_message = Some(error);
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = (ticket, outcome);
+            }
             FileDialogPurpose::SidebarProjectFolder => match outcome {
                 Ok(paths) => {
                     if let Some(path) = paths.into_iter().next() {
@@ -5282,7 +6022,6 @@ impl DesktopProgram {
                         self.project_settings.worktree.parent_dir =
                             Some(path.to_string_lossy().into_owned());
                         self.project_settings_error = None;
-                        self.save_project_preferences();
                     }
                 }
                 Err(FileDialogPickFailure::UnrecognizedResult) => {
@@ -5364,57 +6103,43 @@ impl DesktopProgram {
                     );
                 }
             },
-            FileDialogPurpose::AttachWorktree { window_id, task_id } => match outcome {
+            FileDialogPurpose::AttachWorktree => match outcome {
                 Ok(paths) => {
                     if let Some(path) = paths.into_iter().next() {
-                        if self.worktree_task_for_window(window_id).as_ref() == Some(&task_id) {
-                            self.start_window_worktree_operation(
-                                window_id,
-                                WorktreeOperation::Attach(path),
-                            );
+                        self.start_worktree_operation(WorktreeOperation::Attach(path));
+                    }
+                }
+                Err(FileDialogPickFailure::UnrecognizedResult) => {
+                    self.task_action_error = Some("目录选择器返回了无法识别的结果。".to_owned());
+                }
+                Err(FileDialogPickFailure::Host(error)) => {
+                    self.task_action_error = Some(error);
+                }
+            },
+            FileDialogPurpose::ComposerAttachments { window_id, task_id } => {
+                if self.composer_task_for_window(window_id).as_ref() != Some(&task_id) {
+                    return;
+                }
+                match outcome {
+                    Ok(paths) => {
+                        let attachments = describe_attachment_paths(paths);
+                        if window_id == HostedWindowId::PRIMARY {
+                            self.add_composer_attachments(attachments);
+                        } else {
+                            self.add_task_popup_attachments(window_id, attachments);
                         }
                     }
-                }
-                Err(FileDialogPickFailure::UnrecognizedResult) => {
-                    self.set_task_window_error(
-                        window_id,
-                        "目录选择器返回了无法识别的结果。".to_owned(),
-                    );
-                }
-                Err(FileDialogPickFailure::Host(error)) => {
-                    self.set_task_window_error(window_id, error);
-                }
-            },
-            FileDialogPurpose::ComposerAttachments { .. } => match outcome {
-                Ok(paths) => {
-                    self.add_composer_attachments(describe_attachment_paths(paths));
-                }
-                Err(FileDialogPickFailure::UnrecognizedResult) => {
-                    self.set_task_window_error(
-                        HostedWindowId::PRIMARY,
-                        "文件选择器返回了无法识别的结果，请重试。".to_owned(),
-                    );
-                }
-                Err(FileDialogPickFailure::Host(error)) => {
-                    self.set_task_window_error(HostedWindowId::PRIMARY, error);
-                }
-            },
-            FileDialogPurpose::TaskPopupAttachments { window_id, .. } => match outcome {
-                Ok(paths) => {
-                    self.add_task_popup_attachments(window_id, describe_attachment_paths(paths));
-                }
-                Err(FileDialogPickFailure::UnrecognizedResult) => {
-                    if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                        popup.error = Some("文件选择器返回了无法识别的结果，请重试。".to_owned());
+                    Err(FileDialogPickFailure::UnrecognizedResult) => {
+                        self.set_task_window_error(
+                            window_id,
+                            "文件选择器返回了无法识别的结果，请重试。".to_owned(),
+                        );
+                    }
+                    Err(FileDialogPickFailure::Host(error)) => {
+                        self.set_task_window_error(window_id, error)
                     }
                 }
-                Err(FileDialogPickFailure::Host(error)) => {
-                    eprintln!("failed to add Native task popup attachment: {error}");
-                    if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                        popup.error = Some("无法添加上下文，请重试。".to_owned());
-                    }
-                }
-            },
+            }
             FileDialogPurpose::DataImportSource => match outcome {
                 Ok(paths) => {
                     if let Some(path) = paths.into_iter().next() {
@@ -5502,10 +6227,7 @@ impl DesktopProgram {
         path: &Path,
         position: Option<Point>,
     ) -> bool {
-        if window_id != HostedWindowId::PRIMARY
-            || self.settings_open
-            || self.automations_open
-            || !path.is_dir()
+        if window_id != HostedWindowId::PRIMARY || self.navigation.is_management() || !path.is_dir()
         {
             return false;
         }
@@ -5635,16 +6357,15 @@ impl DesktopProgram {
                         self.execute_workspace_command(DesktopCommand::SelectProject(
                             project_id.clone(),
                         ));
-                        if self.current_selected_project().as_ref() != Some(&project_id) {
-                            return;
-                        }
                         match action {
                             SidebarMenuAction::OpenProject => {}
                             SidebarMenuAction::OpenProjectRoadmap => {
-                                self.update_message(Message::Roadmap(RoadmapMessage::Open));
+                                self.project_surface = ProjectSurface::Roadmap;
+                                self.refresh_roadmap();
                             }
                             SidebarMenuAction::OpenProjectMemory => {
-                                self.update_message(Message::Memory(MemoryMessage::Open));
+                                self.project_surface = ProjectSurface::Memory;
+                                self.refresh_memories();
                             }
                             SidebarMenuAction::OpenProjectPopup => {
                                 if let Err(error) = self.open_conversation_draft_popup(
@@ -5678,22 +6399,6 @@ impl DesktopProgram {
                             _ => {}
                         }
                     }
-                    (
-                        SidebarMenuTarget::Task(task_id),
-                        action @ (SidebarMenuAction::CompleteTask | SidebarMenuAction::ReopenTask),
-                    ) => {
-                        match self
-                            .kernel
-                            .session()
-                            .set_task_completed(&task_id, action == SidebarMenuAction::CompleteTask)
-                        {
-                            Ok(_) => {
-                                self.task_action_error = None;
-                                self.refresh_tasks();
-                            }
-                            Err(error) => self.task_action_error = Some(error.to_string()),
-                        }
-                    }
                     (SidebarMenuTarget::Task(task_id), action) => {
                         self.select_task(task_id.clone());
                         if self.current_selected_task().as_ref() != Some(&task_id) {
@@ -5705,8 +6410,29 @@ impl DesktopProgram {
                                 self.open_child_question_popup(HostedWindowId::PRIMARY, task_id)
                             }
                             SidebarMenuAction::ToggleTaskPinned => self.toggle_task_pinned(),
+                            SidebarMenuAction::CompleteTask => {
+                                if let Err(error) =
+                                    self.kernel.session().set_task_completed(&task_id, true)
+                                {
+                                    self.error_message =
+                                        Some(format!("无法完成任务：{error}"));
+                                } else {
+                                    self.refresh_tasks();
+                                }
+                            }
+                            SidebarMenuAction::ReopenTask => {
+                                if let Err(error) =
+                                    self.kernel.session().set_task_completed(&task_id, false)
+                                {
+                                    self.error_message =
+                                        Some(format!("无法重新打开任务：{error}"));
+                                } else {
+                                    self.refresh_tasks();
+                                }
+                            }
                             SidebarMenuAction::MergeTaskWorktree => {
-                                self.start_worktree_operation(WorktreeOperation::MergeAndArchive)
+                                self.worktree_confirmation =
+                                    Some(WorktreeDangerAction::MergeAndArchive)
                             }
                             SidebarMenuAction::ArchiveTask => self.archive_task(),
                             _ => {}
@@ -5941,9 +6667,9 @@ impl DesktopProgram {
             ],
             SidebarMenuTarget::Project(_) => vec![
                 SidebarMenuAction::OpenProject,
+                SidebarMenuAction::OpenProjectPopup,
                 SidebarMenuAction::OpenProjectRoadmap,
                 SidebarMenuAction::OpenProjectMemory,
-                SidebarMenuAction::OpenProjectPopup,
                 SidebarMenuAction::ToggleProjectPinned,
                 SidebarMenuAction::OpenProjectFileManager,
                 SidebarMenuAction::OpenProjectCodeEditor,
@@ -5958,18 +6684,18 @@ impl DesktopProgram {
                     SidebarMenuAction::ToggleTaskPinned,
                     SidebarMenuAction::ArchiveTask,
                 ];
-                if self.kernel.session().task_completion_editable(task_id) {
-                    if let Ok(session) = self.kernel.session().task_session_snapshot(task_id) {
-                        actions.insert(
-                            3,
-                            if session.task.status == ProductTaskStatus::Done {
-                                SidebarMenuAction::ReopenTask
-                            } else {
-                                SidebarMenuAction::CompleteTask
-                            },
-                        );
-                    }
-                }
+                let done = self.tasks.iter().any(|task| {
+                    task.id.as_str() == task_id.as_str()
+                        && task.status == lilia_contracts::ProductTaskStatus::Done
+                });
+                actions.insert(
+                    3,
+                    if done {
+                        SidebarMenuAction::ReopenTask
+                    } else {
+                        SidebarMenuAction::CompleteTask
+                    },
+                );
                 if self
                     .kernel
                     .session()
@@ -6411,7 +7137,7 @@ impl DesktopProgram {
             return;
         }
         let project_settings_visible =
-            self.settings_open && self.settings_state.active_tab().as_str() == "preferences";
+            self.navigation.is_settings() && self.settings_state.active_tab().as_str() == "project";
         let initial_directory = (!self.project_clone_parent.trim().is_empty())
             .then(|| PathBuf::from(self.project_clone_parent.trim()));
         let request = DesktopFileDialogRequest {
@@ -6510,6 +7236,17 @@ impl DesktopProgram {
     }
 
     fn apply_kernel_job(&mut self, event: JobEvent) {
+        let mut host = std::mem::take(&mut self.ui_modules);
+        let outcome = host.job(&event, &self.primary_module_context());
+        self.ui_modules = host;
+        self.apply_ui_module_outcome(outcome);
+        let windows = self.ui_module_hosts.keys().copied().collect::<Vec<_>>();
+        for window in windows {
+            let mut host = std::mem::take(self.window_ui_modules(window));
+            let outcome = host.job(&event, &self.module_context(window, None));
+            *self.window_ui_modules(window) = host;
+            self.apply_ui_module_outcome(outcome);
+        }
         match event.protocol.as_str() {
             lilia_feature_project::CLONE_PROTOCOL
                 if self.active_project_clone_job == Some(event.job_id) =>
@@ -7097,6 +7834,11 @@ impl DesktopProgram {
     }
 
     fn open_main_conversation_draft(&mut self) {
+        if self.selected_task.is_some()
+            && !self.execute_workspace_command(DesktopCommand::BackToTaskList)
+        {
+            return;
+        }
         let project_id = if self.current_inbox_selected() {
             None
         } else {
@@ -7139,19 +7881,26 @@ impl DesktopProgram {
     }
 
     fn close_main_conversation_draft(&mut self) {
-        if self.main_conversation_draft.take().is_none() {
+        if !self.clear_main_conversation_draft() {
             return;
         }
         self.route_composer_message(
             HostedWindowId::PRIMARY,
             crate::module::composer::ComposerMessage::Refresh,
         );
+    }
+
+    fn clear_main_conversation_draft(&mut self) -> bool {
+        if self.main_conversation_draft.take().is_none() {
+            return false;
+        }
         self.attachment_previews.remove(&HostedWindowId::PRIMARY);
         self.active_prompt_optimizations
             .remove(&HostedWindowId::PRIMARY);
         self.prompt_route_suggestions
             .remove(&HostedWindowId::PRIMARY);
         self.task_action_error = None;
+        true
     }
 
     fn materialize_main_conversation_draft(&mut self) -> bool {
@@ -8077,7 +8826,6 @@ impl DesktopProgram {
 
     fn open_coding_search_hit(&mut self, result: DesktopWorkspaceCodeSearchHit) {
         if self.current_selected_project().as_ref() != Some(&result.project_id) {
-            self.automations_open = false;
             self.project_surface = ProjectSurface::Tasks;
             self.execute_workspace_command(DesktopCommand::SelectProject(
                 result.project_id.clone(),
@@ -8114,24 +8862,10 @@ impl DesktopProgram {
     }
 
     fn open_application_surface(&mut self, surface: ApplicationWorkspaceSurface) {
-        let existing_window = self.task_popups.values().find_map(|popup| {
-            let snapshot = popup.workspace.snapshot().ok()?;
-            snapshot.workspace_items.iter().find_map(|item| {
-                (item.application_surface().ok().flatten() == Some(surface)).then(|| {
-                    snapshot
-                        .panel_layout
-                        .pane_for_item(&item.id)
-                        .cloned()
-                        .map(|pane_id| (popup.id, pane_id, item.id.clone()))
-                })?
-            })
-        });
-        if let Some((window_id, pane_id, item_id)) = existing_window {
-            self.select_workspace_window_tab(window_id, pane_id, Some(item_id));
-            self.pending_window_commands
-                .push(HostedWindowCommand::Focus(window_id));
-            return;
-        }
+        // Management surfaces are owned by the primary workspace. A task
+        // popup intentionally renders only its conversation and resource
+        // panes; placing a settings/automation item there would leave an
+        // unrendered workspace tab with no matching pane view.
         let item = match self.kernel.session().application_workspace_item(surface) {
             Ok(item) => item,
             Err(error) => {
@@ -8139,17 +8873,108 @@ impl DesktopProgram {
                 return;
             }
         };
+        let return_item = self.navigation.return_item_for(
+            surface,
+            self.panel_layout
+                .active_workspace_item()
+                .ok()
+                .flatten()
+                .cloned(),
+        );
         self.reveal_workspace_item(item);
+        // The management surface is mounted in the primary shell even when
+        // the request originated in a task popup. Move focus with the route so
+        // the user immediately sees the page that was opened.
+        self.pending_window_commands
+            .push(HostedWindowCommand::Focus(HostedWindowId::PRIMARY));
+        if self.active_application_surface() == Some(surface) {
+            if let Some(return_item) = return_item {
+                self.update_application_surface_state_entry(
+                    surface,
+                    "returnItemId",
+                    return_item.map(|item_id| json!(item_id.as_str())),
+                );
+            }
+        }
     }
 
     fn reveal_workspace_item(&mut self, item: WorkspaceItem) {
-        if let Some(pane_id) = self.panel_layout.pane_for_item(&item.id).cloned() {
+        let Ok(workspace) = self.dispatch_workspace().snapshot() else {
+            return;
+        };
+        let layout = &workspace.panel_layout;
+        let terminal_pane = |pane_id: &PaneId| {
+            layout.pane_items(pane_id).ok().is_some_and(|ids| {
+                !ids.is_empty()
+                    && ids.iter().all(|id| {
+                        workspace.workspace_items.iter().any(|item| {
+                            &item.id == id && item.kind.as_str() == TERMINAL_WORKSPACE_ITEM_KIND
+                        })
+                    })
+            })
+        };
+        let existing = layout.pane_for_item(&item.id).cloned();
+        if item.kind.as_str() == TERMINAL_WORKSPACE_ITEM_KIND {
+            let target = layout.pane_ids().into_iter().find(&terminal_pane);
+            let pane_id = if let Some(target) = target {
+                target
+            } else {
+                let target = PaneId::new(format!("pane-terminal-{}", uuid::Uuid::new_v4()))
+                    .expect("UUID-backed pane ids are valid");
+                if !self.execute_workspace_command(DesktopCommand::SplitPane {
+                    pane_id: existing
+                        .clone()
+                        .unwrap_or_else(|| layout.active_pane().clone()),
+                    new_pane_id: target.clone(),
+                    axis: SplitAxis::Vertical,
+                    ratio: 0.7,
+                }) {
+                    return;
+                }
+                target
+            };
+            let command = match existing {
+                Some(source) if source != pane_id => DesktopCommand::MoveWorkspaceItem {
+                    item_id: item.id,
+                    target_pane_id: pane_id,
+                    before: None,
+                },
+                Some(_) => DesktopCommand::ActivateWorkspaceItem {
+                    pane_id,
+                    item_id: item.id,
+                },
+                None => DesktopCommand::OpenWorkspaceItem { pane_id, item },
+            };
+            self.execute_workspace_command(command);
+        } else if let Some(pane_id) = existing {
             self.execute_workspace_command(DesktopCommand::ActivateWorkspaceItem {
                 pane_id,
                 item_id: item.id,
             });
         } else {
-            let pane_id = self.panel_layout.active_pane().clone();
+            let pane_id = if terminal_pane(layout.active_pane()) {
+                if let Some(pane) = layout
+                    .pane_ids()
+                    .into_iter()
+                    .find(|pane| !terminal_pane(pane))
+                {
+                    pane
+                } else {
+                    let pane = PaneId::new(format!("pane-{}", uuid::Uuid::new_v4()))
+                        .expect("UUID-backed pane ids are valid");
+                    if !self.execute_workspace_command(DesktopCommand::SplitPane {
+                        pane_id: layout.active_pane().clone(),
+                        new_pane_id: pane.clone(),
+                        axis: SplitAxis::Horizontal,
+                        ratio: 0.5,
+                    }) {
+                        return;
+                    }
+                    pane
+                }
+            } else {
+                layout.active_pane().clone()
+            };
             self.execute_workspace_command(DesktopCommand::OpenWorkspaceItem { pane_id, item });
         }
     }
@@ -8248,7 +9073,7 @@ impl DesktopProgram {
             let target_pane = self.panel_layout.active_pane().clone();
             self.move_task_popup_item_to_main_pane(window_id, item_id, target_pane, None);
         }
-        if surface == ApplicationWorkspaceSurface::Settings {
+        if WindowRoute::from_surface(Some(surface)).is_management() {
             let return_item_id = self
                 .workspace_items
                 .iter()
@@ -8263,10 +9088,10 @@ impl DesktopProgram {
                     .cloned()
                     .map(|pane_id| (item_id, pane_id))
             }) {
-                self.execute_workspace_command(DesktopCommand::ActivateWorkspaceItem {
-                    pane_id,
-                    item_id,
-                });
+                self.execute_workspace_command_with_resource_reveal(
+                    DesktopCommand::ActivateWorkspaceItem { pane_id, item_id },
+                    false,
+                );
                 return;
             }
         }
@@ -8276,13 +9101,8 @@ impl DesktopProgram {
     fn refresh_active_settings_tab(&mut self) {
         match self.settings_state.active_tab().as_str() {
             "project" => self.refresh_project_settings(),
-            "provider" | "credentials" => self.refresh_provider(),
-            "assistant" | "model-config" => self.refresh_provider_ai_settings(),
-            "preferences" => {
-                self.refresh_project_settings();
-                self.refresh_github_binding_status();
-            }
-            "appearance" | "agent" => self.refresh_agent_interaction(),
+            "provider" => self.refresh_provider(),
+            "agent" => self.refresh_agent_interaction(),
             "quota" => self.refresh_quota(),
             "extensions" | "plugin-packages" | "plugin-hooks" | "plugin-mcp" => {
                 self.refresh_extensions()
@@ -8432,6 +9252,28 @@ impl DesktopProgram {
         }
     }
 
+    fn composer_surface_task(&self, window_id: HostedWindowId) -> Option<TaskId> {
+        let task_id = if window_id == HostedWindowId::PRIMARY {
+            self.main_conversation_draft
+                .as_ref()
+                .map(|draft| draft.task.id.clone())
+                .or_else(|| self.current_selected_task())
+        } else {
+            let popup = self.task_popups.get(&window_id)?;
+            popup
+                .draft
+                .as_ref()
+                .map(|draft| draft.id.clone())
+                .or_else(|| popup.active_task_id.clone())
+        }?;
+        Some(task_id)
+    }
+
+    fn composer_task_for_window(&self, window_id: HostedWindowId) -> Option<TaskId> {
+        self.window_composer_module(window_id)?
+            .matching_task(self.composer_surface_task(window_id))
+    }
+
     fn window_composer(&self, window_id: HostedWindowId) -> Option<&DesktopComposerState> {
         self.window_composer_module(window_id)
             .and_then(crate::module::composer::ComposerModule::composer)
@@ -8469,6 +9311,9 @@ impl DesktopProgram {
         window_id: HostedWindowId,
         message: crate::module::composer::ComposerMessage,
     ) -> Option<crate::ui_module::UiModuleOutcome> {
+        if window_id != HostedWindowId::PRIMARY && !self.task_popups.contains_key(&window_id) {
+            return None;
+        }
         if window_id == HostedWindowId::PRIMARY {
             self.route_to_primary_module(
                 &crate::module::composer::ComposerModule::feature_id(),
@@ -8494,6 +9339,7 @@ impl DesktopProgram {
             && matches!(
                 message,
                 crate::module::composer::ComposerMessage::SetContent(_)
+                    | crate::module::composer::ComposerMessage::SetContentAt { .. }
                     | crate::module::composer::ComposerMessage::ApplyCommand(_)
                     | crate::module::composer::ComposerMessage::SelectConversationReference(_)
                     | crate::module::composer::ComposerMessage::SelectContextAttachment(_)
@@ -8505,7 +9351,7 @@ impl DesktopProgram {
         let Some(outcome) = self.reduce_composer(window_id, message) else {
             return false;
         };
-        let ok = outcome.error.is_none();
+        let ok = outcome.dirty && outcome.error.is_none();
         if let Some(error) = outcome.error {
             self.set_task_window_error(window_id, error);
         }
@@ -8551,7 +9397,7 @@ impl DesktopProgram {
             .active_inspector_panel()
             .map(|panel| (panel.id.as_str().to_owned(), panel.visible, panel.extent));
         let visible = active.as_ref().is_some_and(|(panel_id, visible, _)| {
-            if !visible || self.settings_open || self.automations_open {
+            if !visible || self.navigation.is_management() {
                 return false;
             }
             match panel_id.as_str() {
@@ -8586,7 +9432,6 @@ impl DesktopProgram {
             RegionId::Inspector,
             visible,
         ));
-        self.sync_iab_browser_visibility();
     }
 
     fn activate_inspector_panel(&mut self, panel_id: &'static str) {
@@ -8649,112 +9494,206 @@ impl DesktopProgram {
         self.refresh_coding_tools();
     }
 
-    fn apply_iab_action(&mut self, action: crate::iab_panel::IabAction) {
-        if !cfg!(target_os = "macos") {
-            return;
-        }
-        if matches!(action, crate::iab_panel::IabAction::Open) {
-            self.titlebar_menu_open = false;
-            self.open_iab();
-            return;
-        }
-        if matches!(action, crate::iab_panel::IabAction::Capture) {
-            if !self
-                .iab
-                .snapshot(!self.composer_input_is_locked())
-                .can_capture
-            {
-                return;
+    #[cfg(target_os = "windows")]
+    fn sync_browser_workspace_state(&mut self) {
+        let mut items = self
+            .workspace_items
+            .iter()
+            .cloned()
+            .map(|item| (HostedWindowId::PRIMARY, item))
+            .collect::<Vec<_>>();
+        for popup in self.task_popups.values() {
+            if let Ok(snapshot) = popup.workspace.snapshot() {
+                items.extend(
+                    snapshot
+                        .workspace_items
+                        .into_iter()
+                        .map(|item| (popup.id, item)),
+                );
             }
-            let Some(task) = self.current_selected_task() else {
-                return;
+        }
+        let authority = crate::application::ProductBrowserScopeAuthority::new(
+            self.kernel.session().project_task_services().0,
+        );
+        let browser_items = items
+            .iter()
+            .filter(|(_, item)| {
+                item.browser_restoration()
+                    .ok()
+                    .flatten()
+                    .is_some_and(|state| {
+                        lilia_agent::BrowserScopeAuthority::validate(&authority, &state.scope)
+                            .is_ok()
+                    })
+            })
+            .map(|(_, item)| item.clone())
+            .collect::<Vec<_>>();
+        self.browser.restore_items(&browser_items);
+        let resources = browser_items
+            .iter()
+            .map(|item| item.id.as_str().to_owned())
+            .collect();
+        self.browser.retain(&resources);
+        let mut changed = false;
+        for (window, item) in items {
+            let Some(state) = self.browser.restoration(item.id.as_str()) else {
+                continue;
             };
-            self.iab.begin_capture(task);
-        }
-        self.iab.apply(action);
-    }
-
-    fn receive_iab_event(&mut self, event: nana_ui::NativeBrowserEvent) {
-        if event.id != crate::iab_panel::BROWSER_ID
-            || self
-                .runtime_shell
-                .as_ref()
-                .map(|handles| handles.iab.browser.stable_id())
-                != Some(event.node)
-        {
-            return;
-        }
-        if let Some(bytes) = self.iab.receive(event) {
-            let origin = self.iab.capture_task.take();
-            let page = self.iab.capture_page.take();
-            if origin.is_none()
-                || origin != self.current_selected_task()
-                || self.composer_input_is_locked()
-            {
-                self.iab
-                    .set_error("任务已切换或暂时无法编辑，请重新截图。".into());
-                return;
+            let Ok(state) = serde_json::to_value(state) else {
+                continue;
+            };
+            if item.serialized_state.as_ref() == Some(&state) {
+                continue;
             }
-            match self
-                .kernel
-                .session()
-                .cache_encoded_clipboard_image_attachment(
-                    crate::application::DesktopClipboardEncodedImage {
-                        bytes,
-                        mime: Some("image/png".into()),
-                        name: Some("网页截图.png".into()),
-                    },
-                ) {
-                Ok(mut attachment) => {
-                    attachment.name = "网页截图.png".into();
-                    let (url, title) =
-                        page.unwrap_or_else(|| (self.iab.active_url().to_owned(), String::new()));
-                    let task_id = origin.expect("capture task checked");
-                    let input = crate::application::DesktopIabSnapshotInput {
-                        task_id,
-                        url,
-                        title: Some(title),
-                        note: None,
-                        captured_at: current_timestamp_millis().max(0) as u64,
-                        screenshot_path: Some(PathBuf::from(&attachment.path)),
-                        warning: None,
-                    };
-                    match self.kernel.session().prepare_iab_snapshot(input) {
-                        Ok((_, request)) => {
-                            let draft = self
-                                .main_surface_composer()
-                                .map(|composer| composer.content.clone())
-                                .unwrap_or_default();
-                            let content = if draft.trim().is_empty() {
-                                request.content
-                            } else {
-                                format!("{draft}\n\n{}", request.content)
-                            };
-                            self.execute_composer_command(DesktopComposerCommand::SetContent(
-                                content,
-                            ));
-                            self.add_composer_attachments(vec![attachment]);
-                        }
-                        Err(error) => self.iab.set_error(format!("无法添加网页上下文：{error}")),
+            let workspace = if window == HostedWindowId::PRIMARY {
+                Some(self.application_workspace.clone())
+            } else {
+                self.task_popups
+                    .get(&window)
+                    .map(|popup| popup.workspace.clone())
+            };
+            if let Some(workspace) = workspace {
+                if let Ok(outcome) = workspace.execute(DesktopCommand::UpdateWorkspaceItemState {
+                    item_id: item.id,
+                    serialized_state: Some(state),
+                }) {
+                    changed |= outcome.changed;
+                    if window == HostedWindowId::PRIMARY {
+                        self.apply_workspace_snapshot(outcome.workspace);
+                    } else {
+                        self.apply_task_popup_workspace_snapshot(window, outcome.workspace);
                     }
                 }
-                Err(error) => self.iab.set_error(format!("无法保存网页截图：{error}")),
             }
+        }
+        if changed {
+            self.persist_workspace_topology();
+        }
+    }
+
+    fn browser_presentation(
+        &self,
+        resource: &str,
+    ) -> Option<crate::browser_workbench::BrowserPresentation> {
+        #[cfg(target_os = "windows")]
+        if let Some(presentation) = self.browser.presentation(resource) {
+            return Some(presentation);
+        }
+        {
+            let item = self
+                .workspace_items
+                .iter()
+                .find(|item| item.id.as_str() == resource)
+                .cloned()
+                .or_else(|| {
+                    self.task_popups.values().find_map(|popup| {
+                        popup
+                            .workspace
+                            .snapshot()
+                            .ok()?
+                            .workspace_items
+                            .into_iter()
+                            .find(|item| item.id.as_str() == resource)
+                    })
+                })?;
+            let state = item.browser_restoration().ok()??;
+            Some(crate::browser_workbench::BrowserPresentation {
+                resource: resource.into(),
+                url: state.url,
+                ready: false,
+                failed: false,
+                human_control: true,
+                busy: false,
+                status: if cfg!(target_os = "windows") {
+                    "此任务的浏览器当前不可用。"
+                } else {
+                    "当前系统暂不支持嵌入式浏览器。"
+                }
+                .into(),
+                requests: vec![],
+            })
+        }
+    }
+
+    fn browser_available_for_window(&self, window_id: HostedWindowId) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            self.composer_surface_task(window_id)
+                .and_then(|id| self.kernel.session().get_task(&id).ok())
+                .filter(|task| !task.archived)
+                .and_then(|task| task.project_id)
+                .is_some_and(|id| {
+                    self.kernel
+                        .session()
+                        .get_project(&id)
+                        .is_ok_and(|project| project.archive == ProjectArchiveState::Active)
+                })
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = window_id;
+            false
         }
     }
 
     fn open_iab(&mut self) {
-        if self.current_selected_task().is_none() {
-            return;
+        if let Some(task_id) = self.composer_surface_task(HostedWindowId::PRIMARY) {
+            self.open_task_browser(HostedWindowId::PRIMARY, task_id);
         }
-        self.project_surface = ProjectSurface::Tasks;
-        self.activate_inspector_panel(IAB_PANEL_ID);
     }
 
-    fn sync_iab_browser_visibility(&mut self) {
-        let visible =
-            self.inspector_surface == InspectorSurface::Iab && self.inspector_region_is_visible();
-        self.iab.set_panel_visible(visible, HostedWindowId::PRIMARY);
+    fn open_task_browser(&mut self, window_id: HostedWindowId, task_id: TaskId) {
+        if self.composer_surface_task(window_id).as_ref() != Some(&task_id)
+            || !self.browser_available_for_window(window_id)
+        {
+            return;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let Ok(task) = self.kernel.session().get_task(&task_id) else {
+                return;
+            };
+            let Some(project_id) = task.project_id else {
+                return;
+            };
+            let scope = lilia_contracts::BrowserScope {
+                project_id,
+                tab_id: format!("browser:{}", task_id.as_str()),
+                task_id,
+            };
+            match self.browser.open(scope) {
+                Ok(item) => {
+                    if window_id == HostedWindowId::PRIMARY {
+                        self.reveal_workspace_item(item);
+                    } else if let Some(snapshot) = self
+                        .task_popups
+                        .get(&window_id)
+                        .and_then(|popup| popup.workspace.snapshot().ok())
+                    {
+                        let command = if let Some(pane_id) =
+                            snapshot.panel_layout.pane_for_item(&item.id).cloned()
+                        {
+                            DesktopCommand::ActivateWorkspaceItem {
+                                pane_id,
+                                item_id: item.id,
+                            }
+                        } else {
+                            DesktopCommand::OpenWorkspaceItem {
+                                pane_id: snapshot.panel_layout.active_pane().clone(),
+                                item,
+                            }
+                        };
+                        self.execute_workspace_window_command(window_id, command);
+                    }
+                }
+                Err(error) => self.error_message = Some(error),
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (window_id, task_id);
+            self.activate_inspector_panel(IAB_PANEL_ID);
+        }
     }
 
     /// Routes an architecture message to the module owning the domain and
@@ -9249,7 +10188,6 @@ impl DesktopProgram {
         {
             Ok(snapshot) => match self.kernel.session().terminal_workspace_item(&snapshot) {
                 Ok(item) => {
-                    self.terminal_inputs.entry(snapshot.id.clone()).or_default();
                     self.terminal_scrollback.insert(snapshot.id.clone(), 0);
                     self.terminal_snapshots
                         .insert(snapshot.id.clone(), snapshot);
@@ -9297,7 +10235,6 @@ impl DesktopProgram {
             {
                 Ok(item) => {
                     let session_id = launch.terminal.id.clone();
-                    self.terminal_inputs.entry(session_id.clone()).or_default();
                     self.terminal_scrollback.insert(session_id.clone(), 0);
                     self.terminal_snapshots
                         .insert(session_id.clone(), launch.terminal);
@@ -9366,22 +10303,10 @@ impl DesktopProgram {
 
     fn update_terminal(&mut self, message: TerminalViewMessage) {
         match message {
-            TerminalViewMessage::InputChanged(session_id, value) => {
+            TerminalViewMessage::Write(session_id, bytes) => {
                 self.terminal_notices.remove(&session_id);
-                self.terminal_inputs.insert(session_id, value);
-            }
-            TerminalViewMessage::Submit(session_id) => {
-                let input = self
-                    .terminal_inputs
-                    .get(&session_id)
-                    .cloned()
-                    .unwrap_or_default();
-                let mut bytes = input.into_bytes();
-                bytes.push(b'\r');
                 match self.kernel.session().write_terminal(&session_id, &bytes) {
                     Ok(()) => {
-                        self.terminal_inputs
-                            .insert(session_id.clone(), String::new());
                         self.terminal_scrollback.insert(session_id.clone(), 0);
                         self.refresh_terminal(&session_id);
                     }
@@ -9531,764 +10456,42 @@ impl DesktopProgram {
         }
     }
 
-    fn refresh_automations(&mut self) {
-        match self.kernel.session().list_automation_workflows() {
-            Ok(workflows) => {
-                let previous_selection = self.selected_automation.clone();
-                self.merge_automation_refresh(workflows);
-                if !self.automations.iter().any(|workflow| {
-                    self.selected_automation.as_deref() == Some(workflow.id.as_str())
-                }) {
-                    self.selected_automation =
-                        self.automations.first().map(|workflow| workflow.id.clone());
-                }
-                self.rebuild_automation_graph(
-                    previous_selection != self.selected_automation
-                        || self.automation_graph.nodes().is_empty(),
-                );
-                self.refresh_automation_runs();
-                self.automation_error = None;
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法读取自动化：{error}"));
-            }
-        }
-    }
-
-    fn select_automation(&mut self, workflow_id: String) {
-        if self
-            .automations
-            .iter()
-            .any(|workflow| workflow.id == workflow_id)
-        {
-            self.selected_automation = Some(workflow_id);
-            self.automation_inspector_panel = "workflow".into();
-            self.selected_automation_run = None;
-            self.automation_run_detail = None;
-            self.automation_human_response.clear();
-            self.automation_selection = None;
-            self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-            self.rebuild_automation_graph(true);
-            self.refresh_automation_runs();
-        }
-    }
-
-    fn refresh_automation_runs(&mut self) {
-        let Some(workflow_id) = self.selected_automation.as_deref() else {
-            self.automation_runs.clear();
-            self.selected_automation_run = None;
-            self.automation_run_detail = None;
-            self.automation_human_response.clear();
-            return;
-        };
-        match self
-            .kernel
-            .session()
-            .list_automation_runs(Some(workflow_id))
-        {
-            Ok(runs) => {
-                self.automation_runs = runs;
-                if !self
-                    .automation_runs
-                    .iter()
-                    .any(|run| self.selected_automation_run.as_deref() == Some(run.id.as_str()))
-                {
-                    self.selected_automation_run =
-                        self.automation_runs.first().map(|run| run.id.clone());
-                    self.automation_human_response.clear();
-                }
-                self.refresh_automation_run_detail();
-            }
-            Err(error) => {
-                self.automation_runs.clear();
-                self.selected_automation_run = None;
-                self.automation_run_detail = None;
-                self.automation_error = Some(format!("无法读取运行历史：{error}"));
-            }
-        }
-    }
-
-    fn select_automation_run(&mut self, run_id: String) {
-        if self.automation_runs.iter().any(|run| run.id == run_id) {
-            self.automation_inspector_panel = "runs".into();
-            self.selected_automation_run = Some(run_id);
-            self.automation_human_response.clear();
-            self.refresh_automation_run_detail();
-        }
-    }
-
-    fn refresh_automation_run_detail(&mut self) {
-        let Some(run_id) = self.selected_automation_run.as_deref() else {
-            self.automation_run_detail = None;
-            return;
-        };
-        match self.kernel.session().automation_run_detail(run_id) {
-            Ok(detail) => self.automation_run_detail = detail,
-            Err(error) => {
-                self.automation_run_detail = None;
-                self.automation_error = Some(format!("无法读取运行详情：{error}"));
-            }
-        }
-    }
-
     fn run_automation(&mut self) {
-        self.automation_inspector_panel = "runs".into();
-        let Some(workflow) = self.selected_automation_workflow() else {
-            return;
-        };
-        if workflow.published_version_id.is_none() {
-            self.automation_error = Some("请先发布自动化再运行。".to_owned());
-            return;
-        }
-        let workflow_id = workflow.id.clone();
-        let now = current_timestamp_millis();
-        let signal = AutomationSignalEnvelope {
-            id: uuid::Uuid::new_v4().to_string(),
-            kind: "manual".to_owned(),
-            project_id: self
-                .selected_project
-                .as_ref()
-                .map(|project_id| project_id.as_str().to_owned()),
-            task_id: self
-                .selected_task
-                .as_ref()
-                .map(|task_id| task_id.as_str().to_owned()),
-            backend: Some("native-agentkit".to_owned()),
-            event_kind: Some("manual_run".to_owned()),
-            automation_run_id: None,
-            payload: json!({ "source": "lilia" }),
-            created_at: now,
-        };
-        match self
-            .kernel
-            .session()
-            .begin_automation_run(AutomationBeginRunInput {
-                workflow_id,
-                trigger: signal,
-            }) {
-            Ok(detail) => {
-                let run_id = detail.run.id.clone();
-                self.selected_automation_run = Some(run_id.clone());
-                self.automation_run_detail = Some(detail);
-                self.automation_human_response.clear();
-                match self.kernel.session().execute_automation_run(&run_id) {
-                    Ok(result) => {
-                        self.automation_run_detail = Some(result.detail);
-                        self.automation_error = None;
-                    }
-                    Err(error) => {
-                        self.automation_error = Some(format!("自动化运行失败：{error}"));
-                    }
-                }
-                self.refresh_automation_runs();
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法启动自动化：{error}"));
-            }
-        }
-    }
-
-    fn resume_automation(&mut self) {
-        let Some(detail) = self.automation_run_detail.as_ref() else {
-            return;
-        };
-        let Some(node_id) = waiting_human_node(detail).map(|node| node.node_id.clone()) else {
-            return;
-        };
-        let run_id = detail.run.id.clone();
-        let response = self.automation_human_response.trim().to_owned();
-        match self.kernel.session().resume_automation_run(
-            &run_id,
-            AutomationResumeRunInput {
-                node_id: Some(node_id),
-                payload: Some(json!({
-                    "confirmed": true,
-                    "response": response,
-                })),
-            },
-        ) {
-            Ok(result) => {
-                self.automation_run_detail = Some(result.detail);
-                self.automation_human_response.clear();
-                self.automation_error = None;
-                self.refresh_automation_runs();
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法继续自动化：{error}"));
-            }
-        }
-    }
-
-    fn cancel_automation(&mut self) {
-        let Some(detail) = self.automation_run_detail.as_ref() else {
-            return;
-        };
-        if !matches!(
-            detail.run.status,
-            AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
-        ) {
-            return;
-        }
-        let run_id = detail.run.id.clone();
-        match self.kernel.session().cancel_automation_run(&run_id) {
-            Ok(detail) => {
-                self.automation_run_detail = Some(detail);
-                self.automation_human_response.clear();
-                self.automation_error = None;
-                self.refresh_automation_runs();
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法取消自动化：{error}"));
-            }
-        }
-    }
-
-    fn create_automation(&mut self) {
-        let input = AutomationSaveDraftInput {
-            id: None,
-            name: format!("自动化 {}", self.automations.len().saturating_add(1)),
-            scope: AutomationScopeFilter::default(),
-            nodes: vec![AutomationNode {
-                id: "trigger".to_owned(),
-                kind: "trigger".to_owned(),
-                title: "手动触发".to_owned(),
-                position: AutomationNodePosition { x: 80.0, y: 80.0 },
-                config: json!({ "triggerKind": "manual" }),
-            }],
-            edges: Vec::new(),
-        };
-        match self.kernel.session().save_automation_draft(input) {
-            Ok(workflow) => {
-                self.refresh_automations();
-                self.select_automation(workflow.id);
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法创建自动化：{error}"));
-            }
-        }
-    }
-
-    fn add_automation_node(&mut self, kind: &str) {
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let Some(workflow) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-        else {
-            return;
-        };
-        let (title, config) = match kind {
-            "agent" => (
-                "Agent",
-                json!({
-                    "backend": "native-agentkit",
-                    "model": "gpt-5.4",
-                    "permission": "ask",
-                    "prompt": "请根据当前上下文继续推进。"
-                }),
-            ),
-            "tool" => ("工具", json!({ "action": "record_timeline" })),
-            "logic" => (
-                "逻辑",
-                json!({
-                    "logic": "condition",
-                    "path": "trigger.kind",
-                    "equals": "manual"
-                }),
-            ),
-            "human" => ("人工确认", json!({ "prompt": "确认后继续执行自动化。" })),
-            _ => return,
-        };
-        let mut sequence = workflow.draft.nodes.len().saturating_add(1);
-        let node_id = loop {
-            let candidate = format!("{kind}-{sequence}");
-            if workflow.draft.nodes.iter().all(|node| node.id != candidate) {
-                break candidate;
-            }
-            sequence = sequence.saturating_add(1);
-        };
-        let index = workflow.draft.nodes.len();
-        workflow.draft.nodes.push(AutomationNode {
-            id: node_id.clone(),
-            kind: kind.to_owned(),
-            title: title.to_owned(),
-            position: AutomationNodePosition {
-                x: 80.0 + (index % 4) as f64 * 240.0,
-                y: 80.0 + (index / 4) as f64 * 180.0,
-            },
-            config,
-        });
-        if workflow.draft.edges.is_empty() && index == 1 {
-            if let Some(trigger_id) = workflow
-                .draft
-                .nodes
-                .iter()
-                .find(|node| node.kind == "trigger")
-                .map(|node| node.id.clone())
-            {
-                workflow
-                    .draft
-                    .edges
-                    .push(crate::application::AutomationEdge {
-                        id: format!("edge:{trigger_id}:{node_id}:1"),
-                        source: trigger_id,
-                        target: node_id.clone(),
-                        source_handle: None,
-                        target_handle: None,
-                    });
-            }
-        }
-        self.rebuild_automation_graph(true);
-        self.persist_selected_automation_draft();
-        self.automation_selection = Some(GraphSelection::Node(node_id.into()));
-        self.automation_inspector_panel = "node".into();
-        self.refresh_automation_node_inspector();
-    }
-
-    fn toggle_automation_scope_inbox(&mut self) {
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let Some(workflow) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-        else {
-            return;
-        };
-        workflow.scope.include_inbox = !workflow.scope.include_inbox;
-        workflow.draft.scope = workflow.scope.clone();
-        self.persist_selected_automation_draft();
+        let project = self.selected_project.clone();
+        let task = self.selected_task.clone();
+        self.automation_module_mut().run_automation(project, task);
     }
 
     fn toggle_automation_scope_value(&mut self, field: &str, value: &str) {
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let value_allowed = match field {
-            "project" => self
-                .projects
-                .iter()
-                .any(|project| project.id.as_str() == value),
-            "task-status" => matches!(value, "waiting" | "running" | "blocked" | "done"),
-            "backend" => value == "native-agentkit",
-            "event-kind" => matches!(
-                value,
-                "task_created"
-                    | "task_status_changed"
-                    | "task_updated"
-                    | "timeline_event"
-                    | "todo_changed"
-                    | "interaction_request"
-            ),
-            _ => false,
-        };
-        if !value_allowed {
-            return;
-        }
-        let Some(workflow) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-        else {
-            return;
-        };
-        let values = match field {
-            "project" => &mut workflow.scope.project_ids,
-            "task-status" => &mut workflow.scope.task_statuses,
-            "backend" => &mut workflow.scope.backends,
-            "event-kind" => &mut workflow.scope.event_kinds,
-            _ => return,
-        };
-        if let Some(index) = values.iter().position(|item| item == value) {
-            values.remove(index);
-        } else {
-            values.push(value.to_owned());
-            values.sort();
-            values.dedup();
-        }
-        workflow.draft.scope = workflow.scope.clone();
-        self.persist_selected_automation_draft();
-    }
-
-    fn delete_automation_selection(&mut self) {
-        let Some(selection) = self.automation_selection.clone() else {
-            return;
-        };
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let Some(workflow) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-        else {
-            return;
-        };
-        match selection {
-            GraphSelection::Node(node_id) => {
-                if workflow
-                    .draft
-                    .nodes
-                    .iter()
-                    .any(|node| node.id == node_id.as_str() && node.kind == "trigger")
-                {
-                    self.automation_error = Some("触发节点不能删除。".to_owned());
-                    return;
-                }
-                workflow
-                    .draft
-                    .nodes
-                    .retain(|node| node.id != node_id.as_str());
-                workflow.draft.edges.retain(|edge| {
-                    edge.source != node_id.as_str() && edge.target != node_id.as_str()
-                });
-            }
-            GraphSelection::Edge(edge_id) => {
-                workflow
-                    .draft
-                    .edges
-                    .retain(|edge| edge.id != edge_id.as_str());
-            }
-            GraphSelection::Port { .. } => return,
-        }
-        self.automation_selection = None;
-        self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-        self.rebuild_automation_graph(false);
-        self.persist_selected_automation_draft();
-    }
-
-    fn refresh_automation_node_inspector(&mut self) {
-        let Some(GraphSelection::Node(node_id)) = self.automation_selection.as_ref() else {
-            self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-            return;
-        };
-        let node = self
-            .selected_automation_workflow()
-            .and_then(|workflow| {
-                workflow
-                    .draft
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == node_id.as_str())
-            })
-            .cloned();
-        let Some(node) = node else {
-            self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-            return;
-        };
-        self.automation_node_inspector = AutomationNodeInspectorDraft {
-            node_id: Some(node.id),
-            title: node.title,
-            config: serde_json::to_string(&node.config).unwrap_or_else(|_| "{}".to_owned()),
-        };
-    }
-
-    fn update_automation_node_config_field(&mut self, field: String, value: Value) {
-        if self.automation_node_inspector.node_id.is_none() {
-            return;
-        }
-        let mut config = parse_automation_node_config(&self.automation_node_inspector.config)
-            .unwrap_or_else(|_| json!({}));
-        let Some(config) = config.as_object_mut() else {
-            return;
-        };
-        config.insert(field, value);
-        self.automation_node_inspector.config =
-            serde_json::to_string(&config).unwrap_or_else(|_| "{}".to_owned());
-        self.apply_automation_inspector_draft();
-        self.automation_error = None;
-    }
-
-    fn cycle_automation_node_config(&mut self, field: &str) {
-        let values: &[&str] = match field {
-            "triggerKind" => &[
-                "manual",
-                "task_changed",
-                "timeline_event",
-                "todo_changed",
-                "interaction_request",
-            ],
-            "permission" => &["ask", "full", "readonly"],
-            "logic" => &["condition", "switch", "stop"],
-            "action" => &[
-                "record_timeline",
-                "create_task",
-                "update_task_status",
-                "add_todo",
-                "send_guide",
-            ],
-            "priority" => &["low", "normal", "high"],
-            _ => return,
-        };
-        let current = automation_config_string(&self.automation_node_inspector.config, field);
-        let next = values
+        let project_exists = self
+            .projects
             .iter()
-            .position(|value| *value == current)
-            .map(|index| values[(index + 1) % values.len()])
-            .unwrap_or(values[0]);
-        self.update_automation_node_config_field(field.to_owned(), json!(next));
-    }
-
-    fn toggle_automation_node_config_boolean(&mut self, field: &str) {
-        let current = automation_config_boolean(&self.automation_node_inspector.config, field);
-        self.update_automation_node_config_field(field.to_owned(), json!(!current));
-    }
-
-    fn save_automation_node_inspector(&mut self) {
-        let Some(node_id) = self.automation_node_inspector.node_id.clone() else {
-            return;
-        };
-        let title = self.automation_node_inspector.title.trim();
-        if title.is_empty() {
-            self.automation_error = Some("节点名称不能为空。".to_owned());
-            return;
-        }
-        let config = match parse_automation_node_config(&self.automation_node_inspector.config) {
-            Ok(config) => config,
-            Err(error) => {
-                self.automation_error = Some(error);
-                return;
-            }
-        };
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let Some(node) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-            .and_then(|workflow| {
-                workflow
-                    .draft
-                    .nodes
-                    .iter_mut()
-                    .find(|node| node.id == node_id)
-            })
-        else {
-            self.automation_error = Some("所选节点已不存在。".to_owned());
-            return;
-        };
-        node.title = title.to_owned();
-        node.config = config;
-        self.rebuild_automation_graph(false);
-        self.persist_selected_automation_draft();
-        self.refresh_automation_node_inspector();
-    }
-
-    fn publish_automation(&mut self) {
-        let Some(workflow_id) = self.selected_automation.clone() else {
-            return;
-        };
-        match self.kernel.session().publish_automation(&workflow_id) {
-            Ok(_) => self.refresh_automations(),
-            Err(error) => {
-                self.automation_error = Some(format!("无法发布自动化：{error}"));
-            }
-        }
-    }
-
-    fn toggle_automation(&mut self) {
-        let Some(workflow) = self.selected_automation_workflow() else {
-            return;
-        };
-        let workflow_id = workflow.id.clone();
-        let enabled = !workflow.enabled;
-        match self
-            .kernel
-            .session()
-            .set_automation_enabled(&workflow_id, enabled)
-        {
-            Ok(_) => self.refresh_automations(),
-            Err(error) => {
-                self.automation_error = Some(format!("无法更新自动化状态：{error}"));
-            }
-        }
-    }
-
-    fn delete_automation(&mut self) {
-        let Some(workflow_id) = self.selected_automation.clone() else {
-            return;
-        };
-        match self.kernel.session().delete_automation(&workflow_id) {
-            Ok(()) => {
-                self.selected_automation = None;
-                self.refresh_automations();
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法删除自动化：{error}"));
-            }
-        }
-    }
-
-    fn selected_automation_workflow(&self) -> Option<&AutomationWorkflow> {
-        let selected = self.selected_automation.as_deref()?;
-        self.automations
-            .iter()
-            .find(|workflow| workflow.id == selected)
-    }
-
-    fn selected_automation_node(&self) -> Option<&AutomationNode> {
-        let node_id = self.automation_node_inspector.node_id.as_deref()?;
-        self.selected_automation_workflow()?
-            .draft
-            .nodes
-            .iter()
-            .find(|node| node.id == node_id)
-    }
-
-    fn rebuild_automation_graph(&mut self, reset_viewport: bool) {
-        let Some(workflow) = self.selected_automation_workflow() else {
-            self.automation_graph = GraphModel::empty();
-            self.automation_selection = None;
-            self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-            return;
-        };
-        match automation_graph_model(workflow) {
-            Ok(graph) => {
-                self.automation_graph = graph;
-                if reset_viewport {
-                    self.automation_viewport = GraphViewport::default();
-                    self.adjust_automation_view(None);
-                    self.automation_selection = None;
-                    self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-                }
-            }
-            Err(error) => {
-                self.automation_graph = GraphModel::empty();
-                self.automation_selection = None;
-                self.automation_node_inspector = AutomationNodeInspectorDraft::default();
-                self.automation_error = Some(format!("自动化图无法显示：{error}"));
-            }
-        }
-    }
-
-    fn update_automation_graph(&mut self, event: GraphCanvasEvent) {
-        match event {
-            GraphCanvasEvent::SelectionChanged(selection) => {
-                if matches!(selection, Some(GraphSelection::Node(_))) {
-                    self.automation_inspector_panel = "node".into();
-                }
-                self.automation_selection = selection;
-                self.refresh_automation_node_inspector();
-            }
-            GraphCanvasEvent::ViewportInput(viewport)
-            | GraphCanvasEvent::ViewportChanged(viewport) => {
-                self.automation_viewport = viewport;
-            }
-            GraphCanvasEvent::NodePositionInput { node, position } => {
-                self.move_automation_node(node.as_str(), position, false);
-            }
-            GraphCanvasEvent::NodePositionChanged { node, position } => {
-                self.move_automation_node(node.as_str(), position, true);
-            }
-            GraphCanvasEvent::ConnectionRequested { source, target } => {
-                self.connect_automation_nodes(source, target);
-            }
-        }
-    }
-
-    fn move_automation_node(&mut self, node_id: &str, position: GraphPoint, persist: bool) {
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let Some(workflow) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-        else {
-            return;
-        };
-        let Some(node) = workflow
-            .draft
-            .nodes
-            .iter_mut()
-            .find(|node| node.id == node_id)
-        else {
-            return;
-        };
-        node.position = AutomationNodePosition {
-            x: f64::from(position.x),
-            y: f64::from(position.y),
-        };
-        let graph_node = self
-            .automation_graph
-            .nodes()
-            .iter()
-            .find_map(|node| (node.id.as_str() == node_id).then(|| node.id.clone()));
-        if let Some(graph_node) = graph_node {
-            let _ = self
-                .automation_graph
-                .set_node_position(&graph_node, position);
-        }
-        if persist {
-            self.persist_selected_automation_draft();
-        }
-    }
-
-    fn connect_automation_nodes(&mut self, source: GraphEndpoint, target: GraphEndpoint) {
-        let Some(selected) = self.selected_automation.clone() else {
-            return;
-        };
-        let Some(workflow) = self
-            .automations
-            .iter_mut()
-            .find(|workflow| workflow.id == selected)
-        else {
-            return;
-        };
-        if !append_automation_connection(workflow, source, target) {
-            return;
-        }
-        self.persist_selected_automation_draft();
-    }
-
-    fn persist_selected_automation_draft(&mut self) {
-        let Some(workflow) = self.selected_automation_workflow().cloned() else {
-            return;
-        };
-        self.automation_dirty.insert(workflow.id.clone());
-        if workflow
-            .draft
-            .nodes
-            .iter()
-            .any(|node| node.title.trim().is_empty())
-        {
-            self.automation_error = Some("节点名称不能为空。".to_owned());
-            return;
-        }
-        let input = AutomationSaveDraftInput {
-            id: Some(workflow.id.clone()),
-            name: workflow.name,
-            scope: workflow.scope,
-            nodes: workflow.draft.nodes,
-            edges: workflow.draft.edges,
-        };
-        match self.kernel.session().save_automation_draft(input) {
-            Ok(updated) => {
-                self.automation_dirty.remove(&updated.id);
-                if let Some(workflow) = self
-                    .automations
-                    .iter_mut()
-                    .find(|workflow| workflow.id == updated.id)
-                {
-                    *workflow = updated;
-                }
-                self.automation_error = None;
-            }
-            Err(error) => {
-                self.automation_error = Some(format!("无法保存自动化：{error}"));
-            }
-        }
+            .any(|project| project.id.as_str() == value);
+        self.automation_module_mut()
+            .toggle_automation_scope_value(field, value, project_exists);
     }
 
     fn execute_workspace_command(&mut self, command: DesktopCommand) -> bool {
+        self.execute_workspace_command_with_resource_reveal(command, true)
+    }
+
+    fn execute_workspace_command_with_resource_reveal(
+        &mut self,
+        command: DesktopCommand,
+        reveal_resource: bool,
+    ) -> bool {
         let window_id = self.dispatch_window();
         let session = self.dispatch_workspace();
+        let requested_item = reveal_resource
+            .then(|| requested_workspace_item(&command).cloned())
+            .flatten();
         match session.execute(command) {
             Ok(outcome) => {
+                self.reveal_requested_resource(
+                    window_id,
+                    requested_item.as_ref(),
+                    &outcome.workspace.workspace_items,
+                );
                 if window_id == HostedWindowId::PRIMARY {
                     self.apply_workspace_snapshot(outcome.workspace);
                 } else {
@@ -10307,11 +10510,38 @@ impl DesktopProgram {
         }
     }
 
+    fn reveal_requested_resource(
+        &mut self,
+        window_id: HostedWindowId,
+        requested: Option<&WorkspaceItemId>,
+        items: &[WorkspaceItem],
+    ) {
+        if !items.iter().any(|item| {
+            Some(&item.id) == requested
+                && matches!(
+                    item.kind.as_str(),
+                    "document-editor" | "terminal" | "task-browser" | "project-files"
+                )
+        }) {
+            return;
+        }
+        if window_id == HostedWindowId::PRIMARY {
+            if let Some(shell) = &self.runtime_shell {
+                shell.reveal_workspace_resources();
+            }
+        } else if let Some(shell) = self.task_popup_shells.get_mut(&window_id) {
+            shell.reveal_workspace_resources();
+        }
+    }
+
     fn persist_application_workspace(&mut self) {
         self.persist_workspace_topology();
     }
 
     fn persist_workspace_topology(&mut self) {
+        if self.restoring_workspace_topology {
+            return;
+        }
         let mut windows = Vec::with_capacity(self.task_popups.len());
         for popup in self.task_popups.values() {
             if popup.draft.is_some() {
@@ -10335,9 +10565,17 @@ impl DesktopProgram {
             eprintln!("failed to persist Native workspace topology: revision overflow");
             return;
         };
+        let primary = match self.application_workspace.persisted_state() {
+            Ok(state) => Some(state),
+            Err(error) => {
+                eprintln!("failed to snapshot Native primary workspace: {error}");
+                return;
+            }
+        };
         let state = NativeWorkspaceTopologyState {
             schema_version: NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION,
             revision,
+            primary,
             windows,
         };
         match self.workspace_topology_state.record(state) {
@@ -10410,18 +10648,9 @@ impl DesktopProgram {
                     .iter()
                     .find(|item| &item.id == item_id)
             });
-        let next_automations_open = active_item.is_some_and(|item| {
-            item.application_surface()
-                .is_ok_and(|surface| surface == Some(ApplicationWorkspaceSurface::Automations))
-        });
-        let next_projects_overview_open = active_item.is_some_and(|item| {
-            item.application_surface()
-                .is_ok_and(|surface| surface == Some(ApplicationWorkspaceSurface::Projects))
-        });
-        let next_settings_open = active_item.is_some_and(|item| {
-            item.application_surface()
-                .is_ok_and(|surface| surface == Some(ApplicationWorkspaceSurface::Settings))
-        });
+        let next_navigation = WindowRoute::from_surface(
+            active_item.and_then(|item| item.application_surface().ok().flatten()),
+        );
         let next_settings_tab = active_item
             .filter(|item| {
                 item.application_surface()
@@ -10436,13 +10665,6 @@ impl DesktopProgram {
                     "appearance"
                         | "agent"
                         | "provider"
-                        | "credentials"
-                        | "assistant"
-                        | "model-config"
-                        | "preferences"
-                        | "plugin-packages"
-                        | "plugin-hooks"
-                        | "plugin-mcp"
                         | "quota"
                         | "extensions"
                         | "remote"
@@ -10481,11 +10703,15 @@ impl DesktopProgram {
         let project_selection_changed = self.selected_project != snapshot.selected_project;
         let inbox_selection_changed = self.inbox_selected != snapshot.inbox_selected;
         let task_selection_changed = self.selected_task != snapshot.selected_task;
+        if task_selection_changed {
+            self.remember_main_timeline_position();
+        }
         let project_surface_changed = self.project_surface != next_project_surface;
-        let automations_open_changed = self.automations_open != next_automations_open;
+        let automations_open_changed =
+            self.navigation.is_automations() != next_navigation.is_automations();
         let projects_overview_open_changed =
-            self.projects_overview_open != next_projects_overview_open;
-        let settings_open_changed = self.settings_open != next_settings_open;
+            self.navigation.is_projects() != next_navigation.is_projects();
+        let settings_open_changed = self.navigation.is_settings() != next_navigation.is_settings();
         let selection_changed =
             project_selection_changed || inbox_selection_changed || task_selection_changed;
         self.projects = snapshot.projects;
@@ -10514,16 +10740,11 @@ impl DesktopProgram {
         }
         self.selected_project = snapshot.selected_project;
         self.inbox_selected = snapshot.inbox_selected;
-        if self.selected_task != snapshot.selected_task {
-            self.iab.cancel_capture();
-        }
         self.selected_task = snapshot.selected_task;
         self.workspace_items = snapshot.workspace_items;
         self.panel_layout = snapshot.panel_layout;
         self.project_surface = next_project_surface;
-        self.projects_overview_open = next_projects_overview_open;
-        self.automations_open = next_automations_open;
-        self.settings_open = next_settings_open;
+        self.navigation = next_navigation;
         if let Some(tab) = next_settings_tab {
             self.settings_state
                 .select(&self.settings_model, &SettingsTabId::new(tab));
@@ -10550,6 +10771,18 @@ impl DesktopProgram {
             self.pending_session_branch = None;
             self.pending_review_slash_workflow = None;
             self.timeline_viewports.remove(&TimelineSurfaceKey::Main);
+            if let Some(position) = self.selected_task.as_ref().and_then(|task_id| {
+                self.timeline_module_for(HostedWindowId::PRIMARY)?
+                    .reading_position(task_id)
+            }) {
+                self.timeline_viewports.insert(
+                    TimelineSurfaceKey::Main,
+                    TimelineViewport {
+                        offset: position.offset,
+                        extent: position.extent,
+                    },
+                );
+            }
             let title = self
                 .tasks
                 .iter()
@@ -10566,6 +10799,7 @@ impl DesktopProgram {
         self.sync_inspector_region();
         self.error_message = None;
         if selection_changed {
+            self.clear_main_conversation_draft();
             self.task_session = None;
             self.route_composer_message(
                 HostedWindowId::PRIMARY,
@@ -10573,7 +10807,6 @@ impl DesktopProgram {
             );
             self.todo_draft.clear();
             self.editing_todo = None;
-            self.todo_ui = Default::default();
             self.goal_draft.clear();
             self.worktree_confirmation = None;
             self.interaction_drafts.clear();
@@ -10593,7 +10826,7 @@ impl DesktopProgram {
             self.task_session = None;
             self.conversation_suggestions.clear();
         }
-        if projects_overview_open_changed && self.projects_overview_open {
+        if projects_overview_open_changed && self.navigation.is_projects() {
             self.refresh_project_dashboard();
         }
         if project_selection_changed || project_surface_changed {
@@ -10614,9 +10847,11 @@ impl DesktopProgram {
         if has_automation_workspace_item
             && (!had_automation_workspace_item || automations_open_changed)
         {
-            self.refresh_automations();
+            self.route_automation(
+                crate::module::automation::controller::AutomationModuleMessage::Refresh,
+            );
         }
-        if self.settings_open && settings_open_changed {
+        if self.navigation.is_settings() && settings_open_changed {
             self.refresh_active_settings_tab();
         }
         self.refresh_workspace_pane_sessions();
@@ -10647,7 +10882,7 @@ impl DesktopProgram {
         document_items.dedup_by(|left, right| left.id == right.id);
         let application = self.kernel.session().clone();
         if let Some(module) = self.documents_module_mut() {
-            module.sync_editors_from_items(&document_items, &application);
+            module.sync_editors_from_items(&document_items, &application.document_service());
         }
     }
 
@@ -10782,6 +11017,118 @@ impl DesktopProgram {
 
     fn update_message(&mut self, message: Message) -> Option<HostedWindowAction> {
         match message {
+            Message::BrowserPoll => {
+                #[cfg(target_os = "windows")]
+                {
+                    self.browser.poll();
+                    self.browser
+                        .bind_agents(self.kernel.session().authority().shared_runtime().inner());
+                }
+                return None;
+            }
+            Message::BrowserAction {
+                window_id,
+                resource,
+                action,
+            } => {
+                if action == crate::browser_workbench::BrowserAction::InstallRuntime {
+                    if self.browser_presentation(&resource).is_some() {
+                        let _ =
+                            self.kernel
+                                .session()
+                                .execute_host(DesktopHostAction::OpenExternal(
+                                    "https://developer.microsoft.com/microsoft-edge/webview2/"
+                                        .to_owned(),
+                                ));
+                    }
+                    return None;
+                }
+
+                #[cfg(target_os = "windows")]
+                if let crate::browser_workbench::BrowserAction::ApproveRequest(ticket) = &action {
+                    use lilia_contracts::BrowserHostRequestKind;
+                    if ticket.scope.tab_id != resource
+                        || self.browser_presentation(&resource).is_none()
+                    {
+                        return None;
+                    }
+                    if let Err(error) = self.browser.begin_request(ticket) {
+                        self.error_message = Some(error);
+                        return None;
+                    }
+                    match &ticket.kind {
+                        BrowserHostRequestKind::NewWindow { .. } => {
+                            match self.browser.open_requested(ticket) {
+                                Ok(item) => {
+                                    if window_id == HostedWindowId::PRIMARY {
+                                        self.reveal_workspace_item(item);
+                                    } else if let Some(pane_id) = self
+                                        .task_popups
+                                        .get(&window_id)
+                                        .and_then(|popup| popup.workspace.snapshot().ok())
+                                        .map(|snapshot| snapshot.panel_layout.active_pane().clone())
+                                    {
+                                        self.execute_workspace_window_command(
+                                            window_id,
+                                            DesktopCommand::OpenWorkspaceItem { pane_id, item },
+                                        );
+                                    }
+                                }
+                                Err(error) => self.error_message = Some(error),
+                            }
+                        }
+                        kind => {
+                            let request = DesktopFileDialogRequest {
+                                dialog_id: format!("browser-{}", ticket.id),
+                                title: Some(
+                                    if matches!(kind, BrowserHostRequestKind::Download { .. }) {
+                                        "保存下载文件"
+                                    } else {
+                                        "选择上传文件"
+                                    }
+                                    .into(),
+                                ),
+                                initial_directory: None,
+                                filters: vec![],
+                                select_directories: false,
+                                multiple: matches!(
+                                    kind,
+                                    BrowserHostRequestKind::Upload { multiple: true }
+                                ),
+                            };
+                            let action =
+                                if let BrowserHostRequestKind::Download { suggested_filename } =
+                                    kind
+                                {
+                                    let filename = suggested_filename
+                                        .rsplit(['/', '\\'])
+                                        .next()
+                                        .filter(|name| !name.is_empty())
+                                        .unwrap_or("download")
+                                        .to_owned();
+                                    DesktopHostAction::SaveFileDialog {
+                                        request,
+                                        suggested_filename: filename,
+                                    }
+                                } else {
+                                    DesktopHostAction::FileDialog(request)
+                                };
+                            self.spawn_host_file_dialog(
+                                FileDialogPurpose::BrowserRequest(ticket.clone()),
+                                action,
+                            );
+                        }
+                    }
+                    return None;
+                }
+                #[cfg(target_os = "windows")]
+                if let Err(error) = self.browser.action(&resource, action) {
+                    self.error_message = Some(error);
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = (window_id, resource, action);
+                return None;
+            }
             Message::Automation(message) => return self.apply_automation_message(message),
             Message::Roadmap(message) => return self.apply_roadmap_message(message),
             Message::Memory(message) => return self.apply_memory_message(message),
@@ -10806,7 +11153,6 @@ impl DesktopProgram {
             Message::Sidebar(message) => return self.apply_sidebar_message(message),
             Message::GitHub(message) => return self.apply_github_message(message),
             Message::Document(message) => return self.apply_document_message(message),
-            Message::Suggestions(message) => return self.apply_suggestions_message(message),
             Message::Worktree(message) => return self.apply_worktree_message(message),
             Message::Import(message) => return self.apply_import_message(message),
             Message::Provider(message) => return self.apply_provider_message(message),
@@ -10848,61 +11194,24 @@ impl DesktopProgram {
         message: AutomationMessage,
     ) -> Option<HostedWindowAction> {
         match message {
-            AutomationMessage::AddNode(kind) => self.add_automation_node(&kind),
-            AutomationMessage::DeleteSelection => self.delete_automation_selection(),
-            AutomationMessage::Publish => {
-                self.persist_selected_automation_draft();
-                if self.automation_error.is_none() {
-                    self.publish_automation();
-                }
-            }
-            AutomationMessage::ToggleEnabled => self.toggle_automation(),
-            AutomationMessage::Delete => self.delete_automation(),
-            AutomationMessage::SelectRun(id) => self.select_automation_run(id),
-            AutomationMessage::Resume => self.resume_automation(),
-            AutomationMessage::CancelRun => self.cancel_automation(),
-            AutomationMessage::HumanResponse(value) => self.automation_human_response = value,
-            AutomationMessage::NodeTitle(value) => {
-                self.automation_node_inspector.title = value;
-                self.apply_automation_inspector_draft();
-            }
-            AutomationMessage::NodeConfig { field, value } => {
-                self.update_automation_node_config_field(field, value)
-            }
-            AutomationMessage::ToggleConfig(field) => {
-                self.toggle_automation_node_config_boolean(&field)
-            }
-            AutomationMessage::SaveNode => self.save_automation_node_inspector(),
-            AutomationMessage::ToggleInbox => self.toggle_automation_scope_inbox(),
-            AutomationMessage::ToggleScope { field, value } => {
-                self.toggle_automation_scope_value(&field, &value)
-            }
             AutomationMessage::OpenAutomations => {
-                self.settings_open = false;
                 self.open_application_surface(ApplicationWorkspaceSurface::Automations);
             }
             AutomationMessage::CloseAutomations => {
                 self.close_application_surface(ApplicationWorkspaceSurface::Automations)
             }
-            AutomationMessage::RefreshAutomations => self.refresh_automations(),
-            AutomationMessage::SelectAutomation(workflow_id) => self.select_automation(workflow_id),
-            AutomationMessage::CreateAutomation => self.create_automation(),
-            AutomationMessage::AutomationNameChanged(value) => {
-                if let Some(selected) = self.selected_automation.as_deref() {
-                    if let Some(workflow) = self
-                        .automations
-                        .iter_mut()
-                        .find(|workflow| workflow.id == selected)
-                    {
-                        workflow.name = value;
-                        self.automation_dirty.insert(workflow.id.clone());
-                        self.automation_error = None;
-                    }
-                }
-            }
-            AutomationMessage::SaveAutomationDraft => self.persist_selected_automation_draft(),
-            AutomationMessage::RunAutomation => self.run_automation(),
-            AutomationMessage::AutomationGraph(event) => self.update_automation_graph(event),
+            AutomationMessage::RefreshAutomations => self.route_automation(
+                crate::module::automation::controller::AutomationModuleMessage::Refresh,
+            ),
+            AutomationMessage::SelectAutomation(workflow_id) => self.route_automation(
+                crate::module::automation::controller::AutomationModuleMessage::Select(workflow_id),
+            ),
+            AutomationMessage::CreateAutomation => self.route_automation(
+                crate::module::automation::controller::AutomationModuleMessage::Create,
+            ),
+            AutomationMessage::AutomationNameChanged(value) => self.route_automation(
+                crate::module::automation::controller::AutomationModuleMessage::Rename(value),
+            ),
         }
         None
     }
@@ -10930,7 +11239,6 @@ impl DesktopProgram {
         let selection_changed = matches!(
             &message,
             ArchitectureMessage::Graph(nana_ui::GraphCanvasEvent::SelectionChanged(_))
-                | ArchitectureMessage::SelectHistory(_)
         );
         self.route_architecture_message(message);
         if layout_changed {
@@ -11036,9 +11344,6 @@ impl DesktopProgram {
                     }
                 }
             }
-            ConversationStatusMessage::StopConversationStatusTask(task_id) => {
-                self.stop_conversation_status_task(task_id);
-            }
         }
         None
     }
@@ -11058,16 +11363,64 @@ impl DesktopProgram {
 
     fn apply_composer_message(&mut self, message: ComposerMessage) -> Option<HostedWindowAction> {
         match message {
-            ComposerMessage::SelectPermission(permission) => {
-                self.composer_menu_open = None;
-                self.execute_composer_command(DesktopComposerCommand::SetPermission(permission));
+            ComposerMessage::ToggleComposerActionMenu(window_id) => {
+                self.route_composer_message(
+                    window_id,
+                    crate::module::composer::ComposerMessage::ToggleMenu(
+                        crate::module::composer::view::ComposerMenuKind::Actions,
+                    ),
+                );
             }
-            ComposerMessage::SelectWorktree(selection) => {
-                self.composer_menu_open = None;
-                self.select_window_worktree(HostedWindowId::PRIMARY, selection);
+            ComposerMessage::TogglePermissionMenu(window_id) => {
+                self.route_composer_message(
+                    window_id,
+                    crate::module::composer::ComposerMessage::ToggleMenu(
+                        crate::module::composer::view::ComposerMenuKind::Permission,
+                    ),
+                );
+            }
+            ComposerMessage::SelectPermission(window_id, permission) => {
+                self.route_composer_message(
+                    window_id,
+                    crate::module::composer::ComposerMessage::SetMenu(None),
+                );
+                self.route_composer_message(
+                    window_id,
+                    crate::module::composer::ComposerMessage::ApplyCommand(
+                        DesktopComposerCommand::SetPermission(permission),
+                    ),
+                );
+            }
+            ComposerMessage::ToggleWorktreeMenu(window_id) => {
+                if self.draft_worktree_context(window_id).is_some() {
+                    self.route_composer_message(
+                        window_id,
+                        crate::module::composer::ComposerMessage::ToggleMenu(
+                            crate::module::composer::view::ComposerMenuKind::Worktree,
+                        ),
+                    );
+                }
+            }
+            ComposerMessage::SelectWorktree(window_id, selection) => {
+                self.route_composer_message(
+                    window_id,
+                    crate::module::composer::ComposerMessage::SetMenu(None),
+                );
+                match selection {
+                    WorktreeMenuSelection::Current => {
+                        self.set_draft_worktree(window_id, DraftWorktreeSelection::Current)
+                    }
+                    WorktreeMenuSelection::Create => {
+                        self.set_draft_worktree(window_id, DraftWorktreeSelection::Create)
+                    }
+                    WorktreeMenuSelection::Existing => self.pick_draft_worktree(window_id),
+                }
             }
             ComposerMessage::ComposerAction { window_id, action } => {
-                self.composer_menu_open = None;
+                self.route_composer_message(
+                    window_id,
+                    crate::module::composer::ComposerMessage::SetMenu(None),
+                );
                 let message = match action {
                     ComposerAction::AddFile if window_id == HostedWindowId::PRIMARY => {
                         Message::Composer(ComposerMessage::PickAttachmentFiles)
@@ -11112,24 +11465,28 @@ impl DesktopProgram {
                     ComposerAction::ToggleGoalMode => {
                         Message::Composer(ComposerMessage::TaskPopupToggleGoalMode(window_id))
                     }
+                    ComposerAction::NewGuide => {
+                        self.apply_todo_action(
+                            window_id,
+                            crate::todo_panel::TodoAction::NewGuide,
+                        );
+                        if window_id == HostedWindowId::PRIMARY && self.todo_ui.editor.is_some() {
+                            self.activate_inspector_panel(TASK_INSPECTOR_PANEL_ID);
+                        }
+                        return None;
+                    }
+                    ComposerAction::EditGoal => {
+                        self.apply_todo_action(
+                            window_id,
+                            crate::todo_panel::TodoAction::EditGoal,
+                        );
+                        if window_id == HostedWindowId::PRIMARY && self.todo_ui.editor.is_some() {
+                            self.activate_inspector_panel(TASK_INSPECTOR_PANEL_ID);
+                        }
+                        return None;
+                    }
                 };
                 self.update_message(message);
-            }
-            ComposerMessage::TaskPopupComposerChanged { window_id, value } => {
-                if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                    popup.pending_review_slash_workflow = None;
-                }
-                self.route_composer_message(
-                    window_id,
-                    crate::module::composer::ComposerMessage::SetContent(value),
-                );
-                if self
-                    .task_popups
-                    .get(&window_id)
-                    .is_some_and(|popup| popup.draft.is_some())
-                {
-                    self.refresh_conversation_suggestions(window_id, false);
-                }
             }
             ComposerMessage::TaskPopupSelectSlashCommand { window_id, command } => {
                 self.select_slash_command(window_id, command)
@@ -11175,9 +11532,7 @@ impl DesktopProgram {
             ComposerMessage::TaskPopupSubmitTurn(window_id) => {
                 self.submit_task_popup_turn(window_id);
             }
-            ComposerMessage::TaskPopupInterruptTurn(window_id) => {
-                self.interrupt_task_popup_turn(window_id);
-            }
+
             ComposerMessage::TaskPopupTogglePlanMode(window_id) => {
                 let enabled = !self
                     .task_popups
@@ -11339,7 +11694,9 @@ impl DesktopProgram {
                 ));
             }
             ComposerMessage::SubmitTurn => self.submit_turn(),
-            ComposerMessage::InterruptTurn => self.interrupt_turn(),
+            ComposerMessage::StopTurn { window_id, target } => {
+                self.stop_addressed_turn(window_id, target)
+            }
             ComposerMessage::RespondApproval {
                 request_id,
                 approved,
@@ -11365,6 +11722,95 @@ impl DesktopProgram {
         None
     }
 
+    fn apply_addressed_timeline(
+        &mut self,
+        target: crate::module::timeline::view::TimelineTarget,
+        action: crate::module::timeline::view::TimelineAction,
+    ) -> Option<HostedWindowAction> {
+        use crate::module::timeline::view::TimelineAction;
+        let active = if target.window_id == HostedWindowId::PRIMARY {
+            self.selected_task.as_ref()
+        } else {
+            self.task_popups
+                .get(&target.window_id)
+                .and_then(|popup| popup.active_task_id.as_ref())
+        };
+        let current = crate::module::timeline::view::TimelineTarget {
+            window_id: target.window_id,
+            task_id: active.map(|id| id.as_str().to_owned()),
+        };
+        if !target.matches(&current) {
+            return None;
+        }
+        let surface = if target.window_id == HostedWindowId::PRIMARY {
+            TimelineSurfaceKey::Main
+        } else {
+            TimelineSurfaceKey::TaskPopup(target.window_id)
+        };
+        match action {
+            TimelineAction::Expand(event_id) => self.route_timeline_window(
+                target.window_id,
+                crate::module::timeline::TimelineModuleMessage::Toggle(event_id),
+            ),
+            TimelineAction::Scrolled {
+                offset,
+                viewport_extent,
+            } => self.update_timeline_viewport(surface, offset, viewport_extent),
+            TimelineAction::LoadEarlier => {
+                if target.window_id == HostedWindowId::PRIMARY {
+                    self.load_earlier_timeline();
+                } else {
+                    self.load_earlier_task_popup_timeline(target.window_id);
+                }
+            }
+            TimelineAction::Retry(event_id) => {
+                self.retry_timeline_event(target.window_id, &event_id)
+            }
+            TimelineAction::Continue(event_id) => self.set_timeline_session_branch(
+                target.window_id,
+                &event_id,
+                DesktopSessionBranchMode::Continue,
+            ),
+            TimelineAction::Fork(event_id) => self.set_timeline_session_branch(
+                target.window_id,
+                &event_id,
+                DesktopSessionBranchMode::Fork,
+            ),
+            TimelineAction::OpenImage { source, alt } => {
+                return self.apply_timeline_message(TimelineMessage::OpenMarkdownImage {
+                    window_id: target.window_id,
+                    image: MarkdownImage { source, alt },
+                });
+            }
+            TimelineAction::Copy(event_id) => {
+                let session = if target.window_id == HostedWindowId::PRIMARY {
+                    self.task_session.as_ref()
+                } else {
+                    self.task_popups
+                        .get(&target.window_id)
+                        .and_then(|popup| popup.session.as_ref())
+                };
+                let text = session
+                    .and_then(|session| session.timeline.iter().find(|event| event.id == event_id))
+                    .map(|event| {
+                        event
+                            .markdown_plain_text
+                            .clone()
+                            .or_else(|| event.markdown.clone())
+                            .or_else(|| event.summary.clone())
+                            .unwrap_or_else(|| event.title.clone())
+                    });
+                if let Some(text) = text {
+                    return self.apply_timeline_message(TimelineMessage::CopyTimelineMarkdown {
+                        event_id,
+                        text,
+                    });
+                }
+            }
+        }
+        None
+    }
+
     fn apply_timeline_message(&mut self, message: TimelineMessage) -> Option<HostedWindowAction> {
         match message {
             TimelineMessage::ToggleTimelineEvent(event_id) => {
@@ -11373,12 +11819,6 @@ impl DesktopProgram {
                     crate::module::timeline::TimelineModuleMessage::Toggle(event_id),
                 );
             }
-            TimelineMessage::LoadEarlierTimeline => self.load_earlier_timeline(),
-            TimelineMessage::TimelineScrolled {
-                surface,
-                offset,
-                viewport_extent,
-            } => self.update_timeline_viewport(surface, offset, viewport_extent),
             TimelineMessage::ScrollTimelineToEnd(surface) => {
                 let content_extent = match &surface {
                     TimelineSurfaceKey::Main => self.task_session.as_ref(),
@@ -11428,15 +11868,20 @@ impl DesktopProgram {
                 self.complete_markdown_image_load(source, result);
             }
             TimelineMessage::OpenMarkdownImage { window_id, image } => {
-                self.touch_markdown_image(&image.source);
-                self.markdown_image_previews.insert(
-                    window_id,
-                    MarkdownImagePreview {
-                        source: image.source.clone(),
-                        alt: image.alt,
-                    },
+                let ready = matches!(
+                    self.markdown_images.get(&image.source),
+                    Some(MarkdownImageLoadState::Ready(_))
                 );
-                self.request_markdown_image_load(&image.source);
+                if ready {
+                    self.touch_markdown_image(&image.source);
+                    self.markdown_image_previews.insert(
+                        window_id,
+                        MarkdownImagePreview {
+                            source: image.source,
+                            alt: image.alt,
+                        },
+                    );
+                }
             }
             TimelineMessage::CloseMarkdownImage(window_id) => {
                 self.markdown_image_previews.remove(&window_id);
@@ -11449,24 +11894,7 @@ impl DesktopProgram {
     fn apply_settings_message(&mut self, message: SettingsMessage) -> Option<HostedWindowAction> {
         match message {
             SettingsMessage::OpenSettings => {
-                let was_settings_open = self.settings_open;
-                let return_item_id = (!was_settings_open)
-                    .then(|| {
-                        self.panel_layout
-                            .active_workspace_item()
-                            .ok()
-                            .flatten()
-                            .cloned()
-                    })
-                    .flatten();
                 self.open_application_surface(ApplicationWorkspaceSurface::Settings);
-                if !was_settings_open && self.settings_open {
-                    self.update_application_surface_state_entry(
-                        ApplicationWorkspaceSurface::Settings,
-                        "returnItemId",
-                        return_item_id.map(|item_id| json!(item_id.as_str())),
-                    );
-                }
             }
             SettingsMessage::CloseSettings => {
                 self.shell_shortcut_capturing = false;
@@ -11485,6 +11913,10 @@ impl DesktopProgram {
                 self.refresh_active_settings_tab();
             }
             SettingsMessage::Appearance(event) => self.update_appearance(event),
+            SettingsMessage::RemotePcNameChanged(value) => {
+                self.remote_pc_name = value;
+                self.remote_error = None;
+            }
             SettingsMessage::SetSidebarDisplayMode(mode) => {
                 if self.sidebar_display_mode != mode {
                     self.sidebar_display_mode = mode;
@@ -11575,13 +12007,8 @@ impl DesktopProgram {
     /// 应用侧 workspace 写入统一走这里：投影脏标记保证同周期 sync 以
     /// controller 为准，不被拉取回的 shell 模型回退。
     fn apply_workspace_action(&mut self, action: WorkspaceAction) -> bool {
-        let changed = update_workspace_for_surface(
-            &mut self.workspace,
-            self.settings_open || self.automations_open,
-            action,
-        );
-        self.pending_workspace_projection |= changed;
-        changed
+        self.pending_workspace_projection = true;
+        self.workspace.update(action)
     }
 
     fn apply_workspace_layout_message(
@@ -11676,11 +12103,7 @@ impl DesktopProgram {
                 item_id,
                 stroke,
             } => self.dispatch_command_stroke(window_id, item_id, stroke),
-            ChromeMessage::FromShell(intent) => {
-                let action = self.apply_shell_intent(intent);
-                self.pending_shell_intents.fetch_sub(1, Ordering::Relaxed);
-                return action;
-            }
+            ChromeMessage::FromShell(intent) => return self.apply_shell_intent(intent),
             ChromeMessage::Shell(command) => match command {
                 ShellCommand::OpenNewConversation => {
                     self.open_shortcut_conversation_popup();
@@ -11765,6 +12188,21 @@ impl DesktopProgram {
             }
             ProjectMessage::OpenNativeProjectTerminal => self.open_native_project_terminal(),
             ProjectMessage::SaveProjectSettings => self.save_project_preferences(),
+            ProjectMessage::SetWorktreeMode(mode) => {
+                self.project_settings.worktree.default_mode =
+                    crate::application::DesktopWorktreeSelectionMode::parse(&mode);
+                self.project_settings_error = None;
+            }
+            ProjectMessage::PickWorktreeParent => self.pick_project_worktree_parent(),
+            ProjectMessage::WorktreeInstructionsChanged(value) => {
+                self.project_worktree_instructions.set_text(&value);
+                self.project_settings_error = None;
+            }
+            ProjectMessage::ToggleWorktreeCleanup => {
+                self.project_settings.worktree.cleanup_on_archive =
+                    !self.project_settings.worktree.cleanup_on_archive;
+                self.project_settings_error = None;
+            }
             ProjectMessage::OpenProjectWorkspace => {
                 self.open_project_workspace(ExternalWorkspaceTarget::FileManager);
             }
@@ -11777,7 +12215,6 @@ impl DesktopProgram {
                 }
                 self.close_sidebar_search();
                 self.close_main_conversation_draft();
-                self.automations_open = false;
                 self.project_surface = ProjectSurface::Tasks;
                 if !self.coding_search_all_projects {
                     self.coding_search = None;
@@ -11792,8 +12229,8 @@ impl DesktopProgram {
 
     fn apply_task_message(&mut self, message: TaskMessage) -> Option<HostedWindowAction> {
         match message {
-            TaskMessage::SessionPageChanged(_)
-            | TaskMessage::TaskSearchChanged(_)
+            TaskMessage::TaskSearchChanged(_)
+            | TaskMessage::SessionPageChanged(_)
             | TaskMessage::NewTaskTitleChanged(_)
             | TaskMessage::TaskTitleChanged(_)
             | TaskMessage::TaskDropSearchChanged(_) => {
@@ -11816,14 +12253,12 @@ impl DesktopProgram {
             TaskMessage::SelectInbox => {
                 self.close_sidebar_search();
                 self.close_main_conversation_draft();
-                self.automations_open = false;
                 self.project_surface = ProjectSurface::Tasks;
                 self.execute_workspace_command(DesktopCommand::SelectInbox);
             }
             TaskMessage::SelectTask(task_id) => {
                 self.close_sidebar_search();
                 self.close_main_conversation_draft();
-                self.automations_open = false;
                 self.project_surface = ProjectSurface::Tasks;
                 self.select_task(task_id);
             }
@@ -11913,8 +12348,7 @@ impl DesktopProgram {
                         .task_worktree(&task_id)
                         .is_ok_and(|worktree| worktree.is_some())
                 {
-                    self.window_worktree_merge_confirmations
-                        .insert(HostedWindowId::PRIMARY, task_id);
+                    self.worktree_confirmation = Some(WorktreeDangerAction::MergeAndArchive);
                 }
             }
             SidebarMessage::SidebarArchiveTask(task_id) => {
@@ -11928,7 +12362,6 @@ impl DesktopProgram {
                     self.archive_task();
                 }
             }
-            SidebarMessage::SidebarStopTask(task_id) => self.stop_conversation_status_task(task_id),
             SidebarMessage::SidebarTreeDrop {
                 source,
                 target,
@@ -11977,9 +12410,6 @@ impl DesktopProgram {
         None
     }
 
-    /// Routes a document message to the module owning the domain. Document
-    /// editors render only in the primary window's pane, so the dispatch
-    /// window is never consulted.
     fn route_documents_message(&mut self, message: DocumentMessage) {
         let outcome =
             self.route_to_primary_module(&DocumentsModule::feature_id(), Box::new(message));
@@ -11990,35 +12420,6 @@ impl DesktopProgram {
 
     fn apply_document_message(&mut self, message: DocumentMessage) -> Option<HostedWindowAction> {
         self.route_documents_message(message);
-        None
-    }
-
-    fn apply_suggestions_message(
-        &mut self,
-        message: SuggestionsMessage,
-    ) -> Option<HostedWindowAction> {
-        match message {
-            SuggestionsMessage::Refresh { window_id, force } => {
-                self.refresh_conversation_suggestions(window_id, force);
-            }
-            SuggestionsMessage::Apply { window_id, item_id } => {
-                let prompt = self
-                    .conversation_suggestion_state(window_id)
-                    .filter(|state| {
-                        self.window_composer(window_id)
-                            .is_some_and(|composer| state.is_current_for(&composer.task_id))
-                    })
-                    .and_then(|state| state.prompt_for(&item_id));
-                if self
-                    .window_composer(window_id)
-                    .is_some_and(|composer| composer.content.trim().is_empty())
-                {
-                    if let Some(prompt) = prompt {
-                        self.apply_conversation_suggestion(window_id, prompt);
-                    }
-                }
-            }
-        }
         None
     }
 
@@ -12295,7 +12696,18 @@ impl DesktopProgram {
                 }
             }
             RemoteMessage::RevokeDevice(device_id) => {
-                self.start_remote_operation(RemoteRequest::RevokeDevice { device_id })
+                self.remote_revoke_device = Some(device_id);
+            }
+            RemoteMessage::ConfirmRevokeDevice => {
+                if let Some(device_id) = self.remote_revoke_device.take() {
+                    self.start_remote_operation(RemoteRequest::RevokeDevice { device_id });
+                }
+            }
+            RemoteMessage::CancelRevokeDevice => {
+                self.remote_revoke_device = None;
+            }
+            RemoteMessage::Refresh => {
+                self.start_remote_operation(RemoteRequest::Refresh);
             }
         }
         None
@@ -12379,35 +12791,33 @@ impl DesktopProgram {
 
     fn select_workspace_pane_tab(&mut self, pane_id: PaneId, item_id: Option<WorkspaceItemId>) {
         if let Some(item_id) = item_id {
-            let record_settings_return = !self.settings_open
-                && self
-                    .workspace_items
-                    .iter()
-                    .find(|item| item.id == item_id)
-                    .is_some_and(|item| {
-                        item.application_surface().is_ok_and(|surface| {
-                            surface == Some(ApplicationWorkspaceSurface::Settings)
-                        })
-                    });
-            let return_item_id = record_settings_return
-                .then(|| {
+            let surface = self
+                .workspace_items
+                .iter()
+                .find(|item| item.id == item_id)
+                .and_then(|item| item.application_surface().ok().flatten());
+            let return_item = surface.and_then(|surface| {
+                self.navigation.return_item_for(
+                    surface,
                     self.panel_layout
                         .active_workspace_item()
                         .ok()
                         .flatten()
-                        .cloned()
-                })
-                .flatten();
+                        .cloned(),
+                )
+            });
             let activated = self.execute_workspace_command(DesktopCommand::ActivateWorkspaceItem {
                 pane_id,
                 item_id,
             });
-            if activated && record_settings_return {
-                self.update_application_surface_state_entry(
-                    ApplicationWorkspaceSurface::Settings,
-                    "returnItemId",
-                    return_item_id.map(|item_id| json!(item_id.as_str())),
-                );
+            if activated {
+                if let (Some(surface), Some(return_item)) = (surface, return_item) {
+                    self.update_application_surface_state_entry(
+                        surface,
+                        "returnItemId",
+                        return_item.map(|item_id| json!(item_id.as_str())),
+                    );
+                }
             }
         } else if self.execute_workspace_command(DesktopCommand::FocusPane(pane_id)) {
             self.execute_workspace_command(DesktopCommand::BackToTaskList);
@@ -12426,9 +12836,18 @@ impl DesktopProgram {
         if item.kind.as_str() != DOCUMENT_WORKSPACE_ITEM_KIND {
             return None;
         }
+        self.shell_document_for_item(item_id)
+    }
+
+    fn shell_document_for_item(
+        &self,
+        item_id: &WorkspaceItemId,
+    ) -> Option<crate::runtime_shell::ShellDocumentSnapshot> {
         let state = self.documents_module()?.editor(item_id)?;
         Some(crate::runtime_shell::ShellDocumentSnapshot {
             item_id: item_id.as_str().to_owned(),
+            revision: state.revision.get(),
+            conflicted: state.unapplied_edit,
             title: state.path_label.clone(),
             text: state.editor.text(),
             language: state.language_label.clone(),
@@ -12448,15 +12867,7 @@ impl DesktopProgram {
             diagnostics: state
                 .diagnostics
                 .iter()
-                .map(|diagnostic| crate::runtime_shell::ShellDiagnosticRow {
-                    severity: match diagnostic.severity {
-                        DiagnosticSeverity::Error => "错误".to_owned(),
-                        DiagnosticSeverity::Warning => "警告".to_owned(),
-                        DiagnosticSeverity::Information => "信息".to_owned(),
-                        DiagnosticSeverity::Hint => "提示".to_owned(),
-                    },
-                    message: diagnostic.message.clone(),
-                })
+                .map(crate::runtime_shell::ShellDiagnosticRow::from)
                 .collect(),
         })
     }
@@ -12473,14 +12884,20 @@ impl DesktopProgram {
         if item.kind.as_str() != TERMINAL_WORKSPACE_ITEM_KIND {
             return None;
         }
+        self.shell_terminal_for_item(item)
+    }
+
+    fn shell_terminal_for_item(
+        &self,
+        item: &WorkspaceItem,
+    ) -> Option<crate::runtime_shell::ShellTerminalSnapshot> {
         let snapshot = self.terminal_snapshot_for_item(item)?;
         Some(crate::runtime_shell::ShellTerminalSnapshot {
+            item_id: item.id.as_str().to_owned(),
+            session_id: snapshot.id.as_str().to_owned(),
             output: terminal_plain_text(&snapshot),
-            input: self
-                .terminal_inputs
-                .get(&snapshot.id)
-                .cloned()
-                .unwrap_or_default(),
+            screen: crate::terminal_view::terminal_screen(&snapshot),
+            running: snapshot.process.is_running(),
             notice: self.terminal_notices.get(&snapshot.id).cloned(),
         })
     }
@@ -12676,6 +13093,9 @@ impl DesktopProgram {
 
     fn refresh_composer(&mut self) {
         if self.main_conversation_draft.is_some() {
+            if self.selected_task.is_some() {
+                self.close_main_conversation_draft();
+            }
             return;
         }
         self.route_composer_message(
@@ -12689,62 +13109,6 @@ impl DesktopProgram {
             HostedWindowId::PRIMARY,
             crate::module::composer::ComposerMessage::ClearSuggestions,
         );
-    }
-
-    fn conversation_suggestion_state(
-        &self,
-        window_id: HostedWindowId,
-    ) -> Option<&ConversationSuggestionState> {
-        if window_id == HostedWindowId::PRIMARY {
-            Some(
-                self.main_conversation_draft
-                    .as_ref()
-                    .map(|draft| &draft.suggestions)
-                    .unwrap_or(&self.conversation_suggestions),
-            )
-        } else {
-            self.task_popups
-                .get(&window_id)
-                .map(|popup| &popup.conversation_suggestions)
-        }
-    }
-
-    fn conversation_suggestions_snapshot(
-        &self,
-        window_id: HostedWindowId,
-    ) -> crate::runtime_empty_suggestions::EmptySuggestionsSnapshot {
-        let Some(state) = self.conversation_suggestion_state(window_id) else {
-            return Default::default();
-        };
-        if self
-            .window_composer(window_id)
-            .is_none_or(|composer| !state.is_current_for(&composer.task_id))
-        {
-            return Default::default();
-        }
-        crate::runtime_empty_suggestions::EmptySuggestionsSnapshot {
-            items: state
-                .visible_items()
-                .map(|item| crate::runtime_shell::ShellSuggestionRow {
-                    id: item.id.clone(),
-                    source: crate::conversation_suggestions::suggestion_source_label(item),
-                    label: if item.summary.trim().is_empty() {
-                        item.prompt.chars().take(24).collect()
-                    } else {
-                        item.summary.clone()
-                    },
-                    prompt: item.prompt.clone(),
-                })
-                .collect(),
-            can_refresh: state.can_refresh(),
-            status: if state.is_loading() {
-                Some("正在生成建议…".to_owned())
-            } else if state.has_error() {
-                Some("暂时无法获取建议，请重试。".to_owned())
-            } else {
-                None
-            },
-        }
     }
 
     fn conversation_suggestion_state_mut(
@@ -13085,15 +13449,10 @@ impl DesktopProgram {
                 .ok()
                 .flatten()
         };
-        let attachments = composer.effective_attachments().cloned().collect();
-        let conversation_references = composer
-            .effective_conversation_references()
-            .cloned()
-            .collect();
         let input = DesktopPromptOptimizeInput {
             prompt: composer.content,
-            attachments,
-            conversation_references,
+            attachments: composer.attachments,
+            conversation_references: composer.conversation_references,
             project_cwd,
             task_id: Some(task_id.as_str().to_owned()),
         };
@@ -13323,422 +13682,6 @@ impl DesktopProgram {
         }
     }
 
-    fn conversation_controls_snapshot(
-        &self,
-        window_id: HostedWindowId,
-    ) -> crate::runtime_conversation::ConversationControls {
-        use crate::runtime_conversation::ConversationControls;
-        let Some(composer) = self.window_composer(window_id) else {
-            return ConversationControls {
-                paste_binding: self.composer_paste_binding(window_id),
-                ..Default::default()
-            };
-        };
-        let popup = self.task_popups.get(&window_id);
-        let session = if window_id == HostedWindowId::PRIMARY {
-            self.task_session.as_ref()
-        } else {
-            popup.and_then(|popup| popup.session.as_ref())
-        };
-        let pending = if window_id == HostedWindowId::PRIMARY {
-            self.pending_review_slash_workflow.as_ref()
-        } else {
-            popup.and_then(|popup| popup.pending_review_slash_workflow.as_ref())
-        };
-        let branch = if window_id == HostedWindowId::PRIMARY {
-            self.pending_session_branch.as_ref()
-        } else {
-            popup.and_then(|popup| popup.pending_session_branch.as_ref())
-        };
-        let automatic = self.composer_automatic_selection(window_id);
-        let running = if window_id == HostedWindowId::PRIMARY {
-            self.turn_state.as_ref()
-        } else {
-            popup.and_then(|popup| popup.turn_state.as_ref())
-        }
-        .is_some_and(|(_, state)| turn_state_is_active(state));
-        let locked = session.is_some_and(|session| {
-            session.blocking_pending_count > 0 || session.run_block.is_some()
-        });
-        let usage = session.and_then(|session| session.context_usage.as_ref());
-        ConversationControls {
-            paste_binding: self.composer_paste_binding(window_id),
-            can_manage_todos: self.worktree_task_for_window(window_id).is_some(),
-            model: composer.model.clone().unwrap_or_default(),
-            model_label: format!(
-                "自动 · {}",
-                automatic
-                    .as_ref()
-                    .and_then(|selection| selection.model.as_deref())
-                    .unwrap_or("选择模型")
-            ),
-            models: self
-                .composer_model_options(composer.model.as_deref())
-                .into_iter()
-                .map(|option| (option.value.to_string(), option.label.to_string()))
-                .collect(),
-            reasoning: composer
-                .reasoning_effort
-                .clone()
-                .or_else(|| automatic.and_then(|selection| selection.reasoning_effort))
-                .unwrap_or_else(|| "medium".into()),
-            context_label: usage.map(|usage| {
-                usage
-                    .used_percent
-                    .map(|percent| format!("上下文 {percent:.0}% · 压缩"))
-                    .unwrap_or_else(|| format!("{} tokens · 压缩", usage.used_tokens))
-            }),
-            can_compact: usage.is_some() && !running && !locked,
-            can_optimize: !composer.content.trim().is_empty() && !locked && !running,
-            optimizing: self.prompt_optimization_is_busy(window_id, Some(&composer.task_id)),
-            prompt_workflow: self
-                .prompt_route_suggestion(window_id, Some(&composer.task_id))
-                .and_then(|route| route.workflow.as_ref())
-                .map(|workflow| composer.workflow.as_ref() == Some(workflow)),
-            locked,
-            reference_results: self
-                .composer_conversation_references(window_id)
-                .iter()
-                .map(|item| {
-                    (
-                        item.task_id.clone(),
-                        format!(
-                            "{} · {}",
-                            item.title,
-                            item.project_name.as_deref().unwrap_or("收集箱")
-                        ),
-                    )
-                })
-                .collect(),
-            reference_query: composer_conversation_query(&composer.content).is_some(),
-            // Conversation references are rendered only as inline composer atoms.
-            // Retained undo metadata must never become a separate reference chip.
-            references: Vec::new(),
-            attachments: composer
-                .effective_attachments()
-                .filter(|item| !composer.content.contains(&item.reference_text()))
-                .map(|item| (item.id.clone(), item.name.clone()))
-                .collect(),
-            review: pending.map(|pending| {
-                (
-                    match pending.target_kind {
-                        PendingReviewTargetKind::UncommittedChanges => "changes",
-                        PendingReviewTargetKind::BaseBranch => "branch",
-                        PendingReviewTargetKind::Commit => "commit",
-                    }
-                    .into(),
-                    pending.target_value.clone(),
-                )
-            }),
-            branch: branch.map(|pending| {
-                match pending.anchor.mode {
-                    DesktopSessionBranchMode::Continue => "从选定回复继续",
-                    DesktopSessionBranchMode::Fork => "从选定回复分叉",
-                }
-                .into()
-            }),
-            plan: composer.plan_mode,
-            goal: composer.goal_mode,
-            permission: crate::runtime_shell::permission_selection(composer.permission)
-                .0
-                .into(),
-            worktree: self
-                .draft_worktree_context(window_id)
-                .map(|(_, selection)| {
-                    (
-                        draft_worktree_selection_id(&selection).to_owned(),
-                        draft_worktree_label(&selection),
-                    )
-                })
-                .or_else(|| {
-                    self.worktree_task_for_window(window_id).map(|_| {
-                        session
-                            .and_then(|session| session.worktree.as_ref())
-                            .map(|worktree| {
-                                (
-                                    "existing".into(),
-                                    Path::new(&worktree.worktree_path)
-                                        .file_name()
-                                        .and_then(|name| name.to_str())
-                                        .unwrap_or("已有工作树")
-                                        .to_owned(),
-                                )
-                            })
-                            .unwrap_or_else(|| ("current".into(), "当前目录".into()))
-                    })
-                }),
-            worktree_locked: self.window_worktree_locked(window_id),
-            worktree_merge_task: self
-                .worktree_task_for_window(window_id)
-                .filter(|_| session.is_some_and(|session| session.worktree.is_some()))
-                .map(|id| id.to_string()),
-            worktree_merge_confirmation: self
-                .window_worktree_merge_confirmations
-                .get(&window_id)
-                .filter(|task_id| {
-                    self.worktree_task_for_window(window_id).as_ref() == Some(*task_id)
-                })
-                .map(ToString::to_string),
-            slash_results: self
-                .composer_slash_commands(window_id)
-                .iter()
-                .map(|item| (item.command.name.clone(), item.command.title.clone()))
-                .collect(),
-            context_results: self
-                .composer_context_attachments(window_id)
-                .iter()
-                .map(|item| (item.relative_path.clone(), item.attachment.name.clone()))
-                .collect(),
-        }
-    }
-
-    fn apply_conversation_action(
-        &mut self,
-        window_id: HostedWindowId,
-        action: crate::runtime_conversation::ConversationAction,
-    ) {
-        use crate::runtime_conversation::ConversationAction as Action;
-        match action {
-            Action::CompletionChanged => {}
-            Action::PasteClipboard(request) => self.paste_rich_clipboard(window_id, Some(request)),
-            Action::Model(value) => {
-                self.update_composer_model_selection(window_id, DropdownEvent::Select(value));
-            }
-            Action::Reasoning(value) => {
-                self.update_composer_reasoning_selection(window_id, DropdownEvent::Select(value));
-            }
-            Action::Optimize => self.start_prompt_optimization(window_id),
-            Action::ApplyPromptWorkflow => self.apply_prompt_route_workflow(window_id),
-            Action::DismissPromptWorkflow => self.dismiss_prompt_route_workflow(window_id),
-            Action::Compact => {
-                if window_id == HostedWindowId::PRIMARY {
-                    self.compact_context();
-                } else {
-                    self.compact_task_popup_context(window_id);
-                }
-            }
-            Action::SelectReference(id) => {
-                self.route_composer_message(
-                    window_id,
-                    crate::module::composer::ComposerMessage::SelectConversationReference(id),
-                );
-            }
-            Action::RemoveReference(id) => {
-                self.execute_surface_composer_command(
-                    window_id,
-                    DesktopComposerCommand::RemoveConversationReference(id),
-                );
-            }
-            Action::RemoveAttachment(id) => {
-                self.execute_surface_composer_command(
-                    window_id,
-                    DesktopComposerCommand::RemoveAttachment(id),
-                );
-            }
-            Action::CloseImage => {
-                self.markdown_image_previews.remove(&window_id);
-                self.attachment_previews.remove(&window_id);
-            }
-            Action::SelectText { event_id, text } => self.route_timeline_window(
-                window_id,
-                crate::module::timeline::TimelineModuleMessage::SelectText { event_id, text },
-            ),
-            Action::CopySelection => self.copy_timeline_selection(window_id),
-            Action::QuoteSelection => self.quote_timeline_selection(window_id),
-            Action::AskSelection => self.ask_timeline_selection_in_popup(window_id),
-            Action::OpenImage(image) => {
-                self.update_message(Message::Timeline(TimelineMessage::OpenMarkdownImage {
-                    window_id,
-                    image,
-                }));
-            }
-            Action::PreviewAttachment(id) => {
-                let attachment = self
-                    .window_composer(window_id)
-                    .and_then(|composer| {
-                        composer
-                            .effective_attachments()
-                            .find(|attachment| attachment.id == id)
-                    })
-                    .cloned();
-                if let Some(attachment) = attachment {
-                    self.preview_chat_attachment(window_id, attachment);
-                }
-            }
-            Action::PreviewTimelineAttachment {
-                event_id,
-                attachment_id,
-            } => {
-                let session = if window_id == HostedWindowId::PRIMARY {
-                    self.task_session.as_ref()
-                } else {
-                    self.task_popups
-                        .get(&window_id)
-                        .and_then(|popup| popup.session.as_ref())
-                };
-                let attachment = session
-                    .and_then(|session| session.timeline_attachment(&event_id, &attachment_id))
-                    .cloned();
-                if let Some(attachment) = attachment {
-                    self.preview_chat_attachment(window_id, attachment);
-                }
-            }
-            Action::ReviewTarget(kind) => self.select_review_workflow_target(
-                window_id,
-                match kind.as_str() {
-                    "branch" => PendingReviewTargetKind::BaseBranch,
-                    "commit" => PendingReviewTargetKind::Commit,
-                    _ => PendingReviewTargetKind::UncommittedChanges,
-                },
-            ),
-            Action::ReviewValue(value) => self.update_review_workflow_target(window_id, value),
-            Action::SubmitReview => self.submit_review_slash_workflow(window_id),
-            Action::CancelReview => self.clear_review_slash_workflow(window_id),
-            Action::ClearBranch => self.clear_session_branch(window_id),
-            Action::Continue(id) => {
-                self.set_timeline_session_branch(window_id, &id, DesktopSessionBranchMode::Continue)
-            }
-            Action::Fork(id) => {
-                self.set_timeline_session_branch(window_id, &id, DesktopSessionBranchMode::Fork)
-            }
-            Action::ApplySuggestion(id) => self.apply_timeline_suggestion(window_id, &id),
-            Action::Retry(id) => self.retry_timeline_event(window_id, &id),
-            Action::Copy(id) => {
-                let session = if window_id == HostedWindowId::PRIMARY {
-                    self.task_session.as_ref()
-                } else {
-                    self.task_popups
-                        .get(&window_id)
-                        .and_then(|popup| popup.session.as_ref())
-                };
-                if let Some(text) = session
-                    .and_then(|session| session.timeline.iter().find(|item| item.id == id))
-                    .and_then(|item| item.markdown_plain_text.clone().or(item.markdown.clone()))
-                {
-                    self.apply_timeline_message(TimelineMessage::CopyTimelineMarkdown {
-                        event_id: id,
-                        text,
-                    });
-                }
-            }
-            Action::ToggleEvent(id) => {
-                self.route_timeline_window(
-                    window_id,
-                    crate::module::timeline::TimelineModuleMessage::Toggle(id),
-                );
-            }
-            Action::LoadEarlier => {
-                if window_id == HostedWindowId::PRIMARY {
-                    self.apply_timeline_message(TimelineMessage::LoadEarlierTimeline);
-                } else {
-                    self.load_earlier_task_popup_timeline(window_id);
-                }
-            }
-            Action::AddFiles => {
-                if window_id == HostedWindowId::PRIMARY {
-                    self.pick_attachments(false);
-                } else {
-                    self.pick_task_popup_attachments(window_id, false);
-                }
-            }
-            Action::AddDirectories => {
-                if window_id == HostedWindowId::PRIMARY {
-                    self.pick_attachments(true);
-                } else {
-                    self.pick_task_popup_attachments(window_id, true);
-                }
-            }
-            Action::NewGuide => {
-                self.apply_todo_action(window_id, crate::todo_panel::TodoAction::NewGuide)
-            }
-            Action::EditGoal => {
-                self.apply_todo_action(window_id, crate::todo_panel::TodoAction::EditGoal)
-            }
-            Action::Reference => self.open_composer_conversation_reference(window_id),
-            Action::Plan | Action::Goal => {
-                if let Some(composer) = self.window_composer(window_id) {
-                    let command = if action == Action::Plan {
-                        DesktopComposerCommand::SetPlanMode(!composer.plan_mode)
-                    } else {
-                        DesktopComposerCommand::SetGoalMode(!composer.goal_mode)
-                    };
-                    self.execute_surface_composer_command(window_id, command);
-                }
-            }
-            Action::RequestWorktreeMerge(task_id) => {
-                if !self.window_worktree_locked(window_id) {
-                    if let Some(task) = self
-                        .worktree_task_for_window(window_id)
-                        .filter(|task| task.as_str() == task_id)
-                    {
-                        if self
-                            .kernel
-                            .session()
-                            .task_worktree(&task)
-                            .is_ok_and(|worktree| worktree.is_some())
-                        {
-                            self.window_worktree_merge_confirmations
-                                .insert(window_id, task);
-                        }
-                    }
-                }
-            }
-            Action::ConfirmWorktreeMerge(task_id) => {
-                let confirmed = self
-                    .window_worktree_merge_confirmations
-                    .get(&window_id)
-                    .is_some_and(|task| {
-                        task.as_str() == task_id
-                            && self.worktree_task_for_window(window_id).as_ref() == Some(task)
-                    });
-                if confirmed && !self.window_worktree_locked(window_id) {
-                    self.window_worktree_merge_confirmations.remove(&window_id);
-                    self.start_window_worktree_operation(
-                        window_id,
-                        WorktreeOperation::MergeAndArchive,
-                    );
-                }
-            }
-            Action::CancelWorktreeMerge => {
-                self.window_worktree_merge_confirmations.remove(&window_id);
-            }
-            Action::Worktree(value) => self.select_window_worktree(
-                window_id,
-                match value.as_str() {
-                    "create" => WorktreeMenuSelection::Create,
-                    "existing" => WorktreeMenuSelection::Existing,
-                    _ => WorktreeMenuSelection::Current,
-                },
-            ),
-            Action::Permission(value) => {
-                self.execute_surface_composer_command(
-                    window_id,
-                    DesktopComposerCommand::SetPermission(match value.as_str() {
-                        "readonly" => DesktopExecutionPermission::Readonly,
-                        "full" => DesktopExecutionPermission::Full,
-                        _ => DesktopExecutionPermission::Ask,
-                    }),
-                );
-            }
-            Action::Slash(name) => {
-                if let Some(command) = self
-                    .composer_slash_commands(window_id)
-                    .iter()
-                    .find(|item| item.command.name == name)
-                    .map(|item| item.command.clone())
-                {
-                    self.select_slash_command(window_id, command);
-                }
-            }
-            Action::Context(path) => {
-                self.route_composer_message(
-                    window_id,
-                    crate::module::composer::ComposerMessage::SelectContextAttachment(path),
-                );
-            }
-        }
-    }
-
     fn composer_automatic_selection(
         &self,
         window_id: HostedWindowId,
@@ -13769,6 +13712,35 @@ impl DesktopProgram {
             self.provider_ai_settings.model_features(),
             context_usage,
         ))
+    }
+
+    fn composer_model_dropdown_state(
+        &self,
+        window_id: HostedWindowId,
+    ) -> (String, String, Vec<(String, String)>) {
+        let current = if window_id == HostedWindowId::PRIMARY {
+            self.main_surface_composer()
+                .and_then(|composer| composer.model.clone())
+        } else {
+            self.window_composer(window_id)
+                .and_then(|composer| composer.model.clone())
+        };
+        let model = current.clone().unwrap_or_default();
+        let mut models = vec![(String::new(), "自动选择".to_owned())];
+        let mut options = self
+            .provider_ai_settings
+            .composer_model_options(self.provider_runtime_settings.model.as_deref());
+        if let Some(current_model) = current
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+        {
+            if !options.iter().any(|(id, _)| id == current_model) {
+                options.insert(0, (current_model.to_owned(), current_model.to_owned()));
+            }
+        }
+        models.extend(options);
+        (model, "自动选择".to_owned(), models)
     }
 
     fn composer_model_options(&self, current_model: Option<&str>) -> Vec<DropdownOption> {
@@ -14003,21 +13975,7 @@ impl DesktopProgram {
             }
             action @ (DesktopSlashCommandAction::Review
             | DesktopSlashCommandAction::FixSuggestion) => {
-                let task_id = if window_id == HostedWindowId::PRIMARY {
-                    self.main_conversation_draft
-                        .as_ref()
-                        .map(|draft| draft.task.id.clone())
-                        .or_else(|| self.current_selected_task())
-                } else {
-                    self.task_popups.get(&window_id).and_then(|popup| {
-                        popup
-                            .draft
-                            .as_ref()
-                            .map(|draft| draft.id.clone())
-                            .or_else(|| popup.active_task_id.clone())
-                    })
-                };
-                let Some(task_id) = task_id else {
+                let Some(task_id) = self.composer_surface_task(window_id) else {
                     return;
                 };
                 let pending = PendingReviewSlashWorkflow {
@@ -14116,10 +14074,7 @@ impl DesktopProgram {
         let Some(pending) = pending else {
             return;
         };
-        let current_task = self
-            .window_composer(window_id)
-            .map(|composer| &composer.task_id);
-        if current_task != Some(&pending.task_id) {
+        if self.composer_surface_task(window_id).as_ref() != Some(&pending.task_id) {
             self.clear_review_slash_workflow(window_id);
             return;
         }
@@ -14159,54 +14114,30 @@ impl DesktopProgram {
         }
     }
 
-    fn todo_panel_locked(&self, window_id: HostedWindowId) -> bool {
-        if window_id == HostedWindowId::PRIMARY {
-            self.settings_open
-                || self.automations_open
-                || self
-                    .task_session
-                    .as_ref()
-                    .is_none_or(|session| session.blocking_pending_count > 0)
-        } else {
-            self.task_popups
-                .get(&window_id)
-                .and_then(|popup| popup.session.as_ref())
-                .is_none_or(|session| session.blocking_pending_count > 0)
-        }
-    }
-
-    fn shell_todo_panel(&self, window_id: HostedWindowId) -> crate::todo_panel::TodoPanelSnapshot {
-        let (session, editor, error) = if window_id == HostedWindowId::PRIMARY {
-            (
-                self.task_session.as_ref(),
-                &self.todo_ui,
-                self.task_action_error.clone(),
-            )
-        } else if let Some(popup) = self.task_popups.get(&window_id) {
-            (popup.session.as_ref(), &popup.todo_ui, popup.error.clone())
-        } else {
-            return Default::default();
-        };
-        let task_id = self.worktree_task_for_window(window_id);
-        let matching_editor = task_id.is_some() && editor.task_id == task_id;
+    fn todo_panel_snapshot(&self) -> crate::todo_panel::TodoPanelSnapshot {
+        let todos = self
+            .task_session
+            .as_ref()
+            .map(|session| {
+                session
+                    .todos
+                    .iter()
+                    .filter(|todo| crate::todo_panel::visible_todo(todo))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         crate::todo_panel::TodoPanelSnapshot {
-            visible: task_id.is_some()
-                && (session.is_some_and(|session| {
-                    session.goal.is_some()
-                        || session.todos.iter().any(crate::todo_panel::visible_todo)
-                }) || matching_editor && editor.editor.is_some()),
-            locked: self.todo_panel_locked(window_id),
-            todos: session
-                .map(|session| session.todos.clone())
-                .unwrap_or_default(),
-            goal: session.and_then(|session| session.goal.clone()),
-            editor: matching_editor.then_some(editor.editor).flatten(),
-            draft: if matching_editor {
-                editor.draft.clone()
-            } else {
-                String::new()
-            },
-            error,
+            visible: self.current_selected_task().is_some(),
+            locked: self.composer_is_locked(),
+            todos,
+            goal: self
+                .task_session
+                .as_ref()
+                .and_then(|session| session.goal.clone()),
+            editor: self.todo_ui.editor,
+            draft: self.todo_ui.draft.clone(),
+            error: self.task_action_error.clone(),
         }
     }
 
@@ -14215,203 +14146,96 @@ impl DesktopProgram {
         window_id: HostedWindowId,
         action: crate::todo_panel::TodoAction,
     ) {
+        if window_id != HostedWindowId::PRIMARY {
+            return;
+        }
+        let Some(task_id) = self.current_selected_task() else {
+            return;
+        };
+        if self.composer_is_locked() {
+            return;
+        }
         use crate::todo_panel::{TodoAction as Action, TodoEditor};
-        let Some(task_id) = self.worktree_task_for_window(window_id) else {
-            return;
-        };
-        if self.todo_panel_locked(window_id) {
-            return;
-        }
-        let mut editor = if window_id == HostedWindowId::PRIMARY {
-            self.todo_ui.clone()
-        } else if let Some(popup) = self.task_popups.get(&window_id) {
-            popup.todo_ui.clone()
-        } else {
-            return;
-        };
-        if editor.task_id.as_ref() != Some(&task_id) {
-            editor = crate::todo_panel::TodoEditState {
-                task_id: Some(task_id.clone()),
-                ..Default::default()
-            };
-        }
-        let refresh = matches!(
-            &action,
-            Action::Save
-                | Action::Priority(_)
-                | Action::Delete(_)
-                | Action::Dispatch(_)
-                | Action::RefreshGoal
-                | Action::ClearGoal
-        );
-        let result = (|| -> Result<(), DesktopApplicationError> {
-            let stale_guide = || DesktopApplicationError::InvalidInput {
-                field: "guide",
-                message: "引导已进入队列或已发送，请刷新后重试。".into(),
-            };
-            let todo_id = match &action {
-                Action::Edit(id)
-                | Action::Priority(id)
-                | Action::Delete(id)
-                | Action::Dispatch(id) => Some(id.as_str()),
-                Action::Save => editor.editing.as_deref(),
-                _ => None,
-            };
-            let todos = if todo_id.is_some() {
-                self.kernel.session().list_task_todos(&task_id)?
-            } else {
-                Vec::new()
-            };
-            let selected = todo_id.and_then(|id| {
-                todos
-                    .iter()
-                    .find(|todo| todo.id == id && crate::todo_panel::editable_guide(todo))
-            });
-            if todo_id.is_some() && selected.is_none() {
-                return Err(stale_guide());
+        match action {
+            Action::NewGuide => {
+                self.todo_ui.editor = Some(TodoEditor::Guide);
+                self.todo_ui.editing = None;
+                self.todo_ui.draft.clear();
             }
-            match action {
-                Action::NewGuide => {
-                    editor.editor = Some(TodoEditor::Guide);
-                    editor.editing = None;
-                    editor.draft.clear();
-                }
-                Action::Edit(_) => {
-                    let todo = selected.unwrap();
-                    editor.editor = Some(TodoEditor::Guide);
-                    editor.editing = Some(todo.id.clone());
-                    editor.draft = todo.text.clone();
-                }
-                Action::TextChanged(value) => {
-                    if editor.editor.is_some() {
-                        editor.draft = value;
-                    }
-                }
-                Action::Save => {
-                    if editor.draft.trim().is_empty() {
-                        return Ok(());
-                    }
-                    match editor.editor {
-                        Some(TodoEditor::Guide) => {
-                            if let Some(id) = &editor.editing {
-                                self.kernel
-                                    .session()
-                                    .update_task_todo(
-                                        id,
-                                        DesktopTodoUpdate {
-                                            text: Some(editor.draft.clone()),
-                                            ..Default::default()
-                                        },
-                                    )?
-                                    .ok_or_else(stale_guide)?;
-                            } else {
-                                self.kernel.session().create_task_todo(DesktopTodoCreate {
-                                    task_id: task_id.clone(),
-                                    text: editor.draft.clone(),
-                                    priority: DesktopTodoPriority::Normal,
-                                    attachments: Vec::new(),
-                                    conversation_references: Vec::new(),
-                                    workflow: None,
-                                })?;
-                            }
-                        }
-                        Some(TodoEditor::Goal) => {
-                            let budget = self
-                                .kernel
-                                .session()
-                                .task_goal(&task_id)?
-                                .and_then(|goal| goal.token_budget);
-                            self.kernel
-                                .session()
-                                .set_task_goal(&task_id, &editor.draft, budget)?;
-                        }
-                        None => return Ok(()),
-                    }
-                    editor.editor = None;
-                    editor.editing = None;
-                    editor.draft.clear();
-                }
-                Action::Cancel => {
-                    editor.editor = None;
-                    editor.editing = None;
-                    editor.draft.clear();
-                }
-                Action::Priority(_) => {
-                    let todo = selected.unwrap();
-                    self.kernel
-                        .session()
-                        .update_task_todo(
-                            &todo.id,
-                            DesktopTodoUpdate {
-                                priority: Some(next_todo_priority(todo.priority)),
-                                ..Default::default()
-                            },
-                        )?
-                        .ok_or_else(stale_guide)?;
-                }
-                Action::Delete(_) => {
-                    let todo = selected.unwrap();
-                    if !self.kernel.session().delete_task_todo(&todo.id)? {
-                        return Err(stale_guide());
-                    }
-                    if editor.editing.as_deref() == Some(&todo.id) {
-                        editor.editor = None;
-                        editor.editing = None;
-                        editor.draft.clear();
-                    }
-                }
-                Action::Dispatch(_) => {
-                    if self
-                        .kernel
-                        .session()
-                        .dispatch_task_guide(&task_id, &selected.unwrap().id)?
-                        .is_none()
+            Action::Edit(id) => self.edit_todo(&id),
+            Action::TextChanged(value) => {
+                self.todo_ui.draft = value.clone();
+                self.todo_draft = value;
+            }
+            Action::Save => match self.todo_ui.editor {
+                Some(TodoEditor::Goal) => {
+                    if let Err(error) =
+                        self.kernel
+                            .session()
+                            .set_task_goal(&task_id, &self.todo_ui.draft, None)
                     {
-                        return Err(DesktopApplicationError::InvalidInput {
-                            field: "guide",
-                            message: "引导已发送或已进入队列。".into(),
-                        });
+                        self.task_action_error = Some(error.to_string());
+                    } else {
+                        self.todo_ui.editor = None;
+                        self.todo_ui.draft.clear();
+                        self.refresh_task_session();
                     }
                 }
-                Action::EditGoal => {
-                    editor.editor = Some(TodoEditor::Goal);
-                    editor.editing = None;
-                    editor.draft = self
-                        .kernel
-                        .session()
-                        .task_goal(&task_id)?
-                        .map(|goal| goal.objective)
-                        .unwrap_or_default();
+                _ => self.save_todo(),
+            },
+            Action::Cancel => {
+                self.todo_ui.editor = None;
+                self.todo_ui.editing = None;
+                self.todo_ui.draft.clear();
+                self.todo_draft.clear();
+                self.editing_todo = None;
+            }
+            Action::Priority(id) => {
+                if let Some(todo) = self
+                    .task_session
+                    .as_ref()
+                    .and_then(|session| session.todos.iter().find(|todo| todo.id == id))
+                {
+                    self.update_todo(
+                        &id,
+                        DesktopTodoUpdate {
+                            priority: Some(next_todo_priority(todo.priority)),
+                            ..DesktopTodoUpdate::default()
+                        },
+                    );
                 }
-                Action::RefreshGoal => {
-                    self.kernel.session().refresh_task_goal(&task_id)?;
-                }
-                Action::ClearGoal => {
-                    self.kernel.session().clear_task_goal(&task_id)?;
-                    if editor.editor == Some(TodoEditor::Goal) {
-                        editor.editor = None;
-                        editor.draft.clear();
+            }
+            Action::Delete(id) => self.delete_todo(&id),
+            Action::Dispatch(id) => {
+                match self.kernel.session().dispatch_task_guide(&task_id, &id) {
+                    Ok(Some(_)) => {
+                        self.task_action_error = None;
+                        self.refresh_task_session();
                     }
+                    Ok(None) => {
+                        self.task_action_error = Some("引导已发送或已进入队列。".to_owned());
+                    }
+                    Err(error) => self.task_action_error = Some(error.to_string()),
                 }
             }
-            Ok(())
-        })();
-        let error = result.err().map(|error| error.to_string());
-        if window_id == HostedWindowId::PRIMARY {
-            self.todo_ui = editor;
-            if refresh {
-                self.refresh_task_session();
+            Action::EditGoal => {
+                self.todo_ui.editor = Some(TodoEditor::Goal);
+                self.todo_ui.editing = None;
+                self.todo_ui.draft = self.goal_draft.clone();
             }
-            self.task_action_error = error;
-        } else {
-            if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                popup.todo_ui = editor;
+            Action::RefreshGoal => {
+                if let Err(error) = self.kernel.session().refresh_task_goal(&task_id) {
+                    self.task_action_error = Some(error.to_string());
+                } else {
+                    self.refresh_task_session();
+                }
             }
-            if refresh {
-                self.refresh_task_popup(window_id);
-            }
-            if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                popup.error = error;
+            Action::ClearGoal => {
+                if let Err(error) = self.kernel.session().clear_task_goal(&task_id) {
+                    self.task_action_error = Some(error.to_string());
+                } else {
+                    self.refresh_task_session();
+                }
             }
         }
     }
@@ -14420,7 +14244,11 @@ impl DesktopProgram {
         let Some(task_id) = self.current_selected_task() else {
             return;
         };
-        let text = self.todo_draft.trim();
+        let text = if !self.todo_ui.draft.trim().is_empty() {
+            self.todo_ui.draft.trim()
+        } else {
+            self.todo_draft.trim()
+        };
         if text.is_empty() {
             return;
         }
@@ -14452,7 +14280,6 @@ impl DesktopProgram {
             Ok(true) => {
                 self.todo_draft.clear();
                 self.editing_todo = None;
-                self.todo_ui = Default::default();
                 self.task_action_error = None;
                 self.refresh_task_session();
             }
@@ -14477,6 +14304,9 @@ impl DesktopProgram {
         };
         self.todo_draft = todo.text.clone();
         self.editing_todo = Some(todo.id.clone());
+        self.todo_ui.editor = Some(crate::todo_panel::TodoEditor::Guide);
+        self.todo_ui.editing = Some(todo.id.clone());
+        self.todo_ui.draft = todo.text.clone();
         self.task_action_error = None;
     }
 
@@ -14550,17 +14380,13 @@ impl DesktopProgram {
         if objective.is_empty() {
             return;
         }
-        match self.kernel.session().set_task_goal(
-            &task_id,
-            objective,
-            self.task_session
-                .as_ref()
-                .and_then(|session| session.goal.as_ref())
-                .and_then(|goal| goal.token_budget),
-        ) {
+        match self
+            .kernel
+            .session()
+            .set_task_goal(&task_id, objective, None)
+        {
             Ok(_) => {
                 self.goal_draft.clear();
-                self.todo_ui = Default::default();
                 self.task_action_error = None;
                 self.refresh_task_session();
             }
@@ -14598,105 +14424,15 @@ impl DesktopProgram {
         }
     }
 
-    fn worktree_task_for_window(&self, window_id: HostedWindowId) -> Option<TaskId> {
-        if window_id == HostedWindowId::PRIMARY {
-            if self.main_conversation_draft.is_some() {
-                None
-            } else {
-                self.current_selected_task()
-            }
-        } else {
-            self.task_popups
-                .get(&window_id)
-                .filter(|popup| popup.draft.is_none())
-                .and_then(|popup| popup.active_task_id.clone())
-        }
-    }
-
-    fn window_worktree_busy(&self, window_id: HostedWindowId) -> bool {
-        self.worktree_task_for_window(window_id)
-            .is_some_and(|task_id| {
-                self.active_worktree_job
-                    .as_ref()
-                    .is_some_and(|(_, active)| *active == task_id)
-                    || self
-                        .kernel
-                        .session()
-                        .ensure_task_worktree_idle(&task_id)
-                        .is_err()
-            })
-    }
-
-    fn window_worktree_locked(&self, window_id: HostedWindowId) -> bool {
-        if self.active_worktree_job.is_some() {
-            return true;
-        }
-        if window_id == HostedWindowId::PRIMARY {
-            return self.composer_is_locked();
-        }
-        self.task_popups.get(&window_id).is_none_or(|popup| {
-            popup.session.as_ref().is_some_and(|session| {
-                session.blocking_pending_count > 0 || session.run_block.is_some()
-            }) || popup
-                .turn_state
-                .as_ref()
-                .is_some_and(|(_, state)| turn_state_is_active(state))
-        })
-    }
-
-    fn select_window_worktree(
-        &mut self,
-        window_id: HostedWindowId,
-        selection: WorktreeMenuSelection,
-    ) {
-        if self.window_worktree_locked(window_id) {
-            return;
-        }
-        self.window_worktree_merge_confirmations.remove(&window_id);
-        if self.draft_worktree_context(window_id).is_some() {
-            match selection {
-                WorktreeMenuSelection::Current => {
-                    self.set_draft_worktree(window_id, DraftWorktreeSelection::Current)
-                }
-                WorktreeMenuSelection::Create => {
-                    self.set_draft_worktree(window_id, DraftWorktreeSelection::Create)
-                }
-                WorktreeMenuSelection::Existing => self.pick_draft_worktree(window_id),
-            }
-        } else {
-            match selection {
-                WorktreeMenuSelection::Current => {
-                    self.start_window_worktree_operation(window_id, WorktreeOperation::Clear)
-                }
-                WorktreeMenuSelection::Create => {
-                    self.start_window_worktree_operation(window_id, WorktreeOperation::Create)
-                }
-                WorktreeMenuSelection::Existing => self.pick_window_worktree(window_id),
-            }
-        }
-    }
-
     fn start_worktree_operation(&mut self, operation: WorktreeOperation) {
-        self.start_window_worktree_operation(HostedWindowId::PRIMARY, operation);
-    }
-
-    fn start_window_worktree_operation(
-        &mut self,
-        window_id: HostedWindowId,
-        operation: WorktreeOperation,
-    ) {
-        if self.window_worktree_locked(window_id) {
+        if self.worktree_busy() || self.composer_is_locked() {
             return;
         }
-        let Some(task_id) = self.worktree_task_for_window(window_id) else {
+        let Some(task_id) = self.current_selected_task() else {
             return;
         };
-        if window_id == HostedWindowId::PRIMARY {
-            self.worktree_confirmation = None;
-            self.task_action_error = None;
-        } else if let Some(popup) = self.task_popups.get_mut(&window_id) {
-            popup.error = None;
-        }
+        self.worktree_confirmation = None;
+        self.task_action_error = None;
         let request = JobRequest::new(
             lilia_feature_worktree::OPERATE_PROTOCOL,
             serde_json::to_value(lilia_feature_worktree::WorktreeRequest {
@@ -14706,10 +14442,11 @@ impl DesktopProgram {
             .expect("a worktree request is representable as JSON"),
         )
         .in_slot(lilia_feature_worktree::worktree_slot(task_id.as_str()));
+
         match self.kernel.jobs().submit(request) {
             Ok(handle) => self.active_worktree_job = Some((handle.id(), task_id)),
             Err(error) => {
-                self.set_task_window_error(window_id, format!("无法启动工作树操作：{error}"))
+                self.task_action_error = Some(format!("无法启动工作树操作：{error}"));
             }
         }
     }
@@ -14722,41 +14459,26 @@ impl DesktopProgram {
         if !state.is_terminal() {
             return;
         }
-        let task_id = self.active_worktree_job.take().map(|(_, task_id)| task_id);
-        if let (Some(task_id), JobState::Failed { message }) = (task_id, state) {
-            self.apply_worktree_event(&task_id, Some(message));
+        self.active_worktree_job = None;
+        if let JobState::Failed { message } = state {
+            self.worktree_confirmation = None;
+            self.task_action_error = Some(message);
         }
     }
 
     fn pick_worktree(&mut self) {
-        self.pick_window_worktree(HostedWindowId::PRIMARY);
-    }
-
-    fn pick_window_worktree(&mut self, window_id: HostedWindowId) {
-        if self.window_worktree_locked(window_id) {
+        if self.worktree_busy() || self.composer_is_locked() {
             return;
         }
-        let Some(task_id) = self.worktree_task_for_window(window_id) else {
-            return;
-        };
         let request = DesktopFileDialogRequest {
-            dialog_id: format!("attach-worktree-{}", window_id.0),
+            dialog_id: "attach-worktree".to_owned(),
             title: Some("选择已有 Git 工作树".to_owned()),
-            initial_directory: self
-                .kernel
-                .session()
-                .task_workspace_path(&task_id)
-                .ok()
-                .flatten()
-                .map(PathBuf::from),
+            initial_directory: self.selected_task_workspace_path(),
             filters: Vec::new(),
             select_directories: true,
             multiple: false,
         };
-        self.spawn_file_dialog(
-            FileDialogPurpose::AttachWorktree { window_id, task_id },
-            request,
-        );
+        self.spawn_file_dialog(FileDialogPurpose::AttachWorktree, request);
     }
 
     fn open_worktree(&mut self) {
@@ -14785,13 +14507,6 @@ impl DesktopProgram {
     }
 
     fn submit_turn(&mut self) {
-        if self.window_worktree_busy(HostedWindowId::PRIMARY) {
-            self.set_task_window_error(
-                HostedWindowId::PRIMARY,
-                "工作树操作尚未完成，请完成后重试。".to_owned(),
-            );
-            return;
-        }
         if self.main_conversation_draft.is_some() {
             if self.materialize_main_conversation_draft() {
                 self.submit_turn();
@@ -15005,22 +14720,6 @@ impl DesktopProgram {
         event_id: &str,
         mode: DesktopSessionBranchMode,
     ) {
-        let locked = if window_id == HostedWindowId::PRIMARY {
-            self.composer_is_locked()
-        } else {
-            self.task_popups.get(&window_id).is_none_or(|popup| {
-                popup
-                    .turn_state
-                    .as_ref()
-                    .is_some_and(|(_, state)| turn_state_is_active(state))
-                    || popup.session.as_ref().is_some_and(|session| {
-                        session.blocking_pending_count > 0 || session.run_block.is_some()
-                    })
-            })
-        };
-        if locked {
-            return;
-        }
         let pending = if window_id == HostedWindowId::PRIMARY {
             self.current_selected_task().zip(
                 self.task_session
@@ -15101,6 +14800,12 @@ impl DesktopProgram {
         if self.composer_input_is_locked() {
             return;
         }
+        if !self.ensure_primary_composer_ready() {
+            return;
+        }
+        let Some(task_id) = self.composer_task_for_window(HostedWindowId::PRIMARY) else {
+            return;
+        };
         let request = DesktopFileDialogRequest {
             dialog_id: if select_directories {
                 "composer-directories"
@@ -15122,7 +14827,10 @@ impl DesktopProgram {
             multiple: true,
         };
         self.spawn_file_dialog(
-            FileDialogPurpose::ComposerAttachments { select_directories },
+            FileDialogPurpose::ComposerAttachments {
+                window_id: HostedWindowId::PRIMARY,
+                task_id,
+            },
             request,
         );
     }
@@ -15252,253 +14960,117 @@ impl DesktopProgram {
         })
     }
 
-    fn composer_paste_binding(
-        &self,
-        window: HostedWindowId,
-    ) -> Option<(String, u64, Option<String>)> {
-        let project = (window == HostedWindowId::PRIMARY)
-            .then(|| {
-                self.current_selected_project()
-                    .map(|id| id.as_str().to_owned())
-            })
-            .flatten();
-        match self.window_composer(window) {
-            Some(composer) => Some((
-                composer.task_id.as_str().to_owned(),
-                composer.revision,
-                project,
-            )),
-            None if window == HostedWindowId::PRIMARY => Some((String::new(), 0, project)),
-            None => None,
-        }
-    }
-
-    fn composer_paste_request(
-        &self,
-        window: HostedWindowId,
-    ) -> Option<crate::runtime_conversation::ComposerPasteRequest> {
-        let binding = self.composer_paste_binding(window)?;
-        let node = if window == HostedWindowId::PRIMARY {
-            self.runtime_shell.as_ref()?.composer_node()
-        } else {
-            self.task_popup_shells.get(&window)?.composer_node()
-        };
-        let document = self.documents.get(&window)?;
-        let editor = document.context().world().text_input(node)?.clone();
-        Some(crate::runtime_conversation::ComposerPasteRequest { binding, editor })
-    }
-
-    fn apply_composer_paste(
-        &mut self,
-        window: HostedWindowId,
-        mut request: crate::runtime_conversation::ComposerPasteRequest,
-        text: &str,
-        attachments: Vec<ChatAttachment>,
-    ) {
-        if !self.window_accepts_attachment_drop(window) {
-            return;
-        }
-        if self.composer_paste_request(window).as_ref() != Some(&request) {
-            self.set_task_window_error(window, "草稿或选区已变化，请重新粘贴。".into());
-            return;
-        }
-        if request.binding.0.is_empty() {
-            if window != HostedWindowId::PRIMARY || !self.ensure_primary_composer_ready() {
-                return;
-            }
-            let Some(binding) = self.composer_paste_binding(window) else {
-                return;
-            };
-            request.binding = binding;
-        }
-        let had_attachments = !attachments.is_empty();
-        let mut paths = self
-            .window_composer(window)
-            .map(|composer| {
-                composer
-                    .effective_attachments()
-                    .map(|attachment| attachment.path.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let attachments: Vec<_> = attachments
-            .into_iter()
-            .filter(|attachment| {
-                if !attachment.exists
-                    || paths
-                        .iter()
-                        .any(|path| path.eq_ignore_ascii_case(&attachment.path))
-                {
-                    return false;
-                }
-                paths.push(attachment.path.clone());
-                true
-            })
-            .collect();
-        if had_attachments && attachments.is_empty() {
-            return;
-        }
-        let inserted = if attachments.is_empty() {
-            text.to_owned()
-        } else {
-            attachments
-                .iter()
-                .map(ChatAttachment::reference_text)
-                .collect::<Vec<_>>()
-                .join(" ")
-                + " "
-        };
-        let node = if window == HostedWindowId::PRIMARY {
-            self.runtime_shell.as_ref().map(|view| view.composer_node())
-        } else {
-            self.task_popup_shells
-                .get(&window)
-                .map(|view| view.composer_node())
-        };
-        let Some(node) = node else {
-            return;
-        };
-        let Some(document) = self.documents.get_mut(&window) else {
-            return;
-        };
-        let id = document.document();
-        let next = match request.prepare_edit(document.context_mut(), id, node, &inserted) {
-            Ok(Some(next)) => next,
-            Ok(None) => return,
-            Err(error) => {
-                self.set_task_window_error(window, error.to_string());
-                return;
-            }
-        };
-        let command = DesktopComposerCommand::ApplyPaste {
-            expected_revision: request.binding.1,
-            expected_content: request.editor.value,
-            content: next.value.clone(),
-            attachments,
-        };
-        if !self.task_popup_composer_command(window, command) {
-            return;
-        }
-        let result = self.documents.get_mut(&window).map(|document| {
-            let id = document.document();
-            let cx = document.context_mut();
-            cx.paste_focused_text(id, &inserted)
-        });
-        if !matches!(result, Some(Ok(true))) {
-            self.set_task_window_error(
-                window,
-                "草稿已保存，输入器未能更新，请重新打开对话。".into(),
-            );
-        }
-    }
-
-    fn paste_rich_clipboard(
-        &mut self,
-        window: HostedWindowId,
-        request: Option<crate::runtime_conversation::ComposerPasteRequest>,
-    ) {
-        if !self.window_accepts_attachment_drop(window) {
-            return;
-        }
-        let Some(request) = request.or_else(|| self.composer_paste_request(window)) else {
-            return;
-        };
-        if self.composer_paste_request(window).as_ref() != Some(&request) {
-            self.set_task_window_error(window, "草稿或选区已变化，请重新粘贴。".into());
-            return;
-        }
-        let captured = self
+    fn capture_clipboard_text_paste(&self) -> Result<Option<ClipboardTextPaste>, String> {
+        let value = match self
             .kernel
             .session()
-            .capture_composer_clipboard()
-            .map_err(|error| error.to_string());
-        match captured {
-            Ok(Some((text, attachments))) => {
-                self.apply_composer_paste(window, request, &text, attachments)
+            .execute_host(DesktopHostAction::ReadClipboardText)
+        {
+            Ok(DesktopHostResult::ClipboardText(Some(value))) if value.is_empty() => {
+                return Ok(None);
             }
-            Ok(None) => self.set_task_window_error(window, "剪贴板中没有可粘贴的内容。".into()),
-            Err(error) => self.set_task_window_error(window, error),
+            Ok(DesktopHostResult::ClipboardText(Some(value)))
+                if value.len() > MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES =>
+            {
+                return Err("剪贴板文本过大，无法粘贴。".to_owned());
+            }
+            Ok(DesktopHostResult::ClipboardText(Some(value))) => value,
+            Ok(DesktopHostResult::ClipboardText(None)) => return Ok(None),
+            Ok(_) => return Err("剪贴板返回了无法识别的内容，请重试。".to_owned()),
+            Err(error) => {
+                eprintln!("failed to read Native clipboard text: {error}");
+                return Err("无法读取剪贴板，请重试。".to_owned());
+            }
+        };
+        if !clipboard_text_should_be_attachment(&value) {
+            return Ok(Some(ClipboardTextPaste::Inline(value)));
         }
+        self.kernel
+            .session()
+            .cache_clipboard_text_attachment(&value)
+            .map(ClipboardTextPaste::Attachment)
+            .map(Some)
+            .map_err(|error| {
+                eprintln!("failed to cache Native clipboard text: {error}");
+                "无法保存剪贴板文本，请重试。".to_owned()
+            })
     }
 
     fn paste_clipboard_into_composer(&mut self) {
-        self.paste_clipboard_text_for_window(HostedWindowId::PRIMARY);
-    }
-
-    fn paste_clipboard_text_for_window(&mut self, window: HostedWindowId) {
-        if !self.window_accepts_attachment_drop(window) {
+        if self.composer_input_is_locked() {
             return;
         }
-        let Some(request) = self.composer_paste_request(window) else {
-            return;
-        };
-        match self.kernel.session().capture_composer_clipboard_text() {
-            Ok(Some((text, attachments))) => {
-                self.apply_composer_paste(window, request, &text, attachments)
+        match self.capture_clipboard_text_paste() {
+            Ok(Some(ClipboardTextPaste::Attachment(attachment))) => {
+                self.add_composer_attachments(vec![attachment]);
             }
-            Ok(None) => self.set_task_window_error(window, "剪贴板中没有文本。".into()),
-            Err(error) => self.set_task_window_error(window, error.to_string()),
+            Ok(Some(ClipboardTextPaste::Inline(value))) => {
+                let content = self
+                    .main_surface_composer()
+                    .map(|composer| composer.content.as_str())
+                    .unwrap_or_default();
+                self.execute_composer_command(DesktopComposerCommand::SetContent(format!(
+                    "{content}{value}"
+                )));
+            }
+            Ok(None) => {
+                self.set_task_window_error(
+                    HostedWindowId::PRIMARY,
+                    "剪贴板中没有文本。".to_owned(),
+                );
+            }
+            Err(message) => self.set_task_window_error(HostedWindowId::PRIMARY, message),
         }
     }
 
     fn paste_clipboard_image_into_composer(&mut self) {
-        self.paste_clipboard_image_for_window(HostedWindowId::PRIMARY);
-    }
-
-    fn paste_clipboard_image_for_window(&mut self, window: HostedWindowId) {
-        if !self.window_accepts_attachment_drop(window) {
+        if self.composer_input_is_locked() {
             return;
         }
-        let Some(request) = self.composer_paste_request(window) else {
-            return;
-        };
         match self.kernel.session().capture_clipboard_image_attachment() {
-            Ok(Some(image)) => self.apply_composer_paste(window, request, "", vec![image]),
-            Ok(None) => self.set_task_window_error(window, "剪贴板中没有图片。".into()),
-            Err(error) => self.set_task_window_error(window, error.to_string()),
-        }
-    }
-
-    fn paste_clipboard_files(&mut self, window: HostedWindowId) {
-        if !self.window_accepts_attachment_drop(window) {
-            return;
-        }
-        let Some(request) = self.composer_paste_request(window) else {
-            return;
-        };
-        match self.kernel.session().capture_clipboard_file_attachments() {
-            Ok(files) if files.is_empty() => {
-                self.set_task_window_error(window, "剪贴板中没有文件。".into())
+            Ok(Some(attachment)) => {
+                self.add_composer_attachments(vec![attachment]);
             }
-            Ok(files) => self.apply_composer_paste(window, request, "", files),
-            Err(error) => self.set_task_window_error(window, error.to_string()),
+            Ok(None) => {
+                self.set_task_window_error(
+                    HostedWindowId::PRIMARY,
+                    "剪贴板中没有图片。".to_owned(),
+                );
+            }
+            Err(error) => {
+                eprintln!("failed to capture Native clipboard image: {error}");
+                self.set_task_window_error(
+                    HostedWindowId::PRIMARY,
+                    "无法读取剪贴板图片，请重试。".to_owned(),
+                );
+            }
         }
     }
 
-    fn preview_chat_attachment(&mut self, window_id: HostedWindowId, attachment: ChatAttachment) {
-        if attachment_supports_inline_preview(&attachment) {
-            self.open_attachment_preview(window_id, attachment);
-        } else if let Err(error) = self
-            .kernel
-            .session()
-            .execute_host(DesktopHostAction::OpenPath(PathBuf::from(&attachment.path)))
-        {
-            self.set_task_window_error(window_id, error.to_string());
+    fn paste_clipboard_files(&mut self, window_id: HostedWindowId) {
+        if !self.window_accepts_attachment_drop(window_id) {
+            return;
+        }
+        match self.kernel.session().capture_clipboard_file_attachments() {
+            Ok(attachments) if attachments.is_empty() => {
+                self.set_attachment_error(window_id, "剪贴板中没有文件。".to_owned());
+            }
+            Ok(attachments) if window_id == HostedWindowId::PRIMARY => {
+                self.add_composer_attachments(attachments);
+            }
+            Ok(attachments) => {
+                self.add_task_popup_attachments(window_id, attachments);
+            }
+            Err(error) => {
+                eprintln!("failed to capture Native clipboard files: {error}");
+                self.set_attachment_error(window_id, "无法读取剪贴板文件，请重试。".to_owned());
+            }
         }
     }
 
     fn open_attachment_preview(&mut self, window_id: HostedWindowId, attachment: ChatAttachment) {
         if attachment_supports_inline_preview(&attachment) {
-            self.markdown_image_previews.insert(
-                window_id,
-                MarkdownImagePreview {
-                    source: attachment.path.clone(),
-                    alt: attachment.name.clone(),
-                },
-            );
-            let source = attachment.path.clone();
             self.attachment_previews.insert(window_id, attachment);
-            self.request_markdown_image_load(&source);
         }
     }
 
@@ -15527,8 +15099,7 @@ impl DesktopProgram {
         if self.main_conversation_draft.is_some() {
             return false;
         }
-        self.settings_open
-            || self.window_worktree_busy(HostedWindowId::PRIMARY)
+        self.navigation.is_settings()
             || self.current_selected_task().is_none()
             || self
                 .task_session
@@ -15541,7 +15112,17 @@ impl DesktopProgram {
     }
 
     fn composer_input_is_locked(&self) -> bool {
-        self.settings_open || self.automations_open
+        self.navigation.is_management()
+    }
+
+    fn prepare_primary_composer(&mut self) {
+        if self.selected_task.is_none()
+            && self.main_conversation_draft.is_none()
+            && self.active_application_surface().is_none()
+            && self.shell_project_page().is_none()
+        {
+            self.ensure_primary_composer_ready();
+        }
     }
 
     fn ensure_primary_composer_ready(&mut self) -> bool {
@@ -15577,21 +15158,37 @@ impl DesktopProgram {
             .map(PathBuf::from)
     }
 
+    fn stop_addressed_turn(
+        &mut self,
+        window_id: HostedWindowId,
+        target: crate::runtime_shell::TurnStopTarget,
+    ) {
+        if let Err(error) = self
+            .kernel
+            .session()
+            .interrupt_task_turn_at(&target.task_id, &target.turn_id)
+        {
+            self.set_task_window_error(window_id, error.to_string());
+        }
+    }
+
     fn interrupt_turn(&mut self) {
         let Some(task_id) = self.current_selected_task() else {
             return;
         };
-        match self.kernel.session().interrupt_task_turn(&task_id) {
-            Ok(result) => {
-                self.task_action_error = None;
-                if let Some((turn_id, _)) = &mut self.turn_state {
-                    *turn_id = result.turn_id;
-                }
-            }
-            Err(error) => {
-                self.task_action_error = Some(error.to_string());
-            }
+        let Some((turn_id, state)) = self.turn_state.as_ref() else {
+            return;
+        };
+        if !turn_state_is_active(state) {
+            return;
         }
+        self.stop_addressed_turn(
+            HostedWindowId::PRIMARY,
+            crate::runtime_shell::TurnStopTarget {
+                task_id,
+                turn_id: turn_id.clone(),
+            },
+        );
     }
 
     fn respond_approval(&mut self, request_id: String, approved: bool) {
@@ -15699,7 +15296,10 @@ impl DesktopProgram {
         request_id: String,
         action: AskUserAction,
     ) {
-        let Some(pending) = self.task_window_pending_action(window_id, &request_id) else {
+        let Some(pending) = self
+            .task_window_open_pending(window_id, &request_id)
+            .filter(|pending| pending.kind == "ask_user")
+        else {
             return;
         };
         let Some(spec) = AskUserSpec::from_payload(&pending.payload) else {
@@ -15733,7 +15333,7 @@ impl DesktopProgram {
         }
     }
 
-    fn task_window_pending_action(
+    fn task_window_open_pending(
         &self,
         window_id: HostedWindowId,
         request_id: &str,
@@ -15751,9 +15351,7 @@ impl DesktopProgram {
             .iter()
             .chain(debug_pending.iter())
             .find(|pending| {
-                pending.request_id == request_id
-                    && pending.status == PendingProjectionStatus::Open
-                    && pending.kind == "ask_user"
+                pending.request_id == request_id && pending.status == PendingProjectionStatus::Open
             })
             .cloned()
     }
@@ -16203,12 +15801,16 @@ impl DesktopProgram {
             self.sync_markdown_images();
             return;
         };
+        let previous_session = self.task_session.clone().or_else(|| {
+            self.timeline_module_for(HostedWindowId::PRIMARY)?
+                .reading_history(&task_id)
+                .cloned()
+        });
         let timeline_surface = TimelineSurfaceKey::Main;
         let timeline_had_viewport = self.timeline_viewports.contains_key(&timeline_surface);
         let follow_timeline_tail =
-            self.timeline_is_at_end(self.task_session.as_ref(), &timeline_surface, true);
-        let previous_timeline_tail = self
-            .task_session
+            self.timeline_is_at_end(previous_session.as_ref(), &timeline_surface, true);
+        let previous_timeline_tail = previous_session
             .as_ref()
             .and_then(|session| session.timeline.last())
             .cloned();
@@ -16228,7 +15830,7 @@ impl DesktopProgram {
             Ok(snapshot) => {
                 let session = TaskSessionView::refresh_preserving_history(
                     snapshot,
-                    self.task_session.as_ref(),
+                    previous_session.as_ref(),
                 );
                 let timeline_tail_changed =
                     previous_timeline_tail.as_ref() != session.timeline.last();
@@ -16526,16 +16128,54 @@ impl DesktopProgram {
         self.sync_markdown_images();
     }
 
+    fn remember_main_timeline_position(&mut self) {
+        let Some(task_id) = self.selected_task.clone() else {
+            return;
+        };
+        let Some(viewport) = self
+            .timeline_viewports
+            .get(&TimelineSurfaceKey::Main)
+            .copied()
+        else {
+            return;
+        };
+        let session = self.task_session.clone();
+        self.primary_module_mut::<crate::module::timeline::TimelineModule>(
+            &crate::module::timeline::TimelineModule::feature_id(),
+        )
+        .remember_reading_position(
+            task_id,
+            crate::module::timeline::TimelineReadingPosition {
+                offset: viewport.offset,
+                extent: viewport.extent,
+            },
+            session,
+        );
+    }
+
     fn update_timeline_viewport(
         &mut self,
         surface: TimelineSurfaceKey,
         offset: f32,
         viewport_extent: f32,
     ) {
-        self.timeline_viewports
-            .entry(surface)
-            .or_default()
-            .update(offset, viewport_extent);
+        let offset = if offset.is_finite() {
+            offset.max(0.0)
+        } else {
+            0.0
+        };
+        let viewport_extent = if viewport_extent.is_finite() && viewport_extent > 0.0 {
+            viewport_extent
+        } else {
+            TIMELINE_DEFAULT_VIEWPORT_EXTENT
+        };
+        self.timeline_viewports.insert(
+            surface,
+            TimelineViewport {
+                offset,
+                extent: viewport_extent,
+            },
+        );
     }
 
     fn timeline_is_at_end(
@@ -16550,27 +16190,13 @@ impl DesktopProgram {
         let Some(viewport) = self.timeline_viewports.get(surface).copied() else {
             return true;
         };
-        let projected_extent = if matches!(surface, TimelineSurfaceKey::Main) {
-            self.runtime_shell.as_ref().and_then(|handles| {
-                handles.measured_timeline_content_extent_for_task(
-                    self.selected_task.as_ref().map(TaskId::as_str),
-                )
-            })
-        } else {
-            None
-        };
         timeline_viewport_is_at_end(
             viewport,
-            projected_extent
-                .unwrap_or_else(|| timeline_content_extent(session, includes_load_earlier_control)),
+            timeline_content_extent(session, includes_load_earlier_control),
         )
     }
 
     fn queue_timeline_to_end(&mut self, surface: TimelineSurfaceKey, content_extent: f32) {
-        if matches!(surface, TimelineSurfaceKey::Main) {
-            self.pending_main_timeline_tail = self.selected_task.clone();
-            return;
-        }
         let viewport = self
             .timeline_viewports
             .get(&surface)
@@ -16584,20 +16210,9 @@ impl DesktopProgram {
                 extent: viewport.extent,
             },
         );
-        if offset > 0.0 {
-            self.pending_ui_commands.push(HostedUiCommand::ScrollBy {
-                window_id: surface.window_id(),
-                target: surface.scrollable_id(),
-                x: 0.0,
-                y: content_extent,
-            });
-        }
     }
 
     fn shift_timeline_anchor(&mut self, surface: TimelineSurfaceKey, delta: f32) {
-        if matches!(surface, TimelineSurfaceKey::Main) {
-            return;
-        }
         if !delta.is_finite() || delta <= 0.0 {
             return;
         }
@@ -16605,12 +16220,6 @@ impl DesktopProgram {
             .entry(surface.clone())
             .or_default()
             .offset += delta;
-        self.pending_ui_commands.push(HostedUiCommand::ScrollBy {
-            window_id: surface.window_id(),
-            target: surface.scrollable_id(),
-            x: 0.0,
-            y: delta,
-        });
     }
 
     fn set_theme(&mut self, theme: ThemeMode) {
@@ -17641,7 +17250,6 @@ impl DesktopProgram {
         .in_slot(lilia_feature_remote::remote_slot());
 
         self.remote_error = None;
-        self.remote_next_refresh = Some(Instant::now() + Duration::from_secs(2));
         match self.kernel.jobs().submit(request) {
             Ok(handle) => self.active_remote_job = Some(handle.id()),
             Err(error) => {
@@ -17658,13 +17266,7 @@ impl DesktopProgram {
                 self.active_remote_job = None;
                 match serde_json::from_value::<RemoteControlStatus>(output) {
                     Ok(status) => {
-                        if self
-                            .remote
-                            .as_ref()
-                            .is_none_or(|previous| self.remote_pc_name == previous.pc_name)
-                        {
-                            self.remote_pc_name = status.pc_name.clone();
-                        }
+                        self.remote_pc_name = status.pc_name.clone();
                         self.remote = Some(status);
                         self.remote_error = None;
                     }
@@ -17775,161 +17377,7 @@ impl DesktopProgram {
         let settings_visible =
             self.application_surface_is_visible(ApplicationWorkspaceSurface::Settings);
         let response = match command {
-            DebugCommand::UiWindow { window_id, command } => {
-                let name = command.name();
-                let result = self
-                    .task_popup_shells
-                    .get(&WindowId(window_id))
-                    .zip(self.documents.get_mut(&WindowId(window_id)))
-                    .map(|(handles, document)| handles.debug_retained_command(document, &command));
-                match result {
-                    Some(Ok(Some(snapshot))) => snapshot_response(name, &snapshot),
-                    _ => failure_response(
-                        name,
-                        "target_not_interactive",
-                        "the requested window has no exposed enabled control for this action",
-                        None,
-                    ),
-                }
-            }
             DebugCommand::Observe => success_response("observe", &self.debug_observation()),
-            DebugCommand::UiObserve => {
-                let snapshot = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get(&WindowId::PRIMARY))
-                    .map(|(handles, document)| handles.observe_retained_ui(document));
-                snapshot_response("ui-observe", &snapshot)
-            }
-            DebugCommand::UiClick { target_id } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| handles.act_retained_ui(document, &target_id, None));
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-click", &json!({"dispatched": true})),
-                    Some(Err(error)) => {
-                        failure_response("ui-click", "native_ui_error", &error.to_string(), None)
-                    }
-                    _ => failure_response(
-                        "ui-click",
-                        "target_not_interactive",
-                        "the mounted control did not accept this action",
-                        None,
-                    ),
-                }
-            }
-            DebugCommand::UiHover { target_id, point } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| {
-                        handles.hover_retained_ui(document, &target_id, point)
-                    });
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-hover", &json!({"dispatched":true})),
-                    _ => failure_response(
-                        "ui-hover",
-                        "target_not_interactive",
-                        "the visible enabled target did not accept this pointer location",
-                        None,
-                    ),
-                }
-            }
-            DebugCommand::UiClickAt { target_id, x, y } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| {
-                        handles.click_retained_ui_at(document, &target_id, x, y)
-                    });
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-click-at", &json!({"dispatched":true})),
-                    _ => failure_response(
-                        "ui-click-at",
-                        "target_not_interactive",
-                        "the exposed control did not accept this pointer action",
-                        None,
-                    ),
-                }
-            }
-            DebugCommand::UiDrag {
-                target_id,
-                start,
-                end,
-            } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| {
-                        handles.drag_retained_ui_at(document, &target_id, start, end)
-                    });
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-drag", &json!({"dispatched":true})),
-                    _ => failure_response(
-                        "ui-drag",
-                        "target_not_interactive",
-                        "the exposed control did not accept this pointer drag",
-                        None,
-                    ),
-                }
-            }
-            DebugCommand::UiInput { target_id, text } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| {
-                        handles.act_retained_ui(document, &target_id, Some(&text))
-                    });
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-input", &json!({"dispatched": true})),
-                    _ => failure_response(
-                        "ui-input",
-                        "target_not_interactive",
-                        "the mounted control did not accept text",
-                        None,
-                    ),
-                }
-            }
-            DebugCommand::UiScroll { target_id, delta_y } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| {
-                        handles.scroll_retained_ui(document, &target_id, delta_y)
-                    });
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-scroll", &json!({"dispatched":true})),
-                    _ => failure_response(
-                        "ui-scroll",
-                        "target_not_interactive",
-                        "the mounted surface did not accept scrolling",
-                        None,
-                    ),
-                }
-            }
-            DebugCommand::UiKey { target_id, key } => {
-                let result = self
-                    .runtime_shell
-                    .as_ref()
-                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                    .map(|(handles, document)| handles.key_retained_ui(document, &target_id, &key));
-                match result {
-                    Some(Ok(true)) => snapshot_response("ui-key", &json!({"dispatched": true})),
-                    _ => failure_response(
-                        "ui-key",
-                        "target_not_interactive",
-                        "the mounted control did not accept this key",
-                        None,
-                    ),
-                }
-            }
             DebugCommand::EquivalenceSnapshot { fixture_id } => {
                 let configured = std::env::var("LILIA_EQUIVALENCE_FIXTURE_ID").ok();
                 if configured.as_deref() != Some(fixture_id.as_str()) {
@@ -18015,39 +17463,6 @@ impl DesktopProgram {
             }
             DebugCommand::RecentErrors => {
                 success_response("recent-errors", &self.debug_observation())
-            }
-            DebugCommand::UiInputFrame { target_id, text } => {
-                let started_at = Instant::now();
-                if self.pending_debug_frame_response.is_some() {
-                    failure_response(
-                        "ui-input-frame",
-                        "frame_measurement_busy",
-                        "another frame measurement is still pending",
-                        None,
-                    )
-                } else {
-                    let result = self
-                        .runtime_shell
-                        .as_ref()
-                        .zip(self.documents.get_mut(&WindowId::PRIMARY))
-                        .map(|(handles, document)| {
-                            handles.act_retained_ui(document, &target_id, Some(&text))
-                        });
-                    if matches!(result, Some(Ok(true))) {
-                        self.pending_debug_frame_response = Some(PendingDebugFrameResponse {
-                            command: "ui-input-frame",
-                            started_at,
-                            reply,
-                        });
-                        return;
-                    }
-                    failure_response(
-                        "ui-input-frame",
-                        "target_not_interactive",
-                        "the mounted control did not accept text",
-                        None,
-                    )
-                }
             }
             DebugCommand::InputFrame { target_id, text } => {
                 if self.pending_debug_frame_response.is_some() {
@@ -18141,6 +17556,18 @@ impl DesktopProgram {
                 }
             }
             DebugCommand::Input { target_id, text } => {
+                for (window, view) in self.debug_browser_views() {
+                    if let Some(document) = self.documents.get_mut(&window) {
+                        if view.debug_targets(document).contains(&target_id)
+                            && view.debug_input(&target_id, &text, document.context_mut())
+                        {
+                            let _ =
+                                reply.send(success_response("input", &self.debug_observation()));
+                            return;
+                        }
+                    }
+                }
+
                 if target_id == target_ids::COMMAND_PALETTE_INPUT && self.command_picker.is_open() {
                     self.command_picker.set_query(text);
                     let count = self.command_palette_items().len();
@@ -18303,14 +17730,17 @@ impl DesktopProgram {
                 let automation_config_field = parse_automation_node_config_target(&target_id)
                     .filter(|field| {
                         automations_visible
-                            && self.selected_automation_node().is_some_and(|node| {
-                                automation_node_config_fields(
-                                    &node.kind,
-                                    &self.automation_node_inspector.config,
-                                )
-                                .contains(field)
-                                    && automation_node_config_input_field(field)
-                            })
+                            && self
+                                .automation_module()
+                                .selected_automation_node()
+                                .is_some_and(|node| {
+                                    automation_node_config_fields(
+                                        &node.kind,
+                                        &self.automation_module().editor().config,
+                                    )
+                                    .contains(field)
+                                        && automation_node_config_input_field(field)
+                                })
                     })
                     .map(str::to_owned);
                 let feature_preset_model = target_ids::parse_feature_preset_model(&target_id)
@@ -18365,8 +17795,7 @@ impl DesktopProgram {
                         ),
                     }
                 } else if target_id == target_ids::PROJECT_CLONE_REPOSITORY
-                    && !self.settings_open
-                    && !self.automations_open
+                    && !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Clone
                     && !self.project_clone_busy()
                 {
@@ -18375,8 +17804,7 @@ impl DesktopProgram {
                     ));
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::PROJECT_CLONE_PARENT
-                    && !self.settings_open
-                    && !self.automations_open
+                    && !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Clone
                     && !self.project_clone_busy()
                 {
@@ -18385,8 +17813,7 @@ impl DesktopProgram {
                     )));
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::PROJECT_NAME
-                    && !self.settings_open
-                    && !self.automations_open
+                    && !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Settings
                     && self.current_selected_project().is_some()
                     && self.current_selected_task().is_none()
@@ -18394,8 +17821,7 @@ impl DesktopProgram {
                     self.update_message(Message::Project(ProjectMessage::ProjectNameChanged(text)));
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::PROJECT_WORKSPACE
-                    && !self.settings_open
-                    && !self.automations_open
+                    && !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Settings
                     && self.current_selected_project().is_some()
                     && self.current_selected_task().is_none()
@@ -18478,20 +17904,22 @@ impl DesktopProgram {
                     self.coding_query = text;
                     self.coding_error = None;
                     success_response("input", &self.debug_observation())
-                } else if let Some(session_id) = self
+                } else if let Some(intent) = self
                     .visible_terminal_snapshots()
                     .into_iter()
                     .find(|snapshot| {
                         snapshot.process.is_running()
                             && target_ids::terminal_input(snapshot.id.as_str()) == target_id
                     })
-                    .map(|snapshot| snapshot.id)
+                    .and_then(|snapshot| {
+                        self.debug_terminal_write_intent(&snapshot.id, text.as_bytes().to_vec())
+                    })
                 {
-                    self.terminal_inputs.insert(session_id, text);
+                    self.apply_shell_intent(intent);
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::AUTOMATIONS_NAME
                     && automations_visible
-                    && self.selected_automation.is_some()
+                    && self.automation_module().selected_workflow_id().is_some()
                 {
                     self.update_message(Message::Automation(
                         AutomationMessage::AutomationNameChanged(text),
@@ -18499,20 +17927,19 @@ impl DesktopProgram {
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::AUTOMATIONS_NODE_TITLE
                     && automations_visible
-                    && self.automation_node_inspector.node_id.is_some()
+                    && self.automation_module().editor().node_id.is_some()
                 {
-                    self.automation_node_inspector.title = text;
-                    self.automation_error = None;
+                    self.automation_module_mut().edit_node_title(text);
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::AUTOMATIONS_NODE_CONFIG
                     && automations_visible
-                    && self.automation_node_inspector.node_id.is_some()
+                    && self.automation_module().editor().node_id.is_some()
                 {
-                    self.automation_node_inspector.config = text;
-                    self.automation_error = None;
+                    self.automation_module_mut().edit_node_config(text);
                     success_response("input", &self.debug_observation())
                 } else if let Some(field) = automation_config_field {
-                    self.update_automation_node_config_field(field, json!(text));
+                    self.automation_module_mut()
+                        .update_automation_node_config_field(field, json!(text));
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::PROJECT_SETTINGS_CLONE_PARENT
                     && settings_visible
@@ -18540,13 +17967,13 @@ impl DesktopProgram {
                 } else if target_id == target_ids::AUTOMATIONS_HUMAN_RESPONSE
                     && automations_visible
                     && self
-                        .automation_run_detail
+                        .automation_module()
+                        .run_detail()
                         .as_ref()
                         .and_then(waiting_human_node)
                         .is_some()
                 {
-                    self.automation_human_response = text;
-                    self.automation_error = None;
+                    self.automation_module_mut().edit_response(text);
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::PROVIDER_MODEL_INPUT
                     && settings_visible
@@ -18757,8 +18184,7 @@ impl DesktopProgram {
                     self.task_action_error = None;
                     success_response("input", &self.debug_observation())
                 } else if target_id == target_ids::TODO_INPUT
-                    && !self.settings_open
-                    && !self.automations_open
+                    && !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Tasks
                     && self.current_selected_task().is_some()
                     && self.task_session.is_some()
@@ -18894,6 +18320,180 @@ impl DesktopProgram {
                     )
                 }
             }
+            DebugCommand::UiWindow { window_id, command } => {
+                let name = command.name();
+                let result = self
+                    .task_popup_shells
+                    .get(&WindowId(window_id))
+                    .zip(self.documents.get_mut(&WindowId(window_id)))
+                    .map(|(handles, document)| handles.debug_retained_command(document, &command));
+                match result {
+                    Some(Ok(Some(snapshot))) => snapshot_response(name, &snapshot),
+                    _ => failure_response(
+                        name,
+                        "target_not_interactive",
+                        "the requested window has no exposed enabled control for this action",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiObserve => {
+                let snapshot = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get(&WindowId::PRIMARY))
+                    .map(|(handles, document)| handles.observe_retained_ui(document));
+                snapshot_response("ui-observe", &snapshot)
+            }
+            DebugCommand::UiClick { target_id } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| handles.act_retained_ui(document, &target_id, None));
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-click", &json!({"dispatched": true})),
+                    Some(Err(error)) => {
+                        failure_response("ui-click", "native_ui_error", &error.to_string(), None)
+                    }
+                    _ => failure_response(
+                        "ui-click",
+                        "target_not_interactive",
+                        "the mounted control did not accept this action",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiHover { target_id, point } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| {
+                        handles.hover_retained_ui(document, &target_id, point)
+                    });
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-hover", &json!({"dispatched":true})),
+                    _ => failure_response(
+                        "ui-hover",
+                        "target_not_interactive",
+                        "the visible enabled target did not accept this pointer location",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiClickAt { target_id, x, y } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| {
+                        handles.click_retained_ui_at(document, &target_id, x, y)
+                    });
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-click-at", &json!({"dispatched":true})),
+                    _ => failure_response(
+                        "ui-click-at",
+                        "target_not_interactive",
+                        "the exposed control did not accept this pointer action",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiDrag {
+                target_id,
+                start,
+                end,
+            } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| {
+                        handles.drag_retained_ui_at(document, &target_id, start, end)
+                    });
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-drag", &json!({"dispatched":true})),
+                    _ => failure_response(
+                        "ui-drag",
+                        "target_not_interactive",
+                        "the exposed control did not accept this pointer drag",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiInput { target_id, text } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| {
+                        handles.act_retained_ui(document, &target_id, Some(&text))
+                    });
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-input", &json!({"dispatched": true})),
+                    _ => failure_response(
+                        "ui-input",
+                        "target_not_interactive",
+                        "the mounted control did not accept text",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiScroll { target_id, delta_y } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| {
+                        handles.scroll_retained_ui(document, &target_id, delta_y)
+                    });
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-scroll", &json!({"dispatched":true})),
+                    _ => failure_response(
+                        "ui-scroll",
+                        "target_not_interactive",
+                        "the mounted surface did not accept scrolling",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiKey { target_id, key } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| handles.key_retained_ui(document, &target_id, &key));
+                match result {
+                    Some(Ok(true)) => snapshot_response("ui-key", &json!({"dispatched": true})),
+                    _ => failure_response(
+                        "ui-key",
+                        "target_not_interactive",
+                        "the mounted control did not accept this key",
+                        None,
+                    ),
+                }
+            }
+            DebugCommand::UiInputFrame { target_id, text } => {
+                let result = self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get_mut(&WindowId::PRIMARY))
+                    .map(|(handles, document)| {
+                        handles.act_retained_ui(document, &target_id, Some(&text))
+                    });
+                match result {
+                    Some(Ok(true)) => {
+                        snapshot_response("ui-input-frame", &json!({"dispatched": true}))
+                    }
+                    _ => failure_response(
+                        "ui-input-frame",
+                        "target_not_interactive",
+                        "the mounted control did not accept text",
+                        None,
+                    ),
+                }
+            }
         };
         let _ = reply.send(response);
     }
@@ -18926,17 +18526,13 @@ impl DesktopProgram {
     #[cfg(debug_assertions)]
     fn debug_interaction_input(&mut self, target_id: &str, value: String) -> bool {
         if target_id == target_ids::SIDEBAR_SEARCH_INPUT
-            && !self.settings_open
-            && !self.automations_open
+            && !self.navigation.is_management()
             && self.sidebar_search_open
         {
             self.sidebar_search_query = value;
             return true;
         }
-        if self.settings_open
-            || self.automations_open
-            || self.project_surface != ProjectSurface::Tasks
-        {
+        if self.navigation.is_management() || self.project_surface != ProjectSurface::Tasks {
             return false;
         }
         let interaction = self
@@ -19429,6 +19025,28 @@ impl DesktopProgram {
     }
 
     #[cfg(debug_assertions)]
+    fn debug_browser_views(&self) -> Vec<(HostedWindowId, crate::browser_workbench::BrowserView)> {
+        let mut views = Vec::new();
+        if let Some(handles) = &self.runtime_shell {
+            views.extend(
+                handles
+                    .debug_browser_views()
+                    .into_iter()
+                    .map(|view| (HostedWindowId::PRIMARY, view)),
+            );
+        }
+        for (window, handles) in &self.task_popup_shells {
+            views.extend(
+                handles
+                    .debug_browser_views()
+                    .into_iter()
+                    .map(|view| (*window, view)),
+            );
+        }
+        views
+    }
+
+    #[cfg(debug_assertions)]
     fn debug_click(&mut self, target_id: &str) -> bool {
         let automations_visible =
             self.application_surface_is_visible(ApplicationWorkspaceSurface::Automations);
@@ -19440,6 +19058,18 @@ impl DesktopProgram {
             .any(|visible| visible == target_id)
         {
             return false;
+        }
+        for (window, view) in self.debug_browser_views() {
+            if self.documents.get(&window).is_some_and(|document| {
+                view.debug_targets(document)
+                    .iter()
+                    .any(|id| id == target_id)
+            }) {
+                if let Some(intent) = view.debug_click(target_id) {
+                    self.apply_shell_intent(intent);
+                    return true;
+                }
+            }
         }
         if target_id == target_ids::TITLEBAR_SIDEBAR_TOGGLE {
             self.update_message(Message::WorkspaceLayout(WorkspaceLayoutMessage::Workspace(
@@ -19560,9 +19190,15 @@ impl DesktopProgram {
                     || target_ids::terminal_new(snapshot.id.as_str()) == target_id
             })
         {
-            let message = if target_ids::terminal_submit(snapshot.id.as_str()) == target_id {
-                TerminalViewMessage::Submit(snapshot.id)
-            } else if target_ids::terminal_interrupt(snapshot.id.as_str()) == target_id {
+            if target_ids::terminal_submit(snapshot.id.as_str()) == target_id {
+                let Some(intent) = self.debug_terminal_write_intent(&snapshot.id, vec![b'\r'])
+                else {
+                    return false;
+                };
+                self.apply_shell_intent(intent);
+                return true;
+            }
+            let message = if target_ids::terminal_interrupt(snapshot.id.as_str()) == target_id {
                 TerminalViewMessage::Interrupt(snapshot.id)
             } else if target_ids::terminal_eof(snapshot.id.as_str()) == target_id {
                 TerminalViewMessage::Eof(snapshot.id)
@@ -20228,17 +19864,11 @@ impl DesktopProgram {
             }));
             return true;
         }
-        if target_id == target_ids::SIDEBAR_NEW_CONVERSATION
-            && !self.settings_open
-            && !self.automations_open
-        {
+        if target_id == target_ids::SIDEBAR_NEW_CONVERSATION && !self.navigation.is_management() {
             self.update_message(Message::Sidebar(SidebarMessage::OpenSidebarInboxDraft));
             return true;
         }
-        if target_id == target_ids::SIDEBAR_SEARCH_TOGGLE
-            && !self.settings_open
-            && !self.automations_open
-        {
+        if target_id == target_ids::SIDEBAR_SEARCH_TOGGLE && !self.navigation.is_management() {
             self.update_message(Message::Sidebar(SidebarMessage::ToggleSidebarSearch));
             return true;
         }
@@ -20362,13 +19992,20 @@ impl DesktopProgram {
                 && target_ids::sidebar_running_stop(entry.task_id.as_str()) == target_id)
                 .then(|| entry.task_id.clone())
         }) {
-            self.update_message(Message::Sidebar(SidebarMessage::SidebarStopTask(task_id)));
+            if let Some(turn_id) = self
+                .kernel
+                .session()
+                .task_runtime_snapshot(&task_id)
+                .turn_id
+            {
+                self.stop_addressed_turn(
+                    HostedWindowId::PRIMARY,
+                    crate::runtime_shell::TurnStopTarget { task_id, turn_id },
+                );
+            }
             return true;
         }
-        if target_id == target_ids::NEW_CONVERSATION
-            && !self.settings_open
-            && !self.automations_open
-        {
+        if target_id == target_ids::NEW_CONVERSATION && !self.navigation.is_management() {
             self.open_main_conversation_draft();
             return true;
         }
@@ -20501,9 +20138,8 @@ impl DesktopProgram {
                     .find(|image| {
                         matches!(
                             self.markdown_images.get(&image.source),
-                            None | Some(
-                                MarkdownImageLoadState::Failed | MarkdownImageLoadState::Evicted
-                            ) | Some(MarkdownImageLoadState::Pending { requested: false })
+                            None | Some(MarkdownImageLoadState::Failed)
+                                | Some(MarkdownImageLoadState::Pending { requested: false })
                         ) && target_ids::markdown_image_retry(window_id.0, &image.source)
                             == target_id
                     })
@@ -20642,7 +20278,12 @@ impl DesktopProgram {
         if let Some(window_id) = self.task_popups.values().find_map(|popup| {
             (target_ids::task_popup_composer_actions(popup.id.0) == target_id).then_some(popup.id)
         }) {
-            self.composer_menu_open = Some(ComposerMenu::Actions(window_id));
+            self.route_composer_message(
+                window_id,
+                crate::module::composer::ComposerMessage::SetMenu(Some(
+                    crate::module::composer::view::ComposerMenuKind::Actions,
+                )),
+            );
             return true;
         }
         if let Some(window_id) = self.task_popups.values().find_map(|popup| {
@@ -20696,7 +20337,7 @@ impl DesktopProgram {
         if let Some((window_id, attachment)) = self.task_popups.values().find_map(|popup| {
             self.window_composer(popup.id)
                 .into_iter()
-                .flat_map(|composer| composer.effective_attachments())
+                .flat_map(|composer| &composer.attachments)
                 .chain(
                     popup
                         .task_sessions
@@ -20729,7 +20370,7 @@ impl DesktopProgram {
         }
         if let Some((window_id, attachment_id)) = self.task_popups.values().find_map(|popup| {
             self.window_composer(popup.id).and_then(|composer| {
-                composer.effective_attachments().find_map(|attachment| {
+                composer.attachments.iter().find_map(|attachment| {
                     (target_ids::task_popup_remove_attachment(popup.id.0, &attachment.id)
                         == target_id)
                         .then(|| (popup.id, attachment.id.clone()))
@@ -20836,10 +20477,20 @@ impl DesktopProgram {
             })
             .map(|entry| entry.task_id.clone())
         {
-            self.stop_conversation_status_task(task_id);
+            if let Some(turn_id) = self
+                .kernel
+                .session()
+                .task_runtime_snapshot(&task_id)
+                .turn_id
+            {
+                self.stop_addressed_turn(
+                    HostedWindowId::PRIMARY,
+                    crate::runtime_shell::TurnStopTarget { task_id, turn_id },
+                );
+            }
             return true;
         }
-        let project_reorder = (!self.settings_open && !self.automations_open)
+        let project_reorder = (!self.navigation.is_management())
             .then(|| {
                 self.projects.iter().find_map(|project| {
                     self.projects
@@ -20869,8 +20520,7 @@ impl DesktopProgram {
             }));
             return true;
         }
-        let task_reorder = (!self.settings_open
-            && !self.automations_open
+        let task_reorder = (!self.navigation.is_management()
             && self.project_surface == ProjectSurface::Tasks
             && self.current_selected_task().is_none()
             && self.task_module().task_search().trim().is_empty()
@@ -20902,8 +20552,7 @@ impl DesktopProgram {
             }));
             return true;
         }
-        let task_drop = (!self.settings_open
-            && !self.automations_open
+        let task_drop = (!self.navigation.is_management()
             && self.project_surface == ProjectSurface::Tasks
             && self.inspector_surface == InspectorSurface::Task
             && self.inspector_region_is_visible()
@@ -20948,10 +20597,10 @@ impl DesktopProgram {
             }
         }
         match target_id {
-            target_ids::PROJECT_CREATE if !self.settings_open && !self.automations_open => {
+            target_ids::PROJECT_CREATE if !self.navigation.is_management() => {
                 self.create_project();
             }
-            target_ids::PROJECT_CLONE_OPEN if !self.settings_open && !self.automations_open => {
+            target_ids::PROJECT_CLONE_OPEN if !self.navigation.is_management() => {
                 self.open_project_clone();
             }
             target_ids::PROJECT_CLONE_BACK
@@ -21026,7 +20675,7 @@ impl DesktopProgram {
             {
                 self.load_github_repositories(true);
             }
-            target_ids::PROJECTS_REFRESH if !self.settings_open && !self.automations_open => {
+            target_ids::PROJECTS_REFRESH if !self.navigation.is_management() => {
                 self.refresh_projects();
             }
             target_ids::PROJECT_SAVE
@@ -21112,29 +20761,25 @@ impl DesktopProgram {
                 self.create_task();
             }
             target_ids::PROJECT_TASKS
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.open_project_tasks();
             }
             target_ids::PROJECT_SETTINGS
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.open_project_settings();
             }
             target_ids::PROJECT_FILES_OPEN
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.update_message(Message::Project(ProjectMessage::OpenProjectFiles));
             }
             target_ids::ROADMAP_OPEN
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.update_message(Message::Roadmap(RoadmapMessage::Open));
@@ -21177,8 +20822,7 @@ impl DesktopProgram {
                 self.route_roadmap_message(RoadmapMessage::Delete);
             }
             target_ids::MEMORY_OPEN
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.update_message(Message::Memory(MemoryMessage::Open));
@@ -21233,16 +20877,13 @@ impl DesktopProgram {
                 self.route_memory_message(MemoryMessage::SaveCooldown);
             }
             target_ids::CODING_TOOLS_OPEN
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.open_coding_tools();
             }
             target_ids::IAB_OPEN
-                if !self.settings_open
-                    && !self.automations_open
-                    && self.current_selected_task().is_some() =>
+                if !self.navigation.is_management() && self.current_selected_task().is_some() =>
             {
                 self.open_iab();
             }
@@ -21383,8 +21024,7 @@ impl DesktopProgram {
                 }
             }
             target_ids::ARCHITECTURE_OPEN
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_project().is_some() =>
             {
                 self.route_architecture_message(ArchitectureMessage::Open);
@@ -21401,31 +21041,38 @@ impl DesktopProgram {
             {
                 self.route_architecture_message(ArchitectureMessage::Rollback);
             }
-            target_ids::AUTOMATIONS_OPEN if !self.settings_open && !self.automations_open => {
+            target_ids::AUTOMATIONS_OPEN if !self.navigation.is_management() => {
                 self.update_message(Message::Automation(AutomationMessage::OpenAutomations));
             }
             target_ids::AUTOMATIONS_BACK if automations_visible => {
                 self.update_message(Message::Automation(AutomationMessage::CloseAutomations));
             }
             target_ids::AUTOMATIONS_REFRESH if automations_visible => {
-                self.refresh_automations();
+                self.route_automation(
+                    crate::module::automation::controller::AutomationModuleMessage::Refresh,
+                );
             }
             target_ids::AUTOMATIONS_CREATE if automations_visible => {
-                self.create_automation();
+                self.route_automation(
+                    crate::module::automation::controller::AutomationModuleMessage::Create,
+                );
             }
             target_ids::AUTOMATIONS_SAVE_DRAFT
                 if automations_visible
                     && self
+                        .automation_module()
                         .selected_automation_workflow()
                         .is_some_and(|workflow| !workflow.name.trim().is_empty()) =>
             {
-                self.persist_selected_automation_draft();
+                self.automation_module_mut()
+                    .persist_selected_automation_draft();
             }
             target_ids::AUTOMATIONS_ADD_AGENT
             | target_ids::AUTOMATIONS_ADD_TOOL
             | target_ids::AUTOMATIONS_ADD_LOGIC
             | target_ids::AUTOMATIONS_ADD_HUMAN
-                if automations_visible && self.selected_automation.is_some() =>
+                if automations_visible
+                    && self.automation_module().selected_workflow_id().is_some() =>
             {
                 let kind = match target_id {
                     target_ids::AUTOMATIONS_ADD_AGENT => "agent",
@@ -21433,50 +21080,68 @@ impl DesktopProgram {
                     target_ids::AUTOMATIONS_ADD_LOGIC => "logic",
                     _ => "human",
                 };
-                self.add_automation_node(kind);
+                self.automation_module_mut().add_automation_node(kind);
             }
             target_ids::AUTOMATIONS_DELETE_SELECTION
                 if automations_visible
                     && matches!(
-                        self.automation_selection.as_ref(),
+                        self.automation_module().selection().as_ref(),
                         Some(GraphSelection::Node(_)) | Some(GraphSelection::Edge(_))
                     ) =>
             {
-                self.delete_automation_selection();
+                self.automation_module_mut().delete_automation_selection();
             }
             target_ids::AUTOMATIONS_SCOPE_INCLUDE_INBOX
-                if automations_visible && self.selected_automation.is_some() =>
+                if automations_visible
+                    && self.automation_module().selected_workflow_id().is_some() =>
             {
-                self.toggle_automation_scope_inbox();
+                self.automation_module_mut().toggle_automation_scope_inbox();
             }
             target_ids::AUTOMATIONS_NODE_SAVE
                 if automations_visible
-                    && self.automation_node_inspector.node_id.is_some()
-                    && !self.automation_node_inspector.title.trim().is_empty() =>
+                    && self.automation_module().editor().node_id.is_some()
+                    && !self.automation_module().editor().title.trim().is_empty() =>
             {
-                self.save_automation_node_inspector();
+                self.automation_module_mut()
+                    .save_automation_node_inspector();
+            }
+            target_ids::AUTOMATIONS_NODE_CLOSE
+                if automations_visible && self.automation_module().editor().node_id.is_some() =>
+            {
+                self.automation_module_mut()
+                    .update_automation_graph(GraphCanvasEvent::SelectionChanged(None));
             }
             target_ids::AUTOMATIONS_PUBLISH
-                if automations_visible && self.selected_automation.is_some() =>
+                if automations_visible
+                    && self.automation_module().selected_workflow_id().is_some() =>
             {
-                self.publish_automation();
+                self.automation_module_mut()
+                    .persist_selected_automation_draft();
+                if self.automation_module().error().is_none() {
+                    self.automation_module_mut().publish_automation();
+                }
             }
             target_ids::AUTOMATIONS_TOGGLE
                 if automations_visible
-                    && self.selected_automation_workflow().is_some_and(|workflow| {
-                        workflow.enabled || workflow.published_version_id.is_some()
-                    }) =>
+                    && self
+                        .automation_module()
+                        .selected_automation_workflow()
+                        .is_some_and(|workflow| {
+                            workflow.enabled || workflow.published_version_id.is_some()
+                        }) =>
             {
-                self.toggle_automation();
+                self.automation_module_mut().toggle_automation();
             }
             target_ids::AUTOMATIONS_DELETE
-                if automations_visible && self.selected_automation.is_some() =>
+                if automations_visible
+                    && self.automation_module().selected_workflow_id().is_some() =>
             {
-                self.delete_automation();
+                self.automation_module_mut().delete_automation();
             }
             target_ids::AUTOMATIONS_RUN
                 if automations_visible
                     && self
+                        .automation_module()
                         .selected_automation_workflow()
                         .is_some_and(|workflow| workflow.published_version_id.is_some()) =>
             {
@@ -21484,26 +21149,31 @@ impl DesktopProgram {
             }
             target_ids::AUTOMATIONS_CANCEL
                 if automations_visible
-                    && self.automation_run_detail.as_ref().is_some_and(|detail| {
-                        matches!(
-                            detail.run.status,
-                            AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
-                        )
-                    }) =>
+                    && self
+                        .automation_module()
+                        .run_detail()
+                        .as_ref()
+                        .is_some_and(|detail| {
+                            matches!(
+                                detail.run.status,
+                                AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
+                            )
+                        }) =>
             {
-                self.cancel_automation();
+                self.automation_module_mut().cancel_automation();
             }
             target_ids::AUTOMATIONS_RESUME
                 if automations_visible
                     && self
-                        .automation_run_detail
+                        .automation_module()
+                        .run_detail()
                         .as_ref()
                         .and_then(waiting_human_node)
                         .is_some() =>
             {
-                self.resume_automation();
+                self.automation_module_mut().resume_automation();
             }
-            target_ids::SETTINGS_OPEN if !self.settings_open && !self.automations_open => {
+            target_ids::SETTINGS_OPEN if !self.navigation.is_management() => {
                 self.update_message(Message::Settings(SettingsMessage::OpenSettings));
             }
             target_ids::SETTINGS_BACK if settings_visible => {
@@ -22023,9 +21693,7 @@ impl DesktopProgram {
                 self.update_message(Message::Update(UpdateMessage::OpenReleases));
             }
             target_ids::TASK_SESSION_BACK
-                if !self.settings_open
-                    && !self.automations_open
-                    && self.current_selected_task().is_some() =>
+                if !self.navigation.is_management() && self.current_selected_task().is_some() =>
             {
                 self.execute_workspace_command(DesktopCommand::BackToTaskList);
             }
@@ -22049,9 +21717,7 @@ impl DesktopProgram {
                 )));
             }
             target_ids::TASK_SESSION_INSPECTOR_TOGGLE
-                if !self.settings_open
-                    && !self.automations_open
-                    && self.current_selected_task().is_some() =>
+                if !self.navigation.is_management() && self.current_selected_task().is_some() =>
             {
                 self.toggle_task_inspector();
             }
@@ -22147,8 +21813,7 @@ impl DesktopProgram {
                 self.archive_task();
             }
             target_ids::TODO_SAVE
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_task().is_some()
                     && !self.todo_draft.trim().is_empty() =>
             {
@@ -22254,7 +21919,12 @@ impl DesktopProgram {
                 self.update_message(Message::Worktree(WorktreeMessage::CancelAction));
             }
             target_ids::COMPOSER_ACTIONS_OPEN if !self.composer_input_is_locked() => {
-                self.composer_menu_open = Some(ComposerMenu::Actions(HostedWindowId::PRIMARY));
+                self.route_composer_message(
+                    HostedWindowId::PRIMARY,
+                    crate::module::composer::ComposerMessage::SetMenu(Some(
+                        crate::module::composer::view::ComposerMenuKind::Actions,
+                    )),
+                );
             }
             target_ids::COMPOSER_REFERENCE_CONVERSATION if !self.composer_input_is_locked() => {
                 self.open_composer_conversation_reference(HostedWindowId::PRIMARY);
@@ -22376,8 +22046,7 @@ impl DesktopProgram {
                 self.dismiss_prompt_route_workflow(HostedWindowId::PRIMARY);
             }
             target_ids::COMPOSER_SEND
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && (self.current_selected_task().is_some()
                         || self.main_conversation_draft.is_some())
                     && self
@@ -22393,8 +22062,7 @@ impl DesktopProgram {
                 self.compact_context();
             }
             target_ids::COMPOSER_INTERRUPT
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.current_selected_task().is_some()
                     && self
                         .turn_state
@@ -22418,18 +22086,15 @@ impl DesktopProgram {
                     self.restore_task(task_id);
                     return true;
                 }
-                if !self.settings_open && !self.automations_open && target_id == target_ids::INBOX {
+                if !self.navigation.is_management() && target_id == target_ids::INBOX {
                     self.update_message(Message::Task(TaskMessage::SelectInbox));
                     return true;
                 }
-                if !self.settings_open
-                    && !self.automations_open
-                    && target_id == target_ids::PROJECTS_LIST
-                {
+                if !self.navigation.is_management() && target_id == target_ids::PROJECTS_LIST {
                     self.update_message(Message::Project(ProjectMessage::OpenProjectsOverview));
                     return true;
                 }
-                let project_target = (!self.settings_open && !self.automations_open)
+                let project_target = (!self.navigation.is_management())
                     .then(|| {
                         self.projects.iter().find_map(|project| {
                             (target_ids::project(project.id.as_str()) == target_id)
@@ -22443,14 +22108,12 @@ impl DesktopProgram {
                     )));
                     return true;
                 }
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Architecture
                 {
                     return false;
                 }
-                if !self.settings_open
-                    && !self.automations_open
+                if !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Roadmap
                 {
                     if let Some(milestone_id) = self
@@ -22482,8 +22145,7 @@ impl DesktopProgram {
                         }
                     }
                     return false;
-                } else if !self.settings_open
-                    && !self.automations_open
+                } else if !self.navigation.is_management()
                     && self.project_surface == ProjectSurface::Memory
                 {
                     if let Some(memory_id) =
@@ -22497,42 +22159,81 @@ impl DesktopProgram {
                     return false;
                 } else if automations_visible {
                     if let Some((field, value)) = parse_automation_scope_target(target_id) {
-                        let visible = self.selected_automation_workflow().is_some_and(|workflow| {
-                            automation_scope_target_visible(workflow, &self.projects, field, value)
-                        });
+                        let visible = self
+                            .automation_module()
+                            .selected_automation_workflow()
+                            .is_some_and(|workflow| {
+                                automation_scope_target_visible(
+                                    workflow,
+                                    &self.projects,
+                                    field,
+                                    value,
+                                )
+                            });
                         if visible {
                             self.toggle_automation_scope_value(field, value);
                             return true;
                         }
                     }
                     if let Some(field) = parse_automation_node_config_target(target_id) {
-                        let visible = self.selected_automation_node().is_some_and(|node| {
-                            automation_node_config_fields(
-                                &node.kind,
-                                &self.automation_node_inspector.config,
-                            )
-                            .contains(&field)
-                        });
+                        let visible = self
+                            .automation_module()
+                            .selected_automation_node()
+                            .is_some_and(|node| {
+                                automation_node_config_fields(
+                                    &node.kind,
+                                    &self.automation_module().editor().config,
+                                )
+                                .contains(&field)
+                            });
                         if visible && automation_node_config_cycle_field(field) {
-                            self.cycle_automation_node_config(field);
+                            self.automation_module_mut()
+                                .cycle_automation_node_config(field);
                             return true;
                         }
                         if visible && automation_node_config_boolean_field(field) {
-                            self.toggle_automation_node_config_boolean(field);
+                            self.automation_module_mut()
+                                .toggle_automation_node_config_boolean(field);
                             return true;
                         }
                     }
-                    if let Some(workflow_id) = self.automations.iter().find_map(|workflow| {
-                        (target_ids::automation(&workflow.id) == target_id)
-                            .then(|| workflow.id.clone())
-                    }) {
-                        self.select_automation(workflow_id);
+                    if let Some(workflow_id) =
+                        self.automation_module()
+                            .workflows()
+                            .iter()
+                            .find_map(|workflow| {
+                                (target_ids::automation(&workflow.id) == target_id)
+                                    .then(|| workflow.id.clone())
+                            })
+                    {
+                        self.route_automation(
+                            crate::module::automation::controller::AutomationModuleMessage::Select(
+                                workflow_id,
+                            ),
+                        );
                         return true;
                     }
-                    if let Some(run_id) = self.automation_runs.iter().find_map(|run| {
+                    if let Some(node_id) = self
+                        .automation_module()
+                        .selected_automation_workflow()
+                        .and_then(|workflow| {
+                            workflow.draft.nodes.iter().find_map(|node| {
+                                (target_ids::automation_node(&workflow.id, &node.id) == target_id)
+                                    .then(|| node.id.clone())
+                            })
+                        })
+                    {
+                        self.automation_module_mut().update_automation_graph(
+                            GraphCanvasEvent::SelectionChanged(Some(GraphSelection::Node(
+                                node_id.into(),
+                            ))),
+                        );
+                        return true;
+                    }
+                    if let Some(run_id) = self.automation_module().runs().iter().find_map(|run| {
                         (target_ids::automation_run(&run.id) == target_id).then(|| run.id.clone())
                     }) {
-                        self.select_automation_run(run_id);
+                        self.automation_module_mut().select_automation_run(run_id);
                         return true;
                     }
                     return false;
@@ -22604,7 +22305,7 @@ impl DesktopProgram {
                         )));
                         return true;
                     }
-                } else if !self.settings_open && !self.automations_open {
+                } else if !self.navigation.is_management() {
                     if let Some((todo_id, done)) = self.task_session.as_ref().and_then(|session| {
                         session.todos.iter().find_map(|todo| {
                             (todo.source == DesktopTodoSource::Lilia
@@ -22670,10 +22371,10 @@ impl DesktopProgram {
                         self.dispatch_todo_guide(&todo_id);
                         return true;
                     }
-                    let attachment = self
+                    if let Some(attachment) = self
                         .window_composer(HostedWindowId::PRIMARY)
                         .into_iter()
-                        .flat_map(|composer| composer.effective_attachments())
+                        .flat_map(|composer| &composer.attachments)
                         .chain(
                             self.task_session
                                 .iter()
@@ -22687,20 +22388,20 @@ impl DesktopProgram {
                                 &attachment.id,
                             ) == target_id)
                                 .then(|| attachment.clone())
-                        });
-                    if let Some(attachment) = attachment {
+                        })
+                    {
                         self.open_attachment_preview(HostedWindowId::PRIMARY, attachment);
                         return true;
                     }
-                    let attachment_id = self
+                    if let Some(attachment_id) = self
                         .window_composer(HostedWindowId::PRIMARY)
                         .into_iter()
-                        .flat_map(|composer| composer.effective_attachments())
+                        .flat_map(|composer| &composer.attachments)
                         .find_map(|attachment| {
                             (target_ids::composer_remove_attachment(&attachment.id) == target_id)
                                 .then(|| attachment.id.clone())
-                        });
-                    if let Some(attachment_id) = attachment_id {
+                        })
+                    {
                         self.execute_composer_command(DesktopComposerCommand::RemoveAttachment(
                             attachment_id,
                         ));
@@ -23065,15 +22766,20 @@ impl DesktopProgram {
             .task_session
             .as_ref()
             .map(|session| self.task_session_with_debug_overlay(session));
+        #[cfg(target_os = "windows")]
+        let browser_stats = self.browser.debug_stats();
+        #[cfg(not(target_os = "windows"))]
+        let browser_stats = crate::browser_workbench::BrowserDebugStats::default();
         DebugObservation {
-            page: if self.settings_open {
+            page: if self.navigation.is_settings() {
                 format!("settings/{}", self.settings_state.active_tab().as_str())
-            } else if self.automations_open {
-                self.selected_automation
+            } else if self.navigation.is_automations() {
+                self.automation_module()
+                    .selected_workflow_id()
                     .as_ref()
                     .map(|workflow_id| format!("automations/{workflow_id}"))
                     .unwrap_or_else(|| "automations".to_owned())
-            } else if self.projects_overview_open {
+            } else if self.navigation.is_projects() {
                 "projects/overview".to_owned()
             } else if self.project_surface == ProjectSurface::Clone {
                 "projects/clone".to_owned()
@@ -23405,68 +23111,106 @@ impl DesktopProgram {
                 .iter()
                 .find(|task| Some(&task.id) == self.current_selected_task().as_ref())
                 .map(|task| task.pinned),
-            selected_automation: self.selected_automation.clone(),
-            automation_count: self.automations.len(),
+            selected_automation: self.automation_module().selected_workflow_id().clone(),
             automation_authority: self.kernel.session().automation_debug_state().ok(),
+            knowledge_authority: Some({
+                let roadmap = roadmap_module.roadmap();
+                let tasks = &self.tasks;
+                let roadmap_cards = roadmap
+                    .milestones
+                    .iter()
+                    .map(|milestone| {
+                        let linked = roadmap
+                            .links
+                            .iter()
+                            .filter(|link| link.milestone_id == milestone.id)
+                            .map(|link| link.task_id.as_str())
+                            .collect::<Vec<_>>();
+                        let done = linked
+                            .iter()
+                            .filter(|id| {
+                                tasks.iter().any(|task| {
+                                    task.id.as_str() == **id
+                                        && task.status
+                                            == lilia_contracts::ProductTaskStatus::Done
+                                })
+                            })
+                            .count();
+                        serde_json::json!({
+                            "id": milestone.id,
+                            "status": format!("{done}/{} 已完成", linked.len()),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "projectId": self.selected_project.as_ref().map(|id| id.as_str()),
+                    "roadmap": roadmap,
+                    "roadmapCards": roadmap_cards,
+                    "memories": memory_module.memories(),
+                    "memorySettings": memory_module.settings(),
+                    "injection": memory_module.injection(),
+                    "tasks": tasks.iter().map(|task| serde_json::json!({
+                        "id": task.id.as_str(),
+                        "status": task.status,
+                    })).collect::<Vec<_>>(),
+                })
+            }),
+            automation_count: self.automation_module().workflows().len(),
             automation_published: self
+                .automation_module()
                 .selected_automation_workflow()
                 .is_some_and(|workflow| workflow.published_version_id.is_some()),
             automation_enabled: self
+                .automation_module()
                 .selected_automation_workflow()
                 .is_some_and(|workflow| workflow.enabled),
-            automation_node_count: self.automation_graph.nodes().len(),
-            automation_edge_count: self.automation_graph.edges().len(),
-            automation_run_count: self.automation_runs.len(),
-            selected_automation_run: self.selected_automation_run.clone(),
+            automation_node_count: self.automation_module().graph().nodes().len(),
+            automation_edge_count: self.automation_module().graph().edges().len(),
+            automation_run_count: self.automation_module().runs().len(),
+            selected_automation_run: self.automation_module().selected_run_id().clone(),
             automation_run_status: self
-                .automation_run_detail
+                .automation_module()
+                .run_detail()
                 .as_ref()
                 .map(|detail| automation_run_status_key(detail.run.status)),
             automation_waiting_human_node: self
-                .automation_run_detail
+                .automation_module()
+                .run_detail()
                 .as_ref()
                 .and_then(waiting_human_node)
                 .map(|node| node.node_id.clone()),
             automation_waiting_agent_node: self
-                .automation_run_detail
+                .automation_module()
+                .run_detail()
                 .as_ref()
                 .and_then(waiting_agent_node)
                 .map(|node| node.node_id.clone()),
             automation_selected_node_title: self
-                .automation_node_inspector
+                .automation_module()
+                .editor()
                 .node_id
                 .as_ref()
-                .map(|_| self.automation_node_inspector.title.clone()),
+                .map(|_| self.automation_module().editor().title.clone()),
             automation_selected_node_kind: self
+                .automation_module()
                 .selected_automation_node()
                 .map(|node| node.kind.clone()),
             automation_scope: self
+                .automation_module()
                 .selected_automation_workflow()
                 .and_then(|workflow| serde_json::to_value(&workflow.scope).ok()),
             automation_selected_node_config: self
+                .automation_module()
                 .selected_automation_node()
                 .map(|node| node.config.clone()),
             automation_selected_node_config_draft: self
-                .automation_node_inspector
+                .automation_module()
+                .editor()
                 .node_id
                 .as_ref()
                 .and_then(|_| {
-                    parse_automation_node_config(&self.automation_node_inspector.config).ok()
+                    parse_automation_node_config(&self.automation_module().editor().config).ok()
                 }),
-            knowledge_authority: self.current_selected_project().map(|project_id| {
-                serde_json::json!({
-                    "projectId": project_id.as_str(),
-                    "roadmap": self.kernel.session().project_roadmap(&project_id).ok(),
-                    "roadmapCards": self.primary_shell_snapshot().roadmap_cards.iter().map(|card| serde_json::json!({
-                        "id":card.id,"title":card.title,"status":card.status,"date":card.date
-                    })).collect::<Vec<_>>(),
-                    "tasks": self.kernel.session().query_tasks(TaskQuery::for_project(project_id.clone())).ok()
-                        .map(|tasks| tasks.into_iter().map(|task| serde_json::json!({"id":task.id,"status":task.status})).collect::<Vec<_>>()),
-                    "memories": self.kernel.session().list_memories(Some(&project_id)).ok(),
-                    "memorySettings": self.kernel.session().memory_settings().ok(),
-                    "injection": memory_module.injection(),
-                })
-            }),
             selected_milestone: roadmap_module.selected().map(str::to_owned),
             selected_milestone_title: selected_milestone.map(|milestone| milestone.title.clone()),
             selected_milestone_description: selected_milestone
@@ -23518,19 +23262,19 @@ impl DesktopProgram {
                 .active_panel(DockSlot::Right)
                 .filter(|panel| panel.id.as_str() == CODING_TOOLS_PANEL_ID)
                 .map(|panel| panel.extent),
-            iab_dock_open: self.inspector_surface == InspectorSurface::Iab
-                && self.inspector_region_is_visible(),
-            iab_browser_attached: self.iab.browser_attached(),
-            iab_browser_ready: self.iab.browser_ready(),
-            iab_url: self.iab.active_url().to_owned(),
-            iab_error: self.iab.error().map(str::to_owned),
-            iab_window_count: 0,
-            iab_window_ready_count: 0,
-            iab_window_task_ids: Vec::new(),
-            iab_window_urls: Vec::new(),
-            iab_window_capture_pending_count: usize::from(self.iab.capture_task.is_some()),
-            iab_window_notice: None,
-            iab_window_error: None,
+            browser_states: browser_stats.states,
+            iab_dock_open: browser_stats.visible,
+            iab_browser_attached: browser_stats.attached,
+            iab_browser_ready: browser_stats.ready,
+            iab_url: browser_stats.url,
+            iab_error: browser_stats.error.clone(),
+            iab_window_count: browser_stats.count,
+            iab_window_ready_count: browser_stats.ready_count,
+            iab_window_task_ids: browser_stats.task_ids,
+            iab_window_urls: browser_stats.urls,
+            iab_window_capture_pending_count: browser_stats.capture_pending,
+            iab_window_notice: browser_stats.notice,
+            iab_window_error: browser_stats.error,
             coding_tools_busy: self.coding_busy(),
             coding_tools_shared_identity: self
                 .coding_tools
@@ -24063,11 +23807,11 @@ impl DesktopProgram {
                 .and_then(|composer| composer.reasoning_effort.clone()),
             composer_attachment_count: self
                 .main_surface_composer()
-                .map(|composer| composer.effective_attachments().count())
+                .map(|composer| composer.attachments.len())
                 .unwrap_or_default(),
             composer_conversation_reference_count: self
                 .main_surface_composer()
-                .map(|composer| composer.effective_conversation_references().count())
+                .map(|composer| composer.conversation_references.len())
                 .unwrap_or_default(),
             context_usage_used_tokens: self
                 .task_session
@@ -24193,7 +23937,20 @@ impl DesktopProgram {
 
     #[cfg(debug_assertions)]
     fn capture_debug_errors(&mut self) {
+        let automation_operation_error = self
+            .automation_module()
+            .selected_workflow_id()
+            .as_deref()
+            .and_then(|id| {
+                self.automation_module()
+                    .operations()
+                    .error(id, self.automation_module().selected_run_id().as_deref())
+            });
         let mut errors = [
+            (
+                "automation-operation",
+                automation_operation_error.as_deref(),
+            ),
             ("application", self.error_message.as_deref()),
             ("project", self.project_action_error.as_deref()),
             ("task", self.task_action_error.as_deref()),
@@ -24201,7 +23958,7 @@ impl DesktopProgram {
                 "conversation-status",
                 self.conversation_status_error.as_deref(),
             ),
-            ("automation", self.automation_error.as_deref()),
+            ("automation", self.automation_module().error().as_deref()),
             ("roadmap", self.roadmap_module().error()),
             ("architecture", self.architecture_module().error()),
             ("memory", self.memory_module().error()),
@@ -24373,6 +24130,48 @@ impl DesktopProgram {
     }
 
     #[cfg(debug_assertions)]
+    fn debug_terminal_write_intent(
+        &self,
+        session: &DesktopTerminalSessionId,
+        bytes: Vec<u8>,
+    ) -> Option<crate::runtime_shell::ShellIntent> {
+        let resolve = |window_id, layout: &PanelLayoutSnapshot, items: &[WorkspaceItem]| {
+            let item_id = layout.active_workspace_item().ok().flatten()?;
+            let item = items.iter().find(|item| &item.id == item_id)?;
+            if item.kind.as_str() != TERMINAL_WORKSPACE_ITEM_KIND
+                || item.terminal_session_id().ok().flatten().as_ref() != Some(session)
+            {
+                return None;
+            }
+            Some(crate::runtime_shell::ShellPaneTarget {
+                window_id,
+                pane_id: layout.active_pane().as_str().to_owned(),
+                item_id: item_id.as_str().to_owned(),
+            })
+        };
+        let target = resolve(
+            HostedWindowId::PRIMARY,
+            &self.panel_layout,
+            &self.workspace_items,
+        )
+        .or_else(|| {
+            self.task_popups.values().find_map(|popup| {
+                let workspace = popup.workspace.snapshot().ok()?;
+                resolve(
+                    popup.id,
+                    &workspace.panel_layout,
+                    &workspace.workspace_items,
+                )
+            })
+        })?;
+        Some(crate::runtime_shell::ShellIntent::TerminalWrite {
+            target,
+            session_id: session.as_str().to_owned(),
+            bytes,
+        })
+    }
+
+    #[cfg(debug_assertions)]
     fn visible_terminal_snapshots(&self) -> Vec<DesktopTerminalSnapshot> {
         let mut items = Vec::new();
         if let Some(item_id) = self.panel_layout.active_workspace_item().ok().flatten() {
@@ -24446,7 +24245,18 @@ impl DesktopProgram {
             target_ids::COMMAND_PALETTE_OPEN.to_owned(),
             target_ids::CONVERSATION_STATUS_OPEN.to_owned(),
         ];
-        if !self.settings_open && !self.automations_open && self.current_selected_task().is_some() {
+        for (window, view) in self.debug_browser_views() {
+            if let Some(document) = self.documents.get(&window) {
+                targets.extend(view.debug_targets(document));
+            }
+        }
+
+        if !self.navigation.is_management()
+            && self.browser_available_for_window(HostedWindowId::PRIMARY)
+        {
+            targets.push(target_ids::IAB_OPEN.to_owned());
+        }
+        if !self.navigation.is_management() && self.current_selected_task().is_some() {
             targets.push(target_ids::TITLEBAR_TASK_INSPECTOR_TOGGLE.to_owned());
         }
         if self.titlebar_menu_open {
@@ -24475,7 +24285,7 @@ impl DesktopProgram {
                 }
             }
         }
-        if !self.settings_open && !self.automations_open {
+        if !self.navigation.is_management() {
             targets.extend([
                 target_ids::NEW_CONVERSATION.to_owned(),
                 target_ids::SIDEBAR_NEW_CONVERSATION.to_owned(),
@@ -24587,7 +24397,7 @@ impl DesktopProgram {
                         &image.source,
                     )),
                     None
-                    | Some(MarkdownImageLoadState::Failed | MarkdownImageLoadState::Evicted)
+                    | Some(MarkdownImageLoadState::Failed)
                     | Some(MarkdownImageLoadState::Pending { requested: false }) => Some(
                         target_ids::markdown_image_retry(HostedWindowId::PRIMARY.0, &image.source),
                     ),
@@ -24665,7 +24475,7 @@ impl DesktopProgram {
                             Some(target_ids::markdown_image(popup.id.0, &image.source))
                         }
                         None
-                        | Some(MarkdownImageLoadState::Failed | MarkdownImageLoadState::Evicted)
+                        | Some(MarkdownImageLoadState::Failed)
                         | Some(MarkdownImageLoadState::Pending { requested: false }) => {
                             Some(target_ids::markdown_image_retry(popup.id.0, &image.source))
                         }
@@ -24821,7 +24631,7 @@ impl DesktopProgram {
             targets.extend(
                 self.window_composer(popup.id)
                     .into_iter()
-                    .flat_map(|composer| composer.effective_attachments())
+                    .flat_map(|composer| &composer.attachments)
                     .chain(
                         popup
                             .task_sessions
@@ -24839,7 +24649,7 @@ impl DesktopProgram {
             targets.extend(
                 self.window_composer(popup.id)
                     .into_iter()
-                    .flat_map(|composer| composer.effective_attachments())
+                    .flat_map(|composer| &composer.attachments)
                     .map(|attachment| {
                         target_ids::task_popup_remove_attachment(popup.id.0, &attachment.id)
                     }),
@@ -24865,7 +24675,7 @@ impl DesktopProgram {
             targets.extend(
                 self.window_composer(popup.id)
                     .into_iter()
-                    .flat_map(|composer| composer.effective_conversation_references())
+                    .flat_map(|composer| &composer.conversation_references)
                     .map(|reference| {
                         target_ids::task_popup_conversation_reference_remove(
                             popup.id.0,
@@ -25455,11 +25265,26 @@ impl DesktopProgram {
                 target_ids::AUTOMATIONS_CREATE.to_owned(),
             ]);
             targets.extend(
-                self.automations
+                self.automation_module()
+                    .workflows()
                     .iter()
                     .map(|workflow| target_ids::automation(&workflow.id)),
             );
-            if let Some(workflow) = self.selected_automation_workflow() {
+            if let Some(workflow) = self.automation_module().selected_automation_workflow() {
+                if self
+                    .runtime_shell
+                    .as_ref()
+                    .zip(self.documents.get(&WindowId::PRIMARY))
+                    .is_some_and(|(shell, document)| shell.automation_graph_is_mounted(document))
+                {
+                    targets.extend(
+                        workflow
+                            .draft
+                            .nodes
+                            .iter()
+                            .map(|node| target_ids::automation_node(&workflow.id, &node.id)),
+                    );
+                }
                 targets.extend([
                     target_ids::AUTOMATIONS_NAME.to_owned(),
                     target_ids::AUTOMATIONS_PUBLISH.to_owned(),
@@ -25496,7 +25321,7 @@ impl DesktopProgram {
                     .into_iter()
                     .map(|event_kind| target_ids::automation_scope("event-kind", event_kind)),
                 );
-                let selection_deletable = match self.automation_selection.as_ref() {
+                let selection_deletable = match self.automation_module().selection().as_ref() {
                     Some(GraphSelection::Node(node_id)) => workflow
                         .draft
                         .nodes
@@ -25508,19 +25333,20 @@ impl DesktopProgram {
                 if selection_deletable {
                     targets.push(target_ids::AUTOMATIONS_DELETE_SELECTION.to_owned());
                 }
-                if self.automation_node_inspector.node_id.is_some() {
+                if self.automation_module().editor().node_id.is_some() {
+                    targets.push(target_ids::AUTOMATIONS_NODE_CLOSE.to_owned());
                     targets.extend([
                         target_ids::AUTOMATIONS_NODE_TITLE.to_owned(),
                         target_ids::AUTOMATIONS_NODE_CONFIG.to_owned(),
                     ]);
-                    if !self.automation_node_inspector.title.trim().is_empty() {
+                    if !self.automation_module().editor().title.trim().is_empty() {
                         targets.push(target_ids::AUTOMATIONS_NODE_SAVE.to_owned());
                     }
-                    if let Some(node) = self.selected_automation_node() {
+                    if let Some(node) = self.automation_module().selected_automation_node() {
                         targets.extend(
                             automation_node_config_fields(
                                 &node.kind,
-                                &self.automation_node_inspector.config,
+                                &self.automation_module().editor().config,
                             )
                             .into_iter()
                             .map(target_ids::automation_node_config),
@@ -25530,37 +25356,57 @@ impl DesktopProgram {
                 if workflow.enabled || workflow.published_version_id.is_some() {
                     targets.push(target_ids::AUTOMATIONS_TOGGLE.to_owned());
                 }
-                if workflow.published_version_id.is_some() {
+                if workflow.published_version_id.is_some()
+                    && !self.automation_module().operations().busy(&workflow.id)
+                    && !self.automation_module().runs().iter().any(|run| {
+                        matches!(
+                            run.status,
+                            AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
+                        )
+                    })
+                {
                     targets.push(target_ids::AUTOMATIONS_RUN.to_owned());
                 }
                 targets.extend(
-                    self.automation_runs
+                    self.automation_module()
+                        .runs()
                         .iter()
                         .map(|run| target_ids::automation_run(&run.id)),
                 );
                 if self
-                    .automation_run_detail
+                    .automation_module()
+                    .run_detail()
                     .as_ref()
                     .and_then(waiting_human_node)
                     .is_some()
                 {
-                    targets.extend([
-                        target_ids::AUTOMATIONS_HUMAN_RESPONSE.to_owned(),
-                        target_ids::AUTOMATIONS_RESUME.to_owned(),
-                    ]);
+                    targets.extend([target_ids::AUTOMATIONS_HUMAN_RESPONSE.to_owned()]);
+                    if !self.automation_module().operations().busy(&workflow.id) {
+                        targets.push(target_ids::AUTOMATIONS_RESUME.to_owned());
+                    }
                 }
-                if self.automation_run_detail.as_ref().is_some_and(|detail| {
-                    matches!(
-                        detail.run.status,
-                        AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
-                    )
-                }) {
+                if self
+                    .automation_module()
+                    .run_detail()
+                    .as_ref()
+                    .is_some_and(|detail| {
+                        matches!(
+                            detail.run.status,
+                            AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
+                        )
+                    })
+                    && !self
+                        .automation_module()
+                        .selected_run_id()
+                        .as_deref()
+                        .is_some_and(|id| self.automation_module().operations().cancelling(id))
+                {
                     targets.push(target_ids::AUTOMATIONS_CANCEL.to_owned());
                 }
             }
         }
 
-        if self.settings_open || self.automations_open {
+        if self.navigation.is_management() {
             return targets;
         }
 
@@ -26017,7 +25863,7 @@ impl DesktopProgram {
                 targets.extend(
                     self.window_composer(HostedWindowId::PRIMARY)
                         .into_iter()
-                        .flat_map(|composer| composer.effective_attachments())
+                        .flat_map(|composer| &composer.attachments)
                         .map(|attachment| target_ids::composer_remove_attachment(&attachment.id)),
                 );
                 if draft.suggestions.can_refresh() {
@@ -26051,7 +25897,7 @@ impl DesktopProgram {
                 targets.extend(
                     self.window_composer(HostedWindowId::PRIMARY)
                         .into_iter()
-                        .flat_map(|composer| composer.effective_conversation_references())
+                        .flat_map(|composer| &composer.conversation_references)
                         .map(|reference| {
                             target_ids::composer_conversation_reference_remove(&reference.task_id)
                         }),
@@ -26240,7 +26086,7 @@ impl DesktopProgram {
                     targets.extend(
                         self.window_composer(HostedWindowId::PRIMARY)
                             .into_iter()
-                            .flat_map(|composer| composer.effective_attachments())
+                            .flat_map(|composer| &composer.attachments)
                             .map(|attachment| {
                                 target_ids::composer_remove_attachment(&attachment.id)
                             }),
@@ -26248,7 +26094,7 @@ impl DesktopProgram {
                     targets.extend(
                         self.window_composer(HostedWindowId::PRIMARY)
                             .into_iter()
-                            .flat_map(|composer| composer.effective_attachments())
+                            .flat_map(|composer| &composer.attachments)
                             .chain(session.timeline.iter().flat_map(|event| &event.attachments))
                             .filter(|attachment| attachment_supports_inline_preview(attachment))
                             .map(|attachment| {
@@ -26295,7 +26141,7 @@ impl DesktopProgram {
                     targets.extend(
                         self.window_composer(HostedWindowId::PRIMARY)
                             .into_iter()
-                            .flat_map(|composer| composer.effective_conversation_references())
+                            .flat_map(|composer| &composer.conversation_references)
                             .map(|reference| {
                                 target_ids::composer_conversation_reference_remove(
                                     &reference.task_id,
@@ -26681,9 +26527,6 @@ impl DesktopProgram {
                 self.shell_error = Some(error);
             }
         } else if let Some(event) = envelope.downcast::<TasksChanged>() {
-            if self.projects_overview_open {
-                self.refresh_project_dashboard();
-            }
             let active_location_changed = match event.project_id.as_ref() {
                 Some(project_id) => self.current_selected_project().as_ref() == Some(project_id),
                 None => self.current_inbox_selected(),
@@ -26754,17 +26597,6 @@ impl DesktopProgram {
             }
         } else if let Some(event) = envelope.downcast::<NavigationRequested>() {
             self.navigate(event.target.clone());
-        } else if envelope.is::<AutomationRunChanged>() {
-            if self.automations_open {
-                self.refresh_automation_runs();
-            }
-        } else if envelope.is::<AutomationChanged>() {
-            if self
-                .application_surface_item_location(ApplicationWorkspaceSurface::Automations)
-                .is_some()
-            {
-                self.refresh_automations();
-            }
         } else if let Some(event) = envelope.downcast::<MemoryChanged>() {
             self.refresh_workspace_window_project_surfaces(
                 Some(ProjectWorkspaceSurface::Memory),
@@ -26805,15 +26637,6 @@ impl DesktopProgram {
     }
 
     fn apply_worktree_event(&mut self, task_id: &lilia_contracts::TaskId, failure: Option<String>) {
-        if let Some(message) = &failure {
-            for popup in self
-                .task_popups
-                .values_mut()
-                .filter(|popup| popup.active_task_id.as_ref() == Some(task_id))
-            {
-                popup.error = Some(message.clone());
-            }
-        }
         if self.current_selected_task().as_ref() == Some(task_id) {
             self.worktree_confirmation = None;
             if let Some(message) = failure {
@@ -26965,24 +26788,6 @@ impl DesktopProgram {
                 self.sidebar_stopping_tasks.clear();
                 self.conversation_status_error =
                     Some("暂时无法读取会话状态，请稍后重试。".to_owned());
-            }
-        }
-    }
-
-    fn stop_conversation_status_task(&mut self, task_id: TaskId) {
-        if !self.sidebar_stopping_tasks.insert(task_id.clone()) {
-            return;
-        }
-        match self.kernel.session().interrupt_task_turn(&task_id) {
-            Ok(_) => {
-                self.conversation_status_error = None;
-                self.refresh_conversation_status();
-            }
-            Err(error) => {
-                self.sidebar_stopping_tasks.remove(&task_id);
-                eprintln!("failed to stop Native conversation-status task: {error}");
-                self.conversation_status_error =
-                    Some("无法停止当前处理，请刷新状态后重试。".to_owned());
             }
         }
     }
@@ -27263,7 +27068,6 @@ impl DesktopProgram {
                     project_name,
                     task_sessions: BTreeMap::new(),
                     session: None,
-                    todo_ui: Default::default(),
                     conversation_suggestions: ConversationSuggestionState::default(),
                     pending_session_branch: None,
                     pending_review_slash_workflow: None,
@@ -27313,6 +27117,7 @@ impl DesktopProgram {
         let is_full_window_surface = item.application_surface().ok().flatten().is_some()
             || item.project_surface().ok().flatten().is_some()
             || is_document_editor_item(&item)
+            || item.kind.as_str() == "task-browser"
             || item
                 .terminal_session_id()
                 .is_ok_and(|value| value.is_some());
@@ -27362,7 +27167,6 @@ impl DesktopProgram {
                 project_name: "Workspace".to_owned(),
                 task_sessions: BTreeMap::new(),
                 session: None,
-                todo_ui: Default::default(),
                 conversation_suggestions: ConversationSuggestionState::default(),
                 pending_session_branch: None,
                 pending_review_slash_workflow: None,
@@ -27533,7 +27337,6 @@ impl DesktopProgram {
                 project_name,
                 task_sessions: BTreeMap::new(),
                 session: None,
-                todo_ui: Default::default(),
                 conversation_suggestions: ConversationSuggestionState::default(),
                 pending_session_branch: None,
                 pending_review_slash_workflow: None,
@@ -27727,7 +27530,6 @@ impl DesktopProgram {
                 project_name,
                 task_sessions: BTreeMap::new(),
                 session: None,
-                todo_ui: Default::default(),
                 conversation_suggestions: ConversationSuggestionState::default(),
                 pending_session_branch: None,
                 pending_review_slash_workflow: None,
@@ -27991,9 +27793,29 @@ impl DesktopProgram {
         let Some(item) = active_item else {
             return;
         };
+        if window_id != HostedWindowId::PRIMARY
+            && item.application_surface().ok().flatten().is_some()
+        {
+            // Older popup layouts could persist a management item even though
+            // popup rendering has no management page. Remove that stale item;
+            // the next explicit open routes the page to the primary shell.
+            if let Some(popup) = self.task_popups.get(&window_id) {
+                if let Ok(snapshot) = popup.workspace.snapshot() {
+                    if let Some(pane_id) = snapshot.panel_layout.pane_for_item(&item.id).cloned() {
+                        let _ = popup.workspace.execute(DesktopCommand::CloseWorkspaceItem {
+                            pane_id,
+                            item_id: item.id.clone(),
+                        });
+                    }
+                }
+            }
+            return;
+        }
         match item.application_surface().ok().flatten() {
             Some(ApplicationWorkspaceSurface::Projects) => self.refresh_project_dashboard(),
-            Some(ApplicationWorkspaceSurface::Automations) => self.refresh_automations(),
+            Some(ApplicationWorkspaceSurface::Automations) => self.route_automation(
+                crate::module::automation::controller::AutomationModuleMessage::Refresh,
+            ),
             Some(ApplicationWorkspaceSurface::Settings) => {
                 if let Some(tab) = item
                     .serialized_state
@@ -28422,7 +28244,6 @@ impl DesktopProgram {
         self.workspace_sessions.remove(window_id);
         self.ui_module_hosts.remove(&window_id);
         self.file_drop_hovered_windows.remove(&window_id);
-        self.window_worktree_merge_confirmations.remove(&window_id);
         self.attachment_previews.remove(&window_id);
         self.markdown_image_previews.remove(&window_id);
         self.timeline_viewports
@@ -28563,8 +28384,14 @@ impl DesktopProgram {
         else {
             return false;
         };
+        let requested_item = requested_workspace_item(&command).cloned();
         match workspace.execute(command) {
             Ok(outcome) => {
+                self.reveal_requested_resource(
+                    window_id,
+                    requested_item.as_ref(),
+                    &outcome.workspace.workspace_items,
+                );
                 if self.apply_task_popup_workspace_snapshot(window_id, outcome.workspace) {
                     self.persist_workspace_topology();
                     true
@@ -28915,6 +28742,9 @@ impl DesktopProgram {
         }) else {
             return;
         };
+        let Some(composer_task_id) = self.composer_task_for_window(window_id) else {
+            return;
+        };
         let request = DesktopFileDialogRequest {
             dialog_id: format!(
                 "task-popup-{}-{}",
@@ -28956,9 +28786,9 @@ impl DesktopProgram {
             multiple: true,
         };
         self.spawn_file_dialog(
-            FileDialogPurpose::TaskPopupAttachments {
+            FileDialogPurpose::ComposerAttachments {
                 window_id,
-                select_directories,
+                task_id: composer_task_id,
             },
             request,
         );
@@ -28988,18 +28818,53 @@ impl DesktopProgram {
     }
 
     fn paste_clipboard_into_task_popup(&mut self, window_id: HostedWindowId) {
-        self.paste_clipboard_text_for_window(window_id);
+        let Some(_) = self.task_popups.get(&window_id) else {
+            return;
+        };
+        let content = self
+            .window_composer(window_id)
+            .map(|composer| composer.content.clone())
+            .unwrap_or_default();
+        match self.capture_clipboard_text_paste() {
+            Ok(Some(ClipboardTextPaste::Attachment(attachment))) => {
+                self.add_task_popup_attachments(window_id, vec![attachment]);
+            }
+            Ok(Some(ClipboardTextPaste::Inline(value))) => {
+                self.task_popup_composer_command(
+                    window_id,
+                    DesktopComposerCommand::SetContent(format!("{content}{value}")),
+                );
+            }
+            Ok(None) => {
+                if let Some(popup) = self.task_popups.get_mut(&window_id) {
+                    popup.error = Some("剪贴板中没有文本。".to_owned());
+                }
+            }
+            Err(message) => {
+                if let Some(popup) = self.task_popups.get_mut(&window_id) {
+                    popup.error = Some(message);
+                }
+            }
+        }
     }
 
     fn paste_clipboard_image_into_task_popup(&mut self, window_id: HostedWindowId) {
-        self.paste_clipboard_image_for_window(window_id);
+        if !self.window_accepts_attachment_drop(window_id) {
+            return;
+        }
+        match self.kernel.session().capture_clipboard_image_attachment() {
+            Ok(Some(attachment)) => {
+                self.add_task_popup_attachments(window_id, vec![attachment]);
+            }
+            Ok(None) => self.set_attachment_error(window_id, "剪贴板中没有图片。".to_owned()),
+            Err(error) => {
+                eprintln!("failed to capture Native task popup clipboard image: {error}");
+                self.set_attachment_error(window_id, "无法读取剪贴板图片，请重试。".to_owned());
+            }
+        }
     }
 
     fn submit_task_popup_turn(&mut self, window_id: HostedWindowId) {
-        if self.window_worktree_busy(window_id) {
-            self.set_task_window_error(window_id, "工作树操作尚未完成，请完成后重试。".to_owned());
-            return;
-        }
         if self
             .task_popups
             .get(&window_id)
@@ -29281,26 +29146,25 @@ impl DesktopProgram {
     }
 
     fn interrupt_task_popup_turn(&mut self, window_id: HostedWindowId) {
-        let Some(task_id) = self
-            .task_popups
-            .get(&window_id)
-            .and_then(|popup| popup.active_task_id.clone())
-        else {
+        let Some(popup) = self.task_popups.get(&window_id) else {
             return;
         };
-        match self.kernel.session().interrupt_task_turn(&task_id) {
-            Ok(_) => {
-                if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                    popup.error = None;
-                }
-            }
-            Err(error) => {
-                eprintln!("failed to interrupt Native task popup turn: {error}");
-                if let Some(popup) = self.task_popups.get_mut(&window_id) {
-                    popup.error = Some("无法停止任务，请重试。".to_owned());
-                }
-            }
+        let Some(task_id) = popup.active_task_id.clone() else {
+            return;
+        };
+        let Some((turn_id, state)) = popup.turn_state.as_ref() else {
+            return;
+        };
+        if !turn_state_is_active(state) {
+            return;
         }
+        self.stop_addressed_turn(
+            window_id,
+            crate::runtime_shell::TurnStopTarget {
+                task_id,
+                turn_id: turn_id.clone(),
+            },
+        );
     }
 
     fn respond_task_popup_approval(
@@ -29437,59 +29301,8 @@ impl DesktopProgram {
         }
     }
 
-    fn resolve_timeline_images(
-        &self,
-        rows: &mut [crate::runtime_shell::ShellTimelineRow],
-        session: Option<&TaskSessionView>,
-    ) {
-        let events = session
-            .map(|session| {
-                session
-                    .timeline
-                    .iter()
-                    .map(|event| (event.id.as_str(), event))
-                    .collect::<BTreeMap<_, _>>()
-            })
-            .unwrap_or_default();
-        for row in rows {
-            let mut sources = row
-                .attachments
-                .iter()
-                .filter(|attachment| attachment.is_image())
-                .map(|attachment| attachment.path.clone())
-                .collect::<BTreeSet<_>>();
-            if let Some(document) = events
-                .get(row.id.as_str())
-                .and_then(|event| event.markdown_document.as_ref())
-            {
-                sources.extend(document.images().into_iter().map(|image| image.source));
-            }
-            row.images = sources
-                .into_iter()
-                .filter_map(|source| {
-                    let Some(MarkdownImageLoadState::Ready(image)) =
-                        self.markdown_images.get(&source)
-                    else {
-                        return None;
-                    };
-                    Some(crate::runtime_shell::ShellTimelineImage {
-                        source,
-                        data_url: image.data_url(),
-                        width: image.pixels.width,
-                        height: image.pixels.height,
-                    })
-                })
-                .collect();
-        }
-    }
-
     fn sync_markdown_images(&mut self) {
         let mut sources = BTreeSet::new();
-        sources.extend(
-            self.markdown_image_previews
-                .values()
-                .map(|preview| preview.source.clone()),
-        );
         if let Some(session) = &self.task_session {
             collect_session_markdown_image_sources(session, &mut sources);
         }
@@ -29541,17 +29354,16 @@ impl DesktopProgram {
         let mut pending = self
             .markdown_images
             .iter()
-            .filter_map(|(source, state)| {
-                state.pending_request().map(|requested| {
-                    (
-                        !requested,
-                        self.markdown_image_recency
-                            .get(source)
-                            .copied()
-                            .unwrap_or_default(),
-                        source.clone(),
-                    )
-                })
+            .filter_map(|(source, state)| match state {
+                MarkdownImageLoadState::Pending { requested } => Some((
+                    !requested,
+                    self.markdown_image_recency
+                        .get(source)
+                        .copied()
+                        .unwrap_or_default(),
+                    source.clone(),
+                )),
+                _ => None,
             })
             .collect::<Vec<_>>();
         pending.sort();
@@ -29591,18 +29403,43 @@ impl DesktopProgram {
             .count()
     }
 
+    fn markdown_image_ready_bytes(&self) -> usize {
+        self.markdown_images
+            .values()
+            .filter_map(|state| match state {
+                MarkdownImageLoadState::Ready(image) => Some(image.encoded_len()),
+                _ => None,
+            })
+            .sum()
+    }
+
     fn evict_oldest_markdown_image(&mut self, protected_source: Option<&str>) -> bool {
-        let mut protected = self
+        let preview_sources = self
             .markdown_image_previews
             .values()
             .map(|preview| preview.source.as_str())
             .collect::<BTreeSet<_>>();
-        protected.extend(protected_source);
-        crate::markdown_images::evict_lru_image(
-            &mut self.markdown_images,
-            &self.markdown_image_recency,
-            &protected,
-        )
+        let candidate = self
+            .markdown_images
+            .iter()
+            .filter(|(source, state)| {
+                matches!(state, MarkdownImageLoadState::Ready(_))
+                    && protected_source != Some(source.as_str())
+                    && !preview_sources.contains(source.as_str())
+            })
+            .min_by_key(|(source, _)| {
+                self.markdown_image_recency
+                    .get(source.as_str())
+                    .copied()
+                    .unwrap_or_default()
+            })
+            .map(|(source, _)| source.clone());
+        let Some(source) = candidate else {
+            return false;
+        };
+        self.markdown_images
+            .insert(source, MarkdownImageLoadState::Pending { requested: false });
+        true
     }
 
     fn complete_markdown_image_load(
@@ -29618,21 +29455,21 @@ impl DesktopProgram {
         }
         match result {
             Ok(image) => {
-                let protected = self
-                    .markdown_image_previews
-                    .values()
-                    .map(|preview| preview.source.as_str())
-                    .collect::<BTreeSet<_>>();
-                if crate::markdown_images::admit_loaded_image(
-                    &mut self.markdown_images,
-                    &self.markdown_image_recency,
-                    &protected,
-                    source.clone(),
-                    image,
-                    MAX_MARKDOWN_IMAGE_CACHE_BYTES,
-                ) {
-                    self.touch_markdown_image(&source);
+                while self
+                    .markdown_image_ready_bytes()
+                    .saturating_add(image.encoded_len())
+                    > MAX_MARKDOWN_IMAGE_CACHE_BYTES
+                {
+                    if !self.evict_oldest_markdown_image(Some(&source)) {
+                        self.markdown_images
+                            .insert(source.clone(), MarkdownImageLoadState::Failed);
+                        self.sync_markdown_images();
+                        return;
+                    }
                 }
+                self.markdown_images
+                    .insert(source.clone(), MarkdownImageLoadState::Ready(image));
+                self.touch_markdown_image(&source);
             }
             Err(error) => {
                 eprintln!("failed to load Native Markdown image: {error}");
@@ -29644,15 +29481,16 @@ impl DesktopProgram {
     }
 
     fn request_markdown_image_load(&mut self, source: &str) {
-        if !self
-            .markdown_images
-            .entry(source.to_owned())
-            .or_insert(MarkdownImageLoadState::Evicted)
-            .request()
-        {
-            self.touch_markdown_image(source);
+        if matches!(
+            self.markdown_images.get(source),
+            Some(MarkdownImageLoadState::Loading | MarkdownImageLoadState::Ready(_))
+        ) {
             return;
         }
+        self.markdown_images.insert(
+            source.to_owned(),
+            MarkdownImageLoadState::Pending { requested: true },
+        );
         self.touch_markdown_image(source);
         if self.markdown_image_resident_count() >= MAX_MARKDOWN_IMAGE_CACHE_ENTRIES {
             self.evict_oldest_markdown_image(Some(source));
@@ -29796,7 +29634,6 @@ enum LiliaShellState {
 
 pub struct LiliaShell {
     state: LiliaShellState,
-    startup_due: Instant,
     theme: ThemeMode,
     pending_messages: Vec<Message>,
     pending_window_events: Vec<HostedWindowEvent>,
@@ -29818,45 +29655,29 @@ impl RuntimeProgram for LiliaShell {
     type Message = Message;
     type Error = String;
 
-    fn native_browser_requests(&self, id: WindowId) -> Vec<nana_ui::NativeBrowserRequest> {
-        match &self.state {
-            LiliaShellState::Ready(program) => program.native_browser_requests(id),
-            _ => Vec::new(),
+    fn surface_mode() -> nana_ui::HostedSurfaceMode {
+        #[cfg(target_os = "windows")]
+        {
+            nana_ui::HostedSurfaceMode::WindowsComposition
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            nana_ui::HostedSurfaceMode::Window
         }
     }
-
-    fn native_browser_event(
+    #[cfg(target_os = "windows")]
+    fn native_content_frame(
         &mut self,
         id: WindowId,
-        event: nana_ui::NativeBrowserEvent,
+        composition: &nana_ui::WindowsComposition,
+        regions: &[nana_ui::NativeContentRegion],
         context: &HostedProgramContext<Self::Message>,
-    ) -> HostedProgramUpdate {
+    ) -> Result<(), String> {
         match &mut self.state {
-            LiliaShellState::Ready(program) => program.native_browser_event(id, event, context),
-            _ => HostedProgramUpdate::default(),
-        }
-    }
-
-    fn rebuild_gpu(&mut self, _context: &HostedProgramContext<Self::Message>) {
-        if let LiliaShellState::Ready(program) = &mut self.state {
-            program.image_textures.invalidate();
-        }
-    }
-
-    fn host_textures(&self, _id: WindowId) -> Option<nana_ui::HostTextureRegistry> {
-        match &self.state {
-            LiliaShellState::Ready(program) => Some(program.image_textures.registry.clone()),
-            _ => None,
-        }
-    }
-
-    fn prepare_window_frame(
-        &mut self,
-        _id: WindowId,
-        context: &HostedProgramContext<Self::Message>,
-    ) {
-        if let LiliaShellState::Ready(program) = &mut self.state {
-            program.prepare_image_textures(context.gpu());
+            LiliaShellState::Ready(program) => {
+                program.native_content_frame(id, composition, regions, context)
+            }
+            _ => Ok(()),
         }
     }
 
@@ -29893,7 +29714,17 @@ impl RuntimeProgram for LiliaShell {
         context: &HostedProgramContext<Self::Message>,
     ) -> Result<HostedProgramUpdate, nana_ui::runtime::FrameworkError> {
         match &mut self.state {
-            LiliaShellState::Ready(program) => program.input_event(id, input, context),
+            LiliaShellState::Ready(program) => {
+                #[cfg(target_os = "windows")]
+                if program.browser.input(id, input.event, input.pointer_hit) {
+                    context.dispatch(Message::BrowserPoll);
+                    return Ok(HostedProgramUpdate::redraw(id));
+                }
+                if input.disposition.prevent_default {
+                    return Ok(HostedProgramUpdate::default());
+                }
+                program.input_event(id, input, context)
+            }
             LiliaShellState::Loading | LiliaShellState::Failed => {
                 Ok(HostedProgramUpdate::default())
             }
@@ -29913,7 +29744,6 @@ impl RuntimeProgram for LiliaShell {
         Ok((
             Self {
                 state: LiliaShellState::Loading,
-                startup_due: Instant::now() + Duration::from_millis(250),
                 theme,
                 pending_messages: Vec::new(),
                 pending_window_events: Vec::new(),
@@ -29977,11 +29807,27 @@ impl RuntimeProgram for LiliaShell {
         }
     }
 
+    fn host_textures(&self, _id: WindowId) -> Option<nana_ui::HostTextureRegistry> {
+        match &self.state {
+            LiliaShellState::Ready(program) => Some(program.image_textures.registry.clone()),
+            _ => None,
+        }
+    }
+
+    fn prepare_window_frame(
+        &mut self,
+        _id: WindowId,
+        context: &HostedProgramContext<Self::Message>,
+    ) {
+        if let LiliaShellState::Ready(program) = &mut self.state {
+            program.prepare_image_textures(context.gpu());
+        }
+    }
+
     fn next_wakeup(&self) -> Option<std::time::Instant> {
         match &self.state {
             LiliaShellState::Ready(program) => program.next_wakeup(),
-            LiliaShellState::Loading => Some(self.startup_due),
-            LiliaShellState::Failed => None,
+            LiliaShellState::Loading | LiliaShellState::Failed => None,
         }
     }
 
@@ -29992,7 +29838,6 @@ impl RuntimeProgram for LiliaShell {
     ) -> HostedProgramUpdate {
         match &mut self.state {
             LiliaShellState::Ready(program) => program.wake(now, context),
-            LiliaShellState::Loading if now >= self.startup_due => self.finish_loading(context),
             LiliaShellState::Loading | LiliaShellState::Failed => HostedProgramUpdate::default(),
         }
     }
@@ -30010,15 +29855,6 @@ impl RuntimeProgram for LiliaShell {
             return HostedProgramUpdate::default();
         }
 
-        self.finish_loading(context)
-    }
-}
-
-impl LiliaShell {
-    fn finish_loading(&mut self, context: &HostedProgramContext<Message>) -> HostedProgramUpdate {
-        if !matches!(self.state, LiliaShellState::Loading) {
-            return HostedProgramUpdate::default();
-        }
         match DesktopProgram::initialize(context) {
             Ok((mut program, initial_messages)) => {
                 for event in std::mem::take(&mut self.pending_window_events) {
@@ -30052,32 +29888,26 @@ impl RuntimeProgram for DesktopProgram {
     type Message = Message;
     type Error = String;
 
-    fn native_browser_requests(&self, id: WindowId) -> Vec<nana_ui::NativeBrowserRequest> {
-        if id != WindowId::PRIMARY {
-            return Vec::new();
+    fn surface_mode() -> nana_ui::HostedSurfaceMode {
+        #[cfg(target_os = "windows")]
+        {
+            nana_ui::HostedSurfaceMode::WindowsComposition
         }
-        self.runtime_shell
-            .as_ref()
-            .and_then(|handles| self.iab.request(handles.iab.browser.stable_id()))
-            .into_iter()
-            .collect()
+        #[cfg(not(target_os = "windows"))]
+        {
+            nana_ui::HostedSurfaceMode::Window
+        }
     }
-
-    fn native_browser_event(
+    #[cfg(target_os = "windows")]
+    fn native_content_frame(
         &mut self,
         id: WindowId,
-        event: nana_ui::NativeBrowserEvent,
-        _context: &HostedProgramContext<Self::Message>,
-    ) -> HostedProgramUpdate {
-        if id == WindowId::PRIMARY {
-            self.receive_iab_event(event);
-            self.sync_primary_shell();
-        }
-        HostedProgramUpdate::redraw(id)
-    }
-
-    fn rebuild_gpu(&mut self, _context: &HostedProgramContext<Self::Message>) {
-        self.image_textures.invalidate();
+        composition: &nana_ui::WindowsComposition,
+        regions: &[nana_ui::NativeContentRegion],
+        context: &HostedProgramContext<Self::Message>,
+    ) -> Result<(), String> {
+        self.browser
+            .frame(id, composition, regions, context.geometry().scale_factor)
     }
 
     fn host_textures(&self, _id: WindowId) -> Option<nana_ui::HostTextureRegistry> {
@@ -30117,34 +29947,14 @@ impl RuntimeProgram for DesktopProgram {
         if input.disposition.prevent_default {
             return Ok(HostedProgramUpdate::redraw(id));
         }
-        let event = input.event;
         if let nana_ui_platform::InputEvent::Keyboard {
             pressed,
             key,
             modifiers,
             repeat,
             ..
-        } = event
+        } = input.event
         {
-            if id == WindowId::PRIMARY
-                && *pressed
-                && !*repeat
-                && key.eq_ignore_ascii_case("enter")
-                && !modifiers.control
-                && !modifiers.meta
-                && !modifiers.alt
-                && !modifiers.shift
-                && self.runtime_shell.as_ref().is_some_and(|handles| {
-                    self.documents.get(&id).is_some_and(|document| {
-                        document.context().world().focused(document.document())
-                            == Some(handles.iab.address.stable_id())
-                    })
-                })
-            {
-                self.apply_iab_action(crate::iab_panel::IabAction::Navigate);
-                self.sync_primary_shell();
-                return Ok(HostedProgramUpdate::redraw(id));
-            }
             if self.shell_shortcut_capturing {
                 let key_input = KeyInput::new(
                     *pressed,
@@ -30209,8 +30019,20 @@ impl RuntimeProgram for DesktopProgram {
         );
         #[cfg(debug_assertions)]
         crate::debug_fixture::prepare(&application)?;
-        // 主工作区不随会话恢复，拓扑文件只在启动时用于恢复任务弹窗窗口。
-        let loaded_workspace_topology = load_workspace_topology_state(&home);
+        let mut workspace_topology_load = load_workspace_topology_state(&home)?;
+        if let Some(loaded) = workspace_topology_load.as_mut() {
+            if let Some(primary) = loaded.state.primary.as_ref() {
+                if let Err(error) = application_workspace.restore(primary) {
+                    loaded.preserve()?;
+                    eprintln!(
+                        "failed to restore Native primary workspace; original record preserved: {error}"
+                    );
+                }
+            }
+        }
+        let loaded_workspace_topology = workspace_topology_load
+            .as_ref()
+            .map(|loaded| loaded.state.clone());
         let topology_is_current = loaded_workspace_topology
             .as_ref()
             .is_some_and(|state| state.schema_version == NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION);
@@ -30296,14 +30118,12 @@ impl RuntimeProgram for DesktopProgram {
                         application: application.clone(),
                     }),
                     language: Arc::new(DesktopLanguagePort {
-                        application: application.clone(),
+                        service: application.document_service(),
                     }),
                     suggestions: Arc::new(DesktopSuggestionPort {
                         application: application.clone(),
                     }),
-                    worktrees: Arc::new(DesktopWorktreePort {
-                        application: application.clone(),
-                    }),
+                    worktrees: Arc::new(application.worktree_service()),
                     assistant_probes: Arc::new(DesktopAssistantProbePort {
                         application: application.clone(),
                         staged: Arc::clone(&assistant_probes),
@@ -30333,7 +30153,10 @@ impl RuntimeProgram for DesktopProgram {
             .expect("the primary session was installed before the kernel mounted");
         let ui_module_registry = crate::ui_module::UiModuleRegistry::from_kernel(kernel.kernel());
         let ui_modules = ui_module_registry
-            .host()
+            .host(&crate::ui_module::UiModuleContext::new(
+                kernel.kernel(),
+                WindowId::PRIMARY,
+            ))
             .map_err(|error| format!("failed to build the primary window's UI modules: {error}"))?;
         application
             .install_title_update_scheduler(Arc::new(QueuedTitleScheduler {
@@ -30398,34 +30221,29 @@ impl RuntimeProgram for DesktopProgram {
             "appearance",
             [
                 SettingsTab::new("appearance", "外观").icon(Icon::Palette),
-                SettingsTab::new("preferences", "项目").icon(Icon::Folder),
-                SettingsTab::new("project", "当前项目").icon(Icon::Folder),
-                SettingsTab::new("provider", "连接").icon(Icon::Cpu),
-                SettingsTab::new("credentials", "凭据").icon(Icon::ShieldCheck),
-                SettingsTab::new("assistant", "Provider 配置").icon(Icon::Cpu),
-                SettingsTab::new("model-config", "模型配置").icon(Icon::Cpu),
-                SettingsTab::new("plugin-packages", "插件")
-                    .icon(Icon::Puzzle)
-                    .full_page(true),
-                SettingsTab::new("plugin-hooks", "Hooks")
-                    .icon(Icon::Puzzle)
-                    .full_page(true),
-                SettingsTab::new("plugin-mcp", "MCP")
-                    .icon(Icon::Puzzle)
-                    .full_page(true),
+                SettingsTab::new("project", "项目").icon(Icon::Folder),
+                SettingsTab::new("provider", "模型服务").icon(Icon::Cpu),
                 SettingsTab::new("agent", "Agent").icon(Icon::Bot),
                 SettingsTab::new("quota", "用量与额度").icon(Icon::Chart),
                 SettingsTab::new("extensions", "技能")
                     .icon(Icon::Puzzle)
                     .full_page(true),
+                SettingsTab::new("plugin-packages", "插件")
+                    .icon(Icon::Package)
+                    .full_page(true),
+                SettingsTab::new("plugin-hooks", "Hooks")
+                    .icon(Icon::Puzzle)
+                    .full_page(true),
+                SettingsTab::new("plugin-mcp", "MCP")
+                    .icon(Icon::Cpu)
+                    .full_page(true),
                 SettingsTab::new("remote", "远程控制").icon(Icon::MonitorPlay),
-                SettingsTab::new("desktop", "窗口").icon(Icon::Workspace),
+                SettingsTab::new("desktop", "桌面").icon(Icon::Workspace),
                 SettingsTab::new("data", "数据迁移").icon(Icon::Package),
                 SettingsTab::new("about", "关于").icon(Icon::About),
             ],
         )
-        .map_err(|error| error.to_string())?
-        .hide_header(true);
+        .map_err(|error| error.to_string())?;
         let settings_state = SettingsState::new(&settings_model);
         let action_registry = native_action_registry()?;
         let command_keymap = native_command_keymap();
@@ -30506,7 +30324,7 @@ impl RuntimeProgram for DesktopProgram {
             application_workspace,
             data_import_target_identity,
             data_import,
-            home,
+            home: home.clone(),
             workspace,
             pending_workspace_projection: false,
             workspace_items: Vec::new(),
@@ -30518,7 +30336,17 @@ impl RuntimeProgram for DesktopProgram {
             command_source_window: HostedWindowId::PRIMARY,
             command_source_item: None,
             inspector_surface: InspectorSurface::Task,
-            iab: IabPanelState::default(),
+            #[cfg(target_os = "windows")]
+            browser: {
+                let context = context.clone();
+                crate::browser_workbench::BrowserWorkbench::new(
+                    home.clone(),
+                    Arc::new(move || context.dispatch(Message::BrowserPoll)),
+                    Arc::new(crate::application::ProductBrowserScopeAuthority::new(
+                        application.project_task_services().0,
+                    )),
+                )
+            },
             main_window_geometry,
             main_window_scale_factor: 1.0,
             workspace_splits: BTreeMap::new(),
@@ -30529,7 +30357,6 @@ impl RuntimeProgram for DesktopProgram {
             archived_projects: Vec::new(),
             archived_tasks: Vec::new(),
             selected_project: None,
-            projects_overview_open: false,
             project_dashboard: Vec::new(),
             project_dashboard_error: None,
             inbox_selected: false,
@@ -30568,7 +30395,6 @@ impl RuntimeProgram for DesktopProgram {
             pane_task_sessions: BTreeMap::new(),
             main_conversation_draft: None,
             terminal_snapshots: BTreeMap::new(),
-            terminal_inputs: BTreeMap::new(),
             terminal_scrollback: BTreeMap::new(),
             terminal_notices: BTreeMap::new(),
             conversation_suggestions: ConversationSuggestionState::default(),
@@ -30578,12 +30404,11 @@ impl RuntimeProgram for DesktopProgram {
             pending_session_branch: None,
             pending_review_slash_workflow: None,
             todo_draft: String::new(),
-            todo_ui: Default::default(),
+            todo_ui: crate::todo_panel::TodoEditState::default(),
             editing_todo: None,
             goal_draft: String::new(),
             active_worktree_job: None,
             worktree_confirmation: None,
-            window_worktree_merge_confirmations: BTreeMap::new(),
             pending_initial_worktrees: BTreeMap::new(),
             interaction_drafts: BTreeMap::new(),
             ask_user_drafts: BTreeMap::new(),
@@ -30593,7 +30418,6 @@ impl RuntimeProgram for DesktopProgram {
             task_action_error: None,
             last_copied_markdown: None,
             markdown_images: BTreeMap::new(),
-            image_textures: crate::image_textures::ImageTextures::default(),
             markdown_image_recency: BTreeMap::new(),
             markdown_image_access_clock: 0,
             markdown_image_previews: BTreeMap::new(),
@@ -30608,29 +30432,10 @@ impl RuntimeProgram for DesktopProgram {
             file_drop_hovered_windows: BTreeSet::new(),
             attachment_previews: BTreeMap::new(),
             timeline_viewports: BTreeMap::new(),
-            pending_main_timeline_tail: None,
             next_task_popup_window_id: FIRST_TASK_POPUP_WINDOW_ID,
             pending_window_commands: Vec::new(),
-            pending_file_dialogs: BTreeMap::new(),
-            next_file_dialog_id: 0,
             pending_ui_commands: Vec::new(),
-            settings_open: false,
-            automations_open: false,
-            automations: Vec::new(),
-            automation_dirty: BTreeSet::new(),
-            selected_automation: None,
-            automation_runs: Vec::new(),
-            selected_automation_run: None,
-            settings_confirmation: None,
-            automation_run_node: None,
-            automation_inspector_panel: "workflow".into(),
-            automation_run_detail: None,
-            automation_human_response: String::new(),
-            automation_graph: GraphModel::empty(),
-            automation_viewport: GraphViewport::default(),
-            automation_selection: None,
-            automation_node_inspector: AutomationNodeInspectorDraft::default(),
-            automation_error: None,
+            navigation: WindowRoute::default(),
             coding_tools: None,
             coding_git: None,
             coding_git_diff: None,
@@ -30682,7 +30487,7 @@ impl RuntimeProgram for DesktopProgram {
             active_extensions_job: None,
             remote,
             remote_pc_name,
-            remote_next_refresh: None,
+            remote_revoke_device: None,
             active_remote_job: None,
             remote_error,
             shell,
@@ -30699,8 +30504,8 @@ impl RuntimeProgram for DesktopProgram {
             window_state,
             workspace_topology_state,
             workspace_topology_revision: persisted_workspace_topology_revision,
+            restoring_workspace_topology: true,
             message_sender,
-            pending_shell_intents: Arc::new(AtomicUsize::new(0)),
             appearance,
             sidebar_display_mode,
             sidebar_tree_state,
@@ -30711,7 +30516,6 @@ impl RuntimeProgram for DesktopProgram {
             sidebar_search_selection: 0,
             sidebar_menu: None,
             titlebar_menu_open: false,
-            composer_menu_open: None,
             sidebar_pending_task_archive: None,
             sidebar_stopping_tasks: BTreeSet::new(),
             sidebar_folder_drop_hovered: false,
@@ -30731,10 +30535,19 @@ impl RuntimeProgram for DesktopProgram {
                 }
                 documents
             },
+            image_textures: crate::image_textures::ImageTextures::default(),
             runtime_shell: None,
             conversation_status_shell: None,
             task_popup_shells: BTreeMap::new(),
         };
+        #[cfg(target_os = "windows")]
+        program
+            .kernel
+            .session()
+            .authority()
+            .shared_runtime()
+            .inner()
+            .set_browser_sessions(program.browser.sessions());
         program.refresh_projects();
         let catalog = program.custom_agents.clone();
         let interaction = program.agent_interaction_settings.clone();
@@ -30751,6 +30564,32 @@ impl RuntimeProgram for DesktopProgram {
         if let Some(state) = loaded_workspace_topology {
             program.restore_task_popup_windows(state);
         }
+        if let Some(loaded) = workspace_topology_load.as_mut() {
+            let mut restored = NativeWorkspaceTopologyState::default();
+            restored.primary = Some(
+                program
+                    .application_workspace
+                    .persisted_state()
+                    .map_err(|error| error.to_string())?,
+            );
+            for popup in program.task_popups.values() {
+                if popup.draft.is_none() {
+                    restored.windows.push(NativeWorkspaceWindowState {
+                        window_id: popup.id.0,
+                        session_id: popup.workspace.id().as_str().to_owned(),
+                        workspace: popup
+                            .workspace
+                            .persisted_state()
+                            .map_err(|error| error.to_string())?,
+                        geometry: popup.geometry,
+                    });
+                }
+            }
+            loaded.preserve_if_changed(&restored)?;
+        }
+        program.restoring_workspace_topology = false;
+        #[cfg(target_os = "windows")]
+        program.sync_browser_workspace_state();
         program.persist_workspace_topology();
         program.mount_primary_shell();
         #[cfg(debug_assertions)]
@@ -30781,6 +30620,9 @@ impl RuntimeProgram for DesktopProgram {
             Message::Chrome(ChromeMessage::Shell(ShellCommand::Quit))
         );
         let window_action = self.update_message(message);
+        #[cfg(target_os = "windows")]
+        self.sync_browser_workspace_state();
+
         #[cfg(debug_assertions)]
         self.capture_debug_errors();
         self.sync_primary_shell();
@@ -30832,15 +30674,11 @@ impl RuntimeProgram for DesktopProgram {
             .any(|entry| runtime_phase_is_processing(&entry.runtime_phase))
             || !self.sidebar_stopping_tasks.is_empty())
         .then(|| std::time::Instant::now() + Duration::from_millis(100));
-        let animation = match (shell, activity) {
+        match (shell, activity) {
             (Some(shell), Some(activity)) => Some(shell.min(activity)),
             (Some(wakeup), None) | (None, Some(wakeup)) => Some(wakeup),
             (None, None) => None,
-        };
-        animation
-            .into_iter()
-            .chain(self.remote_refresh_deadline())
-            .min()
+        }
     }
 
     fn wake(
@@ -30849,9 +30687,6 @@ impl RuntimeProgram for DesktopProgram {
         _context: &HostedProgramContext<Self::Message>,
     ) -> HostedProgramUpdate {
         self.shell.pump_platform_events();
-        if self.refresh_remote_if_due(_now) {
-            return HostedProgramUpdate::redraw_primary();
-        }
         if !self.sidebar_stopping_tasks.is_empty()
             || self
                 .conversation_status_entries
@@ -30865,35 +30700,12 @@ impl RuntimeProgram for DesktopProgram {
         }
     }
 
+    #[cfg(debug_assertions)]
     fn window_frame_presented(
         &mut self,
-        id: WindowId,
+        _id: WindowId,
         _context: &HostedProgramContext<Self::Message>,
     ) -> HostedProgramUpdate {
-        if id != WindowId::PRIMARY {
-            return HostedProgramUpdate::default();
-        }
-        if let Some((handles, document)) =
-            self.runtime_shell.as_mut().zip(self.documents.get_mut(&id))
-        {
-            match handles.on_timeline_presented(document) {
-                Ok(Some(presentation)) => {
-                    self.update_timeline_viewport(
-                        TimelineSurfaceKey::Main,
-                        presentation.offset,
-                        presentation.viewport_extent,
-                    );
-                    if presentation.redraw {
-                        return HostedProgramUpdate::redraw(id);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    eprintln!("{PRODUCT_NAME} failed to measure the retained timeline: {error}");
-                }
-            }
-        }
-        #[cfg(debug_assertions)]
         if let Some(pending) = self.pending_debug_frame_response.take() {
             let duration = pending.started_at.elapsed();
             let response = frame_response(pending.command, &self.debug_observation(), duration);
@@ -30907,62 +30719,15 @@ impl RuntimeProgram for DesktopProgram {
         event: HostedWindowEvent,
         _context: &HostedProgramContext<Self::Message>,
     ) -> HostedProgramUpdate {
-        if matches!(&event, HostedWindowEvent::Closed { id } if *id == HostedWindowId::PRIMARY) {
-            self.iab.cancel_capture();
-        }
-        let event = match event {
-            HostedWindowEvent::FileDialogRejected {
-                error: nana_ui::FileDialogError::DuplicateRequest,
-                ..
-            } => {
-                return HostedProgramUpdate::default();
+        if let HostedWindowEvent::OpenFailed { id, error } = &event {
+            if *id == CONVERSATION_STATUS_WINDOW_ID {
+                self.conversation_status_open = false;
+                self.conversation_status_ready = false;
+            } else if self.task_popups.contains_key(id) {
+                self.close_task_popup_with_command(*id, false);
             }
-            HostedWindowEvent::FileDialogRejected {
-                id,
-                request_id,
-                error,
-            } => HostedWindowEvent::FileDialogCompleted {
-                id,
-                result: nana_ui::FileDialogResult::failed(request_id, error),
-            },
-            event => event,
-        };
-        if let HostedWindowEvent::FileDialogCompleted { id, ref result } = event {
-            if self
-                .pending_file_dialogs
-                .get(&result.id)
-                .is_some_and(|(window, _)| *window == id)
-            {
-                let (_, purpose) = self
-                    .pending_file_dialogs
-                    .remove(&result.id)
-                    .expect("matching request");
-                let outcome = match &result.error {
-                    None => Ok(result.paths.clone()),
-                    Some(error) => Err(FileDialogPickFailure::Host(
-                        match error {
-                            nana_ui::FileDialogError::Busy
-                            | nana_ui::FileDialogError::DuplicateRequest => {
-                                "请先完成已打开的文件选择窗口"
-                            }
-                            nana_ui::FileDialogError::WindowClosed => {
-                                "原窗口已关闭，请重新选择文件"
-                            }
-                            nana_ui::FileDialogError::Unavailable
-                            | nana_ui::FileDialogError::Platform(_) => {
-                                "无法打开文件选择窗口，请重试"
-                            }
-                        }
-                        .into(),
-                    )),
-                };
-                return <Self as RuntimeProgram>::update(
-                    self,
-                    Message::FileDialogPicked { purpose, outcome },
-                    _context,
-                );
-            }
-            return HostedProgramUpdate::default();
+            self.error_message = Some(format!("无法打开窗口：{error}"));
+            return HostedProgramUpdate::redraw_primary();
         }
         if let Some(update) = self.handle_file_window_event(&event) {
             return update;
@@ -30983,27 +30748,18 @@ impl RuntimeProgram for DesktopProgram {
                     self.record_conversation_status_geometry(geometry);
                     HostedProgramUpdate::default()
                 }
-                HostedWindowEvent::VisibilityChanged { .. }
+                HostedWindowEvent::OpenFailed { .. }
+                | HostedWindowEvent::MousePassthroughChanged { .. }
+                | HostedWindowEvent::VisibilityChanged { .. }
                 | HostedWindowEvent::FocusChanged { .. }
                 | HostedWindowEvent::Ime { .. }
                 | HostedWindowEvent::Closed { .. }
                 | HostedWindowEvent::FileHovered { .. }
                 | HostedWindowEvent::FileDropped { .. }
                 | HostedWindowEvent::FileHoverCancelled { .. }
-                | HostedWindowEvent::FileDialogCompleted { .. }
                 | HostedWindowEvent::FileDialogRejected { .. }
-                | HostedWindowEvent::MousePassthroughChanged { .. }
+                | HostedWindowEvent::FileDialogCompleted { .. }
                 | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),
-                HostedWindowEvent::OpenFailed { id, error } => {
-                    if id == CONVERSATION_STATUS_WINDOW_ID {
-                        self.conversation_status_open = false;
-                        self.conversation_status_ready = false;
-                        self.conversation_status_error = Some(error);
-                    } else if self.task_popups.remove(&id).is_some() {
-                        self.error_message = Some(format!("无法打开窗口：{error}"));
-                    }
-                    HostedProgramUpdate::redraw_primary()
-                }
                 HostedWindowEvent::CloseRequested { .. } => {
                     self.conversation_status_open = false;
                     self.conversation_status_ready = false;
@@ -31024,6 +30780,7 @@ impl RuntimeProgram for DesktopProgram {
                     }
                     self.record_task_popup_geometry(id, geometry);
                     self.sync_workspace_window_splits(id);
+                    self.sync_secondary_windows();
                     HostedProgramUpdate::redraw_window(id)
                 }
                 HostedWindowEvent::Resized { id, geometry, .. } => {
@@ -31033,6 +30790,7 @@ impl RuntimeProgram for DesktopProgram {
                     }
                     self.record_task_popup_geometry(id, geometry);
                     self.sync_workspace_window_splits(id);
+                    self.sync_secondary_windows();
                     HostedProgramUpdate::redraw_window(id)
                 }
                 HostedWindowEvent::Moved { id, geometry, .. } => {
@@ -31044,27 +30802,18 @@ impl RuntimeProgram for DesktopProgram {
                     self.sync_workspace_window_splits(id);
                     HostedProgramUpdate::default()
                 }
-                HostedWindowEvent::VisibilityChanged { .. }
+                HostedWindowEvent::OpenFailed { .. }
+                | HostedWindowEvent::MousePassthroughChanged { .. }
+                | HostedWindowEvent::VisibilityChanged { .. }
                 | HostedWindowEvent::FocusChanged { .. }
                 | HostedWindowEvent::Ime { .. }
                 | HostedWindowEvent::Closed { .. }
                 | HostedWindowEvent::FileHovered { .. }
                 | HostedWindowEvent::FileDropped { .. }
                 | HostedWindowEvent::FileHoverCancelled { .. }
-                | HostedWindowEvent::FileDialogCompleted { .. }
                 | HostedWindowEvent::FileDialogRejected { .. }
-                | HostedWindowEvent::MousePassthroughChanged { .. }
+                | HostedWindowEvent::FileDialogCompleted { .. }
                 | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),
-                HostedWindowEvent::OpenFailed { id, error } => {
-                    if id == CONVERSATION_STATUS_WINDOW_ID {
-                        self.conversation_status_open = false;
-                        self.conversation_status_ready = false;
-                        self.conversation_status_error = Some(error);
-                    } else if self.task_popups.remove(&id).is_some() {
-                        self.error_message = Some(format!("无法打开窗口：{error}"));
-                    }
-                    HostedProgramUpdate::redraw_primary()
-                }
                 HostedWindowEvent::CloseRequested { id, .. } => {
                     if self.close_task_popup_with_command(id, false) {
                         HostedProgramUpdate::default()
@@ -31108,6 +30857,7 @@ impl RuntimeProgram for DesktopProgram {
                     geometry.scale_factor,
                 ));
                 self.sync_workspace_splits();
+                self.sync_primary_shell();
                 HostedProgramUpdate::redraw_primary()
             }
             HostedWindowEvent::Moved { geometry, .. } => {
@@ -31134,27 +30884,18 @@ impl RuntimeProgram for DesktopProgram {
                 }
                 HostedProgramUpdate::default()
             }
-            HostedWindowEvent::VisibilityChanged { .. }
+            HostedWindowEvent::OpenFailed { .. }
+            | HostedWindowEvent::MousePassthroughChanged { .. }
+            | HostedWindowEvent::VisibilityChanged { .. }
             | HostedWindowEvent::FocusChanged { .. }
             | HostedWindowEvent::Ime { .. }
             | HostedWindowEvent::Closed { .. }
             | HostedWindowEvent::FileHovered { .. }
             | HostedWindowEvent::FileDropped { .. }
             | HostedWindowEvent::FileHoverCancelled { .. }
-            | HostedWindowEvent::FileDialogCompleted { .. }
             | HostedWindowEvent::FileDialogRejected { .. }
-            | HostedWindowEvent::MousePassthroughChanged { .. }
+            | HostedWindowEvent::FileDialogCompleted { .. }
             | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),
-            HostedWindowEvent::OpenFailed { id, error } => {
-                if id == CONVERSATION_STATUS_WINDOW_ID {
-                    self.conversation_status_open = false;
-                    self.conversation_status_ready = false;
-                    self.conversation_status_error = Some(error);
-                } else if self.task_popups.remove(&id).is_some() {
-                    self.error_message = Some(format!("无法打开窗口：{error}"));
-                }
-                HostedProgramUpdate::redraw_primary()
-            }
             HostedWindowEvent::CloseRequested { .. } => HostedProgramUpdate::exit(),
         }
     }
@@ -31252,24 +30993,7 @@ fn inspector_layout_signature(layout: &WorkspaceLayout) -> Option<f32> {
         .map(|region| region.extent())
 }
 
-fn update_workspace_for_surface(
-    workspace: &mut WorkspaceController,
-    replacement_mode: bool,
-    action: WorkspaceAction,
-) -> bool {
-    if replacement_mode
-        && matches!(
-            &action,
-            WorkspaceAction::ToggleRegion(RegionId::Resources)
-                | WorkspaceAction::SetRegionCollapsed(RegionId::Resources, _)
-        )
-    {
-        return false;
-    }
-    workspace.update(action)
-}
-
-pub(crate) fn initial_workspace(sidebar_state: &NativeSidebarTreeState) -> WorkspaceController {
+fn initial_workspace(sidebar_state: &NativeSidebarTreeState) -> WorkspaceController {
     let requested_sidebar_width = if sidebar_state.sidebar_width == 0 {
         SIDEBAR_DEFAULT_WIDTH
     } else {
@@ -31292,24 +31016,59 @@ pub(crate) fn initial_workspace(sidebar_state: &NativeSidebarTreeState) -> Works
             .collapsible(true)
             .resizable(true)
             .hidden(true)
-            .narrow_behavior(NarrowBehavior::Shrink),
+            .narrow_behavior(NarrowBehavior::Collapse)
+            .collapse_below(980.0),
     ])
     .expect("LiliaCode workspace regions are unique");
     WorkspaceController::with_layout(layout)
+}
+
+impl DesktopProgram {
+    fn resolve_timeline_images(
+        &self,
+        rows: &mut [crate::module::timeline::view::TimelineRow],
+        session: Option<&TaskSessionView>,
+    ) {
+        let events = session
+            .map(|session| {
+                session
+                    .timeline
+                    .iter()
+                    .map(|event| (event.id.as_str(), event))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        for row in rows {
+            let mut sources = BTreeSet::new();
+            if let Some(document) = events
+                .get(row.id.as_str())
+                .and_then(|event| event.markdown_document.as_ref())
+            {
+                sources.extend(document.images().into_iter().map(|image| image.source));
+            }
+            row.images = sources
+                .into_iter()
+                .filter_map(|source| {
+                    let MarkdownImageLoadState::Ready(image) = self.markdown_images.get(&source)?
+                    else {
+                        return None;
+                    };
+                    Some(crate::module::timeline::view::TimelineImage {
+                        source,
+                        data_url: image.data_url(),
+                        width: image.pixels.width,
+                        height: image.pixels.height,
+                    })
+                })
+                .collect();
+        }
+    }
 }
 
 fn collect_session_markdown_image_sources(
     session: &TaskSessionView,
     sources: &mut BTreeSet<String>,
 ) {
-    sources.extend(
-        session
-            .timeline
-            .iter()
-            .flat_map(|event| event.attachments.iter())
-            .filter(|attachment| attachment.is_image())
-            .map(|attachment| attachment.path.clone()),
-    );
     for image in session
         .timeline
         .iter()
@@ -32017,7 +31776,7 @@ fn tool_consent_draft(
 }
 
 /// A rollback only means something when the drawn graph is an applied version.
-fn architecture_module_can_roll_back(
+pub(crate) fn architecture_module_can_roll_back(
     module: &crate::module::architecture::ArchitectureModule,
 ) -> bool {
     module.history().iter().any(|record| {
@@ -32126,11 +31885,8 @@ pub(crate) fn composer_slash_query(content: &str) -> Option<String> {
 
 fn composer_has_turn_payload(composer: &DesktopComposerState) -> bool {
     !composer.content.trim().is_empty()
-        || composer.effective_attachments().next().is_some()
-        || composer
-            .effective_conversation_references()
-            .next()
-            .is_some()
+        || !composer.attachments.is_empty()
+        || !composer.conversation_references.is_empty()
         || composer.workflow.is_some()
 }
 
@@ -32164,9 +31920,19 @@ fn permission_key(permission: DesktopExecutionPermission) -> &'static str {
     }
 }
 
+fn quota_chart_slices(items: impl IntoIterator<Item = (String, f64)>) -> Vec<(String, f64)> {
+    let mut slices = items
+        .into_iter()
+        .filter(|(_, value)| value.is_finite() && *value > 0.0)
+        .collect::<Vec<_>>();
+    slices.sort_by(|left, right| right.1.total_cmp(&left.1));
+    slices.truncate(5);
+    slices
+}
+
 /// The composer pairs this with a shield glyph, so the word stands alone.
 fn permission_label(permission: DesktopExecutionPermission) -> &'static str {
-    crate::runtime_shell::permission_selection(permission).1
+    crate::module::composer::presentation::permission_selection(permission).1
 }
 
 /// Maps a failed clone job's message onto the product wording. The job reports
@@ -32371,14 +32137,22 @@ fn run_extensions_command(
             } => application.delete_hook_source(scope, project_cwd.as_deref(), expected_revision),
         }
         .map_err(|error| error.to_string())
-        .and_then(|_| load_native_hooks(application, overview_project_cwd.as_deref()))
+        .and_then(|_| {
+            load_native_hooks(
+                &application.hook_documents_service(),
+                overview_project_cwd.as_deref(),
+            )
+        })
         .map(ExtensionsOutcome::Hook),
         ExtensionsCommand::Refresh { project_cwd } => application
             .extensions_snapshot()
             .map_err(|error| error.to_string())
             .and_then(|extensions| {
-                load_native_hooks(application, project_cwd.as_deref())
-                    .map(|hooks| ExtensionsOutcome::Refresh(extensions, hooks))
+                load_native_hooks(
+                    &application.hook_documents_service(),
+                    project_cwd.as_deref(),
+                )
+                .map(|hooks| ExtensionsOutcome::Refresh(extensions, hooks))
             }),
         ExtensionsCommand::ActivateMcp => application
             .activate_registered_mcp_servers()
@@ -32638,48 +32412,6 @@ fn worktree_operation_request(
     }
 }
 
-/// Runs one worktree git operation on the job worker thread and announces the
-/// outcome as a domain event, which is what moves every surface showing the
-/// task.
-struct DesktopWorktreePort {
-    application: DesktopApplication,
-}
-
-impl lilia_feature_worktree::WorktreePort for DesktopWorktreePort {
-    fn operate(&self, request: lilia_feature_worktree::WorktreeRequest) -> Result<(), String> {
-        use lilia_feature_worktree::WorktreeOperationRequest as Request;
-        let task_id = TaskId::new(request.task_id).map_err(|error| error.to_string())?;
-        let application = &self.application;
-        let result = match request.operation {
-            Request::Create => application.create_task_worktree(&task_id, None).map(|_| ()),
-            Request::Attach { path } => application
-                .attach_task_worktree(&task_id, &path)
-                .map(|_| ()),
-            Request::Clear => application.clear_task_worktree(&task_id).map(|_| ()),
-            Request::CleanupAndArchive => application
-                .cleanup_task_worktree_and_archive(&task_id)
-                .map(|_| ()),
-            Request::MergeAndArchive => application
-                .merge_task_worktree_and_archive(&task_id)
-                .map(|_| ()),
-        };
-        match result {
-            Ok(()) => {
-                application.emit_event(WorktreeOperationCompleted { task_id });
-                Ok(())
-            }
-            Err(error) => {
-                let message = error.to_string();
-                application.emit_event(WorktreeOperationFailed {
-                    task_id,
-                    message: message.clone(),
-                });
-                Err(message)
-            }
-        }
-    }
-}
-
 /// Generates a suggestion set on the job worker thread. The auxiliary model
 /// port is built here rather than passed in, because it borrows the same
 /// application handle and is only needed for the duration of one generation.
@@ -32800,7 +32532,7 @@ impl DesktopTurnExecutor for QueuedTurnExecutor {
 
 /// Answers diagnostics and definition queries on the job worker thread.
 struct DesktopLanguagePort {
-    application: DesktopApplication,
+    service: crate::application::DesktopDocumentService,
 }
 
 impl lilia_feature_document::LanguagePort for DesktopLanguagePort {
@@ -32811,11 +32543,11 @@ impl lilia_feature_document::LanguagePort for DesktopLanguagePort {
         let snapshot = match request.project_id {
             Some(project_id) => {
                 let project_id = ProjectId::new(project_id).map_err(|error| error.to_string())?;
-                self.application
+                self.service
                     .refresh_project_document_diagnostics(&project_id, request.document_id)
             }
             None => self
-                .application
+                .service
                 .refresh_document_diagnostics(request.document_id),
         }
         .map_err(|error| error.to_string())?;
@@ -32827,12 +32559,12 @@ impl lilia_feature_document::LanguagePort for DesktopLanguagePort {
         request: lilia_feature_document::DefinitionRequest,
     ) -> Result<Value, String> {
         let project_id = self
-            .application
+            .service
             .document_project_id(request.document_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "document is not inside an active project workspace".to_owned())?;
         let result = self
-            .application
+            .service
             .project_document_definitions(
                 &project_id,
                 request.document_id,
@@ -33208,7 +32940,12 @@ fn next_todo_priority(priority: DesktopTodoPriority) -> DesktopTodoPriority {
 }
 
 fn todo_float_item_is_visible(todo: &DesktopTaskTodo) -> bool {
-    crate::todo_panel::visible_todo(todo)
+    match todo.source {
+        DesktopTodoSource::Agent => !todo.done,
+        DesktopTodoSource::Lilia => {
+            todo.guide_status.is_some() && todo.guide_status != Some(DesktopTodoGuideStatus::Sent)
+        }
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -33444,12 +33181,10 @@ fn composer_draft_title(composer: &DesktopComposerState) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    let source = if normalized.is_empty() && composer.workflow.is_some() {
-        crate::application::workflow::title(composer.workflow.as_ref().unwrap())
-    } else if normalized.is_empty() {
+    let source = if normalized.is_empty() {
         composer
-            .effective_attachments()
-            .next()
+            .attachments
+            .first()
             .map(|attachment| attachment.name.trim())
             .filter(|name| !name.is_empty())
             .unwrap_or("附件")
@@ -33580,33 +33315,6 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
-fn parse_automation_node_config(config: &str) -> Result<Value, String> {
-    match serde_json::from_str::<Value>(config) {
-        Ok(Value::Object(config)) => Ok(Value::Object(config)),
-        Ok(_) => Err("节点配置必须是 JSON 对象。".to_owned()),
-        Err(error) => Err(format!("节点配置不是有效 JSON：{error}")),
-    }
-}
-
-fn automation_config_string(config: &str, field: &str) -> String {
-    parse_automation_node_config(config)
-        .ok()
-        .and_then(|config| config.get(field).cloned())
-        .map(|value| match value {
-            Value::String(value) => value,
-            Value::Null => String::new(),
-            value => value.to_string(),
-        })
-        .unwrap_or_default()
-}
-
-fn automation_config_boolean(config: &str, field: &str) -> bool {
-    parse_automation_node_config(config)
-        .ok()
-        .and_then(|config| config.get(field).and_then(Value::as_bool))
-        .unwrap_or(false)
-}
-
 #[cfg(any(debug_assertions, test))]
 fn parse_automation_scope_target(target_id: &str) -> Option<(&str, &str)> {
     const PREFIX: &str = "lilia.automations.scope.";
@@ -33653,67 +33361,6 @@ fn parse_automation_node_config_target(target_id: &str) -> Option<&str> {
         .filter(|field| !field.is_empty())
 }
 
-fn automation_node_config_fields(kind: &str, config: &str) -> Vec<&'static str> {
-    match kind {
-        "trigger" => vec!["triggerKind"],
-        "agent" => vec![
-            "createTask",
-            "taskId",
-            "projectId",
-            "title",
-            "backend",
-            "model",
-            "projectCwd",
-            "prompt",
-            "permission",
-        ],
-        "logic" => {
-            let logic = automation_config_string(config, "logic");
-            let mut fields = vec!["logic", "path", "equals"];
-            if logic == "switch" {
-                fields.push("cases");
-            }
-            fields
-        }
-        "tool" => {
-            let action = automation_config_string(config, "action");
-            let mut fields = vec!["action"];
-            fields.extend_from_slice(automation_tool_action_fields(&action));
-            fields
-        }
-        "human" => vec!["prompt"],
-        _ => Vec::new(),
-    }
-}
-
-#[cfg(debug_assertions)]
-fn automation_node_config_cycle_field(field: &str) -> bool {
-    matches!(
-        field,
-        "triggerKind" | "permission" | "logic" | "action" | "priority"
-    )
-}
-
-#[cfg(debug_assertions)]
-fn automation_node_config_boolean_field(field: &str) -> bool {
-    field == "createTask"
-}
-
-#[cfg(debug_assertions)]
-fn automation_node_config_input_field(field: &str) -> bool {
-    !automation_node_config_cycle_field(field) && !automation_node_config_boolean_field(field)
-}
-
-fn automation_tool_action_fields(action: &str) -> &'static [&'static str] {
-    match action {
-        "create_task" => &["projectId", "title", "status"],
-        "update_task_status" => &["taskId", "status"],
-        "add_todo" => &["taskId", "text"],
-        "send_guide" => &["taskId", "text", "priority"],
-        _ => &["taskId", "title", "summary", "status", "backend"],
-    }
-}
-
 #[cfg(debug_assertions)]
 fn automation_run_status_key(status: AutomationRunStatus) -> &'static str {
     match status {
@@ -33725,20 +33372,6 @@ fn automation_run_status_key(status: AutomationRunStatus) -> &'static str {
         AutomationRunStatus::Cancelled => "cancelled",
         AutomationRunStatus::WaitingUser => "waiting_user",
     }
-}
-
-fn waiting_human_node(
-    detail: &AutomationRunDetail,
-) -> Option<&crate::application::AutomationRunNodeState> {
-    detail.nodes.iter().find(|node| {
-        node.status == AutomationRunStatus::WaitingUser
-            && node
-                .output
-                .as_ref()
-                .and_then(|output| output.get("waitingUser"))
-                .and_then(Value::as_bool)
-                == Some(true)
-    })
 }
 
 fn waiting_agent_node(
@@ -33761,118 +33394,6 @@ fn current_timestamp_millis() -> i64 {
         .ok()
         .and_then(|duration| i64::try_from(duration.as_millis()).ok())
         .unwrap_or_default()
-}
-
-fn append_automation_connection(
-    workflow: &mut AutomationWorkflow,
-    source: GraphEndpoint,
-    target: GraphEndpoint,
-) -> bool {
-    let source_handle = source
-        .port
-        .as_str()
-        .strip_prefix("out:")
-        .unwrap_or(source.port.as_str())
-        .to_owned();
-    let target_handle = target
-        .port
-        .as_str()
-        .strip_prefix("in:")
-        .unwrap_or(target.port.as_str())
-        .to_owned();
-    if workflow.draft.edges.iter().any(|edge| {
-        edge.source == source.node.as_str()
-            && edge.target == target.node.as_str()
-            && edge.source_handle.as_deref() == Some(source_handle.as_str())
-            && edge.target_handle.as_deref() == Some(target_handle.as_str())
-    }) {
-        return false;
-    }
-    workflow
-        .draft
-        .edges
-        .push(crate::application::AutomationEdge {
-            id: uuid::Uuid::new_v4().to_string(),
-            source: source.node.as_str().to_owned(),
-            target: target.node.as_str().to_owned(),
-            source_handle: Some(source_handle),
-            target_handle: Some(target_handle),
-        });
-    true
-}
-
-fn automation_graph_model(workflow: &AutomationWorkflow) -> Result<GraphModel, String> {
-    let mut input_ports = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut output_ports = BTreeMap::<String, BTreeSet<String>>::new();
-    for node in &workflow.draft.nodes {
-        if node.kind != "trigger" {
-            input_ports
-                .entry(node.id.clone())
-                .or_default()
-                .insert("input".to_owned());
-        }
-        output_ports
-            .entry(node.id.clone())
-            .or_default()
-            .extend(settings_surface::automation_output_handles(node));
-    }
-    for edge in &workflow.draft.edges {
-        output_ports
-            .entry(edge.source.clone())
-            .or_default()
-            .insert(edge.source_handle.as_deref().unwrap_or("output").to_owned());
-        input_ports
-            .entry(edge.target.clone())
-            .or_default()
-            .insert(edge.target_handle.as_deref().unwrap_or("input").to_owned());
-    }
-
-    let nodes = workflow
-        .draft
-        .nodes
-        .iter()
-        .map(|node| {
-            let mut graph_node = CanvasGraphNode::new(
-                node.id.clone(),
-                node.title.clone(),
-                GraphPoint::new(node.position.x as f32, node.position.y as f32),
-                GraphSize::new(184.0, 112.0),
-            );
-            for port in input_ports.get(&node.id).into_iter().flatten() {
-                graph_node = graph_node.with_port(GraphPort::new(
-                    format!("in:{port}"),
-                    port.clone(),
-                    GraphPortKind::Input,
-                    GraphPortSide::Left,
-                ));
-            }
-            for port in output_ports.get(&node.id).into_iter().flatten() {
-                graph_node = graph_node.with_port(GraphPort::new(
-                    format!("out:{port}"),
-                    port.clone(),
-                    GraphPortKind::Output,
-                    GraphPortSide::Right,
-                ));
-            }
-            graph_node
-        })
-        .collect::<Vec<_>>();
-    let edges = workflow
-        .draft
-        .edges
-        .iter()
-        .map(|edge| {
-            let source_handle = edge.source_handle.as_deref().unwrap_or("output");
-            let target_handle = edge.target_handle.as_deref().unwrap_or("input");
-            CanvasGraphEdge::new(
-                edge.id.clone(),
-                GraphEndpoint::new(edge.source.clone(), format!("out:{source_handle}")),
-                GraphEndpoint::new(edge.target.clone(), format!("in:{target_handle}")),
-            )
-            .with_label(source_handle)
-        })
-        .collect::<Vec<_>>();
-    GraphModel::new(nodes, edges).map_err(|error| error.to_string())
 }
 
 fn architecture_layout_event_committed(event: &GraphCanvasEvent) -> bool {
@@ -33965,40 +33486,6 @@ fn restore_architecture_workspace_layout(
     *graph = restored_graph;
     *viewport = normalized_viewport;
     Ok(())
-}
-
-fn architecture_inspector_body(snapshot: &crate::runtime_shell::PrimaryShellSnapshot) -> String {
-    match snapshot.architecture_selection.as_ref() {
-        Some(GraphSelection::Node(node_id)) => snapshot
-            .architecture_graph
-            .node(node_id)
-            .map(|node| {
-                if node.label.is_empty() {
-                    node.id.to_string()
-                } else {
-                    node.label.clone()
-                }
-            })
-            .unwrap_or_else(|| node_id.to_string()),
-        Some(GraphSelection::Edge(edge_id)) => snapshot
-            .architecture_graph
-            .edge(edge_id)
-            .and_then(|edge| {
-                edge.label
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|label| !label.is_empty())
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| "关系".to_owned()),
-        Some(GraphSelection::Port { node, .. }) => snapshot
-            .architecture_graph
-            .node(node)
-            .map(|graph_node| graph_node.label.clone())
-            .filter(|label| !label.is_empty())
-            .unwrap_or_else(|| node.to_string()),
-        None => "选择图中的节点。".to_owned(),
-    }
 }
 
 pub(crate) fn architecture_graph_model(
@@ -34225,21 +33712,6 @@ fn sidebar_folder_drop_hit(bounds: LogicalRect, position: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn workflow_only_draft_title_uses_the_review_scope() {
-        let mut composer = DesktopComposerState::transient(TaskId::new("workflow-title").unwrap());
-        composer.workflow = Some(LiliaAgentWorkflow::LiliaReview {
-            target: LiliaReviewTarget::BaseBranch {
-                branch: "release/main".into(),
-            },
-            instructions: None,
-            delivery: Some("inline".into()),
-        });
-        assert_eq!(composer_draft_title(&composer), "审查分支 release/main");
-        composer.content = "Keep my explicit title".into();
-        assert_eq!(composer_draft_title(&composer), "Keep my explicit title");
-    }
-
     use super::*;
     use crate::application::{
         DesktopHookHandlerUpdate, DesktopMcpPromptGetView, DesktopMcpResourceReadView,
@@ -34417,23 +33889,6 @@ mod tests {
     }
 
     #[test]
-    fn scroll_only_updates_preserve_measured_viewport_for_tail_detection() {
-        let mut viewport = TimelineViewport::default();
-        viewport.update(426.0, 574.0);
-        assert!(timeline_viewport_is_at_end(viewport, 1_000.0));
-
-        viewport.update(300.0, 0.0);
-        assert_eq!(viewport.extent, 574.0);
-        assert!(!timeline_viewport_is_at_end(viewport, 1_000.0));
-
-        viewport.update(700.0, 300.0);
-        assert!(timeline_viewport_is_at_end(viewport, 1_000.0));
-        viewport.update(500.0, 0.0);
-        assert_eq!(viewport.extent, 300.0);
-        assert!(!timeline_viewport_is_at_end(viewport, 1_000.0));
-    }
-
-    #[test]
     fn timeline_tail_following_stops_only_after_the_user_leaves_the_end() {
         let short_content = TimelineViewport {
             offset: 0.0,
@@ -34478,38 +33933,6 @@ mod tests {
             .expect("resources sidebar");
         assert_eq!(sidebar.extent(), SIDEBAR_MAX_WIDTH);
         assert!(sidebar.collapsed_value());
-    }
-
-    #[test]
-    fn requested_inspector_remains_accessible_when_the_window_is_narrow() {
-        let mut workspace = initial_workspace(&NativeSidebarTreeState::default());
-        workspace.update(WorkspaceAction::SetRegionVisible(RegionId::Inspector, true));
-        for width in [960.0, 1440.0, 960.0] {
-            workspace.update(WorkspaceAction::WindowResized {
-                width,
-                height: 600.0,
-            });
-            let geometry = workspace.viewport_geometry();
-            let inspector = geometry.region(&RegionId::Inspector).unwrap();
-            assert!(inspector.visible);
-            assert!(!inspector.overlay);
-            let primary = geometry.region(&RegionId::Primary).unwrap();
-            assert!(primary.logical.x + primary.logical.width <= inspector.logical.x + 0.5);
-            assert!(inspector.logical.width >= 240.0);
-            assert!(inspector.logical.x >= 0.0);
-            assert!(inspector.logical.x + inspector.logical.width <= width);
-        }
-        workspace.update(WorkspaceAction::SetRegionVisible(
-            RegionId::Inspector,
-            false,
-        ));
-        assert!(
-            !workspace
-                .viewport_geometry()
-                .region(&RegionId::Inspector)
-                .unwrap()
-                .visible
-        );
     }
 
     #[test]
@@ -34601,6 +34024,144 @@ mod tests {
         );
         assert_eq!(reordered_before(&values, &"a", Some(&"b")), None);
         assert_eq!(reordered_before(&values, &"a", Some(&"foreign")), None);
+    }
+
+    #[test]
+    fn queued_composer_actions_require_the_same_task_revision_and_displayed_content() {
+        let task = TaskId::new("task-a").unwrap();
+        let other = TaskId::new("task-b").unwrap();
+        let target = crate::runtime_shell::ComposerTarget {
+            turn_id: None,
+            window_id: WindowId(42),
+            task_id: Some(task.as_str().to_owned()),
+            revision: 3,
+            content: "reviewed draft".to_owned(),
+        };
+        assert!(composer_target_matches(
+            &target,
+            Some(&task),
+            Some(3),
+            Some("reviewed draft"),
+            true
+        ));
+        assert!(!composer_target_matches(
+            &target,
+            Some(&other),
+            Some(3),
+            Some("reviewed draft"),
+            true
+        ));
+        assert!(!composer_target_matches(
+            &target,
+            Some(&task),
+            Some(4),
+            Some("reviewed draft"),
+            true
+        ));
+        assert!(!composer_target_matches(&target, None, None, None, true));
+        assert!(!composer_target_matches(
+            &target,
+            Some(&task),
+            None,
+            None,
+            true
+        ));
+        assert!(!composer_target_matches(
+            &target,
+            Some(&task),
+            Some(3),
+            Some("unseen draft from another window"),
+            true
+        ));
+        assert!(composer_target_matches(
+            &target,
+            Some(&task),
+            Some(4),
+            Some("changed draft"),
+            false
+        ));
+        assert!(!composer_target_matches(
+            &target,
+            Some(&other),
+            Some(4),
+            Some("changed draft"),
+            false
+        ));
+    }
+
+    #[test]
+    fn pane_address_targets_visible_resource_in_nonactive_pane() {
+        let mut layout = PanelLayoutSnapshot::default();
+        let primary = PaneId::new("primary").unwrap();
+        let secondary = PaneId::new("secondary").unwrap();
+        let document = WorkspaceItemId::new("document-view").unwrap();
+        let terminal = WorkspaceItemId::new("terminal-view").unwrap();
+        layout
+            .split_pane(&primary, secondary.clone(), SplitAxis::Horizontal, 0.5)
+            .unwrap();
+        layout.open_item(&primary, document.clone()).unwrap();
+        layout.open_item(&secondary, terminal).unwrap();
+        let target = crate::runtime_shell::ShellPaneTarget {
+            window_id: HostedWindowId::PRIMARY,
+            pane_id: primary.as_str().to_owned(),
+            item_id: document.as_str().to_owned(),
+        };
+        assert_eq!(layout.active_pane(), &secondary);
+        assert_eq!(
+            addressed_pane_item_id(&layout, HostedWindowId::PRIMARY, &target),
+            Some(document.clone())
+        );
+        layout.close_item(&primary, &document).unwrap();
+        assert_eq!(
+            addressed_pane_item_id(&layout, HostedWindowId::PRIMARY, &target),
+            None
+        );
+    }
+
+    #[test]
+    fn pane_address_rejects_switched_moved_missing_and_foreign_window_targets() {
+        let mut layout = PanelLayoutSnapshot::default();
+        let primary = PaneId::new("primary").unwrap();
+        let secondary = PaneId::new("secondary").unwrap();
+        let document = WorkspaceItemId::new("document-view").unwrap();
+        layout
+            .split_pane(&primary, secondary.clone(), SplitAxis::Horizontal, 0.5)
+            .unwrap();
+        layout.open_item(&primary, document.clone()).unwrap();
+        let target = crate::runtime_shell::ShellPaneTarget {
+            window_id: HostedWindowId::PRIMARY,
+            pane_id: primary.as_str().to_owned(),
+            item_id: document.as_str().to_owned(),
+        };
+        layout
+            .open_item(&primary, WorkspaceItemId::new("other-view").unwrap())
+            .unwrap();
+        assert_eq!(
+            addressed_pane_item_id(&layout, HostedWindowId::PRIMARY, &target),
+            None
+        );
+        let missing = crate::runtime_shell::ShellPaneTarget {
+            pane_id: "closed-pane".to_owned(),
+            ..target.clone()
+        };
+        assert_eq!(
+            addressed_pane_item_id(&layout, HostedWindowId::PRIMARY, &missing),
+            None
+        );
+        let foreign = crate::runtime_shell::ShellPaneTarget {
+            window_id: WindowId(42),
+            ..target.clone()
+        };
+        assert_eq!(
+            addressed_pane_item_id(&layout, HostedWindowId::PRIMARY, &foreign),
+            None
+        );
+        layout.close_item(&primary, &document).unwrap();
+        layout.open_item(&secondary, document).unwrap();
+        assert_eq!(
+            addressed_pane_item_id(&layout, HostedWindowId::PRIMARY, &target),
+            None
+        );
     }
 
     #[test]
@@ -34790,66 +34351,6 @@ mod tests {
     }
 
     #[test]
-    fn automation_delete_then_reconnect_ports_keeps_unique_edges_and_graph_projection() {
-        let node = |id: &str, kind: &str| AutomationNode {
-            id: id.into(),
-            kind: kind.into(),
-            title: id.into(),
-            position: AutomationNodePosition { x: 0.0, y: 0.0 },
-            config: json!({"logic":"condition"}),
-        };
-        let mut workflow = AutomationWorkflow {
-            id: "workflow".into(),
-            name: "workflow".into(),
-            enabled: false,
-            scope: AutomationScopeFilter::default(),
-            published_version_id: None,
-            created_at: 1,
-            updated_at: 1,
-            draft: crate::application::AutomationDraft {
-                scope: AutomationScopeFilter::default(),
-                nodes: vec![
-                    node("trigger", "trigger"),
-                    node("logic", "logic"),
-                    node("tool", "tool"),
-                ],
-                edges: vec![],
-            },
-        };
-        let connect =
-            |workflow: &mut AutomationWorkflow, source: &str, port: &str, target: &str| {
-                append_automation_connection(
-                    workflow,
-                    GraphEndpoint::new(source, format!("out:{port}")),
-                    GraphEndpoint::new(target, "in:input"),
-                )
-            };
-        assert!(connect(&mut workflow, "trigger", "output", "logic"));
-        assert!(connect(&mut workflow, "logic", "true", "tool"));
-        assert!(connect(&mut workflow, "logic", "false", "tool"));
-        let surviving = workflow.draft.edges[2].id.clone();
-        workflow.draft.edges.remove(1);
-        assert!(connect(&mut workflow, "logic", "true", "tool"));
-        assert!(!connect(&mut workflow, "logic", "true", "tool"));
-        assert_ne!(workflow.draft.edges[2].id, surviving);
-        lilia_feature_automation::validate_automation_graph(
-            &workflow.draft.nodes,
-            &workflow.draft.edges,
-        )
-        .unwrap();
-        let graph = automation_graph_model(&workflow).unwrap();
-        assert_eq!(graph.edges().len(), 3);
-        assert!(graph
-            .edges()
-            .iter()
-            .any(|edge| edge.id.as_str() == surviving && edge.source.port.as_str() == "out:false"));
-        assert!(graph
-            .edges()
-            .iter()
-            .any(|edge| edge.source.port.as_str() == "out:true"));
-    }
-
-    #[test]
     fn architecture_graph_model_uses_stable_node_and_edge_identity() {
         let graph = ProjectArchitectureGraph {
             project_id: "project".to_owned(),
@@ -34955,13 +34456,10 @@ mod tests {
                 "nodePositions": { "ui": { "x": 2_000_000.0, "y": 0.0 } }
             }
         });
-        assert!(restore_architecture_workspace_layout(
-            Some(&corrupt),
-            2,
-            &mut restored,
-            &mut viewport,
-        )
-        .is_err());
+        assert!(
+            restore_architecture_workspace_layout(Some(&corrupt), 2, &mut restored, &mut viewport,)
+                .is_err()
+        );
         assert_eq!(restored, before_graph);
         assert_eq!(viewport, before_viewport);
     }
@@ -34972,12 +34470,16 @@ mod tests {
             parse_automation_node_config(r#"{"prompt":"继续"}"#).unwrap()["prompt"],
             "继续"
         );
-        assert!(parse_automation_node_config("[]")
-            .unwrap_err()
-            .contains("JSON 对象"));
-        assert!(parse_automation_node_config("{")
-            .unwrap_err()
-            .contains("有效 JSON"));
+        assert!(
+            parse_automation_node_config("[]")
+                .unwrap_err()
+                .contains("JSON 对象")
+        );
+        assert!(
+            parse_automation_node_config("{")
+                .unwrap_err()
+                .contains("有效 JSON")
+        );
     }
 
     #[test]
@@ -35046,6 +34548,8 @@ mod tests {
             queued_turn_ids: Vec::new(),
         };
         let pending = vec![PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: "request-plan".to_owned(),
             kind: "plan_approval".to_owned(),
             prompt: "执行计划？".to_owned(),
@@ -35069,6 +34573,8 @@ mod tests {
     #[test]
     fn native_tool_consent_draft_starts_from_the_real_command_and_keeps_edits() {
         let pending = PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: "request-tool".to_owned(),
             kind: "tool_consent".to_owned(),
             prompt: "运行命令？".to_owned(),
@@ -35130,6 +34636,8 @@ mod tests {
     #[test]
     fn plan_cancel_target_interrupts_instead_of_resolving_the_interaction() {
         let pending = PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: "request-plan".to_owned(),
             kind: "plan_approval".to_owned(),
             prompt: "执行计划？".to_owned(),
@@ -35145,6 +34653,8 @@ mod tests {
     #[test]
     fn architecture_debug_targets_respect_the_authoritative_permission() {
         let mut pending = PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: "request-architecture".to_owned(),
             kind: "architecture_change".to_owned(),
             prompt: "更新项目架构？".to_owned(),
@@ -35179,6 +34689,8 @@ mod tests {
     #[test]
     fn native_mcp_form_normalizes_free_arrays_and_uses_the_typed_accept_action() {
         let pending = PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: "request-mcp".to_owned(),
             kind: "mcp_elicitation".to_owned(),
             prompt: "填写发布信息".to_owned(),
@@ -35234,6 +34746,8 @@ mod tests {
     #[test]
     fn native_mcp_form_keeps_accept_unavailable_until_required_fields_are_valid() {
         let pending = PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: "request-mcp-invalid".to_owned(),
             kind: "mcp_elicitation".to_owned(),
             prompt: "填写发布信息".to_owned(),
@@ -35449,18 +34963,15 @@ mod tests {
         );
         assert!(sidebar_navigation_selected(
             SidebarNavigationTarget::Settings,
-            true,
-            false
+            WindowRoute::Settings
         ));
         assert!(sidebar_navigation_selected(
             SidebarNavigationTarget::Automations,
-            false,
-            true
+            WindowRoute::Automations
         ));
         assert!(!sidebar_navigation_selected(
             SidebarNavigationTarget::Settings,
-            false,
-            true
+            WindowRoute::Automations
         ));
     }
 
@@ -35510,12 +35021,22 @@ mod tests {
             handlers[0].command_windows.as_deref(),
             Some("powershell -File hook.ps1")
         );
-        assert!(edit_hook_handler_draft(
-            &draft,
-            0,
-            HookHandlerDraftField::TimeoutSeconds,
-            "301".to_owned(),
-        )
-        .is_err());
+        assert!(
+            edit_hook_handler_draft(
+                &draft,
+                0,
+                HookHandlerDraftField::TimeoutSeconds,
+                "301".to_owned(),
+            )
+            .is_err()
+        );
+    }
+}
+
+fn requested_workspace_item(command: &DesktopCommand) -> Option<&WorkspaceItemId> {
+    match command {
+        DesktopCommand::OpenWorkspaceItem { item, .. } => Some(&item.id),
+        DesktopCommand::ActivateWorkspaceItem { item_id, .. } => Some(item_id),
+        _ => None,
     }
 }

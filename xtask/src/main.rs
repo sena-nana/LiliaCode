@@ -22,6 +22,12 @@ fn dispatch(arguments: Vec<String>) -> Result {
         "agent-debug" if rest.is_empty() => agent_debug::run(),
         "agent-debug" if rest == ["--no-capture"] => agent_debug::run_with_capture(false),
         "agent-debug" if rest == ["--matrix"] => agent_debug::run_matrix(),
+        "agent-debug" if rest == ["--profile", "browser-agent"] => {
+            agent_debug::run_browser_agent(false)
+        }
+        "agent-debug" if rest == ["--profile", "browser-agent", "--no-build"] => {
+            agent_debug::run_browser_agent(true)
+        }
         "screenshot" => screenshot::run(rest),
         "performance" if rest.is_empty() => performance::run(),
         "release" if rest.first().map(String::as_str) == Some("windows") => {
@@ -65,6 +71,6 @@ fn verify() -> Result {
 fn usage() -> XtaskError {
     XtaskError::failure(
         "usage",
-        "usage: cargo xtask <verify|boundary-check|pin-check|agent-debug [--no-capture|--matrix]|screenshot [--out <png>|--matrix]|performance|release windows --tag <v...>|installer-smoke --tag <v...> [--path <installer>]|android doctor|android test|android build|android smoke|icons [source]>",
+        "usage: cargo xtask <verify|boundary-check|pin-check|agent-debug [--no-capture|--matrix|--profile browser-agent [--no-build]]|screenshot [--out <png>|--matrix]|performance|release windows --tag <v...>|installer-smoke --tag <v...> [--path <installer>]|android doctor|android test|android build|android smoke|icons [source]>",
     )
 }

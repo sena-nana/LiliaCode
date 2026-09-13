@@ -417,7 +417,6 @@ pub enum WorkspaceItemError {
     NotMovableAcrossWindows(String),
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,5 +504,4 @@ mod tests {
                 if kind == AUTOMATION_WORKSPACE_ITEM_KIND
         ));
     }
-
 }

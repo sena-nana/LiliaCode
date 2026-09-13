@@ -4,7 +4,7 @@ use crate::application::composer::DesktopComposerTurnRequest;
 use crate::application::{DesktopApplication, DesktopApplicationError, DesktopTurnDispatch};
 
 pub use lilia_feature_timeline::{
-    timeline_retry_context, TimelineRetryContext as DesktopTimelineRetryContext,
+    TimelineRetryContext as DesktopTimelineRetryContext, timeline_retry_context,
 };
 
 impl DesktopApplication {

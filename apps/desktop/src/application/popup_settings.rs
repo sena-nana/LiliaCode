@@ -177,8 +177,8 @@ pub fn normalize_popup_window_settings(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
     use crate::application::{

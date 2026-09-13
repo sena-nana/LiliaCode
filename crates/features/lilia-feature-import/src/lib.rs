@@ -135,9 +135,10 @@ mod tests {
     fn planning_claims_the_ticket_the_host_staged() {
         let port = RecordingPort::default();
 
-        let output = run_import_job(serde_json::to_value(ImportRequest::new(5)).unwrap(), |ticket| {
-            port.plan(ticket)
-        })
+        let output = run_import_job(
+            serde_json::to_value(ImportRequest::new(5)).unwrap(),
+            |ticket| port.plan(ticket),
+        )
         .unwrap();
 
         assert_eq!(output, serde_json::json!({ "status": "ready" }));
@@ -148,9 +149,10 @@ mod tests {
     fn executing_claims_the_ticket_the_host_staged() {
         let port = RecordingPort::default();
 
-        run_import_job(serde_json::to_value(ImportRequest::new(6)).unwrap(), |ticket| {
-            port.execute(ticket)
-        })
+        run_import_job(
+            serde_json::to_value(ImportRequest::new(6)).unwrap(),
+            |ticket| port.execute(ticket),
+        )
         .unwrap();
 
         assert_eq!(port.executed.lock().unwrap().as_slice(), [6]);

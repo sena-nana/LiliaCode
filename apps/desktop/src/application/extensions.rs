@@ -1,13 +1,15 @@
 use lilia_agent::{RegisteredMcpActivation, SharedCodingServicesStatus};
 use lilia_feature_extensions::{
-    activate_mcp_entry, activate_registered_mcp_servers, create_skill_package,
-    delete_mcp_credentials_for_entries, delete_mcp_server, delete_mcp_server_credential,
-    delete_skill_package, extensions_snapshot, get_mcp_prompt, mcp_state_key, read_mcp_resource,
-    set_mcp_server_credential, set_mcp_server_enabled, set_skill_package_enabled,
-    upsert_mcp_server, CodingRuntimeFacts, ExtensionsHost, LoadedPluginFacts, McpPromptRead,
+    CodingRuntimeFacts, ExtensionsHost, LoadedPluginFacts, McpPromptRead, activate_mcp_entry,
+    activate_registered_mcp_servers, create_skill_package, delete_mcp_credentials_for_entries,
+    delete_mcp_server, delete_mcp_server_credential, delete_skill_package, extensions_snapshot,
+    get_mcp_prompt, mcp_state_key, read_mcp_resource, set_mcp_server_credential,
+    set_mcp_server_enabled, set_skill_package_enabled, upsert_mcp_server,
 };
+use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
 use lilia_storage::{AgentkitMcpRegistryEntry, LiliaDataPaths};
 use mutsuki_agent_contracts::{McpCatalog, McpServerStatus, SkillDiscoverResult, SkillLoadResult};
+use std::sync::{Arc, Mutex};
 
 use crate::application::{
     DesktopApplication, DesktopApplicationError, DesktopCredentialAction, DesktopHostAction,
@@ -47,6 +49,57 @@ pub use lilia_feature_extensions::{
     RuntimeServiceView as DesktopRuntimeServiceView, SkillCreate as DesktopSkillCreate,
     SkillPackageView as DesktopSkillPackageView, SkillScope as DesktopSkillScope,
 };
+
+/// Owns serialization of registry mutations that update the durable registry
+/// and reconcile the shared Agent runtime as one operation.
+#[derive(Clone, Default)]
+pub struct DesktopExtensionRegistryService {
+    operation: Arc<Mutex<()>>,
+}
+
+impl DesktopExtensionRegistryService {
+    pub(crate) fn mutate<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, DesktopApplicationError>,
+    ) -> Result<T, DesktopApplicationError> {
+        let _guard = self
+            .operation
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("extension registry"))?;
+        operation()
+    }
+}
+
+pub struct ExtensionRegistryServiceKey;
+
+impl ServiceKey for ExtensionRegistryServiceKey {
+    type Value = DesktopExtensionRegistryService;
+    const NAME: &'static str = "lilia.extensions.registry";
+}
+
+pub struct ExtensionRegistryServiceFeature {
+    service: DesktopExtensionRegistryService,
+}
+
+impl ExtensionRegistryServiceFeature {
+    pub fn new(service: DesktopExtensionRegistryService) -> Self {
+        Self { service }
+    }
+}
+
+impl Feature for ExtensionRegistryServiceFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.extension-registry").expect("nonempty feature id")
+    }
+
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<ExtensionRegistryServiceKey>()]
+    }
+
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        cx.provide::<ExtensionRegistryServiceKey>(self.service.clone())
+    }
+}
 
 impl ExtensionsHost for DesktopApplication {
     fn data_paths(&self) -> LiliaDataPaths {
@@ -270,16 +323,15 @@ impl ExtensionsHost for DesktopApplication {
 }
 
 impl DesktopApplication {
+    pub fn extension_registry_service(&self) -> DesktopExtensionRegistryService {
+        self.inner.extension_registry.clone()
+    }
+
     fn with_extension_registry<T>(
         &self,
         run: impl FnOnce(&Self) -> Result<T, DesktopApplicationError>,
     ) -> Result<T, DesktopApplicationError> {
-        let _guard = self
-            .inner
-            .extension_registry
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("extension registry"))?;
-        run(self)
+        self.extension_registry_service().mutate(|| run(self))
     }
 
     pub fn extensions_snapshot(
@@ -538,6 +590,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use crate::application::{
         DesktopApplicationConfig, DesktopHost, DesktopHostAction, DesktopHostContext,
@@ -618,6 +671,48 @@ mod tests {
         )
         .unwrap();
         (application, home)
+    }
+
+    #[test]
+    fn registry_service_serializes_overlapping_mutations() {
+        let service = DesktopExtensionRegistryService::default();
+        let (first_acquired_sender, first_acquired_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let first = service.clone();
+        let first_thread = std::thread::spawn(move || {
+            first
+                .mutate(|| {
+                    first_acquired_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        first_acquired_receiver.recv().unwrap();
+
+        let (second_attempt_sender, second_attempt_receiver) = std::sync::mpsc::channel();
+        let (second_completed_sender, second_completed_receiver) = std::sync::mpsc::channel();
+        let second = service.clone();
+        let second_thread = std::thread::spawn(move || {
+            second_attempt_sender.send(()).unwrap();
+            second
+                .mutate(|| {
+                    second_completed_sender.send(()).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        second_attempt_receiver.recv().unwrap();
+        assert!(
+            second_completed_receiver
+                .recv_timeout(Duration::from_millis(50))
+                .is_err()
+        );
+
+        release_sender.send(()).unwrap();
+        second_completed_receiver.recv().unwrap();
+        first_thread.join().unwrap();
+        second_thread.join().unwrap();
     }
 
     #[test]
@@ -736,9 +831,11 @@ mod tests {
         assert_eq!(disabled.skills_registry_revision, 2);
         assert!(!disabled.skills[0].enabled);
         assert!(!disabled.skills[0].runtime_available);
-        assert!(application
-            .set_skill_package_enabled("review-changes", true, 1)
-            .is_err());
+        assert!(
+            application
+                .set_skill_package_enabled("review-changes", true, 1)
+                .is_err()
+        );
 
         let enabled = application
             .set_skill_package_enabled("review-changes", true, 2)
@@ -784,11 +881,13 @@ mod tests {
         assert_eq!(created.snapshot.mcp_servers.len(), 1);
         assert!(!created.snapshot.mcp_servers[0].enabled);
         assert!(created.results[0].error.is_none());
-        assert!(application
-            .activate_registered_mcp_servers()
-            .unwrap()
-            .results
-            .is_empty());
+        assert!(
+            application
+                .activate_registered_mcp_servers()
+                .unwrap()
+                .results
+                .is_empty()
+        );
 
         let stale = application
             .set_mcp_server_enabled("fixture.server", true, 0)
@@ -908,11 +1007,13 @@ mod tests {
             .set_mcp_server_enabled("secured", true, 1)
             .unwrap();
         assert!(enabled.results[0].error.is_some());
-        assert!(!enabled.results[0]
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .contains(canary));
+        assert!(
+            !enabled.results[0]
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains(canary)
+        );
 
         let cleared = application
             .delete_mcp_server_credential(
@@ -922,10 +1023,12 @@ mod tests {
             )
             .unwrap();
         assert!(!cleared.snapshot.mcp_servers[0].credentials[0].present);
-        assert!(cleared.results[0]
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("OS Keyring")));
+        assert!(
+            cleared.results[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("OS Keyring"))
+        );
 
         application
             .set_mcp_server_credential(
@@ -937,13 +1040,15 @@ mod tests {
             .unwrap();
         let deleted = application.delete_mcp_server("secured", 2).unwrap();
         assert!(deleted.snapshot.mcp_servers.is_empty());
-        assert!(!application
-            .read_mcp_credential(
-                "secured",
-                DesktopMcpCredentialKind::Environment,
-                "API_TOKEN"
-            )
-            .unwrap()
-            .is_some());
+        assert!(
+            !application
+                .read_mcp_credential(
+                    "secured",
+                    DesktopMcpCredentialKind::Environment,
+                    "API_TOKEN"
+                )
+                .unwrap()
+                .is_some()
+        );
     }
 }

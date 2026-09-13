@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::sync::{Mutex, RwLock};
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
 
 use lilia_contracts::{
     ArtifactProjection, ChatContextUsage, PendingProjection, ProductError, ProductTask, Project,
@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 use crate::application::agent::DesktopAgentRuntime;
 use crate::application::composer::DesktopComposerStore;
 use crate::application::remote::DesktopRemoteControlService;
-use crate::application::submission::DesktopSubmissionStore;
 use crate::application::todo::DesktopTodoStore;
 use crate::application::workspace::DesktopWorkspaceState;
 use crate::application::worktree::DesktopWorktreeStore;
+use crate::application::worktree::WorktreeRuntimePort;
 use crate::application::{
     DesktopApplicationConfig, DesktopEvent, DesktopEventBus, DesktopEventSubscription, DesktopHost,
     DesktopHostAction, DesktopHostContext, DesktopHostError, DesktopHostResult, ProjectQuery,
@@ -26,10 +26,9 @@ use crate::application::{
 };
 use crate::application::{
     DesktopArchitectureService, DesktopAutomationService, DesktopMemoryService,
-    DesktopRoadmapService, InMemoryMemorySettingsStore, MemorySettingsStore, SqliteMemoryStore,
+    DesktopRoadmapService, DesktopTurnSubmissionService, InMemoryMemorySettingsStore,
+    MemorySettingsStore, SqliteMemoryStore,
 };
-use crate::application::{DocumentStore, LanguageRegistry};
-use lilia_feature_agent_session::DesktopTurnQueueStore;
 
 #[derive(Clone)]
 pub struct DesktopApplication {
@@ -43,6 +42,7 @@ pub(crate) struct DesktopApplicationInner {
     pub(crate) host_context: DesktopHostContext,
     pub(crate) events: DesktopEventBus,
     pub(crate) project_tasks: lilia_feature_task::ProjectTaskService,
+    pub(crate) project_settings: crate::application::ProjectSettingsService,
     pub(crate) project_task_events: Arc<lilia_feature_task::ProjectTaskEventFanout>,
     pub(crate) journal: lilia_kernel::Journal,
     /// Held only for its `Drop`, which drains and flushes the export writer.
@@ -50,15 +50,12 @@ pub(crate) struct DesktopApplicationInner {
     pub(crate) workspace: Arc<Mutex<DesktopWorkspaceState>>,
     pub(crate) timeline: lilia_feature_timeline::TimelineService,
     pub(crate) domain_db: Db,
-    pub(crate) composers: DesktopComposerStore,
-    pub(crate) submissions: Mutex<DesktopSubmissionStore>,
+    pub(crate) composers: Arc<DesktopComposerStore>,
+    pub(crate) composer_input: crate::application::ComposerInputService,
+    pub(crate) turn_submissions: crate::application::DesktopTurnSubmissionService,
     pub(crate) terminals: Arc<crate::application::terminal::DesktopTerminalService>,
-    pub(crate) pending_turns: Mutex<DesktopTurnQueueStore>,
-    pub(crate) turn_submission: Mutex<()>,
-    pub(crate) guide_dispatch: Mutex<()>,
-    pub(crate) todos: Mutex<DesktopTodoStore>,
-    pub(crate) worktrees: Mutex<DesktopWorktreeStore>,
-    pub(crate) worktree_operations: Mutex<std::collections::HashSet<TaskId>>,
+    pub(crate) todo_service: crate::application::DesktopTodoService,
+    pub(crate) worktree_service: crate::application::DesktopWorktreeService,
     pub(crate) automation: DesktopAutomationService,
     pub(crate) automation_dispatcher:
         Mutex<Option<super::automation_dispatch::AutomationDispatcher>>,
@@ -71,41 +68,47 @@ pub(crate) struct DesktopApplicationInner {
     pub(crate) roadmap: DesktopRoadmapService,
     pub(crate) architecture: DesktopArchitectureService,
     pub(crate) remote: DesktopRemoteControlService,
-    pub(crate) update_state: Mutex<crate::application::DesktopUpdateState>,
-    pub(crate) update_operation: Mutex<()>,
-    pub(crate) provider_revision: AtomicU64,
-    pub(crate) provider_settings:
-        Mutex<crate::application::provider::DesktopAgentRuntimeSettingsState>,
-    pub(crate) agent_interaction:
-        Mutex<crate::application::agent_interaction::DesktopAgentInteractionState>,
-    pub(crate) documents: lilia_feature_document::SharedDocumentStore,
-    pub(crate) languages: lilia_feature_document::SharedLanguageRegistry,
-    pub(crate) language_services:
-        Mutex<crate::application::language_service::DesktopLanguageServiceState>,
-    pub(crate) language_service_operations: Mutex<()>,
-    pub(crate) project_files_watchers: Mutex<
-        std::collections::BTreeMap<String, crate::application::project_files::ProjectFilesWatcher>,
-    >,
-    pub(crate) project_files_revisions: Arc<Mutex<std::collections::BTreeMap<String, AtomicU64>>>,
-    pub(crate) project_task_runs: Mutex<
-        std::collections::BTreeMap<(String, String), crate::application::DesktopTerminalSessionId>,
-    >,
-    pub(crate) conversation_suggestion_generation: Mutex<()>,
-    pub(crate) session_search_cache:
-        Mutex<Option<Arc<crate::application::session_search::SessionSearchCorpus>>>,
-    pub(crate) product_change_feed: crate::application::change_feed::ProductChangeFeed,
-    pub(crate) registry_file_watch: crate::application::registry_watch::RegistryFileWatch,
+    pub(crate) update_service: crate::application::DesktopUpdateService,
+    pub(crate) provider_credentials: crate::application::ProviderCredentialService,
+    pub(crate) provider_runtime_settings: crate::application::ProviderRuntimeSettingsService,
+    pub(crate) agent_interaction: crate::application::AgentInteractionService,
+    pub(crate) document_service: crate::application::DesktopDocumentService,
+    pub(crate) project_files: crate::application::ProjectFilesService,
+    pub(crate) project_commands: crate::application::ProjectCommandRunService,
+    pub(crate) conversation_suggestion_generation:
+        crate::application::DesktopConversationSuggestionGenerationService,
+    pub(crate) session_search: crate::application::SessionSearchService,
+    pub(crate) product_change_feed: crate::application::ProductChangeFeedService,
+    pub(crate) registry_file_watch: crate::application::RegistryFileWatchService,
     pub(crate) title_update:
         std::sync::Arc<crate::application::title_update::DesktopTitleUpdateCoordinator>,
     pub(crate) title_update_scheduler:
         std::sync::OnceLock<Arc<dyn crate::application::title_update::DesktopTitleUpdateScheduler>>,
     pub(crate) turn_executor:
         std::sync::OnceLock<Arc<dyn crate::application::agent::DesktopTurnExecutor>>,
-    pub(crate) agent: DesktopAgentRuntime,
+    pub(crate) agent: Arc<DesktopAgentRuntime>,
     pub(crate) cli_requests: Mutex<()>,
-    pub(crate) extension_registry: Mutex<()>,
-    pub(crate) hook_executions: crate::application::hooks::DesktopHookExecutionStore,
+    pub(crate) extension_registry: crate::application::DesktopExtensionRegistryService,
+    pub(crate) hook_documents: crate::application::HookDocumentsService,
+    pub(crate) hook_execution: crate::application::HookExecutionService,
     pub(crate) contribution_host: crate::application::contributions::LiliaContributionHost,
+}
+
+struct WorktreeAgentRuntimePort {
+    agent: Arc<DesktopAgentRuntime>,
+}
+
+impl WorktreeRuntimePort for WorktreeAgentRuntimePort {
+    fn ensure_turn_idle(&self, task_id: &TaskId) -> Result<(), DesktopApplicationError> {
+        let snapshot = self.agent.snapshot(task_id);
+        if snapshot.turn_id.is_some() || snapshot.queued_turns != 0 {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "worktree",
+                message: "请先停止当前任务，再更改工作树。".into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -184,17 +187,33 @@ impl DesktopApplication {
             Some(store) => store.db(),
             None => Db::in_memory()?,
         };
-        let composers = DesktopComposerStore::new(domain_connection.clone())?;
+        let composers = Arc::new(DesktopComposerStore::new(domain_connection.clone())?);
         let todos = DesktopTodoStore::from_shared(domain_connection.clone())?;
-        let pending_turns = DesktopTurnQueueStore::from_shared(domain_connection.clone())?;
-        let hook_executions = crate::application::hooks::DesktopHookExecutionStore::from_shared(
+        let pending_turns = lilia_feature_agent_session::DesktopTurnQueueStore::from_shared(
             domain_connection.clone(),
         )?;
-        let submissions = DesktopSubmissionStore::new(domain_connection.clone());
-        let worktrees = DesktopWorktreeStore::from_db(domain_connection.clone())?;
+        let hook_execution = crate::application::HookExecutionService::new(
+            config.data_paths(),
+            crate::application::hooks::DesktopHookExecutionStore::from_shared(
+                domain_connection.clone(),
+            )?,
+        );
+        let turn_submissions = crate::application::DesktopTurnSubmissionService::new(
+            crate::application::submission::DesktopSubmissionStore::new(domain_connection.clone()),
+            pending_turns,
+        );
+        let worktrees = Arc::new(DesktopWorktreeStore::from_db(domain_connection.clone())?);
         let journal = lilia_kernel::Journal::new();
         let events =
             DesktopEventBus::from_bus(lilia_kernel::EventBus::with_journal(journal.clone()));
+        let project_settings = crate::application::ProjectSettingsService::new(
+            config.data_paths(),
+            events.bus().clone(),
+        );
+        let hook_documents = crate::application::HookDocumentsService::new(
+            config.data_paths(),
+            events.bus().clone(),
+        );
         let automation = DesktopAutomationService::from_db(
             domain_connection.clone(),
             Arc::new(lilia_feature_automation::KernelAutomationEvents::new(
@@ -214,12 +233,16 @@ impl DesktopApplication {
                 memory_settings,
             )
         };
+        let memory = memory.with_events(events.bus().clone());
         let roadmap = if authority.data_paths().is_some() {
             DesktopRoadmapService::from_db(domain_connection.clone())?
         } else {
             DesktopRoadmapService::in_memory()?
         };
-        let architecture = DesktopArchitectureService::from_db(domain_connection.clone())?;
+        let roadmap = roadmap.with_events(events.bus().clone());
+        let architecture =
+            DesktopArchitectureService::from_db(domain_connection.clone(), authority.clone())?
+                .with_events(events.bus().clone());
         let remote = DesktopRemoteControlService::from_db(
             domain_connection.clone(),
             Arc::new(
@@ -239,19 +262,19 @@ impl DesktopApplication {
         .map_err(|error| {
             crate::application::DesktopProviderError::Persistence(error.to_string())
         })?;
-        let provider_settings =
-            crate::application::provider::DesktopAgentRuntimeSettingsState::open(
+        let provider_revision = Arc::new(AtomicU64::new(1));
+        let provider_runtime_settings =
+            crate::application::ProviderRuntimeSettingsService::from_authority(
                 provider_settings_store,
+                authority.clone(),
+                provider_revision.clone(),
+                events.bus().clone(),
             )?;
-        authority
-            .shared_runtime()
-            .inner()
-            .configure_model_runtime(crate::application::provider::runtime_configuration(
-                &provider_settings.current(),
-            ))
-            .map_err(|error| {
-                crate::application::DesktopProviderError::Runtime(error.to_string())
-            })?;
+        let provider_credentials = crate::application::ProviderCredentialService::new(
+            authority.clone(),
+            provider_revision,
+            events.bus().clone(),
+        );
         let agent_interaction_store = if authority.data_paths().is_some() {
             lilia_storage::SqliteAgentRuntimeStateStore::open(
                 config.data_paths().agent_runtime_db(),
@@ -279,6 +302,11 @@ impl DesktopApplication {
                 message: error.to_string(),
                 rollback_failed: None,
             })?;
+        let agent_interaction = crate::application::AgentInteractionService::new(
+            agent_interaction,
+            authority.clone(),
+            events.bus().clone(),
+        );
         let project_task_events = Arc::new(lilia_feature_task::ProjectTaskEventFanout::default());
         project_task_events.install(Arc::new(lilia_feature_task::KernelProjectTaskEvents::new(
             events.bus().clone(),
@@ -293,6 +321,61 @@ impl DesktopApplication {
             project_task_events.clone(),
         )
         .with_journal(journal.clone());
+        let registry_file_watch = crate::application::RegistryFileWatchService::new(
+            config.data_paths(),
+            project_tasks.clone(),
+            events.clone(),
+            authority.data_paths().is_some(),
+        );
+        let product_change_feed =
+            crate::application::ProductChangeFeedService::new(authority.clone(), events.clone());
+        let agent = Arc::new(DesktopAgentRuntime::default());
+        let worktree_service = crate::application::DesktopWorktreeService::new(
+            worktrees,
+            Arc::new(project_tasks.clone()),
+            Arc::new(project_settings.clone()),
+            Arc::new(crate::application::NativeGitWorktreePort),
+            Arc::new(WorktreeAgentRuntimePort {
+                agent: agent.clone(),
+            }),
+            events.bus().clone(),
+        );
+        let todo_service = crate::application::DesktopTodoService::new(
+            todos,
+            project_tasks.clone(),
+            authority.clone(),
+            events.bus().clone(),
+        );
+        let composer_input = crate::application::ComposerInputService::new(
+            Arc::clone(&composers),
+            project_tasks.clone(),
+            events.bus().clone(),
+        );
+        let document_service = crate::application::DesktopDocumentService::new(
+            authority.clone(),
+            project_tasks.clone(),
+            events.bus().clone(),
+        );
+        let session_search = crate::application::SessionSearchService::new(project_tasks.clone());
+        let terminals = Arc::new(crate::application::terminal::DesktopTerminalService::default());
+        let project_commands = crate::application::ProjectCommandRunService::new(
+            project_tasks.clone(),
+            terminals.clone(),
+            events.bus().clone(),
+        );
+        let project_files = crate::application::ProjectFilesService::new(
+            project_tasks.clone(),
+            document_service.clone(),
+            events.bus().clone(),
+        );
+        let update_service = crate::application::DesktopUpdateService::from_host(
+            host.clone(),
+            host_context.clone(),
+            events.bus().clone(),
+        );
+        let extension_registry = crate::application::DesktopExtensionRegistryService::default();
+        let conversation_suggestion_generation =
+            crate::application::DesktopConversationSuggestionGenerationService::default();
         let contribution_host =
             crate::application::contributions::LiliaContributionHost::bootstrap()
                 .map_err(|error| DesktopApplicationError::Contribution(error.to_string()))?;
@@ -314,6 +397,7 @@ impl DesktopApplication {
                 host_context,
                 events,
                 project_tasks,
+                project_settings,
                 project_task_events,
                 journal,
                 _journal_export: journal_export,
@@ -321,16 +405,11 @@ impl DesktopApplication {
                 timeline,
                 domain_db: domain_connection,
                 composers,
-                submissions: Mutex::new(submissions),
-                terminals: Arc::new(
-                    crate::application::terminal::DesktopTerminalService::default(),
-                ),
-                pending_turns: Mutex::new(pending_turns),
-                turn_submission: Mutex::new(()),
-                guide_dispatch: Mutex::new(()),
-                todos: Mutex::new(todos),
-                worktrees: Mutex::new(worktrees),
-                worktree_operations: Mutex::new(std::collections::HashSet::new()),
+                composer_input,
+                turn_submissions,
+                terminals,
+                todo_service,
+                worktree_service,
                 automation,
                 automation_dispatcher: Mutex::new(None),
                 automation_inbox,
@@ -342,32 +421,27 @@ impl DesktopApplication {
                 roadmap,
                 architecture,
                 remote,
-                update_state: Mutex::new(crate::application::DesktopUpdateState::Idle),
-                update_operation: Mutex::new(()),
-                provider_revision: AtomicU64::new(1),
-                provider_settings: Mutex::new(provider_settings),
-                agent_interaction: Mutex::new(agent_interaction),
-                documents: Arc::new(Mutex::new(DocumentStore::default())),
-                languages: Arc::new(RwLock::new(LanguageRegistry::with_builtins())),
-                language_services: Mutex::new(Default::default()),
-                language_service_operations: Mutex::new(()),
-                project_files_watchers: Mutex::new(std::collections::BTreeMap::new()),
-                project_files_revisions: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
-                project_task_runs: Mutex::new(std::collections::BTreeMap::new()),
-                conversation_suggestion_generation: Mutex::new(()),
-                session_search_cache: Mutex::new(None),
-                product_change_feed: crate::application::change_feed::ProductChangeFeed::default(),
-                registry_file_watch: crate::application::registry_watch::RegistryFileWatch::default(
-                ),
+                update_service,
+                provider_credentials,
+                provider_runtime_settings,
+                agent_interaction,
+                document_service,
+                project_files,
+                project_commands,
+                conversation_suggestion_generation,
+                session_search,
+                product_change_feed,
+                registry_file_watch,
                 title_update: std::sync::Arc::new(
                     crate::application::title_update::DesktopTitleUpdateCoordinator::default(),
                 ),
                 title_update_scheduler: std::sync::OnceLock::new(),
                 turn_executor: std::sync::OnceLock::new(),
-                agent: DesktopAgentRuntime::default(),
+                agent,
                 cli_requests: Mutex::new(()),
-                extension_registry: Mutex::new(()),
-                hook_executions,
+                extension_registry,
+                hook_documents,
+                hook_execution,
                 contribution_host,
             }),
         })
@@ -439,14 +513,18 @@ impl DesktopApplication {
         &self.inner.terminals
     }
 
+    pub fn turn_submission_service(&self) -> DesktopTurnSubmissionService {
+        self.inner.turn_submissions.clone()
+    }
+
     /// Open documents and the buffers behind them.
     pub fn document_store(&self) -> &lilia_feature_document::SharedDocumentStore {
-        &self.inner.documents
+        &self.inner.document_service.documents
     }
 
     /// Language definitions the editor resolves paths against.
     pub fn language_registry(&self) -> &lilia_feature_document::SharedLanguageRegistry {
-        &self.inner.languages
+        &self.inner.document_service.languages
     }
 
     pub fn query_projects(
@@ -706,8 +784,8 @@ pub enum DesktopApplicationError {
 mod tests {
     use std::collections::BTreeMap;
     use std::io::{Read, Write};
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
     use lilia_agent::ProductCredentialLoginInput;
@@ -1050,11 +1128,13 @@ mod tests {
             "fn entry() {}"
         );
         app.mark_document_saved(document.id, revision).unwrap();
-        assert!(!clone
-            .document_snapshot(document.id)
-            .unwrap()
-            .buffer
-            .is_dirty());
+        assert!(
+            !clone
+                .document_snapshot(document.id)
+                .unwrap()
+                .buffer
+                .is_dirty()
+        );
     }
 
     #[test]
@@ -1250,14 +1330,15 @@ mod tests {
                 .len(),
             1
         );
-        assert!(app
-            .inner
-            .pending_turns
-            .lock()
-            .unwrap()
-            .list(&task_id)
-            .unwrap()
-            .is_empty());
+        assert!(
+            app.inner
+                .turn_submissions
+                .queue()
+                .unwrap()
+                .list(&task_id)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1401,8 +1482,8 @@ mod tests {
         let original_claim = {
             let rows = app
                 .inner
-                .pending_turns
-                .lock()
+                .turn_submissions
+                .queue()
                 .unwrap()
                 .list(&task_id)
                 .unwrap();
@@ -1437,8 +1518,8 @@ mod tests {
         let (recovered_claim, recovered_turn_id) = {
             let rows = restarted
                 .inner
-                .pending_turns
-                .lock()
+                .turn_submissions
+                .queue()
                 .unwrap()
                 .list(&task_id)
                 .unwrap();
@@ -1457,8 +1538,8 @@ mod tests {
         assert!(matches!(
             restarted
                 .inner
-                .pending_turns
-                .lock()
+                .turn_submissions
+                .queue()
                 .unwrap()
                 .ack_and_claim_next(
                     &task_id,
@@ -1517,22 +1598,26 @@ mod tests {
             restarted.task_runtime_snapshot(&task_id)
         );
         assert!(!workspace.join("must-not-exist.txt").exists());
-        assert!(restarted
-            .task_session_snapshot(&task_id)
-            .unwrap()
-            .pending
-            .iter()
-            .any(|pending| {
-                pending.request_id == request_id
-                    && pending.status == PendingProjectionStatus::Cancelled
-            }));
-        assert!(restarted
-            .inner
-            .pending_turns
-            .lock()
-            .unwrap()
-            .list(&task_id)
-            .unwrap()
-            .is_empty());
+        assert!(
+            restarted
+                .task_session_snapshot(&task_id)
+                .unwrap()
+                .pending
+                .iter()
+                .any(|pending| {
+                    pending.request_id == request_id
+                        && pending.status == PendingProjectionStatus::Cancelled
+                })
+        );
+        assert!(
+            restarted
+                .inner
+                .turn_submissions
+                .queue()
+                .unwrap()
+                .list(&task_id)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

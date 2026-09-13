@@ -1,21 +1,21 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lilia_service::{StorageWriterGuard, WriterLeaseError, WriterMode};
-use lilia_storage::{LiliaDataPaths, SqliteAgentRuntimeStateStore, PRODUCT_SCHEMA_VERSION};
+use lilia_storage::{LiliaDataPaths, PRODUCT_SCHEMA_VERSION, SqliteAgentRuntimeStateStore};
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::application::{
-    normalize_assistant_ai_settings, DesktopApplicationConfig, DesktopAssistantAiModelPoolItem,
+    ASSISTANT_AI_SETTINGS_KEY, DesktopApplicationConfig, DesktopAssistantAiModelPoolItem,
     DesktopAssistantAiSettings, DesktopCredentialAction, DesktopCredentialImportEntry,
     DesktopGitHubBindingMetadata, DesktopHost, DesktopHostAction, DesktopHostContext,
-    DesktopHostResult, ASSISTANT_AI_SETTINGS_KEY,
+    DesktopHostResult, normalize_assistant_ai_settings,
 };
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
@@ -2256,10 +2256,11 @@ mod tests {
         assert!(!sidecar_path(&target, "-shm").exists());
         assert!(source_wal.exists());
         assert!(source_shm.exists());
-        assert!(item
-            .files
-            .iter()
-            .all(|file| file.role != DesktopImportFileRole::SharedMemory));
+        assert!(
+            item.files
+                .iter()
+                .all(|file| file.role != DesktopImportFileRole::SharedMemory)
+        );
         drop(source_connection);
     }
 
@@ -2442,11 +2443,12 @@ mod tests {
         let plan = service.plan(&source).unwrap();
         assert!(plan.source_home.is_absolute());
         assert!(plan.target_home.is_absolute());
-        assert!(plan
-            .items
-            .iter()
-            .flat_map(|item| &item.files)
-            .all(|file| { file.source.is_absolute() && file.target.is_absolute() }));
+        assert!(
+            plan.items
+                .iter()
+                .flat_map(|item| &item.files)
+                .all(|file| { file.source.is_absolute() && file.target.is_absolute() })
+        );
 
         drop(plan);
         drop(service);
@@ -2502,11 +2504,13 @@ mod tests {
             "{report:#?}"
         );
         assert!(service.target().data_paths().product_db().exists());
-        assert!(!service
-            .target()
-            .data_paths()
-            .product_projections_db()
-            .exists());
+        assert!(
+            !service
+                .target()
+                .data_paths()
+                .product_projections_db()
+                .exists()
+        );
     }
 
     #[test]
@@ -2855,9 +2859,11 @@ mod tests {
                 .and_then(|settings| settings.model.as_deref()),
             Some("assistant-model")
         );
-        assert!(!serde_json::to_string(&plan)
-            .unwrap()
-            .contains("must-not-enter-the-plan"));
+        assert!(
+            !serde_json::to_string(&plan)
+                .unwrap()
+                .contains("must-not-enter-the-plan")
+        );
 
         let report = service.execute(
             &plan,

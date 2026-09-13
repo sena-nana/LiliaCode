@@ -100,11 +100,24 @@ impl ComposerStore {
         task_id: &TaskId,
         command: ComposerCommand,
     ) -> Result<(ComposerState, bool), ComposerError> {
-        let mut state = self.snapshot(task_id)?;
+        let mut connection = self.connection.lock();
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| ComposerError::Storage {
+                operation: "begin draft update",
+                message: error.to_string(),
+            })?;
+        let mut state = Self::snapshot_from(&transaction, task_id)?;
         let changed = state.apply_transient_command(command)?;
         if changed {
-            self.save(&state)?;
+            Self::save_to(&transaction, &state)?;
         }
+        transaction
+            .commit()
+            .map_err(|error| ComposerError::Storage {
+                operation: "commit draft update",
+                message: error.to_string(),
+            })?;
         Ok((state, changed))
     }
 
@@ -151,6 +164,69 @@ impl ComposerStore {
     pub fn save(&self, state: &ComposerState) -> Result<(), ComposerError> {
         let connection = self.connection.lock();
         Self::save_to(&connection, state)
+    }
+
+    /// Reserves a draft row without replacing a prior draft, including one
+    /// being materialized by another window.
+    pub fn insert_if_absent(&self, state: &ComposerState) -> Result<bool, ComposerError> {
+        let mut connection = self.connection.lock();
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| ComposerError::Storage {
+                operation: "reserve draft",
+                message: error.to_string(),
+            })?;
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM desktop_composer_drafts WHERE task_id = ?1)",
+                [state.task_id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|error| ComposerError::Storage {
+                operation: "find draft reservation",
+                message: error.to_string(),
+            })?;
+        if exists {
+            return Ok(false);
+        }
+        Self::save_to(&transaction, state)?;
+        transaction
+            .commit()
+            .map_err(|error| ComposerError::Storage {
+                operation: "commit draft reservation",
+                message: error.to_string(),
+            })?;
+        Ok(true)
+    }
+
+    /// Failed materialization may release only its own unchanged reservation.
+    pub fn remove_if_unchanged(&self, expected: &ComposerState) -> Result<bool, ComposerError> {
+        let mut connection = self.connection.lock();
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| ComposerError::Storage {
+                operation: "release draft reservation",
+                message: error.to_string(),
+            })?;
+        if Self::snapshot_from(&transaction, &expected.task_id)? != *expected {
+            return Ok(false);
+        }
+        let removed = transaction
+            .execute(
+                "DELETE FROM desktop_composer_drafts WHERE task_id = ?1",
+                [expected.task_id.as_str()],
+            )
+            .map_err(|error| ComposerError::Storage {
+                operation: "delete draft reservation",
+                message: error.to_string(),
+            })?;
+        transaction
+            .commit()
+            .map_err(|error| ComposerError::Storage {
+                operation: "commit draft release",
+                message: error.to_string(),
+            })?;
+        Ok(removed == 1)
     }
 
     pub fn remove(&self, task_id: &TaskId) -> Result<(), ComposerError> {
@@ -457,5 +533,52 @@ mod tests {
             .unwrap());
         assert_eq!(draft.content, "new draft");
         assert_eq!(draft.revision, 1);
+    }
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+    #[test]
+    fn only_one_concurrent_materializer_can_reserve_a_task_draft() {
+        let store = Arc::new(ComposerStore::in_memory().unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let id = TaskId::new("reserved-task").unwrap();
+        let workers = ["first", "second"].map(|content| {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            let mut draft = ComposerState::new(id.clone());
+            draft.content = content.into();
+            std::thread::spawn(move || {
+                barrier.wait();
+                (store.insert_if_absent(&draft).unwrap(), draft)
+            })
+        });
+        let results = workers.map(|worker| worker.join().unwrap());
+        assert_eq!(results.iter().filter(|(inserted, _)| *inserted).count(), 1);
+        let winner = results
+            .into_iter()
+            .find(|(inserted, _)| *inserted)
+            .unwrap()
+            .1;
+        assert_eq!(store.snapshot(&id).unwrap(), winner);
+    }
+    #[test]
+    fn cleanup_removes_only_the_unchanged_reserved_payload() {
+        let store = ComposerStore::in_memory().unwrap();
+        let draft = ComposerState::new(TaskId::new("reserved-task").unwrap());
+        assert!(store.insert_if_absent(&draft).unwrap());
+        let updated = store
+            .execute(
+                &draft.task_id,
+                ComposerCommand::SetContent("new owner input".into()),
+            )
+            .unwrap()
+            .0;
+        assert!(!store.remove_if_unchanged(&draft).unwrap());
+        assert_eq!(store.snapshot(&draft.task_id).unwrap(), updated);
+        assert!(store.remove_if_unchanged(&updated).unwrap());
+        assert!(store.insert_if_absent(&draft).unwrap());
     }
 }

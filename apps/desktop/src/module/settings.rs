@@ -1,12 +1,11 @@
-//! Settings-page agent drafts as a UI module.
-//!
-//! Surface open/close, tab selection and NanaUI appearance stay with the shell.
-//! This module owns the Agent 页签's custom-agent editor and toggle copy.
+pub mod presentation;
+pub mod view;
 
 use lilia_kernel::FeatureId;
 
+use self::presentation::CustomAgentRow;
 use crate::application::{DesktopAgentInteractionSettings, DesktopCustomSubagentCatalog};
-use crate::runtime_shell::{PrimaryShellSnapshot, ShellActionRow, ShellAgentRow};
+use crate::runtime_shell::ShellActionRow;
 use crate::text_editor_state::TextEditorState;
 use crate::ui_module::{UiModule, UiModuleContext, UiModuleOutcome};
 
@@ -95,6 +94,8 @@ impl SettingsModule {
 }
 
 impl UiModule for SettingsModule {
+    type Projection<'a> = crate::ui_module::projection::SettingsProjection<'a>;
+
     type Message = SettingsModuleMessage;
 
     fn feature(&self) -> FeatureId {
@@ -171,13 +172,13 @@ impl UiModule for SettingsModule {
         if !envelope.is::<crate::application::AgentInteractionChanged>() {
             return UiModuleOutcome::clean();
         }
-        let Ok(application) = cx.application() else {
+        let Ok(service) = cx
+            .kernel()
+            .service::<crate::application::AgentInteractionServiceKey>()
+        else {
             return UiModuleOutcome::clean();
         };
-        let (Ok(settings), Ok(catalog)) = (
-            application.agent_interaction_settings(),
-            application.custom_subagent_catalog(),
-        ) else {
+        let Ok((settings, catalog)) = service.snapshot() else {
             return UiModuleOutcome::clean();
         };
         self.interaction = settings;
@@ -185,13 +186,13 @@ impl UiModule for SettingsModule {
         UiModuleOutcome::dirty()
     }
 
-    fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
+    fn project_fields(&self, cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
         if !cx.shows_settings_tab("agent") && !cx.shows_settings_tab("desktop") {
             return;
         }
         if cx.shows_settings_tab("agent") {
             let auto = &self.interaction.auto_turn_decision;
-            into.settings.agent_actions = vec![
+            *into.agent_actions = vec![
                 ShellActionRow {
                     id: "non_interrupt".into(),
                     label: if self.interaction.non_interrupt_mode {
@@ -225,24 +226,24 @@ impl UiModule for SettingsModule {
                     },
                 },
             ];
-            into.settings.custom_agents = self
+            *into.custom_agents = self
                 .catalog
                 .agents
                 .iter()
-                .map(|agent| ShellAgentRow {
+                .map(|agent| CustomAgentRow {
                     id: agent.id.clone(),
                     label: agent.name.clone(),
                     enabled: agent.enabled,
                 })
                 .collect();
-            into.settings.custom_agent_editor_open = self.editor_open;
-            into.settings.custom_agent_name = self.name.clone();
-            into.settings.custom_agent_description = self.description.clone();
-            into.settings.custom_agent_instruction = self.instruction.text();
+            *into.custom_agent_editor_open = self.editor_open;
+            *into.custom_agent_name = self.name.clone();
+            *into.custom_agent_description = self.description.clone();
+            *into.custom_agent_instruction = self.instruction.text();
         }
         if cx.shows_settings_tab("desktop") {
-            into.settings.shortcut = self.shortcut.clone();
-            into.settings.shortcut_capturing = self.shortcut_capturing;
+            *into.shortcut = self.shortcut.clone();
+            *into.shortcut_capturing = self.shortcut_capturing;
         }
     }
 }

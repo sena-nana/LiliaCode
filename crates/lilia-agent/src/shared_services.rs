@@ -1362,18 +1362,22 @@ mod tests {
             .shared_lsp_change_document(&document, 2, "fn main() { let _: bool = 1; }\n".to_owned())
             .unwrap();
 
-        let mut diagnostics = Vec::new();
-        for _ in 0..100 {
-            diagnostics = runtime.shared_lsp_document_diagnostics(&document).unwrap();
-            if !diagnostics.is_empty() {
-                break;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
+        let diagnostics = loop {
+            let diagnostics = runtime.shared_lsp_document_diagnostics(&document).unwrap();
+            if diagnostics.iter().any(|item| item.severity == Some(1))
+                || std::time::Instant::now() >= deadline
+            {
+                break diagnostics;
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
         assert!(
-            !diagnostics.is_empty(),
-            "rust-analyzer did not publish the unsaved type error"
+            diagnostics.iter().any(|item| item.severity == Some(1)),
+            "rust-analyzer did not report the unsaved type error: {diagnostics:?}; status: {:?}",
+            runtime.shared_lsp_status()
         );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn main() {}\n");
         runtime.shared_lsp_close_document(&document).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }

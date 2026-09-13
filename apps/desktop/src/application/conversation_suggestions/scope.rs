@@ -11,9 +11,9 @@ use lilia_feature_suggestions::generation::{compact_line, truncate_chars};
 use lilia_feature_suggestions::local_git::load_local_git_context;
 use lilia_feature_suggestions::types::{
     DesktopSuggestionItemSource, DesktopSuggestionLocalGitProbe, DesktopSuggestionSourceProbe,
-    GitHubActivitySample, GitHubRepoRef, LocalGitContextSample, ProjectContext,
-    SessionThreadSample, SuggestionScope, TaskSample, MAX_TASKS_PER_SCOPE, SAMPLE_TEXT_LIMIT,
-    TASK_CANDIDATE_LIMIT, UNFINISHED_SIGNAL_LIMIT,
+    GitHubActivitySample, GitHubRepoRef, LocalGitContextSample, MAX_TASKS_PER_SCOPE,
+    ProjectContext, SAMPLE_TEXT_LIMIT, SessionThreadSample, SuggestionScope, TASK_CANDIDATE_LIMIT,
+    TaskSample, UNFINISHED_SIGNAL_LIMIT,
 };
 
 impl DesktopApplication {

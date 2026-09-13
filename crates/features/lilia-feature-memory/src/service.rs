@@ -1,5 +1,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::{MemoryChanged, MemoryInjectionChanged, MemorySettingsChanged};
+use lilia_contracts::{ProjectId, TaskId};
+use lilia_kernel::{Event, EventBus};
 use lilia_storage::Db;
 
 use super::{
@@ -10,6 +13,7 @@ use super::{
 #[derive(Clone)]
 pub struct DesktopMemoryService {
     state: Arc<Mutex<DesktopMemoryServiceState>>,
+    events: EventBus,
 }
 
 struct DesktopMemoryServiceState {
@@ -55,10 +59,36 @@ impl DesktopMemoryService {
         settings: impl MemorySettingsStore + 'static,
     ) -> Self {
         Self {
+            events: EventBus::new(),
             state: Arc::new(Mutex::new(DesktopMemoryServiceState {
                 records: Box::new(store),
                 settings: Box::new(settings),
             })),
+        }
+    }
+
+    pub fn with_events(mut self, events: EventBus) -> Self {
+        self.events = events;
+        self
+    }
+
+    fn publish(&self, event: impl Event) {
+        self.events.publish(event);
+    }
+
+    fn memory_changed(&self, memory: &DesktopMemory) {
+        self.publish(MemoryChanged {
+            memory_id: Some(memory.id.clone()),
+            project_id: memory
+                .project_id
+                .as_deref()
+                .and_then(|id| ProjectId::new(id).ok()),
+        });
+    }
+
+    fn injection_changed(&self, state: &MemoryInjectionState) {
+        if let Ok(task_id) = TaskId::new(&state.task_id) {
+            self.publish(MemoryInjectionChanged { task_id });
         }
     }
 
@@ -71,7 +101,9 @@ impl DesktopMemoryService {
     }
 
     pub fn save(&self, input: MemoryUpsertInput) -> Result<DesktopMemory, DesktopMemoryError> {
-        Ok(self.state()?.records.save(input)?)
+        let memory = self.state()?.records.save(input)?;
+        self.memory_changed(&memory);
+        Ok(memory)
     }
 
     pub fn set_enabled(
@@ -88,10 +120,12 @@ impl DesktopMemoryService {
         enabled: bool,
         expected_updated_at: Option<i64>,
     ) -> Result<DesktopMemory, DesktopMemoryError> {
-        Ok(self
+        let memory = self
             .state()?
             .records
-            .set_enabled(memory_id, enabled, expected_updated_at)?)
+            .set_enabled(memory_id, enabled, expected_updated_at)?;
+        self.memory_changed(&memory);
+        Ok(memory)
     }
 
     pub fn delete(&self, memory_id: &str) -> Result<bool, DesktopMemoryError> {
@@ -103,10 +137,21 @@ impl DesktopMemoryService {
         memory_id: &str,
         expected_updated_at: Option<i64>,
     ) -> Result<bool, DesktopMemoryError> {
-        Ok(self
-            .state()?
-            .records
-            .delete(memory_id, expected_updated_at)?)
+        let (previous, deleted) = {
+            let mut state = self.state()?;
+            let previous = state.records.memory(memory_id)?;
+            let deleted = state.records.delete(memory_id, expected_updated_at)?;
+            (previous, deleted)
+        };
+        if deleted {
+            self.publish(MemoryChanged {
+                memory_id: Some(memory_id.to_owned()),
+                project_id: previous
+                    .and_then(|memory| memory.project_id)
+                    .and_then(|id| ProjectId::new(id).ok()),
+            });
+        }
+        Ok(deleted)
     }
 
     pub fn settings(&self) -> Result<MemorySettings, DesktopMemoryError> {
@@ -124,6 +169,7 @@ impl DesktopMemoryService {
     ) -> Result<MemorySettings, DesktopMemoryError> {
         let settings = settings.normalized();
         self.state()?.settings.save(&settings)?;
+        self.publish(MemorySettingsChanged);
         Ok(settings)
     }
 
@@ -148,10 +194,12 @@ impl DesktopMemoryService {
         enabled: bool,
         expected_updated_at: Option<i64>,
     ) -> Result<MemoryInjectionState, DesktopMemoryError> {
-        Ok(self
-            .state()?
-            .records
-            .set_task_enabled(task_id, enabled, expected_updated_at)?)
+        let state =
+            self.state()?
+                .records
+                .set_task_enabled(task_id, enabled, expected_updated_at)?;
+        self.injection_changed(&state);
+        Ok(state)
     }
 
     pub fn reset_task_cooldown(
@@ -166,10 +214,12 @@ impl DesktopMemoryService {
         task_id: &str,
         expected_updated_at: Option<i64>,
     ) -> Result<MemoryInjectionState, DesktopMemoryError> {
-        Ok(self
+        let state = self
             .state()?
             .records
-            .reset_task_cooldown(task_id, expected_updated_at)?)
+            .reset_task_cooldown(task_id, expected_updated_at)?;
+        self.injection_changed(&state);
+        Ok(state)
     }
 
     fn state(&self) -> Result<MutexGuard<'_, DesktopMemoryServiceState>, DesktopMemoryError> {
@@ -246,6 +296,97 @@ mod tests {
             MemorySettings::default().cooldown_turns
         );
         assert_eq!(service.settings().unwrap(), saved);
+    }
+
+    #[test]
+    fn mounted_and_direct_services_publish_once_after_successful_writes() {
+        let kernel = lilia_kernel::Kernel::new();
+        let service = DesktopMemoryService::in_memory()
+            .unwrap()
+            .with_events(kernel.events().clone());
+        kernel
+            .mount(Arc::new(crate::MemoryFeature::new(service.clone())))
+            .unwrap();
+        let mounted = kernel.service::<crate::MemoryServiceKey>().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        kernel.events().observe(None, move |event| {
+            tx.send(event.clone()).unwrap();
+        });
+
+        let saved = service.save(input()).unwrap();
+        let changed = rx.try_recv().unwrap();
+        assert_eq!(
+            changed
+                .downcast::<MemoryChanged>()
+                .unwrap()
+                .memory_id
+                .as_deref(),
+            Some(saved.id.as_str())
+        );
+        assert!(rx.try_recv().is_err());
+        assert_eq!(mounted.memory(&saved.id).unwrap(), Some(saved.clone()));
+
+        assert!(!mounted.set_enabled(&saved.id, false).unwrap().enabled);
+        assert!(rx.try_recv().unwrap().is::<MemoryChanged>());
+        assert!(rx.try_recv().is_err());
+        assert!(mounted
+            .set_enabled_if_unmodified(&saved.id, true, Some(-1))
+            .is_err());
+        assert!(mounted.delete_if_unmodified(&saved.id, Some(-1)).is_err());
+        assert!(rx.try_recv().is_err());
+        assert!(!service.memory(&saved.id).unwrap().unwrap().enabled);
+
+        assert!(mounted.delete(&saved.id).unwrap());
+        assert!(rx.try_recv().unwrap().is::<MemoryChanged>());
+        assert!(!mounted.delete(&saved.id).unwrap());
+        assert!(rx.try_recv().is_err());
+        mounted.save_settings(MemorySettings::default()).unwrap();
+        assert!(rx.try_recv().unwrap().is::<MemorySettingsChanged>());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn injection_mutations_publish_after_commit_and_reject_stale_writes() {
+        let db = Db::in_memory().unwrap();
+        db.lock().execute_batch("CREATE TABLE projects (id TEXT PRIMARY KEY); CREATE TABLE tasks (id TEXT PRIMARY KEY); INSERT INTO tasks (id) VALUES ('task-1');").unwrap();
+        let events = EventBus::new();
+        let service = DesktopMemoryService::from_store(SqliteMemoryStore::from_db(db).unwrap())
+            .with_events(events.clone());
+        let reader = service.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        events.on::<MemoryInjectionChanged, _>(None, move |event| {
+            tx.send(reader.injection_state(event.task_id.as_str()).unwrap())
+                .unwrap();
+        });
+        let disabled = service.set_task_enabled("task-1", false).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), disabled);
+        assert!(rx.try_recv().is_err());
+        assert!(service
+            .set_task_enabled_if_unmodified("task-1", true, Some(-1))
+            .is_err());
+        assert!(service
+            .reset_task_cooldown_if_unmodified("task-1", Some(-1))
+            .is_err());
+        assert!(rx.try_recv().is_err());
+        let reset = service.reset_task_cooldown("task-1").unwrap();
+        assert_eq!(rx.try_recv().unwrap(), reset);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_settings_write_does_not_publish() {
+        let events = EventBus::new();
+        let service = DesktopMemoryService::from_stores(
+            SqliteMemoryStore::in_memory().unwrap(),
+            CorruptSettingsStore,
+        )
+        .with_events(events.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        events.observe(None, move |event| {
+            tx.send(event.clone()).unwrap();
+        });
+        assert!(service.save_settings(MemorySettings::default()).is_err());
+        assert!(rx.try_recv().is_err());
     }
 
     struct CorruptSettingsStore;

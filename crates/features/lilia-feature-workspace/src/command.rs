@@ -11,8 +11,14 @@ pub enum DesktopCommand {
     BackToTaskList,
     ReplacePanelLayout(PanelLayoutSnapshot),
     ActivatePanel(PanelId),
-    SetPanelVisible { panel_id: PanelId, visible: bool },
-    ResizePanel { panel_id: PanelId, extent: f32 },
+    SetPanelVisible {
+        panel_id: PanelId,
+        visible: bool,
+    },
+    ResizePanel {
+        panel_id: PanelId,
+        extent: f32,
+    },
     OpenWorkspaceItem {
         pane_id: PaneId,
         item: WorkspaceItem,
@@ -46,7 +52,9 @@ pub enum DesktopCommand {
         second_pane_id: PaneId,
         ratio: f32,
     },
-    ClosePane { pane_id: PaneId },
+    ClosePane {
+        pane_id: PaneId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

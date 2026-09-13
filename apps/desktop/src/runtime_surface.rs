@@ -911,7 +911,7 @@ mod tests {
                     "编辑",
                     value,
                     multiline,
-                    ShellIntent::ComposerChanged,
+                    |_| ShellIntent::RefreshExtensions,
                 )
                 .binding_identity(identity)
             };
@@ -972,8 +972,6 @@ mod tests {
 
     #[test]
     fn repeated_waiting_and_completed_runs_preserve_details_and_live_actions() {
-        use crate::desktop::AutomationMessage;
-
         let mut context = AppContext::new();
         let document = DocumentId::new(1).unwrap();
         let root = context
@@ -992,23 +990,23 @@ mod tests {
                 "运行记录",
                 run.to_string(),
                 vec![],
-                |value| ShellIntent::AutomationCommand(AutomationMessage::SelectRun(value)),
+                |value| ShellIntent::SelectAutomation(value),
             )];
             if waiting {
                 controls.extend([
                     SurfaceControl::section("auto-human-waiting", "等待输入"),
-                    SurfaceControl::field("auto-response", "回复", "", true, |value| {
-                        ShellIntent::AutomationCommand(AutomationMessage::HumanResponse(value))
+                    SurfaceControl::field("auto-response", "回复", "", true, |_| {
+                        ShellIntent::RefreshAutomations
                     }),
                     SurfaceControl::action(
                         "auto-resume",
                         "继续运行",
-                        ShellIntent::AutomationCommand(AutomationMessage::Resume),
+                        ShellIntent::RefreshAutomations,
                     ),
                     SurfaceControl::action(
                         "auto-cancel",
                         "取消运行",
-                        ShellIntent::AutomationCommand(AutomationMessage::CancelRun),
+                        ShellIntent::CreateAutomation,
                     ),
                 ]);
             }
@@ -1088,11 +1086,11 @@ mod tests {
                 let mut events = events.lock().unwrap();
                 assert!(matches!(
                     events.remove(0),
-                    ShellIntent::AutomationCommand(AutomationMessage::Resume)
+                    ShellIntent::RefreshAutomations
                 ));
                 assert!(matches!(
                     events.remove(0),
-                    ShellIntent::AutomationCommand(AutomationMessage::CancelRun)
+                    ShellIntent::CreateAutomation
                 ));
                 assert!(events.is_empty());
                 body.stable_id()

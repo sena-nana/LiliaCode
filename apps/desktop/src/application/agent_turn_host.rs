@@ -321,8 +321,8 @@ impl AgentTurnHost for DesktopApplication {
         request: &DesktopTurnRequest,
     ) -> Result<(), AgentTurnError> {
         self.inner
-            .pending_turns
-            .lock()
+            .turn_submissions
+            .queue()
             .map_err(|_| AgentTurnError::StateUnavailable("pending turns"))?
             .update_request(turn_id, request)
             .map_err(AgentTurnError::from)
@@ -443,14 +443,15 @@ impl AgentTurnHost for DesktopApplication {
         workspace: Option<&str>,
         content: &str,
     ) -> Result<(), AgentTurnError> {
-        self.execute_turn_hooks(
-            DesktopHookEvent::UserPromptSubmit,
-            task_id,
-            turn_id,
-            workspace,
-            content,
-        )
-        .map_err(|error| agent_turn_error(error.into()))
+        self.hook_execution_service()
+            .execute_turn_hooks(
+                DesktopHookEvent::UserPromptSubmit,
+                task_id,
+                turn_id,
+                workspace,
+                content,
+            )
+            .map_err(|error| agent_turn_error(error.into()))
     }
 
     fn submit_observed(&self, spec: TurnSubmitSpec) -> Result<ObservedTurnOutcome, AgentTurnError> {

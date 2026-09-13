@@ -9,6 +9,7 @@ license.workspace = true
 lilia-contracts = { workspace = true }
 lilia-kernel = { workspace = true }
 lilia-storage = { workspace = true }
+lilia-service = { workspace = true }
 mutsuki-agent-contracts = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }

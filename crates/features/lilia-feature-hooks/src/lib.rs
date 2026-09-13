@@ -110,9 +110,7 @@ pub enum HookError {
 }
 
 impl HookExecutionStore {
-    pub fn from_shared(
-        connection: Db,
-    ) -> Result<Self, HookError> {
+    pub fn from_shared(connection: Db) -> Result<Self, HookError> {
         connection
             .lock()
             .execute_batch(HOOK_EXECUTION_SCHEMA)
@@ -301,7 +299,6 @@ pub struct HookDocumentUpdate {
     pub handlers: Vec<HookHandlerUpdate>,
 }
 
-
 pub fn hook_source_view(
     scope: HookScope,
     project_cwd: Option<String>,
@@ -410,13 +407,10 @@ pub fn ensure_hook_revision(actual: u64, expected: u64) -> Result<(), HooksError
 }
 
 pub fn bump_hook_revision(document: &mut AgentkitHooksDocument) -> Result<(), HooksError> {
-    document.revision =
-        document
-            .revision
-            .checked_add(1)
-            .ok_or(HooksError::StateRevisionOverflow(
-                "Hook source",
-            ))?;
+    document.revision = document
+        .revision
+        .checked_add(1)
+        .ok_or(HooksError::StateRevisionOverflow("Hook source"))?;
     Ok(())
 }
 
@@ -748,4 +742,3 @@ pub fn hook_execution_error(
         message: message.into(),
     }
 }
-

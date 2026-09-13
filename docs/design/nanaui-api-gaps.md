@@ -1,6 +1,6 @@
 # NanaUI API 缺口提案
 
-对照：LiliaCode 桌面（pin `nana-ui` `d3cdc1c638730583a8b2c0fb04907c490c4144de`）、聊天桌面（Claude / ChatGPT）与 IDE 工作台（VS Code / Cursor）。权威文档：该 pin 的 `docs/rust-layout.md`、`docs/components.md`、`docs/workspace.md`。
+对照：LiliaCode 桌面（正式 pin `bf6c9c657a56f567dfdefc528cbd0ca3d6f9b89f`）与 IDE 工作台（VS Code / Cursor）。权威文档：该 pin 的 `docs/rust-layout.md`、`docs/components.md`、`docs/workspace.md`；新增接口已随 NanaUI 提交发布并由 LiliaCode 验证。
 
 不修改 cargo git checkout。下列「建议 API」是给 NanaUI 仓库的提案草稿。
 
@@ -40,7 +40,7 @@
 | 侧栏任务行：拖拽排序 + 行内停止/菜单 | `ReorderItem::tools` + live 行子节点 | 已接到 Lilia 侧栏；跨列表拖到收集箱仍不能一次完成 | 任务/运行中会话可拖；项目是 drop target | 无需新 API |
 | 补全列表贴着输入框 | `ActionMenu` / `Popover` 可锚定；应用把补全做成 Composer 内 `column` | 键盘上下 + 锚定宽度跟输入框走不完整 | 继续槽位列表 | `Popover`/`SearchDropdown` 支持 textarea 插车锚点与 Arrow 导航 |
 | 代码编辑器 | `TextArea` + 可选 `syntax-highlighting` presenter | 无行号、诊断沟、 minimap、多光标 | 继续 `TextArea`，诊断放 bottom | `TextEditor`：gutter、diagnostics、revision 仍由应用拥有 |
-| 终端 | 无；应用用只读 `TextArea` + 底栏输入 | 无 PTY 单元格、选区、resize 事件模型 | 继续应用终端快照 | `TerminalView`：rows/styles、resize(cols,rows)、submit/interrupt |
+| 终端 | 本地联调已有 `TerminalView` / `TerminalScreen` | 正式 pin 尚未包含网格、选区和尺寸事件 API；应用 PTY 生命周期已完成 | 正式构建暂以兼容层阻塞 | 发布 `TerminalView`：rows/styles、resize(cols,rows)、submit/interrupt，并保持屏幕快照与输入事件契约 |
 | Markdown 图与公式 | `NativeMarkdown` 给出 mermaid/math 槽，**不渲染** | 槽要宿主自己画 | 继续纯文本/代码围栏 | 官方 presenter 或明确「宿主 GPU 槽」示例 |
 | 架构/自动化图 | `GraphCanvas` 画网格、框、边 | 节点内部 UI 要应用塞子节点 | 继续 | 保持；文档写清节点内容合同即可 |
 
@@ -55,6 +55,8 @@
 | 可聚焦分区环（F6 在侧栏/编辑器/终端间跳） | `Workspace` 焦点环 API | 分区焦点属于壳 | 继续单焦点控件 |
 | 面包屑 | 标题栏槽位 | 应用手写 `Text` 面包屑 | 继续手写短面包屑 | 若多产品需要，再升 `Breadcrumb` |
 | Agent 补丁 diff / merge | 无 | Cursor 式行内 diff 属于编辑器平台 | 时间线用 markdown 摘要 | `DiffView`：hunk、接受/拒绝，buffer 仍由应用拥有 |
+
+| 原生内容区域 | 本地联调已有 `NativeContent`、`NativeContentRegion`、`WindowsComposition` | 正式 pin 尚未发布裁剪、可见性、焦点和合成宿主合同 | 平台宿主暂依赖本地联调，正式构建仍阻塞 |
 
 ## 第一批对 Lilia 的约束
 
@@ -74,6 +76,6 @@
 
 应用侧先修、不必等 NanaUI 的：`Stack` 替换新容器（pending/检查器顶栏已做）、菜单锚定槽而不是 `(420, 48)`（行菜单已改为按 more 按钮布局盒 / 右键光标点锚定，配合 `ContextMenu::place_in` 视口钳制）、对话与 IAB 检查器 `EmptyState`（已做）、图标 `IconButton::with_tooltip`、时间线 `materialize_virtual_list`（已做）。
 
-Lilia 已钉 NanaUI `180bac35c`：`IconButton::with_tooltip`、侧栏 `ReorderList` + `ReorderItem::tools`、`sidebar_row_tool_button` 行级工具构造器、`Icon::More` 目录项、`Icon::from_data` 宿主图标扩展、行工具槽统一承担图标列对齐（按钮簇间隔回归宿主 gap）、`ReorderListEvent::Secondary`（行表面 `pointer_events: none`，行体右键由 `secondary_press_at` 冒泡解析到行并发事件，`x`/`y` 为窗口坐标可直接作菜单锚点）。
+Lilia 已使用 NanaUI 的 `IconButton::with_tooltip`、侧栏 `ReorderList` + `ReorderItem::tools`、`sidebar_row_tool_button` 行级工具构造器、`Icon::More` 目录项、`Icon::from_data` 宿主图标扩展、行工具槽统一承担图标列对齐（按钮簇间隔回归宿主 gap）、`ReorderListEvent::Secondary`（行表面 `pointer_events: none`，行体右键由 `secondary_press_at` 冒泡解析到行并发事件，`x`/`y` 为窗口坐标可直接作菜单锚点）。这些能力随当前正式 pin 或本地联调 checkout 的实际状态分别记录，不能将未发布接口写成可获取版本。
 
 每条提案应对 NanaUI：现有类型、缺的方法/事件、应用侧绕过、以及一个最小 example。

@@ -11,12 +11,8 @@ use lilia_contracts::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::service::{
-    now_millis, remote_capabilities, DesktopRemoteControlError,
-};
-use crate::types::{
-    RemoteRequestEnvelope, REMOTE_MIN_PROTOCOL_VERSION, REMOTE_PROTOCOL_VERSION,
-};
+use crate::service::{now_millis, remote_capabilities, DesktopRemoteControlError};
+use crate::types::{RemoteRequestEnvelope, REMOTE_MIN_PROTOCOL_VERSION, REMOTE_PROTOCOL_VERSION};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemoteSessionForkCommand {
@@ -297,7 +293,11 @@ fn remote_timeline_subscribe(
         })
         .unwrap_or(0);
     let limit = positive_limit(request, 500, 500);
-    let page = events.into_iter().skip(start).take(limit).collect::<Vec<_>>();
+    let page = events
+        .into_iter()
+        .skip(start)
+        .take(limit)
+        .collect::<Vec<_>>();
     Ok(json!({
         "type": "timeline.subscribe",
         "taskId": task_id.as_str(),

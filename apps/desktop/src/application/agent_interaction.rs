@@ -1,4 +1,9 @@
+use lilia_kernel::{
+    EventBus, Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef,
+};
+use lilia_service::ServiceAuthority;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use lilia_agent::NativeSubagentDefinition;
 use lilia_storage::SqliteAgentRuntimeStateStore;
@@ -304,12 +309,118 @@ impl DesktopAgentInteractionState {
     }
 }
 
+#[derive(Clone)]
+pub struct AgentInteractionService {
+    state: Arc<Mutex<DesktopAgentInteractionState>>,
+    authority: ServiceAuthority,
+    events: EventBus,
+}
+
+pub enum AgentInteractionServiceKey {}
+
+impl ServiceKey for AgentInteractionServiceKey {
+    type Value = AgentInteractionService;
+    const NAME: &'static str = "lilia.settings.agent-interaction";
+}
+
+pub struct AgentInteractionFeature {
+    service: AgentInteractionService,
+}
+
+impl AgentInteractionFeature {
+    pub fn new(service: AgentInteractionService) -> Self {
+        Self { service }
+    }
+}
+
+impl Feature for AgentInteractionFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.agent-interaction").expect("nonempty feature id")
+    }
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<AgentInteractionServiceKey>()]
+    }
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        let mut service = self.service.clone();
+        service.events = cx.events().clone();
+        cx.provide::<AgentInteractionServiceKey>(service)
+    }
+}
+
+impl AgentInteractionService {
+    pub(crate) fn new(
+        state: DesktopAgentInteractionState,
+        authority: ServiceAuthority,
+        events: EventBus,
+    ) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(state)),
+            authority,
+            events,
+        }
+    }
+}
+
 impl DesktopApplication {
+    pub fn agent_interaction_service(&self) -> AgentInteractionService {
+        self.inner.agent_interaction.clone()
+    }
     pub fn agent_interaction_settings(
         &self,
     ) -> Result<DesktopAgentInteractionSettings, DesktopApplicationError> {
+        self.inner.agent_interaction.agent_interaction_settings()
+    }
+    pub fn save_agent_interaction_settings(
+        &self,
+        update: DesktopAgentInteractionSettingsUpdate,
+    ) -> Result<DesktopAgentInteractionSettings, DesktopApplicationError> {
         self.inner
             .agent_interaction
+            .save_agent_interaction_settings(update)
+    }
+    pub fn custom_subagent_catalog(
+        &self,
+    ) -> Result<DesktopCustomSubagentCatalog, DesktopApplicationError> {
+        self.inner.agent_interaction.custom_subagent_catalog()
+    }
+    pub fn upsert_custom_subagent(
+        &self,
+        input: DesktopCustomSubagentUpsert,
+    ) -> Result<DesktopCustomSubagentDefinition, DesktopApplicationError> {
+        self.inner.agent_interaction.upsert_custom_subagent(input)
+    }
+    pub fn delete_custom_subagent(
+        &self,
+        expected_revision: u64,
+        id: &str,
+    ) -> Result<DesktopCustomSubagentCatalog, DesktopApplicationError> {
+        self.inner
+            .agent_interaction
+            .delete_custom_subagent(expected_revision, id)
+    }
+}
+
+impl AgentInteractionService {
+    pub fn snapshot(
+        &self,
+    ) -> Result<
+        (
+            DesktopAgentInteractionSettings,
+            DesktopCustomSubagentCatalog,
+        ),
+        DesktopApplicationError,
+    > {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| DesktopAgentInteractionError::StateUnavailable)?;
+        Ok((state.settings(), state.catalog()))
+    }
+
+    pub fn agent_interaction_settings(
+        &self,
+    ) -> Result<DesktopAgentInteractionSettings, DesktopApplicationError> {
+        self.state
             .lock()
             .map(|state| state.settings())
             .map_err(|_| DesktopAgentInteractionError::StateUnavailable.into())
@@ -319,10 +430,9 @@ impl DesktopApplication {
         &self,
         update: DesktopAgentInteractionSettingsUpdate,
     ) -> Result<DesktopAgentInteractionSettings, DesktopApplicationError> {
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let mut state = self
-            .inner
-            .agent_interaction
+            .state
             .lock()
             .map_err(|_| DesktopAgentInteractionError::StateUnavailable)?;
         let previous_settings = state.settings();
@@ -346,7 +456,7 @@ impl DesktopApplication {
         }
         state.settings = next_settings.clone();
         drop(state);
-        self.emit_event(AgentInteractionChanged {
+        self.events.publish(AgentInteractionChanged {
             revision: next_settings.revision,
         });
         Ok(next_settings)
@@ -355,8 +465,7 @@ impl DesktopApplication {
     pub fn custom_subagent_catalog(
         &self,
     ) -> Result<DesktopCustomSubagentCatalog, DesktopApplicationError> {
-        self.inner
-            .agent_interaction
+        self.state
             .lock()
             .map(|state| state.catalog())
             .map_err(|_| DesktopAgentInteractionError::StateUnavailable.into())
@@ -366,10 +475,9 @@ impl DesktopApplication {
         &self,
         input: DesktopCustomSubagentUpsert,
     ) -> Result<DesktopCustomSubagentDefinition, DesktopApplicationError> {
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let mut state = self
-            .inner
-            .agent_interaction
+            .state
             .lock()
             .map_err(|_| DesktopAgentInteractionError::StateUnavailable)?;
         let previous_settings = state.settings();
@@ -394,7 +502,7 @@ impl DesktopApplication {
         state.settings = next_settings.clone();
         state.agents = next_agents;
         drop(state);
-        self.emit_event(AgentInteractionChanged {
+        self.events.publish(AgentInteractionChanged {
             revision: next_settings.revision,
         });
         Ok(saved)
@@ -405,10 +513,9 @@ impl DesktopApplication {
         expected_revision: u64,
         id: &str,
     ) -> Result<DesktopCustomSubagentCatalog, DesktopApplicationError> {
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let mut state = self
-            .inner
-            .agent_interaction
+            .state
             .lock()
             .map_err(|_| DesktopAgentInteractionError::StateUnavailable)?;
         let previous_settings = state.settings();
@@ -434,7 +541,7 @@ impl DesktopApplication {
         state.agents = next_agents;
         let catalog = state.catalog();
         drop(state);
-        self.emit_event(AgentInteractionChanged {
+        self.events.publish(AgentInteractionChanged {
             revision: next_settings.revision,
         });
         Ok(catalog)
@@ -642,6 +749,59 @@ mod tests {
             Arc::new(TestHost),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn typed_settings_service_shares_state_and_publishes_only_committed_revisions() {
+        let application = application();
+        let service = application.agent_interaction_service();
+        let kernel = lilia_kernel::Kernel::with_events(
+            application.inner.journal.clone(),
+            application.inner.events.bus().clone(),
+        );
+        kernel
+            .mount(Arc::new(AgentInteractionFeature::new(service.clone())))
+            .unwrap();
+        let mounted = kernel.service::<AgentInteractionServiceKey>().unwrap();
+        let reader = service.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let subscription = kernel
+            .events()
+            .on::<AgentInteractionChanged, _>(None, move |event| {
+                tx.send((event.revision, reader.snapshot().unwrap()))
+                    .unwrap();
+            });
+        let saved = mounted
+            .upsert_custom_subagent(DesktopCustomSubagentUpsert {
+                expected_revision: 1,
+                id: Some("reviewer".to_owned()),
+                name: "Reviewer".to_owned(),
+                description: String::new(),
+                instruction: "Review ownership".to_owned(),
+                enabled: true,
+            })
+            .unwrap();
+        let (revision, (settings, catalog)) = rx.try_recv().unwrap();
+        assert_eq!(revision, settings.revision);
+        assert_eq!(catalog.revision, revision);
+        assert_eq!(catalog.agents, vec![saved]);
+        assert_eq!(application.custom_subagent_catalog().unwrap(), catalog);
+        assert!(rx.try_recv().is_err());
+        let mut update = DesktopAgentInteractionSettingsUpdate::from_settings(&settings);
+        update.subagent_mode.enabled = true;
+        let changed = application.save_agent_interaction_settings(update).unwrap();
+        assert_eq!(rx.try_recv().unwrap().0, changed.revision);
+        assert!(rx.try_recv().is_err());
+        assert!(mounted.delete_custom_subagent(1, "reviewer").is_err());
+        assert_eq!(service.custom_subagent_catalog().unwrap().agents.len(), 1);
+        assert!(rx.try_recv().is_err());
+        let deleted = mounted
+            .delete_custom_subagent(changed.revision, "reviewer")
+            .unwrap();
+        assert!(deleted.agents.is_empty());
+        assert_eq!(rx.try_recv().unwrap().0, deleted.revision);
+        assert!(rx.try_recv().is_err());
+        kernel.events().unsubscribe(subscription);
     }
 
     #[test]

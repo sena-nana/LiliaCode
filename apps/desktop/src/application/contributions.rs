@@ -3,9 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lilia_contracts::{
+    SIDEBAR_NAVIGATION_EXTENSION_ID, SIDEBAR_NAVIGATION_SCHEMA_VERSION,
     SidebarNavigationContribution, SidebarNavigationContributionError,
     SidebarNavigationContributionSet, SidebarNavigationIcon, SidebarNavigationTarget,
-    SIDEBAR_NAVIGATION_EXTENSION_ID, SIDEBAR_NAVIGATION_SCHEMA_VERSION,
 };
 use mutsuki_runtime_contracts::{
     ExtensionProjection, PluginDeploymentKind, PluginExtensionDescriptor, RuntimeProfile,
@@ -322,9 +322,11 @@ mod tests {
         let mut unsupported_profile = default_profile();
         unsupported_profile.supported_extensions.clear();
 
-        assert!(bootstrapper
-            .into_host_runtime_with_config(unsupported_profile, contribution_host_config())
-            .is_err());
+        assert!(
+            bootstrapper
+                .into_host_runtime_with_config(unsupported_profile, contribution_host_config())
+                .is_err()
+        );
         assert!(registry.snapshot().is_empty());
     }
 }

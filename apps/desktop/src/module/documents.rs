@@ -1,15 +1,3 @@
-//! The document editor domain as a UI module.
-//!
-//! Owns the editor view states, the open-document pointer the files page reads
-//! back, and the two in-flight job maps for diagnostics and definitions. The
-//! authoritative document content lives behind the application service, so a
-//! view state here is a buffer mirror that is resynced from snapshots, never a
-//! second authority.
-//!
-//! Definition navigation itself stays with the shell: deciding which pane or
-//! window a definition lands in crosses into layout, so the module resolves
-//! the target and hands it over as a [`ShellEffect`].
-
 use std::collections::BTreeMap;
 
 use lilia_contracts::ProjectId;
@@ -17,12 +5,11 @@ use lilia_kernel::{JobEvent, JobId, JobRequest, JobState, Jobs};
 use serde::{Deserialize, Serialize};
 
 use crate::application::{
-    DesktopApplication, DesktopDocumentDefinitionResult, DesktopDocumentDiagnosticsSnapshot,
-    DiagnosticSeverity, DocumentId, DocumentSnapshot, WorkspaceItem, WorkspaceItemResolve,
-    WorkspaceItemId,
+    DesktopDocumentDefinitionResult, DesktopDocumentDiagnosticsSnapshot, DesktopDocumentService,
+    DocumentId, DocumentSnapshot, WorkspaceItem, WorkspaceItemId, WorkspaceItemResolve,
 };
 use crate::document_editor::{
-    document_editor_cursor_offset, select_document_editor_offsets, DocumentEditorViewState,
+    DocumentEditorViewState, document_editor_cursor_offset, select_document_editor_offsets,
 };
 use crate::runtime_compat::HostedWindowId;
 use crate::runtime_shell::{ShellDiagnosticRow, ShellDocumentSnapshot};
@@ -31,9 +18,10 @@ use crate::ui_module::{ShellEffect, UiModule, UiModuleContext, UiModuleOutcome};
 /// The document domain's own message vocabulary.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DocumentMessage {
-    EditorEdited {
+    EditorReplaced {
         item_id: WorkspaceItemId,
-        action: String,
+        expected_revision: u64,
+        value: String,
     },
     GoToDefinition {
         item_id: WorkspaceItemId,
@@ -165,7 +153,7 @@ impl DocumentsModule {
     pub fn sync_editors_from_items(
         &mut self,
         items: &[WorkspaceItem],
-        application: &DesktopApplication,
+        service: &DesktopDocumentService,
     ) {
         let mut next = BTreeMap::new();
         for item in items {
@@ -175,10 +163,10 @@ impl DocumentsModule {
             let snapshot = match self
                 .editors
                 .get(&item.id)
-                .and_then(|state| application.document_snapshot(state.document_id).ok())
+                .and_then(|state| service.document_snapshot(state.document_id).ok())
             {
                 Some(snapshot) => snapshot,
-                None => match application.open_document_at_path(&path) {
+                None => match service.open_document_at_path(&path) {
                     Ok((snapshot, _)) => snapshot,
                     Err(error) => {
                         eprintln!("failed to sync Native document editor: {error}");
@@ -251,7 +239,7 @@ impl DocumentsModule {
         let Some(state) = self.editors.get(&item_id) else {
             return;
         };
-        if state.definition_job.is_some() {
+        if state.definition_job.is_some() || state.unapplied_edit {
             return;
         }
         let document_id = state.document_id;
@@ -299,12 +287,12 @@ impl DocumentsModule {
     }
 
     /// Applies the editor action the control emitted, writing the buffer back
-    /// through the application under an optimistic revision check.
+    /// through the document service under an optimistic revision check.
     fn handle_editor_action(
         &mut self,
         item_id: WorkspaceItemId,
         action: String,
-        application: &DesktopApplication,
+        service: &DesktopDocumentService,
     ) {
         let Some(state) = self.editors.get_mut(&item_id) else {
             return;
@@ -312,20 +300,24 @@ impl DocumentsModule {
         if state.read_only {
             return;
         }
-        let is_edit = !action.is_empty();
+        if action == state.editor.text() {
+            return;
+        }
         let document_id = state.document_id;
         let expected = state.revision;
         state.editor.perform(action);
-        if !is_edit {
+        state.note_text_changed();
+        state.definition_targets.clear();
+        if state.unapplied_edit {
             return;
         }
         let text = state.editor.text();
-        match application.replace_document_text(document_id, expected, text) {
+        match service.replace_document_text(document_id, expected, text) {
             Ok(revision) => {
                 if revision == expected {
                     return;
                 }
-                self.sync_views(document_id, application);
+                self.sync_views(document_id, service);
                 for state in self
                     .editors
                     .values_mut()
@@ -340,14 +332,13 @@ impl DocumentsModule {
                 }
             }
             Err(error) => {
-                if let Ok(snapshot) = application.document_snapshot(document_id) {
-                    if let Some(state) = self.editors.get_mut(&item_id) {
-                        state.sync_from_snapshot(&snapshot);
-                        state.conflict_message =
-                            Some(format!("编辑冲突，已恢复当前缓冲区：{error}"));
-                    }
-                } else if let Some(state) = self.editors.get_mut(&item_id) {
-                    state.conflict_message = Some(format!("无法写入文档：{error}"));
+                eprintln!("document edit was not applied: {error}");
+                let latest = service.document_snapshot(document_id).ok();
+                if let Some(state) = self.editors.get_mut(&item_id) {
+                    state.retain_edit_conflict(latest.as_ref());
+                    state.conflict_message = Some(
+                        "更改尚未写入，已保留当前内容。请选择保留并保存或重新载入。".to_owned(),
+                    );
                 }
             }
         }
@@ -356,17 +347,41 @@ impl DocumentsModule {
     fn save_editor(
         &mut self,
         item_id: WorkspaceItemId,
-        application: &DesktopApplication,
+        service: &DesktopDocumentService,
         jobs: &Jobs,
     ) {
         let Some(state) = self.editors.get(&item_id) else {
             return;
         };
         let document_id = state.document_id;
-        let expected = state.revision;
-        match application.save_document(document_id, expected) {
+        let mut expected = state.revision;
+        if state.unapplied_edit {
+            match service.replace_document_text(document_id, expected, state.editor.text()) {
+                Ok(revision) => {
+                    expected = revision;
+                    if let Some(state) = self.editors.get_mut(&item_id) {
+                        state.unapplied_edit = false;
+                        state.revision = revision;
+                    }
+                    self.sync_views(document_id, service);
+                }
+                Err(error) => {
+                    eprintln!("retained document edit was not applied: {error}");
+                    let latest = service.document_snapshot(document_id).ok();
+                    if let Some(state) = self.editors.get_mut(&item_id) {
+                        if let Some(snapshot) = latest {
+                            state.revision = snapshot.buffer.revision;
+                        }
+                        state.conflict_message =
+                            Some("无法保存当前更改，内容仍已保留。请检查文档后重试。".to_owned());
+                    }
+                    return;
+                }
+            }
+        }
+        match service.save_document(document_id, expected) {
             Ok(snapshot) => {
-                self.sync_views(document_id, application);
+                self.sync_views(document_id, service);
                 if let Some(state) = self.editors.get_mut(&item_id) {
                     state.conflict_message = None;
                     state.status_message = Some("已保存".to_owned());
@@ -386,16 +401,34 @@ impl DocumentsModule {
     fn discard_editor(
         &mut self,
         item_id: WorkspaceItemId,
-        application: &DesktopApplication,
+        service: &DesktopDocumentService,
         jobs: &Jobs,
     ) {
         let Some(state) = self.editors.get(&item_id) else {
             return;
         };
         let document_id = state.document_id;
-        match application.discard_document_changes(document_id) {
+        if state.unapplied_edit {
+            match service.document_snapshot(document_id) {
+                Ok(snapshot) => {
+                    if let Some(state) = self.editors.get_mut(&item_id) {
+                        state.unapplied_edit = false;
+                        state.sync_from_snapshot(&snapshot);
+                        state.conflict_message = None;
+                        state.status_message = None;
+                    }
+                }
+                Err(error) => {
+                    if let Some(state) = self.editors.get_mut(&item_id) {
+                        state.conflict_message = Some(format!("无法重新载入：{error}"));
+                    }
+                }
+            }
+            return;
+        }
+        match service.discard_document_changes(document_id) {
             Ok(snapshot) => {
-                self.sync_views(document_id, application);
+                self.sync_views(document_id, service);
                 if let Some(state) = self.editors.get_mut(&item_id) {
                     state.conflict_message = None;
                     state.status_message = Some("已丢弃未保存更改".to_owned());
@@ -438,7 +471,7 @@ impl DocumentsModule {
         &mut self,
         job_id: JobId,
         state: JobState,
-        application: &DesktopApplication,
+        service: &DesktopDocumentService,
     ) {
         let result = match state {
             JobState::Pending | JobState::Running { .. } => return,
@@ -457,20 +490,20 @@ impl DocumentsModule {
         let Some(document_id) = self.active_diagnostics_jobs.remove(&job_id) else {
             return;
         };
-        self.finish_diagnostics(document_id, result, application);
+        self.finish_diagnostics(document_id, result, service);
     }
 
     fn finish_diagnostics(
         &mut self,
         document_id: DocumentId,
         result: Result<DesktopDocumentDiagnosticsSnapshot, String>,
-        application: &DesktopApplication,
+        service: &DesktopDocumentService,
     ) {
         let snapshot = match result {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 eprintln!("failed to refresh Native document diagnostics: {error}");
-                match application.document_diagnostics(document_id) {
+                match service.document_diagnostics(document_id) {
                     Ok(snapshot) => snapshot,
                     Err(snapshot_error) => {
                         eprintln!(
@@ -541,7 +574,8 @@ impl DocumentsModule {
         match result {
             Ok(result)
                 if result.source_document_id == state.document_id
-                    && result.source_revision == state.revision =>
+                    && result.source_revision == state.revision
+                    && !state.unapplied_edit =>
             {
                 state.definition_project_id = project_id.clone();
                 match result.targets.as_slice() {
@@ -597,8 +631,8 @@ impl DocumentsModule {
         }
     }
 
-    fn sync_views(&mut self, document_id: DocumentId, application: &DesktopApplication) {
-        let Ok(snapshot) = application.document_snapshot(document_id) else {
+    fn sync_views(&mut self, document_id: DocumentId, service: &DesktopDocumentService) {
+        let Ok(snapshot) = service.document_snapshot(document_id) else {
             return;
         };
         for state in self
@@ -612,6 +646,8 @@ impl DocumentsModule {
 }
 
 impl UiModule for DocumentsModule {
+    type Projection<'a> = crate::ui_module::projection::DocumentsProjection<'a>;
+
     type Message = DocumentMessage;
 
     fn feature(&self) -> lilia_kernel::FeatureId {
@@ -620,12 +656,35 @@ impl UiModule for DocumentsModule {
 
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
-            DocumentMessage::EditorEdited { item_id, action } => {
-                let application = match cx.application() {
-                    Ok(application) => application,
+            DocumentMessage::EditorReplaced {
+                item_id,
+                expected_revision,
+                value,
+            } => {
+                let Some(state) = self.editors.get_mut(&item_id) else {
+                    return UiModuleOutcome::clean();
+                };
+                if state.read_only {
+                    return UiModuleOutcome::clean();
+                }
+                if state.revision.get() != expected_revision {
+                    state.editor.perform(value);
+                    state.retain_edit_conflict(None);
+                    state.conflict_message = Some(
+                        "文档已在其他位置更新。当前输入已保留，请选择保留并保存或重新载入。"
+                            .to_owned(),
+                    );
+                    return UiModuleOutcome::dirty();
+                }
+                let service = match cx
+                    .kernel()
+                    .service::<crate::application::DocumentServiceKey>()
+                    .map_err(|error| error.to_string())
+                {
+                    Ok(service) => service,
                     Err(error) => return UiModuleOutcome::failed(error),
                 };
-                self.handle_editor_action(item_id, action, &application);
+                self.handle_editor_action(item_id, value, &service);
                 UiModuleOutcome::dirty()
             }
             DocumentMessage::GoToDefinition { item_id, window_id } => {
@@ -638,45 +697,82 @@ impl UiModule for DocumentsModule {
                 index,
             } => self.open_definition_target(item_id, window_id, index),
             DocumentMessage::SaveEditor(item_id) => {
-                let application = match cx.application() {
-                    Ok(application) => application,
+                let service = match cx
+                    .kernel()
+                    .service::<crate::application::DocumentServiceKey>()
+                    .map_err(|error| error.to_string())
+                {
+                    Ok(service) => service,
                     Err(error) => return UiModuleOutcome::failed(error),
                 };
-                self.save_editor(item_id, &application, cx.kernel().jobs());
+                self.save_editor(item_id, &service, cx.kernel().jobs());
                 UiModuleOutcome::dirty()
             }
             DocumentMessage::DiscardEditor(item_id) => {
-                let application = match cx.application() {
-                    Ok(application) => application,
+                let service = match cx
+                    .kernel()
+                    .service::<crate::application::DocumentServiceKey>()
+                    .map_err(|error| error.to_string())
+                {
+                    Ok(service) => service,
                     Err(error) => return UiModuleOutcome::failed(error),
                 };
-                self.discard_editor(item_id, &application, cx.kernel().jobs());
+                self.discard_editor(item_id, &service, cx.kernel().jobs());
                 UiModuleOutcome::dirty()
             }
             DocumentMessage::Job(event) => {
-                let application = match cx.application() {
-                    Ok(application) => application,
+                let service = match cx
+                    .kernel()
+                    .service::<crate::application::DocumentServiceKey>()
+                    .map_err(|error| error.to_string())
+                {
+                    Ok(service) => service,
                     Err(error) => return UiModuleOutcome::failed(error),
                 };
                 match event.protocol.as_str() {
                     lilia_feature_document::DIAGNOSTICS_PROTOCOL => {
-                        self.apply_diagnostics_job(event.job_id, event.state, &application);
+                        self.apply_diagnostics_job(event.job_id, event.state, &service);
                         UiModuleOutcome::dirty()
                     }
-                    lilia_feature_document::DEFINITION_PROTOCOL => self.apply_definition_job(&event),
+                    lilia_feature_document::DEFINITION_PROTOCOL => {
+                        self.apply_definition_job(&event)
+                    }
                     _ => UiModuleOutcome::clean(),
                 }
             }
         }
     }
 
-    fn project(
-        &self,
+    fn invalidate(
+        &mut self,
+        envelope: &lilia_kernel::EventEnvelope,
         cx: &UiModuleContext<'_>,
-        into: &mut crate::runtime_shell::PrimaryShellSnapshot,
-    ) {
-        // The document pane is where the active workspace item renders an
-        // editor; anything else leaves the field empty for the shell.
+    ) -> UiModuleOutcome {
+        let Some(event) = envelope.downcast::<crate::application::DesktopDocumentChanged>() else {
+            return UiModuleOutcome::clean();
+        };
+        if !self
+            .editors
+            .values()
+            .any(|state| state.document_id == event.document_id)
+        {
+            return UiModuleOutcome::clean();
+        }
+        if event.kind == crate::application::DocumentChangeKind::Closed {
+            return UiModuleOutcome::clean();
+        }
+        let service = match cx
+            .kernel()
+            .service::<crate::application::DocumentServiceKey>()
+        {
+            Ok(service) => service,
+            Err(error) => return UiModuleOutcome::failed(error.to_string()),
+        };
+        self.sync_views(event.document_id, &service);
+        UiModuleOutcome::dirty()
+    }
+
+    fn project_fields(&self, cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
         let Some(active_item) = cx
             .workspace()
             .and_then(|session| session.snapshot().ok())
@@ -695,8 +791,10 @@ impl UiModule for DocumentsModule {
             return;
         };
         let item_id = &active_item;
-        into.document = Some(ShellDocumentSnapshot {
+        *into.document = Some(ShellDocumentSnapshot {
             item_id: item_id.as_str().to_owned(),
+            revision: state.revision.get(),
+            conflicted: state.unapplied_edit,
             title: state.path_label.clone(),
             text: state.editor.text(),
             language: state.language_label.clone(),
@@ -716,15 +814,7 @@ impl UiModule for DocumentsModule {
             diagnostics: state
                 .diagnostics
                 .iter()
-                .map(|diagnostic| ShellDiagnosticRow {
-                    severity: match diagnostic.severity {
-                        DiagnosticSeverity::Error => "错误".to_owned(),
-                        DiagnosticSeverity::Warning => "警告".to_owned(),
-                        DiagnosticSeverity::Information => "信息".to_owned(),
-                        DiagnosticSeverity::Hint => "提示".to_owned(),
-                    },
-                    message: diagnostic.message.clone(),
-                })
+                .map(ShellDiagnosticRow::from)
                 .collect(),
         });
     }
@@ -733,7 +823,160 @@ impl UiModule for DocumentsModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::DesktopApplication;
     use std::path::PathBuf;
+
+    struct NoopHost;
+
+    impl crate::application::DesktopHost for NoopHost {
+        fn execute(
+            &self,
+            _: &crate::application::DesktopHostContext,
+            _: crate::application::DesktopHostAction,
+        ) -> Result<crate::application::DesktopHostResult, crate::application::DesktopHostError>
+        {
+            Ok(crate::application::DesktopHostResult::Completed)
+        }
+    }
+
+    fn application(home: &std::path::Path) -> DesktopApplication {
+        let identity = format!("document-view-test-{}", uuid::Uuid::new_v4());
+        let authority = lilia_service::ServiceAuthority::bootstrap_in_memory_named(
+            identity.clone(),
+            identity.clone(),
+        )
+        .unwrap();
+        DesktopApplication::from_authority(
+            crate::application::DesktopApplicationConfig::new(home, identity).unwrap(),
+            authority,
+            std::sync::Arc::new(NoopHost),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn deleting_all_text_updates_the_authoritative_buffer() {
+        let home = tempfile::tempdir().unwrap();
+        let application = application(home.path());
+        let (snapshot, _) = application
+            .open_document(home.path().join("empty.md"), "text", None, false)
+            .unwrap();
+        let mut module = DocumentsModule::default();
+        let item = workspace_item("editor", "empty.md");
+        module.ensure_editor(&item, &snapshot);
+
+        module.handle_editor_action(
+            item.id.clone(),
+            String::new(),
+            &application.document_service(),
+        );
+
+        assert_eq!(
+            application
+                .document_snapshot(snapshot.id)
+                .unwrap()
+                .buffer
+                .text,
+            ""
+        );
+        assert!(module.editors[&item.id].dirty);
+    }
+
+    #[test]
+    fn a_rejected_edit_survives_refresh_and_reload_preserves_the_other_writer() {
+        let home = tempfile::tempdir().unwrap();
+        let application = application(home.path());
+        let (snapshot, _) = application
+            .open_document(home.path().join("shared.md"), "original", None, false)
+            .unwrap();
+        let mut module = DocumentsModule::default();
+        let item = workspace_item("editor", "shared.md");
+        module.ensure_editor(&item, &snapshot);
+        application
+            .replace_document_text(snapshot.id, snapshot.buffer.revision, "other writer")
+            .unwrap();
+
+        module.handle_editor_action(
+            item.id.clone(),
+            "my draft".to_owned(),
+            &application.document_service(),
+        );
+        module.sync_views(snapshot.id, &application.document_service());
+        assert_eq!(module.editors[&item.id].editor.text(), "my draft");
+        assert!(module.editors[&item.id].unapplied_edit);
+        assert_eq!(
+            application
+                .document_snapshot(snapshot.id)
+                .unwrap()
+                .buffer
+                .text,
+            "other writer"
+        );
+
+        let kernel = lilia_kernel::Kernel::new();
+        module.discard_editor(
+            item.id.clone(),
+            &application.document_service(),
+            kernel.jobs(),
+        );
+        assert_eq!(module.editors[&item.id].editor.text(), "other writer");
+        assert!(!module.editors[&item.id].unapplied_edit);
+        assert_eq!(
+            application
+                .document_snapshot(snapshot.id)
+                .unwrap()
+                .buffer
+                .text,
+            "other writer"
+        );
+    }
+
+    #[test]
+    fn stale_view_events_retain_the_draft_without_reaching_the_application() {
+        let mut module = DocumentsModule::default();
+        let (item, state) = editor_with("editor", "current");
+        module.editors.insert(item.clone(), state);
+        let kernel = lilia_kernel::Kernel::new();
+        let cx = UiModuleContext::new(&kernel, nana_ui_platform::WindowId::PRIMARY);
+        let outcome = module.reduce(
+            DocumentMessage::EditorReplaced {
+                item_id: item.clone(),
+                expected_revision: 99,
+                value: "stale".to_owned(),
+            },
+            &cx,
+        );
+        assert!(outcome.dirty);
+        assert!(module.editors[&item].unapplied_edit);
+        assert_eq!(module.editors[&item].editor.text(), "stale");
+    }
+
+    #[test]
+    fn retained_drafts_do_not_accept_authoritative_diagnostics_or_definitions() {
+        let mut module = DocumentsModule::default();
+        let (item, mut state) = editor_with("editor", "my draft");
+        let snapshot = document_snapshot("other text");
+        state.retain_edit_conflict(Some(&snapshot));
+        state.sync_diagnostics(&DesktopDocumentDiagnosticsSnapshot {
+            document_id: snapshot.id,
+            buffer_revision: snapshot.buffer.revision,
+            state: crate::application::DesktopDocumentDiagnosticsState::Ready,
+            diagnostics: vec![crate::application::Diagnostic {
+                severity: crate::application::DiagnosticSeverity::Error,
+                message: "other writer's error".to_owned(),
+                start_offset: 0,
+                end_offset: 5,
+                source: None,
+                code: None,
+            }],
+        });
+        assert!(state.diagnostics.is_empty());
+        module.editors.insert(item.clone(), state);
+        let kernel = lilia_kernel::Kernel::new();
+        module.start_definition(item.clone(), HostedWindowId::PRIMARY, kernel.jobs());
+        assert!(module.active_definition_jobs.is_empty());
+        assert_eq!(module.editors[&item].editor.text(), "my draft");
+    }
 
     use crate::application::{
         BufferId, BufferRevision, BufferSnapshot, WorkspaceFocusTarget, WorkspaceItemCapabilities,
@@ -791,8 +1034,9 @@ mod tests {
     fn without_a_window_session_the_projection_stays_empty() {
         let kernel = lilia_kernel::Kernel::new();
         kernel
-            .mount_all(vec![std::sync::Arc::new(SessionsFeature)
-                as std::sync::Arc<dyn lilia_kernel::Feature>])
+            .mount_all(vec![
+                std::sync::Arc::new(SessionsFeature) as std::sync::Arc<dyn lilia_kernel::Feature>
+            ])
             .expect("the sessions feature mounts");
         let mut module = DocumentsModule::default();
         let (id, state) = editor_with("item-1", "hello");
@@ -859,7 +1103,7 @@ mod tests {
     }
 
     #[test]
-    fn a_job_event_without_the_application_reports_a_failure() {
+    fn a_job_event_without_the_document_service_reports_a_failure() {
         let kernel = lilia_kernel::Kernel::new();
         let mut module = DocumentsModule::default();
         let (id, state) = editor_with("item-1", "text");
@@ -879,7 +1123,10 @@ mod tests {
         );
         assert!(
             outcome.error.is_some(),
-            "the shell owes the module an application"
+            "the shell owes the module a document service"
         );
     }
 }
+
+#[cfg(test)]
+use crate::ui_module::ErasedUiModule;

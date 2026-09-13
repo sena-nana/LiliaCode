@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -135,6 +135,8 @@ pub struct NativeWorkspaceWindowState {
 pub struct NativeWorkspaceTopologyState {
     pub schema_version: u32,
     pub revision: u64,
+    #[serde(default)]
+    pub primary: Option<DesktopWorkspaceSessionState>,
     pub windows: Vec<NativeWorkspaceWindowState>,
 }
 
@@ -143,6 +145,7 @@ impl Default for NativeWorkspaceTopologyState {
         Self {
             schema_version: NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION,
             revision: 0,
+            primary: None,
             windows: Vec::new(),
         }
     }
@@ -590,40 +593,107 @@ fn persist_window_state(home: &Path, state: NativeWindowState) -> Result<(), Str
     Ok(())
 }
 
-pub fn load_workspace_topology_state(home: &Path) -> Option<NativeWorkspaceTopologyState> {
-    [
-        home.join(WORKSPACE_TOPOLOGY_STATE_FILE),
-        home.join(format!("{WORKSPACE_TOPOLOGY_STATE_FILE}.bak")),
-    ]
-    .into_iter()
-    .find_map(|path| {
-        fs::read(&path)
-            .ok()
-            .and_then(|content| serde_json::from_slice(&content).ok())
-            .filter(|state: &NativeWorkspaceTopologyState| {
-                matches!(
-                    state.schema_version,
-                    2 | NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION
-                )
-            })
-            .map(normalize_workspace_topology_state)
-    })
-    .or_else(|| load_legacy_workspace_topology_state(home))
+pub struct LoadedWorkspaceTopology {
+    pub state: NativeWorkspaceTopologyState,
+    source: PathBuf,
+    content: Vec<u8>,
+    preserved: bool,
 }
 
-fn load_legacy_workspace_topology_state(home: &Path) -> Option<NativeWorkspaceTopologyState> {
-    [
-        home.join(LEGACY_WORKSPACE_WINDOWS_STATE_FILE),
-        home.join(format!("{LEGACY_WORKSPACE_WINDOWS_STATE_FILE}.bak")),
-    ]
-    .into_iter()
-    .find_map(|path| {
-        fs::read(&path)
+impl LoadedWorkspaceTopology {
+    pub fn preserve(&mut self) -> Result<(), String> {
+        if !self.preserved {
+            preserve_workspace_bytes(&self.source, &self.content)?;
+            self.preserved = true;
+        }
+        Ok(())
+    }
+    pub fn preserve_if_changed(
+        &mut self,
+        current: &NativeWorkspaceTopologyState,
+    ) -> Result<(), String> {
+        let mut before = self.state.clone();
+        let mut after = current.clone();
+        for state in [&mut before, &mut after] {
+            state.revision = 0;
+            if let Some(primary) = &mut state.primary {
+                primary.revision = 0;
+            }
+            state.windows.sort_by_key(|window| window.window_id);
+            for window in &mut state.windows {
+                window.workspace.revision = 0;
+                window.geometry = None;
+            }
+        }
+        if before != after {
+            self.preserve()?;
+        }
+        Ok(())
+    }
+}
+
+fn preserve_workspace_bytes(source: &Path, content: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let filename = source
+        .file_name()
+        .ok_or("workspace record has no filename")?
+        .to_string_lossy();
+    let destination =
+        source.with_file_name(format!("{filename}.unrestored-{}", uuid::Uuid::new_v4()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|error| format!("failed to preserve workspace record: {error}"))?;
+    file.write_all(content)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("failed to preserve workspace record: {error}"))
+}
+
+pub fn load_workspace_topology_state(
+    home: &Path,
+) -> Result<Option<LoadedWorkspaceTopology>, String> {
+    for (filename, legacy) in [
+        (WORKSPACE_TOPOLOGY_STATE_FILE.to_owned(), false),
+        (format!("{WORKSPACE_TOPOLOGY_STATE_FILE}.bak"), false),
+        (LEGACY_WORKSPACE_WINDOWS_STATE_FILE.to_owned(), true),
+        (format!("{LEGACY_WORKSPACE_WINDOWS_STATE_FILE}.bak"), true),
+    ] {
+        let source = home.join(filename);
+        let content = match fs::read(&source) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("failed to read workspace record: {error}")),
+        };
+        let state = serde_json::from_slice::<NativeWorkspaceTopologyState>(&content)
             .ok()
-            .and_then(|content| serde_json::from_slice(&content).ok())
-            .filter(|state: &NativeWorkspaceTopologyState| state.schema_version == 1)
-            .map(normalize_workspace_topology_state)
-    })
+            .filter(|state| {
+                if legacy {
+                    state.schema_version == 1
+                } else {
+                    matches!(
+                        state.schema_version,
+                        2 | NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION
+                    )
+                }
+            });
+        let Some(state) = state else {
+            preserve_workspace_bytes(&source, &content)?;
+            continue;
+        };
+        let normalized = normalize_workspace_topology_state(state.clone());
+        let mut loaded = LoadedWorkspaceTopology {
+            state: normalized,
+            source,
+            content,
+            preserved: false,
+        };
+        if loaded.state != state {
+            loaded.preserve()?;
+        }
+        return Ok(Some(loaded));
+    }
+    Ok(None)
 }
 
 fn normalize_workspace_topology_state(
@@ -644,9 +714,7 @@ impl NativeWorkspaceTopologyStateWriter {
         let worker_revision = Arc::clone(&committed_revision);
         let worker = thread::Builder::new()
             .name("lilia-native-workspace-topology-state".to_owned())
-            .spawn(move || {
-                run_workspace_topology_state_writer(home, receiver, worker_revision)
-            })
+            .spawn(move || run_workspace_topology_state_writer(home, receiver, worker_revision))
             .map_err(|error| {
                 format!("failed to start Native workspace topology writer: {error}")
             })?;
@@ -742,11 +810,6 @@ fn persist_workspace_topology_state(
         return Err(format!(
             "failed to publish Native workspace topology: {error}"
         ));
-    }
-    if backup.exists() {
-        fs::remove_file(&backup).map_err(|error| {
-            format!("failed to remove Native workspace topology backup: {error}")
-        })?;
     }
     Ok(())
 }
@@ -857,6 +920,14 @@ impl MemorySettingsStore for NativeMemorySettingsStore {
 
 #[cfg(test)]
 mod tests {
+    fn loaded_topology_state(
+        home: &std::path::Path,
+    ) -> Option<super::NativeWorkspaceTopologyState> {
+        super::load_workspace_topology_state(home)
+            .unwrap()
+            .map(|loaded| loaded.state)
+    }
+
     use super::*;
 
     #[test]
@@ -1077,6 +1148,106 @@ mod tests {
     }
 
     #[test]
+    fn topology_restore_archives_structural_loss_once_but_ignores_revision_only_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = NativeWorkspaceTopologyState {
+            primary: Some(DesktopWorkspaceSessionState::default()),
+            windows: vec![NativeWorkspaceWindowState {
+                window_id: 100,
+                session_id: "popup".into(),
+                workspace: DesktopWorkspaceSessionState::default(),
+                geometry: None,
+            }],
+            ..Default::default()
+        };
+        let bytes = serde_json::to_vec(&original).unwrap();
+        fs::write(directory.path().join(WORKSPACE_TOPOLOGY_STATE_FILE), &bytes).unwrap();
+        let mut loaded = super::load_workspace_topology_state(directory.path())
+            .unwrap()
+            .unwrap();
+        let mut changed = original.clone();
+        changed.revision = 20;
+        changed.primary.as_mut().unwrap().revision = 10;
+        changed.windows[0].workspace.revision = 5;
+        loaded.preserve_if_changed(&changed).unwrap();
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        changed.windows.clear();
+        loaded.preserve_if_changed(&changed).unwrap();
+        loaded.preserve_if_changed(&changed).unwrap();
+        let files = fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        assert_eq!(files.len(), 2);
+        let archived = files
+            .iter()
+            .find(|entry| entry.file_name().to_string_lossy().contains(".unrestored-"))
+            .unwrap();
+        assert_eq!(fs::read(archived.path()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn invalid_topology_is_archived_before_default_or_backup_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join(WORKSPACE_TOPOLOGY_STATE_FILE);
+        let invalid = b"{invalid json";
+        fs::write(&source, invalid).unwrap();
+        assert!(
+            super::load_workspace_topology_state(directory.path())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(fs::read(&source).unwrap(), invalid);
+        let archive = fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().contains(".unrestored-"))
+            .unwrap();
+        assert_eq!(fs::read(archive.path()).unwrap(), invalid);
+        let loaded = LoadedWorkspaceTopology {
+            state: NativeWorkspaceTopologyState::default(),
+            source: directory.path().join("absent-parent/state.json"),
+            content: invalid.to_vec(),
+            preserved: false,
+        };
+        let mut loaded = loaded;
+        assert!(loaded.preserve().is_err());
+        assert!(!loaded.preserved);
+    }
+
+    #[test]
+    fn primary_workspace_state_is_optional_and_failed_records_survive_later_writes() {
+        let old: NativeWorkspaceTopologyState = serde_json::from_value(serde_json::json!({
+            "schemaVersion": NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION, "revision": 1, "windows": []
+        }))
+        .unwrap();
+        assert!(old.primary.is_none());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(WORKSPACE_TOPOLOGY_STATE_FILE);
+        let original = b"original invalid workspace record";
+        fs::write(&path, original).unwrap();
+        preserve_workspace_bytes(&path, original).unwrap();
+        let mut current = NativeWorkspaceTopologyState {
+            primary: Some(DesktopWorkspaceSessionState::default()),
+            ..Default::default()
+        };
+        persist_workspace_topology_state(directory.path(), &current).unwrap();
+        let backup = directory
+            .path()
+            .join(format!("{WORKSPACE_TOPOLOGY_STATE_FILE}.bak"));
+        assert_eq!(fs::read(&backup).unwrap(), original);
+        current.revision = 2;
+        persist_workspace_topology_state(directory.path(), &current).unwrap();
+        assert_eq!(loaded_topology_state(directory.path()), Some(current));
+        let preserved = fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().contains(".unrestored-"))
+            .unwrap();
+        assert_eq!(fs::read(preserved.path()).unwrap(), original);
+    }
+
+    #[test]
     fn workspace_topology_round_trips_windows_and_recovers_from_backup() {
         let directory = std::env::temp_dir().join(format!(
             "lilia-native-workspace-topology-state-{}-{}",
@@ -1089,6 +1260,10 @@ mod tests {
         let state = NativeWorkspaceTopologyState {
             schema_version: NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION,
             revision: 3,
+            primary: Some(DesktopWorkspaceSessionState {
+                revision: 7,
+                ..DesktopWorkspaceSessionState::default()
+            }),
             windows: vec![NativeWorkspaceWindowState {
                 window_id: 100,
                 session_id: "lilia.popup.task.one.100".to_owned(),
@@ -1116,16 +1291,13 @@ mod tests {
                 thread::yield_now();
             }
             assert_eq!(writer.committed_revision(), state.revision);
-            assert_eq!(
-                load_workspace_topology_state(&directory),
-                Some(state.clone())
-            );
+            assert_eq!(loaded_topology_state(&directory), Some(state.clone()));
         }
 
         let path = directory.join(WORKSPACE_TOPOLOGY_STATE_FILE);
         let backup = directory.join(format!("{WORKSPACE_TOPOLOGY_STATE_FILE}.bak"));
         fs::rename(&path, &backup).unwrap();
-        assert_eq!(load_workspace_topology_state(&directory), Some(state));
+        assert_eq!(loaded_topology_state(&directory), Some(state));
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1143,6 +1315,7 @@ mod tests {
         let mut legacy = serde_json::to_value(NativeWorkspaceTopologyState {
             schema_version: 1,
             revision: 4,
+            primary: None,
             windows: Vec::new(),
         })
         .unwrap();
@@ -1153,7 +1326,7 @@ mod tests {
         )
         .unwrap();
 
-        let migrated = load_workspace_topology_state(&directory).unwrap();
+        let migrated = loaded_topology_state(&directory).unwrap();
         assert_eq!(
             migrated.schema_version,
             NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION
@@ -1176,6 +1349,10 @@ mod tests {
         let mut legacy = serde_json::to_value(NativeWorkspaceTopologyState {
             schema_version: 2,
             revision: 8,
+            primary: Some(DesktopWorkspaceSessionState {
+                revision: 7,
+                ..DesktopWorkspaceSessionState::default()
+            }),
             windows: vec![NativeWorkspaceWindowState {
                 window_id: 100,
                 session_id: "lilia.popup.task.one.100".to_owned(),
@@ -1199,7 +1376,7 @@ mod tests {
         )
         .unwrap();
 
-        let migrated = load_workspace_topology_state(&directory).unwrap();
+        let migrated = loaded_topology_state(&directory).unwrap();
         assert_eq!(
             migrated.schema_version,
             NATIVE_WORKSPACE_TOPOLOGY_SCHEMA_VERSION

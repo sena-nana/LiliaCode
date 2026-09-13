@@ -11,7 +11,7 @@ use mutsuki_agent_contracts::{
     AgentEvent, AgentMessage, AgentSession, AgentWireError, AgentWireRequestEnvelope,
     AgentWireResponseEnvelope, InteractionResolution,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::application::agent_architecture::DesktopArchitectureInteractionPayload;
@@ -24,25 +24,25 @@ use crate::application::{
     DesktopTodoGuideStatus, DesktopTurnState,
 };
 use crate::application::{TimelineChanged, TurnRecoveryIssue, TurnStateChanged};
-use lilia_agent::{agent_owned_pending_kind, checkpoint_from_session, AgentTurnCheckpoint};
+use lilia_agent::{AgentTurnCheckpoint, agent_owned_pending_kind, checkpoint_from_session};
 use lilia_feature_agent_session::PersistedDesktopTurnState;
 
 pub use lilia_contracts::ExecutionPermission as DesktopExecutionPermission;
 
-use lilia_feature_agent_session::{
-    accept_persisted_turn, prepare_turn_request, run_approval_resume, run_interaction_resume,
-    InteractionResumeSpec, TurnCancellationMode,
-};
 pub use lilia_feature_agent_session::{
-    DesktopAgentRuntime, DesktopApprovalResponse, DesktopAutomaticTurnSelection,
+    APPROVAL_PROTOCOL, DesktopAgentRuntime, DesktopApprovalResponse, DesktopAutomaticTurnSelection,
     DesktopAutomationTurnCorrelation, DesktopInteractionResponse, DesktopInterruptResult,
     DesktopSessionBranchAnchor, DesktopSessionBranchMode, DesktopTaskRuntimeSnapshot,
-    DesktopTurnDispatch, DesktopTurnDispatchKind, DesktopTurnRequest, APPROVAL_PROTOCOL,
-    INTERACTION_PROTOCOL, TURN_PROTOCOL,
+    DesktopTurnDispatch, DesktopTurnDispatchKind, DesktopTurnRequest, INTERACTION_PROTOCOL,
+    TURN_PROTOCOL,
 };
 #[cfg(debug_assertions)]
 pub use lilia_feature_agent_session::{
     DesktopDurableTurnDebugSnapshot, DesktopQuarantinedTurnDebugSnapshot,
+};
+use lilia_feature_agent_session::{
+    InteractionResumeSpec, TurnCancellationMode, accept_persisted_turn, prepare_turn_request,
+    run_approval_resume, run_interaction_resume,
 };
 
 pub use crate::application::agent_architecture::{
@@ -284,20 +284,11 @@ impl DesktopApplication {
         if version == 0 {
             return;
         }
-        if let Ok(pending_turns) = self.inner.pending_turns.lock() {
+        if let Ok(pending_turns) = self.inner.turn_submissions.queue() {
             if let Err(error) = pending_turns.bind_session_version(turn_id, version) {
                 eprintln!("failed to bind AgentKit session version: {error}");
             }
         }
-    }
-
-    fn turn_is_waiting_in_checkpoint(&self, task_id: &TaskId, turn_id: &str) -> bool {
-        self.task_turn_checkpoint(task_id)
-            .ok()
-            .flatten()
-            .is_some_and(|checkpoint| {
-                checkpoint.turn_id.as_deref() == Some(turn_id) && checkpoint.is_waiting()
-            })
     }
 
     #[cfg(debug_assertions)]
@@ -306,9 +297,8 @@ impl DesktopApplication {
         task_id: &TaskId,
     ) -> Result<Vec<DesktopDurableTurnDebugSnapshot>, DesktopApplicationError> {
         self.inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+            .turn_submissions
+            .queue()?
             .list_debug(task_id)
             .map(|turns| {
                 let epoch = self
@@ -337,9 +327,8 @@ impl DesktopApplication {
         &self,
     ) -> Result<Vec<DesktopQuarantinedTurnDebugSnapshot>, DesktopApplicationError> {
         self.inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+            .turn_submissions
+            .queue()?
             .list_quarantined()
             .map(|turns| {
                 turns
@@ -368,9 +357,8 @@ impl DesktopApplication {
             });
         }
         self.inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+            .turn_submissions
+            .queue()?
             .corrupt_request_for_debug(turn_id)
             .map_err(Into::into)
     }
@@ -428,15 +416,10 @@ impl DesktopApplication {
                 },
             )
             .map_err(|error| DesktopApplicationError::Agent(error.to_string()))?;
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         self.inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+            .turn_submissions
+            .queue()?
             .enqueue(turn_id, &request)?;
         let (dispatch, _should_start) =
             self.accept_persisted_task_turn(request, turn_id.to_owned(), false)?;
@@ -738,18 +721,13 @@ impl DesktopApplication {
         request: DesktopTurnRequest,
     ) -> Result<DesktopTurnDispatch, DesktopApplicationError> {
         let task_id = request.task_id.clone();
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         self.ensure_task_worktree_idle(&task_id)?;
         let request = self.prepare_task_turn_request(request)?;
         let turn_id = format!("native-turn-{}", Uuid::new_v4());
         self.inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+            .turn_submissions
+            .queue()?
             .enqueue(&turn_id, &request)?;
         let (dispatch, should_start) = self.accept_persisted_task_turn(request, turn_id, false)?;
         drop(submission);
@@ -787,11 +765,7 @@ impl DesktopApplication {
         &self,
     ) -> Result<Vec<DesktopTurnDispatch>, DesktopApplicationError> {
         let (newly_quarantined, quarantine_history) = {
-            let mut pending_turns = self
-                .inner
-                .pending_turns
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?;
+            let mut pending_turns = self.inner.turn_submissions.queue()?;
             let newly_quarantined = pending_turns.quarantine_invalid_rows()?;
             let quarantine_history = pending_turns.list_quarantined()?;
             (newly_quarantined, quarantine_history)
@@ -887,40 +861,21 @@ impl DesktopApplication {
                 reason: quarantined.reason_code,
             });
         }
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
-        let task_ids = self
-            .inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
-            .list_task_ids()?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
+        let task_ids = self.inner.turn_submissions.queue()?.list_task_ids()?;
         let mut dispatches = Vec::new();
         let mut workers = Vec::new();
         for task_id in task_ids {
             if self.get_task(&task_id).is_err() {
-                self.inner
-                    .pending_turns
-                    .lock()
-                    .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
-                    .clear_task(&task_id)?;
+                self.inner.turn_submissions.queue()?.clear_task(&task_id)?;
                 continue;
             }
             let active_turn_id = self.inner.agent.snapshot(&task_id).turn_id;
             self.inner
-                .pending_turns
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+                .turn_submissions
+                .queue()?
                 .prepare_recovery(&task_id, active_turn_id.as_deref())?;
-            let turns = self
-                .inner
-                .pending_turns
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
-                .list(&task_id)?;
+            let turns = self.inner.turn_submissions.queue()?.list(&task_id)?;
             for mut persisted in turns {
                 if active_turn_id.as_deref() != Some(persisted.turn_id.as_str())
                     && self
@@ -928,9 +883,8 @@ impl DesktopApplication {
                         .is_some()
                 {
                     self.inner
-                        .pending_turns
-                        .lock()
-                        .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+                        .turn_submissions
+                        .queue()?
                         .remove(&persisted.turn_id)?;
                     continue;
                 }
@@ -939,9 +893,8 @@ impl DesktopApplication {
                 {
                     let prepared = self.prepare_task_turn_request(persisted.request.clone())?;
                     self.inner
-                        .pending_turns
-                        .lock()
-                        .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+                        .turn_submissions
+                        .queue()?
                         .update_request(&persisted.turn_id, &prepared)?;
                     persisted.request = prepared;
                 }
@@ -1017,11 +970,7 @@ impl DesktopApplication {
             });
         }
         let task_id = request.task_id.clone();
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         self.ensure_task_worktree_idle(&task_id)?;
         let request = self.prepare_task_turn_request(request)?;
         let turn_id = format!("automation-turn:{idempotency_key}");
@@ -1032,11 +981,7 @@ impl DesktopApplication {
             )?;
         }
         if let Some(status) = self.persisted_turn_terminal_status(&task_id, &turn_id)? {
-            self.inner
-                .pending_turns
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
-                .remove(&turn_id)?;
+            self.inner.turn_submissions.queue()?.remove(&turn_id)?;
             if status == "completed" {
                 return Ok(DesktopIdempotentTurnStart::Completed { turn_id });
             }
@@ -1131,22 +1076,30 @@ impl DesktopApplication {
                 DesktopTurnState::Cancelled,
             );
         };
-        if let Some(session_id) = &cancel.session_id {
-            if let Err(error) = self
+        let paused = if let Some(session_id) = &cancel.session_id {
+            match self
                 .authority()
                 .shared_runtime()
                 .inner()
                 .cancel_session_turn(session_id, &cancel.turn_id)
             {
-                self.inner.agent.revert_automation_cancel(task_id, turn_id);
-                return Err(DesktopApplicationError::Agent(error.to_string()));
+                Ok(disposition) => matches!(
+                    disposition,
+                    lilia_agent::TurnCancellationDisposition::PausedAction
+                ),
+                Err(error) => {
+                    self.inner.agent.revert_automation_cancel(task_id, turn_id);
+                    return Err(DesktopApplicationError::Agent(error.to_string()));
+                }
             }
-        }
+        } else {
+            false
+        };
         self.emit_event(TimelineChanged {
             task_id: task_id.clone(),
             cursor: None,
         });
-        if self.turn_is_waiting_in_checkpoint(task_id, &cancel.turn_id) {
+        if paused {
             self.finish_turn(task_id.clone(), cancel.turn_id, DesktopTurnState::Cancelled);
         }
         Ok(())
@@ -1161,18 +1114,48 @@ impl DesktopApplication {
             .agent
             .request_cancel(task_id)
             .ok_or_else(|| DesktopApplicationError::NoActiveTurn(task_id.clone()))?;
-        if let Some(session_id) = &cancel.session_id {
-            self.authority()
+        self.apply_user_turn_cancellation(task_id, cancel)
+    }
+
+    pub fn interrupt_task_turn_at(
+        &self,
+        task_id: &TaskId,
+        expected_turn_id: &str,
+    ) -> Result<Option<DesktopInterruptResult>, DesktopApplicationError> {
+        let Some(cancel) = self
+            .inner
+            .agent
+            .request_cancel_at(task_id, expected_turn_id)
+        else {
+            return Ok(None);
+        };
+        self.apply_user_turn_cancellation(task_id, cancel).map(Some)
+    }
+
+    fn apply_user_turn_cancellation(
+        &self,
+        task_id: &TaskId,
+        cancel: lilia_feature_agent_session::CancelSnapshot,
+    ) -> Result<DesktopInterruptResult, DesktopApplicationError> {
+        let paused = if let Some(session_id) = &cancel.session_id {
+            let disposition = self
+                .authority()
                 .shared_runtime()
                 .inner()
                 .cancel_session_turn(session_id, &cancel.turn_id)
                 .map_err(|error| DesktopApplicationError::Agent(error.to_string()))?;
-        }
+            matches!(
+                disposition,
+                lilia_agent::TurnCancellationDisposition::PausedAction
+            )
+        } else {
+            false
+        };
         self.emit_event(TimelineChanged {
             task_id: task_id.clone(),
             cursor: None,
         });
-        if self.turn_is_waiting_in_checkpoint(task_id, &cancel.turn_id) {
+        if paused {
             self.finish_turn(
                 task_id.clone(),
                 cancel.turn_id.clone(),
@@ -1350,11 +1333,7 @@ impl DesktopApplication {
         task_id: TaskId,
         turn_id: String,
     ) -> Result<(), DesktopApplicationError> {
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         let request = self
             .inner
             .agent
@@ -1365,9 +1344,8 @@ impl DesktopApplication {
                 ))
             })?;
         self.inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?
+            .turn_submissions
+            .queue()?
             .enqueue_idempotent(&turn_id, &request)?;
         if self.inner.agent.active(&task_id, &turn_id).is_none()
             && !self.inner.agent.promote_queued_if_idle(&task_id, &turn_id)
@@ -1394,11 +1372,7 @@ impl DesktopApplication {
             )));
         }
         let outcome = {
-            let mut pending_turns = self
-                .inner
-                .pending_turns
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?;
+            let mut pending_turns = self.inner.turn_submissions.queue()?;
             lilia_feature_agent_session::claim_turn_for_worker(
                 &mut pending_turns,
                 &self.inner.agent,
@@ -1491,18 +1465,10 @@ impl DesktopApplication {
         turn_id: String,
         terminal_state: DesktopTurnState,
     ) -> Result<(), DesktopApplicationError> {
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         let prepared_active = self.inner.agent.is_prepared_active(&task_id, &turn_id);
         let durable_next = {
-            let mut pending_turns = self
-                .inner
-                .pending_turns
-                .lock()
-                .map_err(|_| DesktopApplicationError::StateUnavailable("pending turns"))?;
+            let mut pending_turns = self.inner.turn_submissions.queue()?;
             let persisted = pending_turns.contains(&turn_id)?;
             let result = if prepared_active {
                 if persisted {
@@ -1608,7 +1574,7 @@ impl DesktopApplication {
             turn_id: turn_id.to_owned(),
             state: DesktopTurnState::Running,
         });
-        self.execute_turn_hooks(
+        self.hook_execution_service().execute_turn_hooks(
             DesktopHookEvent::UserPromptSubmit,
             task_id,
             turn_id,
@@ -1695,7 +1661,7 @@ impl DesktopApplication {
             DesktopTurnState::Failed { message } => format!("failed:{message}"),
             other => format!("{other:?}"),
         };
-        if let Err(error) = self.execute_turn_hooks(
+        if let Err(error) = self.hook_execution_service().execute_turn_hooks(
             DesktopHookEvent::Stop,
             &task_id,
             &turn_id,
@@ -1734,11 +1700,7 @@ impl DesktopApplication {
                 }
             }
         }
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let submission = self.inner.turn_submissions.submission_guard_recovering();
         if cancellation_mode == Some(TurnCancellationMode::User) {
             let queued = self.inner.agent.queued(&task_id);
             let guides_reset = queued.iter().try_for_each(|turn| {
@@ -1755,9 +1717,8 @@ impl DesktopApplication {
             } else {
                 match self
                     .inner
-                    .pending_turns
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
+                    .turn_submissions
+                    .queue_recovering()
                     .cancel_claim_and_clear_task(&task_id, &turn_id, claim_token.as_deref())
                 {
                     Ok(_) => self
@@ -1786,11 +1747,7 @@ impl DesktopApplication {
         }
         let expected_next = self.inner.agent.queued_front(&task_id);
         let durable_next = {
-            let mut pending_turns = self
-                .inner
-                .pending_turns
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
+            let mut pending_turns = self.inner.turn_submissions.queue_recovering();
             let result = if let Some(claim_token) = claim_token.as_deref() {
                 pending_turns.ack_and_claim_next(&task_id, &turn_id, claim_token, None)
             } else {

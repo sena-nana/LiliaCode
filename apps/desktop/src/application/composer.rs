@@ -1,8 +1,8 @@
 use lilia_contracts::{ProductTask, ProductTaskStatus, TaskId};
 use uuid::Uuid;
 
+use crate::application::ComposerChanged;
 use crate::application::submission::DesktopGuideQueueInput;
-use crate::application::{ComposerChanged, TodosChanged};
 use crate::application::{
     DesktopApplication, DesktopApplicationError, DesktopSessionBranchAnchor, DesktopTaskPatch,
     DesktopTaskTodo, DesktopTodoCreate, DesktopTodoPriority, DesktopTurnDispatch,
@@ -11,8 +11,8 @@ use crate::application::{
 
 pub(crate) use lilia_feature_composer::ComposerStore as DesktopComposerStore;
 pub use lilia_feature_composer::{
-    ensure_expected_revision, ComposerCommand as DesktopComposerCommand,
-    ComposerError as DesktopComposerError, ComposerState as DesktopComposerState,
+    ComposerCommand as DesktopComposerCommand, ComposerError as DesktopComposerError,
+    ComposerState as DesktopComposerState, ensure_expected_revision,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,12 +64,36 @@ impl DesktopApplication {
                 message: "must match the task id reserved by the draft".to_owned(),
             });
         }
-        self.inner.composers.save(&draft)?;
+        match self.get_task(&draft.task_id) {
+            Ok(_) => {
+                return Err(DesktopApplicationError::InvalidInput {
+                    field: "draft.task_id",
+                    message: "cannot materialize over an existing task".into(),
+                });
+            }
+            Err(DesktopApplicationError::Product(lilia_contracts::ProductError::NotFound {
+                ..
+            })) => {}
+            Err(error) => return Err(error),
+        }
+        if !self.inner.composers.insert_if_absent(&draft)? {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "draft.task_id",
+                message: "a durable draft already owns this task id".into(),
+            });
+        }
         let task = match self.create_task(input) {
             Ok(task) => task,
             Err(error) => {
-                if self.get_task(&draft.task_id).is_err() {
-                    let _ = self.inner.composers.remove(&draft.task_id);
+                if matches!(
+                    self.get_task(&draft.task_id),
+                    Err(DesktopApplicationError::Product(
+                        lilia_contracts::ProductError::NotFound { .. }
+                    ))
+                ) {
+                    if let Err(cleanup) = self.inner.composers.remove_if_unchanged(&draft) {
+                        eprintln!("failed to release composer draft reservation: {cleanup}");
+                    }
                 }
                 return Err(error);
             }
@@ -85,8 +109,7 @@ impl DesktopApplication {
         &self,
         task_id: &TaskId,
     ) -> Result<DesktopComposerState, DesktopApplicationError> {
-        self.get_task(task_id)?;
-        Ok(self.inner.composers.snapshot(task_id)?)
+        self.inner.composer_input.composer_state(task_id)
     }
 
     pub fn execute_composer_command(
@@ -94,15 +117,9 @@ impl DesktopApplication {
         task_id: &TaskId,
         command: DesktopComposerCommand,
     ) -> Result<DesktopComposerState, DesktopApplicationError> {
-        self.get_task(task_id)?;
-        let (state, changed) = self.inner.composers.execute(task_id, command)?;
-        if changed {
-            self.emit_event(ComposerChanged {
-                task_id: task_id.clone(),
-                revision: state.revision,
-            });
-        }
-        Ok(state)
+        self.inner
+            .composer_input
+            .execute_composer_command(task_id, command)
     }
 
     pub fn start_composer_turn(
@@ -118,11 +135,7 @@ impl DesktopApplication {
         session_branch: Option<DesktopSessionBranchAnchor>,
     ) -> Result<DesktopTurnDispatch, DesktopApplicationError> {
         self.ensure_initial_worktree_ready(task_id)?;
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         self.ensure_task_worktree_idle(task_id)?;
         let composer = self.composer_state(task_id)?;
         let mut request = composer.turn_request();
@@ -133,9 +146,7 @@ impl DesktopApplication {
         let turn_id = format!("native-turn-{}", Uuid::new_v4());
         let cleared = self
             .inner
-            .submissions
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("submission"))?
+            .turn_submissions
             .commit_turn(&composer, &turn_id, &request)?;
         let (dispatch, should_start) = self.accept_persisted_task_turn(request, turn_id, false)?;
         drop(submission);
@@ -172,11 +183,7 @@ impl DesktopApplication {
         session_branch: Option<DesktopSessionBranchAnchor>,
     ) -> Result<DesktopComposerSubmission, DesktopApplicationError> {
         self.ensure_initial_worktree_ready(task_id)?;
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         self.ensure_task_worktree_idle(task_id)?;
         let composer = self.composer_state(task_id)?;
         if session_branch.is_none()
@@ -191,9 +198,7 @@ impl DesktopApplication {
                 self.record_task_slash_command(task_id, composer.revision, &execution)?;
                 let cleared = self
                     .inner
-                    .submissions
-                    .lock()
-                    .map_err(|_| DesktopApplicationError::StateUnavailable("submission"))?
+                    .turn_submissions
                     .commit_composer_clear(&composer)?;
                 drop(submission);
                 if let Some(state) = cleared {
@@ -247,24 +252,19 @@ impl DesktopApplication {
             })
         })
         .transpose()?;
-        let committed = self
-            .inner
-            .submissions
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("submission"))?
-            .commit_guide(
-                &composer,
-                &guide_id,
-                DesktopTodoCreate {
-                    task_id: task_id.clone(),
-                    text: guide_text,
-                    priority: DesktopTodoPriority::Normal,
-                    attachments,
-                    conversation_references: composer.conversation_references.clone(),
-                    workflow: composer.workflow.clone(),
-                },
-                queue,
-            )?;
+        let committed = self.inner.turn_submissions.commit_guide(
+            &composer,
+            &guide_id,
+            DesktopTodoCreate {
+                task_id: task_id.clone(),
+                text: guide_text,
+                priority: DesktopTodoPriority::Normal,
+                attachments,
+                conversation_references: composer.conversation_references.clone(),
+                workflow: composer.workflow.clone(),
+            },
+            queue,
+        )?;
         let queued_turn = committed
             .queued
             .map(|queued| {
@@ -276,9 +276,7 @@ impl DesktopApplication {
             })
             .transpose()?;
         drop(submission);
-        self.emit_event(TodosChanged {
-            task_id: task_id.clone(),
-        });
+        self.inner.todo_service.notify_committed(task_id.clone());
         if let Some(state) = committed.cleared {
             self.emit_event(ComposerChanged {
                 task_id: task_id.clone(),
@@ -326,24 +324,18 @@ impl DesktopApplication {
         expected_revision: u64,
         input: DesktopTodoCreate,
     ) -> Result<DesktopTaskTodo, DesktopApplicationError> {
-        let submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let submission = self.inner.turn_submissions.submission_guard()?;
         let composer = self.composer_state(&input.task_id)?;
         ensure_expected_revision(&composer, expected_revision)?;
         let guide_id = Uuid::new_v4().to_string();
         let committed = self
             .inner
-            .submissions
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("submission"))?
+            .turn_submissions
             .commit_guide(&composer, &guide_id, input, None)?;
         drop(submission);
-        self.emit_event(TodosChanged {
-            task_id: composer.task_id.clone(),
-        });
+        self.inner
+            .todo_service
+            .notify_committed(composer.task_id.clone());
         if let Some(state) = committed.cleared {
             self.emit_event(ComposerChanged {
                 task_id: composer.task_id,
@@ -356,8 +348,8 @@ impl DesktopApplication {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use lilia_contracts::{
         ChatConversationReference, LiliaAgentWorkflow, ProductEntity, ProductTask,
@@ -496,11 +488,13 @@ mod tests {
             .with_parent(parent_id.clone());
         let task_id = input.id.clone();
         let mut draft = DesktopComposerState::transient(task_id.clone());
-        assert!(draft
-            .apply_transient_command(DesktopComposerCommand::SetContent(
-                "first message".to_owned(),
-            ))
-            .unwrap());
+        assert!(
+            draft
+                .apply_transient_command(DesktopComposerCommand::SetContent(
+                    "first message".to_owned(),
+                ))
+                .unwrap()
+        );
 
         assert!(application.get_task(&task_id).is_err());
         let task = application
@@ -511,6 +505,60 @@ mod tests {
         assert_eq!(task.parent_id, Some(parent_id));
         assert_eq!(task.status, ProductTaskStatus::Draft);
         assert_eq!(application.composer_state(&task_id).unwrap(), draft);
+    }
+
+    #[test]
+    fn materialization_never_overwrites_an_existing_task_or_reserved_draft() {
+        let (app, task, blank_task) = application();
+        let original = app
+            .execute_composer_command(
+                &task,
+                DesktopComposerCommand::SetContent("valuable draft".into()),
+            )
+            .unwrap();
+        let events = app.subscribe_events();
+        for existing in [&task, &blank_task] {
+            let mut input = crate::application::DesktopTaskCreate::new(None, "collision");
+            input.id = existing.clone();
+            let mut draft = DesktopComposerState::transient(existing.clone());
+            draft.content = "replacement".into();
+            assert!(app.materialize_task_draft(input, draft).is_err());
+        }
+        assert_eq!(app.composer_state(&task).unwrap(), original);
+        assert!(app.composer_state(&blank_task).unwrap().content.is_empty());
+        assert!(events.try_recv().is_err());
+
+        let input = crate::application::DesktopTaskCreate::new(None, "reserved collision");
+        let mut reserved = DesktopComposerState::transient(input.id.clone());
+        reserved.content = "reserved draft".into();
+        assert!(app.inner.composers.insert_if_absent(&reserved).unwrap());
+        let mut incoming = reserved.clone();
+        incoming.content = "replacement".into();
+        assert!(app.materialize_task_draft(input, incoming).is_err());
+        assert_eq!(
+            app.inner.composers.snapshot(&reserved.task_id).unwrap(),
+            reserved
+        );
+        assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_task_creation_releases_only_its_new_draft_reservation() {
+        let (app, _, _) = application();
+        let input = crate::application::DesktopTaskCreate::new(None, "invalid parent")
+            .with_parent(TaskId::new("missing-parent").unwrap());
+        let draft = DesktopComposerState::transient(input.id.clone());
+        assert!(app.materialize_task_draft(input, draft.clone()).is_err());
+        assert!(matches!(
+            app.get_task(&draft.task_id),
+            Err(DesktopApplicationError::Product(
+                lilia_contracts::ProductError::NotFound { .. }
+            ))
+        ));
+        assert!(
+            app.inner.composers.insert_if_absent(&draft).unwrap(),
+            "failed creation must leave the reservation available for retry"
+        );
     }
 
     #[test]

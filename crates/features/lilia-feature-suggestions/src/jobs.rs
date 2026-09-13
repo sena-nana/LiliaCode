@@ -39,9 +39,7 @@ pub fn generate_slot(window: u64) -> JobSlot {
 pub(crate) fn generate_protocol(port: Arc<dyn SuggestionPort>) -> JobProtocol {
     JobProtocol::new(
         GENERATE_PROTOCOL,
-        Arc::new(move |payload, _context: &JobContext| {
-            run_generate_job(payload, port.as_ref())
-        }),
+        Arc::new(move |payload, _context: &JobContext| run_generate_job(payload, port.as_ref())),
     )
 }
 

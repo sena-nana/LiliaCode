@@ -1,9 +1,12 @@
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
 use lilia_storage::Db;
 use rusqlite::{Transaction, TransactionBehavior};
 
 use crate::application::agent::turn_content_with_references;
 use crate::application::composer::DesktopComposerStore;
-use crate::application::todo::{guide_message, DesktopTodoStore};
+use crate::application::todo::{DesktopTodoStore, guide_message};
 use crate::application::{
     ChatAttachment, DesktopComposerState, DesktopGuideDispatchWindow, DesktopTaskTodo,
     DesktopTodoCreate, DesktopTodoError, DesktopTodoGuideStatus, DesktopTodoSource,
@@ -26,6 +29,118 @@ pub(crate) struct DesktopGuideSubmissionCommit {
     pub guide: DesktopTaskTodo,
     pub cleared: Option<DesktopComposerState>,
     pub queued: Option<DesktopQueuedGuide>,
+}
+
+/// Owns the durable turn queue together with the submission fence that keeps
+/// composer commits, queue acceptance, and worker claims in one ordering.
+#[derive(Clone)]
+pub struct DesktopTurnSubmissionService {
+    operation: Arc<Mutex<()>>,
+    submissions: Arc<Mutex<DesktopSubmissionStore>>,
+    queue: Arc<Mutex<DesktopTurnQueueStore>>,
+}
+
+impl DesktopTurnSubmissionService {
+    pub(crate) fn new(submissions: DesktopSubmissionStore, queue: DesktopTurnQueueStore) -> Self {
+        Self {
+            operation: Arc::new(Mutex::new(())),
+            submissions: Arc::new(Mutex::new(submissions)),
+            queue: Arc::new(Mutex::new(queue)),
+        }
+    }
+
+    pub(crate) fn submission_guard(
+        &self,
+    ) -> Result<MutexGuard<'_, ()>, crate::application::DesktopApplicationError> {
+        self.operation.lock().map_err(|_| {
+            crate::application::DesktopApplicationError::StateUnavailable("turn submission")
+        })
+    }
+
+    pub(crate) fn submission_guard_recovering(&self) -> MutexGuard<'_, ()> {
+        self.operation
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub(crate) fn queue(
+        &self,
+    ) -> Result<MutexGuard<'_, DesktopTurnQueueStore>, crate::application::DesktopApplicationError>
+    {
+        self.queue.lock().map_err(|_| {
+            crate::application::DesktopApplicationError::StateUnavailable("pending turns")
+        })
+    }
+
+    pub(crate) fn queue_recovering(&self) -> MutexGuard<'_, DesktopTurnQueueStore> {
+        self.queue.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub(crate) fn commit_turn(
+        &self,
+        composer: &DesktopComposerState,
+        turn_id: &str,
+        request: &DesktopTurnRequest,
+    ) -> Result<Option<DesktopComposerState>, DesktopSubmissionError> {
+        self.submissions
+            .lock()
+            .map_err(|_| DesktopSubmissionError::StateUnavailable("submission"))?
+            .commit_turn(composer, turn_id, request)
+    }
+
+    pub(crate) fn commit_composer_clear(
+        &self,
+        composer: &DesktopComposerState,
+    ) -> Result<Option<DesktopComposerState>, DesktopSubmissionError> {
+        self.submissions
+            .lock()
+            .map_err(|_| DesktopSubmissionError::StateUnavailable("submission"))?
+            .commit_composer_clear(composer)
+    }
+
+    pub(crate) fn commit_guide(
+        &self,
+        composer: &DesktopComposerState,
+        guide_id: &str,
+        input: DesktopTodoCreate,
+        queue: Option<DesktopGuideQueueInput>,
+    ) -> Result<DesktopGuideSubmissionCommit, DesktopSubmissionError> {
+        self.submissions
+            .lock()
+            .map_err(|_| DesktopSubmissionError::StateUnavailable("submission"))?
+            .commit_guide(composer, guide_id, input, queue)
+    }
+}
+
+pub struct TurnSubmissionServiceKey;
+
+impl ServiceKey for TurnSubmissionServiceKey {
+    type Value = DesktopTurnSubmissionService;
+    const NAME: &'static str = "lilia.turn-submission";
+}
+
+pub struct TurnSubmissionServiceFeature {
+    service: DesktopTurnSubmissionService,
+}
+
+impl TurnSubmissionServiceFeature {
+    pub fn new(service: DesktopTurnSubmissionService) -> Self {
+        Self { service }
+    }
+}
+
+impl Feature for TurnSubmissionServiceFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.turn-submission").expect("nonempty feature id")
+    }
+
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<TurnSubmissionServiceKey>()]
+    }
+
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        cx.provide::<TurnSubmissionServiceKey>(self.service.clone())
+    }
 }
 
 pub(crate) struct DesktopSubmissionStore {
@@ -181,6 +296,8 @@ pub enum DesktopSubmissionError {
     Todo(#[from] crate::application::DesktopTodoError),
     #[error(transparent)]
     TurnQueue(#[from] crate::application::DesktopTurnQueueError),
+    #[error("desktop submission state is unavailable: {0}")]
+    StateUnavailable(&'static str),
     #[error("desktop submission storage failed during {operation}: {message}")]
     Storage {
         operation: &'static str,

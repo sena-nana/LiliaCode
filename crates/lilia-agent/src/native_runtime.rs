@@ -318,6 +318,7 @@ pub struct NativeAgentKitRuntime {
     model_runtime_configuration: Mutex<NativeModelRuntimeConfiguration>,
     subagent_configuration: Mutex<Vec<NativeSubagentDefinition>>,
     host: Mutex<Option<CachedHost>>,
+    browser: Mutex<Option<Arc<crate::BrowserSessions>>>,
     active_runs: Mutex<BTreeMap<String, ActiveRun>>,
     pending_turn_cancellations: Mutex<BTreeSet<(String, String)>>,
     turn_event_observers: Mutex<BTreeMap<(String, String), TurnEventObserver>>,
@@ -366,6 +367,7 @@ impl NativeAgentKitRuntime {
             model_runtime_configuration: Mutex::new(NativeModelRuntimeConfiguration::default()),
             subagent_configuration: Mutex::new(Vec::new()),
             host: Mutex::new(None),
+            browser: Mutex::new(None),
             active_runs: Mutex::new(BTreeMap::new()),
             pending_turn_cancellations: Mutex::new(BTreeSet::new()),
             turn_event_observers: Mutex::new(BTreeMap::new()),
@@ -378,6 +380,30 @@ impl NativeAgentKitRuntime {
             configuration.openai_endpoint_override = endpoint;
         }
         self.invalidate_host();
+    }
+
+    pub fn set_browser_sessions(&self, sessions: Arc<crate::BrowserSessions>) {
+        *self.browser.lock().expect("browser runtime") = Some(sessions);
+        self.invalidate_host();
+    }
+
+    pub fn bind_browser_session(
+        &self,
+        session: &str,
+        scope: lilia_contracts::BrowserScope,
+    ) -> Result<(), crate::BrowserError> {
+        let task = self
+            .task_for_session(session)
+            .map_err(|_| crate::BrowserError::WrongScope)?;
+        if task != scope.task_id {
+            return Err(crate::BrowserError::WrongScope);
+        }
+        self.browser
+            .lock()
+            .expect("browser runtime")
+            .as_ref()
+            .ok_or(crate::BrowserError::Unavailable)?
+            .bind_agent(session.to_owned(), scope)
     }
 
     pub fn set_anthropic_endpoint_override(&self, endpoint: Option<String>) {
@@ -904,6 +930,15 @@ impl NativeAgentKitRuntime {
         let binding = self.binding(session.as_str())?;
         let credential_bound = self.gate_credentials_for_turn()?;
         let (plan, workspace) = self.turn_plan(context.as_ref())?;
+        if let Some(browser) = self.browser.lock().expect("browser runtime").clone() {
+            let task = TaskId::new(binding.task_id.clone())
+                .map_err(|error| AgentKitPortError::InvalidInput(error.to_string()))?;
+            browser
+                .bind_selected_agent(session.as_str(), &task)
+                .map_err(|error| {
+                    AgentKitPortError::Unavailable(format!("browser scope: {error:?}"))
+                })?;
+        }
         if let Some(workspace) = &workspace {
             self.prepare_native_coding_workspace(&workspace.root)
                 .map_err(|error| AgentKitPortError::Unavailable(error.to_string()))?;
@@ -2060,6 +2095,9 @@ impl NativeAgentKitRuntime {
         turn_id: &str,
     ) -> Result<TurnCancellationDisposition, AgentKitPortError> {
         let snapshot = self.session_snapshot(session_id)?;
+        if let Some(browser) = self.browser.lock().expect("browser runtime").as_ref() {
+            browser.cancel_agent(session_id, turn_id);
+        }
         self.request_turn_cancellation(session_id, turn_id)?;
         if self.cancel_active_runs(session_id, Some(turn_id))? {
             self.take_pending_turn_cancellation(session_id, turn_id)?;
@@ -2319,6 +2357,7 @@ impl NativeAgentKitRuntime {
                 adapter_credential_broker(self.credentials().broker().clone()),
                 enable_workspace_tools,
                 &subagents,
+                self.browser.lock().expect("browser runtime").clone(),
             )
             .map_err(agent_port_error)?,
         );

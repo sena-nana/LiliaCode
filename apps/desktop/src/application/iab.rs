@@ -4,8 +4,8 @@ use lilia_contracts::{ChatAttachment, TaskId};
 use serde::{Deserialize, Serialize};
 
 use crate::application::{
-    describe_attachment_path, DesktopApplication, DesktopApplicationError, DesktopTurnDispatch,
-    DesktopTurnRequest,
+    DesktopApplication, DesktopApplicationError, DesktopTurnDispatch, DesktopTurnRequest,
+    describe_attachment_path,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -131,11 +131,7 @@ impl DesktopApplication {
         task_id: &TaskId,
         completed: bool,
     ) -> Result<ProductTask, DesktopApplicationError> {
-        let _submission = self
-            .inner
-            .turn_submission
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("turn submission"))?;
+        let _submission = self.inner.turn_submissions.submission_guard()?;
         if !self.task_completion_editable(task_id) {
             return Err(DesktopApplicationError::InvalidInput {
                 field: "task status",
@@ -201,8 +197,8 @@ impl DesktopApplication {
 #[cfg(test)]
 mod tests {
     use crate::application::composer::DesktopComposerTurnRequest;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use lilia_contracts::{
         ExpectedRevision, ProductConversationStatus, ProductEntity, ProductEntityKind,
@@ -262,18 +258,13 @@ mod tests {
         let other = app
             .create_task(DesktopTaskCreate::new(None, "Other"))
             .unwrap();
-        app.inner
-            .worktree_operations
-            .lock()
-            .unwrap()
-            .insert(task.id.clone());
+        let busy = app
+            .worktree_service()
+            .occupy_task_for_test(&task.id)
+            .unwrap();
         assert!(!app.task_completion_editable(&task.id));
         assert!(app.set_task_completed(&task.id, true).is_err());
-        app.inner
-            .worktree_operations
-            .lock()
-            .unwrap()
-            .remove(&task.id);
+        drop(busy);
         let request = app.composer_state(&task.id).unwrap().turn_request();
         app.inner
             .agent
@@ -369,10 +360,11 @@ mod tests {
         assert!(archived.conversations.iter().all(|conversation| {
             conversation.archived && conversation.status == ProductConversationStatus::Closed
         }));
-        assert!(app
-            .query_tasks(TaskQuery::for_project(project.id.clone()))
-            .unwrap()
-            .is_empty());
+        assert!(
+            app.query_tasks(TaskQuery::for_project(project.id.clone()))
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             app.query_tasks(TaskQuery::for_project(project.id.clone()).including_archived())
                 .unwrap()
@@ -388,10 +380,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(app
-            .query_projects(ProjectQuery::default())
-            .unwrap()
-            .is_empty());
+        assert!(
+            app.query_projects(ProjectQuery::default())
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             app.query_projects(ProjectQuery {
                 include_archived: true,
@@ -432,10 +425,11 @@ mod tests {
         assert!(outcome.archived_conversations.iter().all(|conversation| {
             conversation.archived && conversation.status == ProductConversationStatus::Closed
         }));
-        assert!(app
-            .query_tasks(TaskQuery::for_project(project.id.clone()))
-            .unwrap()
-            .is_empty());
+        assert!(
+            app.query_tasks(TaskQuery::for_project(project.id.clone()))
+                .unwrap()
+                .is_empty()
+        );
         assert!(app.get_task(&first.id).unwrap().archived);
         assert!(app.get_task(&second.id).unwrap().archived);
         assert!(!app.get_task(&other.id).unwrap().archived);

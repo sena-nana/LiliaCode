@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::application::{
-    DesktopApplication, DesktopAssistantAiModelPoolItem, DesktopSecret, ASSISTANT_AI_CREDENTIAL_KEY,
+    ASSISTANT_AI_CREDENTIAL_KEY, DesktopApplication, DesktopAssistantAiModelPoolItem, DesktopSecret,
 };
 
 const ASSISTANT_AI_PROBE_TIMEOUT: Duration = Duration::from_secs(5);

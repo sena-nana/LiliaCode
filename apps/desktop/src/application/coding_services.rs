@@ -136,13 +136,15 @@ impl DesktopApplication {
                 .then_with(|| left.id.cmp(&right.id))
         });
         projects = match &scope {
-            DesktopCodeSearchScope::Project { project_id } => vec![projects
-                .into_iter()
-                .find(|project| &project.id == project_id)
-                .ok_or_else(|| DesktopApplicationError::InvalidInput {
-                    field: "projectId",
-                    message: format!("active project `{}` was not found", project_id.as_str()),
-                })?],
+            DesktopCodeSearchScope::Project { project_id } => vec![
+                projects
+                    .into_iter()
+                    .find(|project| &project.id == project_id)
+                    .ok_or_else(|| DesktopApplicationError::InvalidInput {
+                        field: "projectId",
+                        message: format!("active project `{}` was not found", project_id.as_str()),
+                    })?,
+            ],
             DesktopCodeSearchScope::AllProjects => projects,
         };
         projects.retain(|project| {
@@ -576,14 +578,18 @@ mod tests {
         assert!(result.failures.is_empty());
         assert!(!result.truncated_projects);
         assert!(!result.truncated_hits);
-        assert!(result
-            .hits
-            .iter()
-            .any(|hit| hit.project_id == alpha.id && hit.hit.path == "src/alpha.rs"));
-        assert!(result
-            .hits
-            .iter()
-            .any(|hit| hit.project_id == beta.id && hit.hit.path == "lib/beta.rs"));
+        assert!(
+            result
+                .hits
+                .iter()
+                .any(|hit| hit.project_id == alpha.id && hit.hit.path == "src/alpha.rs")
+        );
+        assert!(
+            result
+                .hits
+                .iter()
+                .any(|hit| hit.project_id == beta.id && hit.hit.path == "lib/beta.rs")
+        );
         assert!(result.hits.iter().all(|hit| hit.index_revision > 0));
     }
 }

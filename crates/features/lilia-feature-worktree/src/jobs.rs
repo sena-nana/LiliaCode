@@ -1,13 +1,9 @@
 //! Kernel job lane for the git commands behind a task's worktree.
 //!
-//! Creating, merging or removing a worktree shells out to git and can take
-//! seconds on a large repository, so it ran on its own thread. It is a job now,
-//! keyed per task: two tasks own two different directories and must not queue
-//! behind each other, while a second operation on one task replaces the first.
-//!
-//! Completion still travels as a domain event, because archiving a task also
-//! moves the surface off it and every open popup has to follow. The job's own
-//! terminal state is the backstop for a run that died without reporting.
+//! Jobs are keyed by task. The operation service additionally serializes Git
+//! mutations by common repository directory, and observes cancellation before
+//! side effects begin. Once Git has changed state it persists the resulting fact
+//! even when the job was superseded.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,23 +37,36 @@ pub struct WorktreeRequest {
 /// Runs one worktree operation and announces the outcome as a domain event.
 pub trait WorktreePort: Send + Sync + 'static {
     fn operate(&self, request: WorktreeRequest) -> Result<(), String>;
+    fn operate_with_context(
+        &self,
+        request: WorktreeRequest,
+        context: &JobContext,
+    ) -> Result<(), String> {
+        if context.is_cancelled() {
+            return Err("worktree operation cancelled".into());
+        }
+        self.operate(request)
+    }
 }
 
 /// One lane per task.
 pub fn worktree_slot(task_id: &str) -> JobSlot {
-    JobSlot::new(format!("lilia.worktree.{task_id}"))
-        .expect("the worktree slot name is not blank")
+    JobSlot::new(format!("lilia.worktree.{task_id}")).expect("the worktree slot name is not blank")
 }
 
 pub(crate) fn operate_protocol(port: Arc<dyn WorktreePort>) -> JobProtocol {
     JobProtocol::new(
         OPERATE_PROTOCOL,
-        Arc::new(move |payload, _context: &JobContext| {
-            run_operate_job(payload, port.as_ref())
+        Arc::new(move |payload, context: &JobContext| {
+            let request = serde_json::from_value(payload)
+                .map_err(|error| format!("invalid worktree request: {error}"))?;
+            port.operate_with_context(request, context)?;
+            Ok(Value::Null)
         }),
     )
 }
 
+#[cfg(test)]
 fn run_operate_job(payload: Value, port: &dyn WorktreePort) -> Result<Value, String> {
     let request: WorktreeRequest = serde_json::from_value(payload)
         .map_err(|error| format!("invalid worktree request: {error}"))?;

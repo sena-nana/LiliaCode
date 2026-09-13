@@ -91,6 +91,6 @@ impl Feature for MemoryFeature {
     }
 
     fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
-        cx.provide::<MemoryServiceKey>(self.service.clone())
+        cx.provide::<MemoryServiceKey>(self.service.clone().with_events(cx.events().clone()))
     }
 }

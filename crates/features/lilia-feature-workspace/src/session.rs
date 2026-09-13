@@ -304,12 +304,14 @@ impl DesktopWorkspaceSession {
         let source_key = Arc::as_ptr(&self.state) as usize;
         let target_key = Arc::as_ptr(&target.state) as usize;
         if source_key < target_key {
-            let mut source_state = self.state.lock().map_err(|_| {
-                WorkspaceSessionError::StateUnavailable("source workspace session")
-            })?;
-            let mut target_state = target.state.lock().map_err(|_| {
-                WorkspaceSessionError::StateUnavailable("target workspace session")
-            })?;
+            let mut source_state = self
+                .state
+                .lock()
+                .map_err(|_| WorkspaceSessionError::StateUnavailable("source workspace session"))?;
+            let mut target_state = target
+                .state
+                .lock()
+                .map_err(|_| WorkspaceSessionError::StateUnavailable("target workspace session"))?;
             transfer_workspace_item_locked(
                 self.catalog.as_ref(),
                 &mut source_state,
@@ -319,12 +321,14 @@ impl DesktopWorkspaceSession {
                 before,
             )
         } else {
-            let mut target_state = target.state.lock().map_err(|_| {
-                WorkspaceSessionError::StateUnavailable("target workspace session")
-            })?;
-            let mut source_state = self.state.lock().map_err(|_| {
-                WorkspaceSessionError::StateUnavailable("source workspace session")
-            })?;
+            let mut target_state = target
+                .state
+                .lock()
+                .map_err(|_| WorkspaceSessionError::StateUnavailable("target workspace session"))?;
+            let mut source_state = self
+                .state
+                .lock()
+                .map_err(|_| WorkspaceSessionError::StateUnavailable("source workspace session"))?;
             transfer_workspace_item_locked(
                 self.catalog.as_ref(),
                 &mut source_state,
@@ -362,7 +366,13 @@ impl DesktopWorkspaceSession {
             DesktopCommand::SelectTask(task_id) => {
                 let selected_project = next.selected_project.clone();
                 let inbox_selected = next.inbox_selected;
-                next.reload(self.catalog.as_ref(), selected_project, inbox_selected, false, false)?;
+                next.reload(
+                    self.catalog.as_ref(),
+                    selected_project,
+                    inbox_selected,
+                    false,
+                    false,
+                )?;
                 if !next.tasks.iter().any(|task| task.id == task_id) {
                     return Err(WorkspaceSessionError::InvalidInput {
                         field: "taskId",
@@ -482,7 +492,7 @@ impl DesktopWorkspaceSession {
                 }
                 next.panel_layout.close_item(&pane_id, &item_id)?;
                 if !next.panel_layout.contains_item(&item_id) {
-                    next.workspace_items.remove(&item_id);
+                    next.remove_workspace_item(&item_id)?;
                 }
                 next.sync_selection(self.catalog.as_ref())?;
             }
@@ -600,6 +610,200 @@ impl DesktopWorkspaceState {
     }
 }
 
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    use crate::{
+        ApplicationWorkspaceSurface, PaneId, WorkspaceFocusTarget, WorkspaceItemCapabilities,
+        WorkspaceItemKind, WorkspaceResourceId,
+    };
+
+    struct Catalog;
+    impl WorkspaceCatalog for Catalog {
+        fn list_projects(&self) -> Result<Vec<DesktopWorkspaceProject>, WorkspaceSessionError> {
+            Ok(vec![DesktopWorkspaceProject {
+                id: ProjectId::new("project").unwrap(),
+                name: "Project".into(),
+                workspace_path: None,
+                pinned: false,
+                sort_order: 0,
+            }])
+        }
+        fn list_project_tasks(
+            &self,
+            _: &ProjectId,
+        ) -> Result<Vec<DesktopWorkspaceTask>, WorkspaceSessionError> {
+            Ok(["one", "two"]
+                .into_iter()
+                .map(|id| DesktopWorkspaceTask {
+                    id: TaskId::new(id).unwrap(),
+                    title: id.into(),
+                    parent_id: None,
+                    status: ProductTaskStatus::Draft,
+                    priority: ProductTaskPriority::Normal,
+                    pinned: false,
+                    sort_order: 0,
+                })
+                .collect())
+        }
+        fn list_inbox_tasks(&self) -> Result<Vec<DesktopWorkspaceTask>, WorkspaceSessionError> {
+            Ok(vec![])
+        }
+        fn restore_item(
+            &self,
+            restoration: &WorkspaceItemRestoration,
+        ) -> Result<Option<WorkspaceItem>, WorkspaceSessionError> {
+            let mut restored = item(
+                restoration.kind.as_str(),
+                restoration.resource_id.as_ref().unwrap().as_str(),
+            );
+            restored.id = restoration.id.clone();
+            restored.serialized_state = restoration.serialized_state.clone();
+            Ok(Some(restored))
+        }
+        fn lookup_task(&self, _: &TaskId) -> Result<WorkspaceTaskRef, WorkspaceSessionError> {
+            Ok(WorkspaceTaskRef {
+                archived: false,
+                project_id: Some(ProjectId::new("project").unwrap()),
+            })
+        }
+        fn host_ptr(&self) -> usize {
+            1
+        }
+    }
+    fn item(kind: &str, resource: &str) -> WorkspaceItem {
+        WorkspaceItem::new(
+            WorkspaceItemId::new(resource).unwrap(),
+            WorkspaceResourceId::new(resource).unwrap(),
+            WorkspaceItemKind::new(kind).unwrap(),
+            resource,
+            WorkspaceFocusTarget::new("content").unwrap(),
+            WorkspaceItemCapabilities::dockable(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn resource_panes_preserve_task_while_explicit_navigation_updates_it() {
+        let session = DesktopWorkspaceSession::new(
+            DesktopWorkspaceSessionId::new("test").unwrap(),
+            Arc::new(Catalog),
+            Arc::new(Mutex::new(DesktopWorkspaceState::default())),
+        );
+        session
+            .execute(DesktopCommand::SelectProject(
+                ProjectId::new("project").unwrap(),
+            ))
+            .unwrap();
+        let one = TaskId::new("one").unwrap();
+        let two = TaskId::new("two").unwrap();
+        session
+            .execute(DesktopCommand::SelectTask(one.clone()))
+            .unwrap();
+        for kind in ["task-browser", "document-editor", "terminal"] {
+            let resource = item(kind, kind);
+            let pane_id = PaneId::new("primary").unwrap();
+            session
+                .execute(DesktopCommand::OpenWorkspaceItem {
+                    pane_id: pane_id.clone(),
+                    item: resource.clone(),
+                })
+                .unwrap();
+            assert_eq!(session.snapshot().unwrap().selected_task, Some(one.clone()));
+            session.execute(DesktopCommand::RefreshWorkspace).unwrap();
+            assert_eq!(session.snapshot().unwrap().selected_task, Some(one.clone()));
+            session
+                .execute(DesktopCommand::CloseWorkspaceItem {
+                    pane_id,
+                    item_id: resource.id,
+                })
+                .unwrap();
+            assert_eq!(session.snapshot().unwrap().selected_task, Some(one.clone()));
+        }
+        session
+            .execute(DesktopCommand::SelectTask(two.clone()))
+            .unwrap();
+        assert_eq!(session.snapshot().unwrap().selected_task, Some(two.clone()));
+        for surface in ApplicationWorkspaceSurface::ALL {
+            session
+                .execute(DesktopCommand::OpenWorkspaceItem {
+                    pane_id: PaneId::new("primary").unwrap(),
+                    item: item(surface.kind(), surface.resource_id()),
+                })
+                .unwrap();
+            assert_eq!(session.snapshot().unwrap().selected_task, None);
+            session
+                .execute(DesktopCommand::SelectTask(two.clone()))
+                .unwrap();
+            assert_eq!(session.snapshot().unwrap().selected_task, Some(two.clone()));
+        }
+        session.execute(DesktopCommand::BackToTaskList).unwrap();
+        assert_eq!(session.snapshot().unwrap().selected_task, None);
+        session.execute(DesktopCommand::SelectTask(one)).unwrap();
+        session
+            .execute(DesktopCommand::SelectProject(
+                ProjectId::new("project").unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(session.snapshot().unwrap().selected_task, None);
+    }
+
+    #[test]
+    fn closing_or_detaching_last_task_view_clears_only_its_source_context() {
+        let create = |id| {
+            DesktopWorkspaceSession::new(
+                DesktopWorkspaceSessionId::new(id).unwrap(),
+                Arc::new(Catalog),
+                Arc::new(Mutex::new(DesktopWorkspaceState::default())),
+            )
+        };
+        let source = create("source");
+        let target = create("target");
+        let pane = PaneId::new("primary").unwrap();
+        let task_item = item("task", "task:one");
+        let mut second_view = task_item.clone();
+        second_view.id = WorkspaceItemId::new("second-view").unwrap();
+        for view in [
+            task_item.clone(),
+            second_view.clone(),
+            item("task-browser", "browser:one"),
+        ] {
+            source
+                .execute(DesktopCommand::OpenWorkspaceItem {
+                    pane_id: pane.clone(),
+                    item: view,
+                })
+                .unwrap();
+        }
+        source
+            .execute(DesktopCommand::CloseWorkspaceItem {
+                pane_id: pane.clone(),
+                item_id: second_view.id,
+            })
+            .unwrap();
+        assert_eq!(
+            source.snapshot().unwrap().selected_task,
+            Some(TaskId::new("one").unwrap())
+        );
+        let moved = source
+            .transfer_item_to(&target, &task_item.id, &pane, None)
+            .unwrap();
+        assert_eq!(moved.source.selected_task, None);
+        assert_eq!(
+            moved.target.selected_task,
+            Some(TaskId::new("one").unwrap())
+        );
+        assert_eq!(moved.source.workspace_items.len(), 1);
+        target
+            .execute(DesktopCommand::CloseWorkspaceItem {
+                pane_id: pane,
+                item_id: task_item.id,
+            })
+            .unwrap();
+        assert_eq!(target.snapshot().unwrap().selected_task, None);
+    }
+}
+
 fn transfer_workspace_item_locked(
     catalog: &dyn WorkspaceCatalog,
     source: &mut DesktopWorkspaceState,
@@ -647,7 +851,7 @@ fn transfer_workspace_item_locked(
         .panel_layout
         .close_item(&source_pane_id, item_id)?;
     if !next_source.panel_layout.contains_item(item_id) {
-        next_source.workspace_items.remove(item_id);
+        next_source.remove_workspace_item(item_id)?;
     }
 
     next_source.sync_selection(catalog)?;
@@ -675,6 +879,29 @@ fn transfer_workspace_item_locked(
 }
 
 impl DesktopWorkspaceState {
+    fn remove_workspace_item(
+        &mut self,
+        item_id: &WorkspaceItemId,
+    ) -> Result<(), WorkspaceSessionError> {
+        let removed_task = self
+            .workspace_items
+            .remove(item_id)
+            .map(|item| item.task_id())
+            .transpose()?
+            .flatten();
+        if let Some(task_id) = removed_task {
+            if self.selected_task.as_ref() == Some(&task_id)
+                && !self
+                    .workspace_items
+                    .values()
+                    .any(|item| item.task_id().ok().flatten().as_ref() == Some(&task_id))
+            {
+                self.selected_task = None;
+            }
+        }
+        Ok(())
+    }
+
     pub fn reload(
         &mut self,
         catalog: &dyn WorkspaceCatalog,
@@ -795,7 +1022,14 @@ impl DesktopWorkspaceState {
             return Ok(());
         }
 
-        self.selected_task = None;
+        if active_workspace_item
+            .map(WorkspaceItem::application_surface)
+            .transpose()?
+            .flatten()
+            .is_some()
+        {
+            self.selected_task = None;
+        }
         Ok(())
     }
 

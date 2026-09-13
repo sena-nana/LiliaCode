@@ -23,6 +23,26 @@ pub struct FileDialogRequest {
 /// wedges the loop. Run it on a dedicated thread and deliver the result as a
 /// message.
 pub fn pick(request: FileDialogRequest) -> Vec<PathBuf> {
+    let select_directories = request.select_directories;
+    let multiple = request.multiple;
+    let dialog = build(request);
+    match (select_directories, multiple) {
+        (true, true) => dialog.pick_folders().unwrap_or_default(),
+        (true, false) => dialog.pick_folder().into_iter().collect(),
+        (false, true) => dialog.pick_files().unwrap_or_default(),
+        (false, false) => dialog.pick_file().into_iter().collect(),
+    }
+}
+
+pub fn save(request: FileDialogRequest, suggested_filename: &str) -> Vec<PathBuf> {
+    build(request)
+        .set_file_name(suggested_filename)
+        .save_file()
+        .into_iter()
+        .collect()
+}
+
+fn build(request: FileDialogRequest) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
     if let Some(title) = request.title {
         dialog = dialog.set_title(title);
@@ -38,10 +58,5 @@ pub fn pick(request: FileDialogRequest) -> Vec<PathBuf> {
             .collect::<Vec<_>>();
         dialog = dialog.add_filter(filter.name, &extensions);
     }
-    match (request.select_directories, request.multiple) {
-        (true, true) => dialog.pick_folders().unwrap_or_default(),
-        (true, false) => dialog.pick_folder().into_iter().collect(),
-        (false, true) => dialog.pick_files().unwrap_or_default(),
-        (false, false) => dialog.pick_file().into_iter().collect(),
-    }
+    dialog
 }

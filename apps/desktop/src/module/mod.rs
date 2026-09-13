@@ -1,9 +1,11 @@
 //! UI modules: one per domain that has moved out of the shell.
 
 pub mod architecture;
+pub mod automation;
 pub mod composer;
 pub mod documents;
 pub mod extensions;
+pub mod extensions_browser;
 pub mod memory;
 pub mod roadmap;
 pub mod settings;
@@ -33,13 +35,6 @@ pub(crate) fn conversation_is_visible(cx: &UiModuleContext<'_>) -> bool {
         || cx.shows(ShellProjectPage::Files))
 }
 
-/// Contributes the modules whose domains live in the shell's crate.
-///
-/// A feature crate cannot contribute one yet: `UiModule` is host vocabulary
-/// declared in `apps/desktop`, and a feature crate depending on the host would
-/// invert the dependency. So the shell contributes on their behalf, through the
-/// same registry a feature would use, which is what keeps the collection path
-/// identical once the contract moves to a shared crate.
 pub struct ShellUiFeature;
 
 impl Feature for ShellUiFeature {
@@ -48,18 +43,40 @@ impl Feature for ShellUiFeature {
     }
 
     fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
-        cx.contribute::<UiModules>(Box::new(|| {
-            Box::new(architecture::ArchitectureModule::default())
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(architecture::ArchitectureModule::default()))
         }));
-        cx.contribute::<UiModules>(Box::new(|| Box::new(roadmap::RoadmapModule::default())));
-        cx.contribute::<UiModules>(Box::new(|| Box::new(memory::MemoryModule::default())));
-        cx.contribute::<UiModules>(Box::new(|| Box::new(composer::ComposerModule::default())));
-        cx.contribute::<UiModules>(Box::new(|| {
-            Box::new(extensions::ExtensionsModule::default())
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(roadmap::RoadmapModule::default()))
         }));
-        cx.contribute::<UiModules>(Box::new(|| Box::new(task::TaskModule::default())));
-        cx.contribute::<UiModules>(Box::new(|| Box::new(timeline::TimelineModule::default())));
-        cx.contribute::<UiModules>(Box::new(|| Box::new(settings::SettingsModule::default())));
+        cx.contribute::<UiModules>(Box::new(|_| Ok(Box::new(memory::MemoryModule::default()))));
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(composer::ComposerModule::default()))
+        }));
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(extensions::ExtensionsModule::default()))
+        }));
+        cx.contribute::<UiModules>(Box::new(|_| Ok(Box::new(task::TaskModule::default()))));
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(documents::DocumentsModule::default()))
+        }));
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(timeline::TimelineModule::default()))
+        }));
+        cx.contribute::<UiModules>(Box::new(|_| {
+            Ok(Box::new(settings::SettingsModule::default()))
+        }));
+        cx.contribute::<UiModules>(Box::new(|cx| {
+            let service = cx
+                .kernel()
+                .service::<lilia_feature_automation::AutomationServiceKey>()
+                .map_err(|error| error.to_string())?;
+            Ok(Box::new(automation::controller::AutomationController::new(
+                cx.window(),
+                service,
+                cx.kernel().jobs().clone(),
+            )))
+        }));
         Ok(())
     }
 }

@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use lilia_agent::NativeControlModelRequest;
 use reqwest::blocking::Client;
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 
 use super::settings::DesktopConversationSuggestionSource;
-use crate::application::{DesktopApplication, ASSISTANT_AI_CREDENTIAL_KEY};
+use crate::application::{ASSISTANT_AI_CREDENTIAL_KEY, DesktopApplication};
 use lilia_feature_suggestions::generation::suggestion_system_instruction;
 use lilia_feature_suggestions::types::DesktopSuggestionModelRequest;
 

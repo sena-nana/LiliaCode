@@ -57,7 +57,8 @@ impl<'a> FeatureContext<'a> {
     where
         K: ServiceKey + ?Sized,
     {
-        self.kernel.provide_service::<K>(self.feature.clone(), value)?;
+        self.kernel
+            .provide_service::<K>(self.feature.clone(), value)?;
         self.provided.push(ServiceRef::of::<K>());
         Ok(())
     }

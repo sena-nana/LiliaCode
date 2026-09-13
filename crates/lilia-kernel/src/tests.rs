@@ -344,7 +344,9 @@ fn journal_sequences_records_and_evicts_the_oldest_beyond_capacity() {
     assert_eq!(journal.earliest_sequence(), Some(2));
     let tail = journal.records_after(1, 10);
     assert_eq!(
-        tail.iter().map(|record| record.topic.as_str()).collect::<Vec<_>>(),
+        tail.iter()
+            .map(|record| record.topic.as_str())
+            .collect::<Vec<_>>(),
         ["second", "third"]
     );
 }
@@ -363,7 +365,12 @@ fn journal_sink_observes_every_appended_record() {
     let writes = Arc::new(AtomicUsize::new(0));
     journal.set_sink(Arc::new(CountingSink(Arc::clone(&writes))));
 
-    journal.append(RecordKind::Event, "topic", Some("subject".into()), json!({}));
+    journal.append(
+        RecordKind::Event,
+        "topic",
+        Some("subject".into()),
+        json!({}),
+    );
 
     assert_eq!(writes.load(Ordering::Relaxed), 1);
 }
@@ -498,11 +505,7 @@ impl TaskRuntime for FakeTaskRuntime {
 
 fn job_harness() -> (Jobs, Arc<FakeTaskRuntime>, Arc<Mutex<Vec<JobEvent>>>) {
     let events = EventBus::new();
-    let jobs = Jobs::with_poll_interval(
-        events.clone(),
-        Journal::new(),
-        Duration::from_millis(2),
-    );
+    let jobs = Jobs::with_poll_interval(events.clone(), Journal::new(), Duration::from_millis(2));
     let runtime = Arc::new(FakeTaskRuntime::default());
     jobs.install_runtime(Arc::clone(&runtime) as Arc<dyn TaskRuntime>);
 
@@ -647,7 +650,10 @@ fn a_failing_task_surfaces_its_message() {
         TaskProgress::Failed("endpoint unreachable".to_owned()),
     );
 
-    assert!(wait_for(|| matches!(handle.state(), Some(JobState::Failed { .. }))));
+    assert!(wait_for(|| matches!(
+        handle.state(),
+        Some(JobState::Failed { .. })
+    )));
     assert!(matches!(
         handle.state(),
         Some(JobState::Failed { message }) if message.contains("unreachable")
@@ -673,7 +679,10 @@ fn job_transitions_are_journalled_in_order() {
         handle.state(),
         Some(JobState::Running { progress }) if progress == serde_json::json!({ "percent": 40 })
     )));
-    runtime.settle(&TaskTicket::new("ticket-1"), TaskProgress::Completed(json!(1)));
+    runtime.settle(
+        &TaskTicket::new("ticket-1"),
+        TaskProgress::Completed(json!(1)),
+    );
 
     let job_topics = || {
         journal
@@ -684,5 +693,8 @@ fn job_transitions_are_journalled_in_order() {
             .collect::<Vec<_>>()
     };
     assert!(wait_for(|| job_topics().len() == 3));
-    assert_eq!(job_topics(), ["job.pending", "job.running", "job.completed"]);
+    assert_eq!(
+        job_topics(),
+        ["job.pending", "job.running", "job.completed"]
+    );
 }
