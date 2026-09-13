@@ -225,11 +225,13 @@ mod tests {
         });
         let canonical_root = std::fs::canonicalize(root.path()).unwrap();
         assert!(screen_text(&ready).contains(&format!("ready:{}", canonical_root.display())));
-        assert!(ready
-            .screen
-            .iter()
-            .flat_map(|row| &row.styles)
-            .any(|span| { span.style.foreground == DesktopTerminalColor::Indexed(1) }));
+        assert!(
+            ready
+                .screen
+                .iter()
+                .flat_map(|row| &row.styles)
+                .any(|span| { span.style.foreground == DesktopTerminalColor::Indexed(1) })
+        );
 
         app.write_terminal(&launched.id, b"hello\r").unwrap();
         let completed = wait_for_snapshot(&app, &launched.id, |snapshot| {

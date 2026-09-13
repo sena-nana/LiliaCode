@@ -7,7 +7,7 @@ use lilia_contracts::{
     TimelineProjectionCommand, TimelineProjectionEvent,
 };
 use lilia_storage::ProjectionApplyResult;
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 
 use super::{
     AutomationAddTodoRequest, AutomationAgentActivation, AutomationAgentDispatch,
@@ -21,21 +21,105 @@ use super::{
 };
 use crate::application::agent::DesktopIdempotentTurnStart;
 use crate::application::{
-    DesktopApplication, DesktopAutomationTurnCorrelation, DesktopExecutionPermission,
-    DesktopTodoCreate, DesktopTodoGuideStatus, DesktopTodoPriority, DesktopTodoSource,
-    DesktopTurnDispatchKind, DesktopTurnRequest, TaskQuery,
+    DesktopApplication, DesktopApplicationError, DesktopAutomationTurnCorrelation,
+    DesktopExecutionPermission, DesktopTodoCreate, DesktopTodoGuideStatus, DesktopTodoPriority,
+    DesktopTodoSource, DesktopTurnDispatchKind, DesktopTurnRequest, TaskQuery,
 };
 use crate::application::{TasksChanged, TimelineChanged};
 
+#[derive(Clone)]
+pub struct DesktopAutomationOperationService {
+    automation: super::DesktopAutomationService,
+    authority: lilia_service::ServiceAuthority,
+    project_tasks: lilia_feature_task::ProjectTaskService,
+    todos: super::DesktopTodoService,
+    events: lilia_kernel::EventBus,
+    agent: Arc<dyn DesktopAutomationAgentOperations>,
+}
+
+trait DesktopAutomationAgentOperations: Send + Sync {
+    fn start_turn(
+        &self,
+        request: DesktopTurnRequest,
+        idempotency_key: &str,
+    ) -> Result<DesktopIdempotentTurnStart, DesktopApplicationError>;
+
+    fn activate_turn(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+    ) -> Result<(), DesktopApplicationError>;
+
+    fn abort_turn(&self, task_id: TaskId, turn_id: String);
+
+    fn cancel_turn(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        run_id: &str,
+        node_id: &str,
+    ) -> Result<(), DesktopApplicationError>;
+}
+
+struct DesktopApplicationAutomationAgentOperations {
+    application: DesktopApplication,
+}
+
+impl DesktopAutomationAgentOperations for DesktopApplicationAutomationAgentOperations {
+    fn start_turn(
+        &self,
+        request: DesktopTurnRequest,
+        idempotency_key: &str,
+    ) -> Result<DesktopIdempotentTurnStart, DesktopApplicationError> {
+        self.application
+            .start_task_turn_idempotent(request, idempotency_key)
+    }
+
+    fn activate_turn(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+    ) -> Result<(), DesktopApplicationError> {
+        self.application.activate_turn_worker(task_id, turn_id)
+    }
+
+    fn abort_turn(&self, task_id: TaskId, turn_id: String) {
+        self.application.abort_prepared_turn(task_id, turn_id);
+    }
+
+    fn cancel_turn(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        run_id: &str,
+        node_id: &str,
+    ) -> Result<(), DesktopApplicationError> {
+        self.application
+            .cancel_automation_agent_turn(task_id, turn_id, run_id, node_id)
+    }
+}
+
 impl DesktopApplication {
+    pub fn automation_operation_service(&self) -> DesktopAutomationOperationService {
+        DesktopAutomationOperationService {
+            automation: self.automation_service(),
+            authority: self.inner.authority.clone(),
+            project_tasks: self.inner.project_tasks.clone(),
+            todos: self.todo_service(),
+            events: self.event_bus(),
+            agent: Arc::new(DesktopApplicationAutomationAgentOperations {
+                application: self.clone(),
+            }),
+        }
+    }
+
     pub fn execute_automation_run(
         &self,
         run_id: &str,
     ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
         let _execution = self.inner.automation_execution.enter(run_id);
         let _effect = super::automation_dispatch::AutomationEffectGuard::enter();
-        let repository = self.automation_service();
-        AutomationExecutionEngine::new(Arc::new(self.clone())).execute_run(&repository, run_id)
+        self.automation_operation_service().execute_run(run_id)
     }
 
     pub fn resume_automation_run(
@@ -45,12 +129,8 @@ impl DesktopApplication {
     ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
         let _execution = self.inner.automation_execution.enter(run_id);
         let _effect = super::automation_dispatch::AutomationEffectGuard::enter();
-        let repository = self.automation_service();
-        AutomationExecutionEngine::new(Arc::new(self.clone())).resume_human(
-            &repository,
-            run_id,
-            input,
-        )
+        self.automation_operation_service()
+            .resume_run(run_id, input)
     }
 
     pub fn complete_automation_agent_turn(
@@ -59,8 +139,8 @@ impl DesktopApplication {
     ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
         let _execution = self.inner.automation_execution.enter(&input.run_id);
         let _effect = super::automation_dispatch::AutomationEffectGuard::enter();
-        let repository = self.automation_service();
-        AutomationExecutionEngine::new(Arc::new(self.clone())).complete_agent(&repository, input)
+        self.automation_operation_service()
+            .complete_agent_turn(input)
     }
 
     pub fn cancel_automation_run(
@@ -68,12 +148,45 @@ impl DesktopApplication {
         run_id: &str,
     ) -> Result<AutomationRunDetail, AutomationExecutionError> {
         let _execution = self.inner.automation_execution.enter(run_id);
-        let repository = self.automation_service();
-        let detail = repository.execution_run_detail(run_id)?.ok_or_else(|| {
-            AutomationExecutionError::RunNotFound {
+        self.automation_operation_service().cancel_run(run_id)
+    }
+}
+
+impl DesktopAutomationOperationService {
+    fn execute_run(
+        &self,
+        run_id: &str,
+    ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
+        AutomationExecutionEngine::new(Arc::new(self.clone())).execute_run(&self.automation, run_id)
+    }
+
+    fn resume_run(
+        &self,
+        run_id: &str,
+        input: AutomationResumeRunInput,
+    ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
+        AutomationExecutionEngine::new(Arc::new(self.clone())).resume_human(
+            &self.automation,
+            run_id,
+            input,
+        )
+    }
+
+    fn complete_agent_turn(
+        &self,
+        input: AutomationCompleteAgentInput,
+    ) -> Result<AutomationExecutionResult, AutomationExecutionError> {
+        AutomationExecutionEngine::new(Arc::new(self.clone()))
+            .complete_agent(&self.automation, input)
+    }
+
+    fn cancel_run(&self, run_id: &str) -> Result<AutomationRunDetail, AutomationExecutionError> {
+        let detail = self
+            .automation
+            .execution_run_detail(run_id)?
+            .ok_or_else(|| AutomationExecutionError::RunNotFound {
                 run_id: run_id.to_owned(),
-            }
-        })?;
+            })?;
         if !matches!(
             detail.run.status,
             AutomationRunStatus::Running | AutomationRunStatus::WaitingUser
@@ -112,18 +225,19 @@ impl DesktopApplication {
                     message: "waiting Agent output is missing a valid taskId or turnId".to_owned(),
                 });
             };
-            self.cancel_automation_agent_turn(&task_id, turn_id, run_id, &node.node_id)
+            self.agent
+                .cancel_turn(&task_id, turn_id, run_id, &node.node_id)
                 .map_err(|error| AutomationExecutionError::AgentCancellation {
                     run_id: run_id.to_owned(),
                     node_id: node.node_id.clone(),
                     message: error.to_string(),
                 })?;
         }
-        AutomationExecutionEngine::new(Arc::new(self.clone())).cancel_run(&repository, run_id)
+        AutomationExecutionEngine::new(Arc::new(self.clone())).cancel_run(&self.automation, run_id)
     }
 }
 
-impl AutomationTaskPort for DesktopApplication {
+impl AutomationTaskPort for DesktopAutomationOperationService {
     fn create_task(
         &self,
         request: AutomationCreateTaskRequest,
@@ -136,7 +250,7 @@ impl AutomationTaskPort for DesktopApplication {
         request: AutomationUpdateTaskStatusRequest,
     ) -> Result<JsonValue, AutomationPortError> {
         let task_id = TaskId::new(request.task_id).map_err(port_error)?;
-        let mut task = self.get_task(&task_id).map_err(port_error)?;
+        let mut task = self.project_tasks.get_task(&task_id).map_err(port_error)?;
         task.status = product_task_status(&request.status)?;
         let key = operation_key(&request.context, "update-task-status");
         let meta = ProductCommandMeta::update(
@@ -146,14 +260,14 @@ impl AutomationTaskPort for DesktopApplication {
         )
         .map_err(port_error)?;
         let result = self
-            .authority()
+            .authority
             .client()
             .map_err(port_error)?
             .update_product_entity(&meta, ProductEntity::Task(task), "automation_update_status")
             .map_err(port_error)?;
         let task = product_task(result.value)?;
         if !result.duplicate {
-            self.emit_event(TasksChanged {
+            self.events.publish(TasksChanged {
                 project_id: task.project_id.clone(),
                 task_id: Some(task.id.clone()),
             });
@@ -162,7 +276,7 @@ impl AutomationTaskPort for DesktopApplication {
     }
 }
 
-impl AutomationTodoPort for DesktopApplication {
+impl AutomationTodoPort for DesktopAutomationOperationService {
     fn add_todo(
         &self,
         request: AutomationAddTodoRequest,
@@ -170,6 +284,7 @@ impl AutomationTodoPort for DesktopApplication {
         let id = stable_identity("automation-todo", &request.context);
         let task_id = TaskId::new(request.task_id).map_err(port_error)?;
         let (todo, _) = self
+            .todos
             .create_task_todo_idempotent(
                 &id,
                 DesktopTodoCreate {
@@ -191,7 +306,7 @@ impl AutomationTodoPort for DesktopApplication {
     }
 }
 
-impl AutomationGuidePort for DesktopApplication {
+impl AutomationGuidePort for DesktopAutomationOperationService {
     fn send_guide(
         &self,
         request: AutomationSendGuideRequest,
@@ -200,6 +315,7 @@ impl AutomationGuidePort for DesktopApplication {
         let task_id = TaskId::new(request.task_id).map_err(port_error)?;
         let priority = todo_priority(&request.priority)?;
         let (guide, _) = self
+            .todos
             .create_task_todo_idempotent(
                 &id,
                 DesktopTodoCreate {
@@ -223,13 +339,13 @@ impl AutomationGuidePort for DesktopApplication {
     }
 }
 
-impl AutomationTimelinePort for DesktopApplication {
+impl AutomationTimelinePort for DesktopAutomationOperationService {
     fn record_timeline(
         &self,
         request: AutomationRecordTimelineRequest,
     ) -> Result<JsonValue, AutomationPortError> {
         let task_id = TaskId::new(request.task_id).map_err(port_error)?;
-        self.get_task(&task_id).map_err(port_error)?;
+        self.project_tasks.get_task(&task_id).map_err(port_error)?;
         let event_id = stable_identity("automation-timeline", &request.context);
         let sequence = stable_sequence(&request.context);
         let event = TimelineProjectionEvent {
@@ -250,11 +366,11 @@ impl AutomationTimelinePort for DesktopApplication {
             projected: false,
         };
         let result = self
-            .authority()
+            .authority
             .apply_projection(TimelineProjectionCommand::UpsertTimelineEvent { event })
             .map_err(port_error)?;
         if result != ProjectionApplyResult::DuplicateIgnored {
-            self.emit_event(TimelineChanged {
+            self.events.publish(TimelineChanged {
                 task_id: task_id.clone(),
                 cursor: Some(sequence),
             });
@@ -267,7 +383,7 @@ impl AutomationTimelinePort for DesktopApplication {
     }
 }
 
-impl AutomationAgentPort for DesktopApplication {
+impl AutomationAgentPort for DesktopAutomationOperationService {
     fn start_agent(
         &self,
         request: AutomationStartAgentRequest,
@@ -281,7 +397,7 @@ impl AutomationAgentPort for DesktopApplication {
         let task_id = match request.target {
             AutomationAgentTarget::ExistingTask { task_id } => {
                 let task_id = TaskId::new(task_id).map_err(port_error)?;
-                self.get_task(&task_id).map_err(port_error)?;
+                self.project_tasks.get_task(&task_id).map_err(port_error)?;
                 task_id
             }
             AutomationAgentTarget::CreateTask { project_id, title } => {
@@ -314,10 +430,7 @@ impl AutomationAgentPort for DesktopApplication {
             node_id: request.context.idempotency_key.node_id.clone(),
         });
         let key = operation_key(&request.context, "agent-turn");
-        match self
-            .start_task_turn_idempotent(turn, &key)
-            .map_err(port_error)?
-        {
+        match self.agent.start_turn(turn, &key).map_err(port_error)? {
             DesktopIdempotentTurnStart::Dispatch {
                 dispatch,
                 worker_start_required,
@@ -361,7 +474,8 @@ impl AutomationAgentPort for DesktopApplication {
         activation: AutomationAgentActivation,
     ) -> Result<(), AutomationPortError> {
         let task_id = TaskId::new(activation.task_id).map_err(port_error)?;
-        self.activate_turn_worker(task_id, activation.turn_id)
+        self.agent
+            .activate_turn(task_id, activation.turn_id)
             .map_err(port_error)
     }
 
@@ -370,13 +484,13 @@ impl AutomationAgentPort for DesktopApplication {
         activation: AutomationAgentActivation,
     ) -> Result<(), AutomationPortError> {
         let task_id = TaskId::new(activation.task_id).map_err(port_error)?;
-        self.abort_prepared_turn(task_id, activation.turn_id);
+        self.agent.abort_turn(task_id, activation.turn_id);
         Ok(())
     }
 }
 
 fn create_product_task(
-    application: &DesktopApplication,
+    service: &DesktopAutomationOperationService,
     request: AutomationCreateTaskRequest,
     operation: &str,
 ) -> Result<JsonValue, AutomationPortError> {
@@ -386,14 +500,18 @@ fn create_product_task(
         .transpose()
         .map_err(port_error)?;
     if let Some(project_id) = &project_id {
-        application.get_project(project_id).map_err(port_error)?;
+        service
+            .project_tasks
+            .get_project(project_id)
+            .map_err(port_error)?;
     }
     let task_id =
         TaskId::new(stable_identity("automation-task", &request.context)).map_err(port_error)?;
     let mut task =
         ProductTask::new(task_id, project_id.clone(), request.title).map_err(port_error)?;
     task.status = product_task_status(&request.status)?;
-    task.sort_order = application
+    task.sort_order = service
+        .project_tasks
         .query_tasks(TaskQuery::for_project_or_inbox(project_id))
         .map_err(port_error)?
         .into_iter()
@@ -406,15 +524,15 @@ fn create_product_task(
     let meta =
         ProductCommandMeta::create(key.clone(), IdempotencyKey::new(key).map_err(port_error)?)
             .map_err(port_error)?;
-    let result = application
-        .authority()
+    let result = service
+        .authority
         .client()
         .map_err(port_error)?
         .create_product_entity(&meta, ProductEntity::Task(task), "automation_create_task")
         .map_err(port_error)?;
     let task = product_task(result.value)?;
     if !result.duplicate {
-        application.emit_event(TasksChanged {
+        service.events.publish(TasksChanged {
             project_id: task.project_id.clone(),
             task_id: Some(task.id.clone()),
         });
@@ -517,8 +635,8 @@ fn port_error(error: impl std::fmt::Display) -> AutomationPortError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use lilia_contracts::{ProductEntity, ProductTask, TaskId};
     use lilia_service::ServiceAuthority;
@@ -603,6 +721,7 @@ mod tests {
     #[test]
     fn task_creation_replay_returns_the_original_task_without_a_second_event() {
         let application = application();
+        let operations = application.automation_operation_service();
         let events = application.subscribe_events();
         let request = AutomationCreateTaskRequest {
             context: context("run:1", "node/1"),
@@ -611,8 +730,8 @@ mod tests {
             status: "running".to_owned(),
         };
 
-        let first = AutomationTaskPort::create_task(&application, request.clone()).unwrap();
-        let replay = AutomationTaskPort::create_task(&application, request).unwrap();
+        let first = AutomationTaskPort::create_task(&operations, request.clone()).unwrap();
+        let replay = AutomationTaskPort::create_task(&operations, request).unwrap();
 
         assert_eq!(replay, first);
         let tasks = application.query_tasks(TaskQuery::default()).unwrap();
@@ -625,6 +744,7 @@ mod tests {
     #[test]
     fn todo_and_guide_replays_do_not_duplicate_rows_or_events() {
         let (application, task_id) = application_with_task();
+        let operations = application.automation_operation_service();
         let events = application.subscribe_events();
         let todo_request = AutomationAddTodoRequest {
             context: context("run-2", "todo-node"),
@@ -638,14 +758,14 @@ mod tests {
             priority: "high".to_owned(),
         };
 
-        let todo = AutomationTodoPort::add_todo(&application, todo_request.clone()).unwrap();
+        let todo = AutomationTodoPort::add_todo(&operations, todo_request.clone()).unwrap();
         assert_eq!(
-            AutomationTodoPort::add_todo(&application, todo_request).unwrap(),
+            AutomationTodoPort::add_todo(&operations, todo_request).unwrap(),
             todo
         );
-        let guide = AutomationGuidePort::send_guide(&application, guide_request.clone()).unwrap();
+        let guide = AutomationGuidePort::send_guide(&operations, guide_request.clone()).unwrap();
         assert_eq!(
-            AutomationGuidePort::send_guide(&application, guide_request).unwrap(),
+            AutomationGuidePort::send_guide(&operations, guide_request).unwrap(),
             guide
         );
 
@@ -664,6 +784,7 @@ mod tests {
     #[test]
     fn timeline_replay_is_a_single_projection_and_single_event() {
         let (application, task_id) = application_with_task();
+        let operations = application.automation_operation_service();
         let events = application.subscribe_events();
         let request = AutomationRecordTimelineRequest {
             context: context("run-3", "timeline-node"),
@@ -675,8 +796,8 @@ mod tests {
             payload: json!({ "gate": "native" }),
         };
 
-        let first = AutomationTimelinePort::record_timeline(&application, request.clone()).unwrap();
-        let replay = AutomationTimelinePort::record_timeline(&application, request).unwrap();
+        let first = AutomationTimelinePort::record_timeline(&operations, request.clone()).unwrap();
+        let replay = AutomationTimelinePort::record_timeline(&operations, request).unwrap();
 
         assert_eq!(replay, first);
         let snapshot = application.task_session_snapshot(&task_id).unwrap();
@@ -743,6 +864,7 @@ mod tests {
         application.publish_automation(&workflow.id).unwrap();
         let begun = application
             .begin_automation_run(AutomationBeginRunInput {
+                expected_version_id: None,
                 workflow_id: workflow.id,
                 trigger: super::super::AutomationSignalEnvelope {
                     id: "real-port-signal".to_owned(),
@@ -765,5 +887,224 @@ mod tests {
         let tasks = application.query_tasks(TaskQuery::default()).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Created by real ports");
+    }
+
+    #[test]
+    fn operation_port_preserves_run_and_confirmation_ownership() {
+        use lilia_contracts::{AutomationOperationRequest, AutomationSignalEnvelope};
+        use lilia_feature_automation::AutomationOperationPort;
+        let app = application();
+        let workflow = app.save_automation_draft(serde_json::from_value(json!({
+            "id":"job-workflow", "name":"Confirm", "scope":{},
+            "nodes":[
+                {"id":"trigger","kind":"trigger","title":"Trigger","position":{"x":0,"y":0},"config":{}},
+                {"id":"human","kind":"human","title":"Confirm","position":{"x":100,"y":0},"config":{"prompt":"Review"}}
+            ],
+            "edges":[{"id":"next","source":"trigger","target":"human"}]
+        })).unwrap()).unwrap();
+        let version = app.publish_automation(&workflow.id).unwrap();
+        let trigger: AutomationSignalEnvelope =
+            serde_json::from_value(json!({"id":"job-signal","kind":"manual","createdAt":1}))
+                .unwrap();
+        let context = lilia_kernel::JobContext::new();
+        let operations = app.automation_operation_service();
+        let started = operations
+            .operate(
+                AutomationOperationRequest::Start {
+                    workflow_id: workflow.id.clone(),
+                    expected_version_id: version.id,
+                    trigger,
+                },
+                &context,
+            )
+            .unwrap();
+        assert!(started.error.is_none());
+        assert_eq!(
+            app.automation_run_detail(&started.run_id)
+                .unwrap()
+                .unwrap()
+                .run
+                .status,
+            AutomationRunStatus::WaitingUser
+        );
+        assert!(
+            operations
+                .operate(
+                    AutomationOperationRequest::Cancel {
+                        workflow_id: "other".into(),
+                        run_id: started.run_id.clone()
+                    },
+                    &context
+                )
+                .is_err()
+        );
+        let wrong = operations
+            .operate(
+                AutomationOperationRequest::Resume {
+                    workflow_id: workflow.id.clone(),
+                    run_id: started.run_id.clone(),
+                    node_id: "trigger".into(),
+                    payload: None,
+                },
+                &context,
+            )
+            .unwrap();
+        assert!(wrong.error.is_some());
+        assert_eq!(
+            app.automation_run_detail(&started.run_id)
+                .unwrap()
+                .unwrap()
+                .run
+                .status,
+            AutomationRunStatus::WaitingUser
+        );
+        let completed = operations
+            .operate(
+                AutomationOperationRequest::Resume {
+                    workflow_id: workflow.id,
+                    run_id: started.run_id.clone(),
+                    node_id: "human".into(),
+                    payload: Some(json!({"response":"confirmed"})),
+                },
+                &context,
+            )
+            .unwrap();
+        assert!(completed.error.is_none());
+        assert_eq!(completed.run_id, started.run_id);
+        let detail = app
+            .automation_run_detail(&completed.run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.run.status, AutomationRunStatus::Succeeded);
+        assert_eq!(
+            detail
+                .nodes
+                .iter()
+                .find(|node| node.node_id == "human")
+                .unwrap()
+                .output
+                .as_ref()
+                .unwrap()["user"]["response"],
+            "confirmed"
+        );
+    }
+}
+
+impl lilia_feature_automation::AutomationOperationPort for DesktopAutomationOperationService {
+    fn operate(
+        &self,
+        request: lilia_contracts::AutomationOperationRequest,
+        context: &lilia_kernel::JobContext,
+    ) -> Result<lilia_contracts::AutomationOperationResult, String> {
+        use lilia_contracts::{AutomationOperationRequest, AutomationOperationResult};
+        let workflow_id = request.workflow_id().to_owned();
+        if let Some(run_id) = request.run_id() {
+            let detail = self
+                .automation
+                .run_detail(run_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "自动化运行已不存在。".to_owned())?;
+            if detail.run.workflow_id != workflow_id {
+                return Err("运行不属于所选自动化。".into());
+            }
+        }
+        if context.is_cancelled() {
+            return Err("操作已取消。".into());
+        }
+        let (run_id, result) = match request {
+            AutomationOperationRequest::Start {
+                workflow_id,
+                expected_version_id,
+                trigger,
+            } => {
+                let detail = self
+                    .automation
+                    .try_begin_run(super::AutomationBeginRunInput {
+                        workflow_id,
+                        trigger,
+                        expected_version_id: Some(expected_version_id),
+                    })
+                    .map_err(automation_start_error)?;
+                let run_id = detail.run.id;
+                context.report(
+                    serde_json::json!({"workflowId":detail.run.workflow_id,"runId":run_id}),
+                );
+                let result = if context.is_cancelled() {
+                    self.cancel_run(&run_id).map(|_| ())
+                } else {
+                    self.execute_run(&run_id).map(|_| ())
+                };
+                (run_id, result)
+            }
+            AutomationOperationRequest::Resume {
+                run_id,
+                node_id,
+                payload,
+                ..
+            } => {
+                let result = self
+                    .resume_run(
+                        &run_id,
+                        AutomationResumeRunInput {
+                            node_id: Some(node_id),
+                            payload,
+                        },
+                    )
+                    .map(|_| ());
+                (run_id, result)
+            }
+            AutomationOperationRequest::Cancel { run_id, .. } => {
+                let result = self.cancel_run(&run_id).map(|_| ());
+                (run_id, result)
+            }
+        };
+        Ok(AutomationOperationResult {
+            workflow_id,
+            run_id,
+            error: result.err().and_then(automation_operation_error),
+        })
+    }
+}
+
+fn automation_start_error(error: lilia_feature_automation::DesktopAutomationError) -> String {
+    use lilia_feature_automation::{AutomationStoreError, DesktopAutomationError};
+    match error {
+        DesktopAutomationError::Store(AutomationStoreError::PublishedVersionChanged { .. }) => {
+            "自动化已发布新版本，请重新运行。"
+        }
+        DesktopAutomationError::Store(AutomationStoreError::ActiveRunExists { .. }) => {
+            "此自动化已有进行中的运行，请继续或取消该运行。"
+        }
+        DesktopAutomationError::Store(AutomationStoreError::PublishedVersionRequired {
+            ..
+        }) => "请先发布自动化再运行。",
+        _ => "暂时无法启动自动化，请刷新后重试。",
+    }
+    .into()
+}
+
+fn automation_operation_error(error: AutomationExecutionError) -> Option<String> {
+    use lilia_feature_automation::AutomationStoreError;
+    match error {
+        AutomationExecutionError::InvalidRunState {
+            actual: AutomationRunStatus::Cancelled,
+            ..
+        }
+        | AutomationExecutionError::InvalidNodeState {
+            status: AutomationRunStatus::Cancelled,
+            ..
+        }
+        | AutomationExecutionError::Store(AutomationStoreError::InvalidStateTransition {
+            actual: AutomationRunStatus::Cancelled,
+            ..
+        }) => None,
+        AutomationExecutionError::AgentCancellation { .. } => {
+            Some("未能停止 Agent，请重试取消。".into())
+        }
+        AutomationExecutionError::WaitingNodeNotFound { .. }
+        | AutomationExecutionError::InvalidRunState { .. } => {
+            Some("运行状态已变化，请检查最新进度。".into())
+        }
+        _ => Some("自动化操作失败，请查看运行详情后重试。".into()),
     }
 }

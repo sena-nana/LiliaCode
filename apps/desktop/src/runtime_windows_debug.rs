@@ -1,13 +1,19 @@
 use super::*;
 use crate::agent_debug::DebugCommand;
 use nana_ui::runtime::StableNodeId;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 impl TaskPopupHandles {
     fn debug_targets(&self) -> [(&'static str, StableNodeId); 2] {
         [
-            ("lilia.ui.popup.composer", self.composer.stable_id()),
-            ("lilia.ui.popup.send", self.send.stable_id()),
+            (
+                "lilia.ui.popup.composer",
+                self.task_view.composer_view.composer.stable_id(),
+            ),
+            (
+                "lilia.ui.popup.send",
+                self.task_view.composer_view.send.stable_id(),
+            ),
         ]
     }
 
@@ -92,7 +98,9 @@ impl TaskPopupHandles {
         context.focus_node(doc, id)?;
         let accepted = match command {
             DebugCommand::UiClick { .. } => context.activate_node(id)?,
-            DebugCommand::UiInput { text, .. } if id == self.composer.stable_id() => {
+            DebugCommand::UiInput { text, .. }
+                if id == self.task_view.composer_view.composer.stable_id() =>
+            {
                 context.select_all_focused_text(doc)?;
                 context.replace_focused_text(doc, text)?
             }

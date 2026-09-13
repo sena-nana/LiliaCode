@@ -105,11 +105,26 @@ fn checkpoint_from_events(
                 _ => {}
             }
         }
+        if let AgentEvent::ToolCallStarted {
+            call_id, turn_id, ..
+        }
+        | AgentEvent::ToolCallCompleted {
+            call_id, turn_id, ..
+        } = &envelope.event
+        {
+            if pending_by_id.get(call_id).is_some_and(|pending| {
+                pending.kind == "permission_approval"
+                    && pending.turn_id.as_deref() == Some(turn_id.as_str())
+            }) {
+                pending_by_id.remove(call_id);
+            }
+        }
     }
     let waiting_approval = status == Some("waiting_approval");
     let waiting_interaction = status == Some("waiting_interaction");
     let pending = pending_by_id
         .into_values()
+        .filter(|_| waiting_approval || waiting_interaction)
         .filter(|pending| turn_id.as_deref() == pending.turn_id.as_deref())
         .filter(|_| !matches!(status, Some("completed" | "cancelled" | "failed")))
         .collect();
@@ -1438,6 +1453,65 @@ mod tests {
                 checkpoint.pending.is_empty(),
                 "terminal {status} must not resurrect pending"
             );
+            events.pop();
+        }
+    }
+
+    #[test]
+    fn checkpoint_does_not_reopen_executed_approvals_during_later_steps() {
+        use mutsuki_agent_contracts::{PermissionRequest, ToolSideEffect};
+        let task = TaskId::new("task-approvals").unwrap();
+        let approval = |call: &str| AgentEvent::ApprovalRequest {
+            request: PermissionRequest {
+                session_id: "session".into(),
+                turn_id: "turn".into(),
+                action_id: call.into(),
+                version: 4,
+                tool: "task_browser".into(),
+                side_effect: ToolSideEffect::ExternalWrite,
+                summary: "Allow browser".into(),
+            },
+        };
+        let state = |status: &str| AgentEvent::TurnState {
+            turn_id: "turn".into(),
+            status: status.into(),
+        };
+        let mut events = vec![
+            state("running"),
+            approval("first"),
+            state("waiting_approval"),
+            state("running"),
+            AgentEvent::ToolCallStarted {
+                turn_id: "turn".into(),
+                call_id: "first".into(),
+                name: "task_browser".into(),
+                input: json!({"operation":{"kind":"observe"}}),
+            },
+            approval("second"),
+            state("waiting_approval"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, event)| AgentEventEnvelope {
+            session_id: "session".into(),
+            sequence: index as u64 + 1,
+            meta: AgentEventMeta::new(format!("event-{index}"), "browser"),
+            event,
+        })
+        .collect::<Vec<_>>();
+        let checkpoint = checkpoint_from_events(&task, "session", 1, &events);
+        assert_eq!(checkpoint.pending.len(), 1);
+        assert_eq!(checkpoint.pending[0].request_id, "second");
+        for status in ["completed", "cancelled", "failed"] {
+            events.push(AgentEventEnvelope {
+                session_id: "session".into(),
+                sequence: 8,
+                meta: AgentEventMeta::new("terminal", "turn"),
+                event: state(status),
+            });
+            assert!(checkpoint_from_events(&task, "session", 1, &events)
+                .pending
+                .is_empty());
             events.pop();
         }
     }

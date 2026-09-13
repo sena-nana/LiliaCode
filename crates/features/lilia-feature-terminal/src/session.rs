@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
 use lilia_contracts::{ProjectId, TaskId};
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::process::ProcessKiller;
 use crate::TerminalEvents;
-
 
 const TERMINAL_SCROLLBACK_ROWS: usize = 10_000;
 const MIN_TERMINAL_ROWS: u16 = 2;
@@ -162,6 +162,12 @@ pub struct DesktopTerminalSnapshot {
     pub scrollback_position: usize,
     pub maximum_scrollback_position: usize,
     pub screen: Vec<DesktopTerminalRow>,
+    #[serde(default)]
+    pub cells: Vec<lilia_contracts::TerminalGridCell>,
+    #[serde(default)]
+    pub application_cursor: bool,
+    #[serde(default)]
+    pub bracketed_paste: bool,
     pub process: DesktopTerminalProcessState,
     pub revision: u64,
     pub output_error: Option<String>,
@@ -209,6 +215,9 @@ impl DesktopTerminalRestoration {
                 styles: Vec::new(),
             }],
             process: DesktopTerminalProcessState::Restored,
+            cells: Vec::new(),
+            application_cursor: false,
+            bracketed_paste: false,
             revision: 0,
             output_error: None,
         }
@@ -257,7 +266,6 @@ impl Default for DesktopTerminalService {
         }
     }
 }
-
 
 impl DesktopTerminalService {
     /// Starts a PTY in `cwd` and registers it.
@@ -316,18 +324,23 @@ impl DesktopTerminalService {
         if input.is_empty() {
             return Ok(());
         }
-        let mut sessions = self
-            .sessions
+        let writer = {
+            let sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| DesktopTerminalError::StateUnavailable)?;
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| DesktopTerminalError::SessionNotFound(session_id.clone()))?;
+            session.ensure_running()?;
+            session.writer.clone()
+        };
+        let mut writer = writer
             .lock()
             .map_err(|_| DesktopTerminalError::StateUnavailable)?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| DesktopTerminalError::SessionNotFound(session_id.clone()))?;
-        session.ensure_running()?;
-        session
-            .writer
+        writer
             .write_all(input)
-            .and_then(|()| session.writer.flush())
+            .and_then(|()| writer.flush())
             .map_err(|error| operation_error("write input", error))
     }
 
@@ -382,14 +395,19 @@ impl DesktopTerminalService {
             .state
             .lock()
             .map_err(|_| DesktopTerminalError::StateUnavailable)?;
-        state.process = DesktopTerminalProcessState::Terminating;
-        state.revision = state.revision.saturating_add(1);
+        if state.process.is_running() {
+            state.process = DesktopTerminalProcessState::Terminating;
+            state.revision = state.revision.saturating_add(1);
+        }
         Ok(())
     }
 
     /// Drops a finished session. A running session must be terminated first so
     /// no process is left without an owner.
-    pub fn forget(&self, session_id: &DesktopTerminalSessionId) -> Result<(), DesktopTerminalError> {
+    pub fn forget(
+        &self,
+        session_id: &DesktopTerminalSessionId,
+    ) -> Result<(), DesktopTerminalError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -398,9 +416,13 @@ impl DesktopTerminalService {
             .get(session_id)
             .ok_or_else(|| DesktopTerminalError::SessionNotFound(session_id.clone()))?;
         if session.is_running()? {
-            return Err(DesktopTerminalError::SessionStillRunning(session_id.clone()));
+            return Err(DesktopTerminalError::SessionStillRunning(
+                session_id.clone(),
+            ));
         }
-        sessions.remove(session_id);
+        let removed = sessions.remove(session_id);
+        drop(sessions);
+        drop(removed);
         Ok(())
     }
 }
@@ -412,8 +434,8 @@ struct DesktopTerminalSession {
     command_label: String,
     process_id: Option<u32>,
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    killer: ProcessKiller,
     state: Arc<Mutex<DesktopTerminalRuntimeState>>,
     registration: TerminalRegistration,
 }
@@ -421,10 +443,41 @@ struct DesktopTerminalSession {
 type TerminalRegistration = Arc<(Mutex<bool>, Condvar)>;
 
 struct DesktopTerminalRuntimeState {
-    parser: vt100::Parser,
+    parser: vt100::Parser<TerminalResponses>,
     process: DesktopTerminalProcessState,
     revision: u64,
     output_error: Option<String>,
+}
+
+#[derive(Default)]
+struct TerminalResponses {
+    bytes: Vec<u8>,
+}
+
+impl vt100::Callbacks for TerminalResponses {
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        first: Option<u8>,
+        second: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if command != 'n' || second.is_some() || params.len() != 1 {
+            return;
+        }
+        match (first, params[0]) {
+            (None, [5]) => self.bytes.extend_from_slice(b"\x1b[0n"),
+            (None | Some(b'?'), [6]) => {
+                let (row, column) = screen.cursor_position();
+                let prefix = if first.is_some() { "?" } else { "" };
+                self.bytes.extend_from_slice(
+                    format!("\x1b[{prefix}{};{}R", row + 1, column + 1).as_bytes(),
+                );
+            }
+            _ => {}
+        }
+    }
 }
 
 impl DesktopTerminalSession {
@@ -454,6 +507,7 @@ impl DesktopTerminalSession {
                     operation: "open input writer",
                     message: error.to_string(),
                 })?;
+        let writer = Arc::new(Mutex::new(writer));
         let (command, command_label) = command_builder(&launch, &cwd);
         let mut child =
             pair.slave
@@ -465,9 +519,15 @@ impl DesktopTerminalSession {
         drop(pair.slave);
 
         let process_id = child.process_id();
-        let mut killer = child.clone_killer();
+        let mut killer = ProcessKiller::new(child.as_mut())
+            .map_err(|error| operation_error("own process handle", error))?;
         let state = Arc::new(Mutex::new(DesktopTerminalRuntimeState {
-            parser: vt100::Parser::new(launch.rows, launch.columns, TERMINAL_SCROLLBACK_ROWS),
+            parser: vt100::Parser::new_with_callbacks(
+                launch.rows,
+                launch.columns,
+                TERMINAL_SCROLLBACK_ROWS,
+                TerminalResponses::default(),
+            ),
             process: DesktopTerminalProcessState::Running,
             revision: 1,
             output_error: None,
@@ -495,11 +555,14 @@ impl DesktopTerminalSession {
                         message: error.to_string(),
                     },
                 };
-                if let Ok(mut state) = wait_state.lock() {
+                let revision = wait_state.lock().ok().map(|mut state| {
                     state.process = process;
                     state.revision = state.revision.saturating_add(1);
+                    state.revision
+                });
+                if let Some(revision) = revision {
                     wait_until_terminal_registered(&wait_registration);
-                    wait_events.changed(&wait_session_id, state.revision);
+                    wait_events.changed(&wait_session_id, revision);
                 }
             });
         if let Err(error) = wait_spawn {
@@ -512,6 +575,7 @@ impl DesktopTerminalSession {
         }
 
         let reader_state = state.clone();
+        let response_writer = writer.clone();
         let reader_events = events;
         let reader_session_id = session_id.clone();
         let reader_registration = registration.clone();
@@ -526,22 +590,48 @@ impl DesktopTerminalSession {
                     match reader.read(&mut buffer) {
                         Ok(0) => break,
                         Ok(read) => {
-                            let Ok(mut state) = reader_state.lock() else {
-                                break;
+                            let (mut revision, response) = {
+                                let Ok(mut state) = reader_state.lock() else {
+                                    break;
+                                };
+                                state.parser.process(&buffer[..read]);
+                                state.revision = state.revision.saturating_add(1);
+                                let response =
+                                    std::mem::take(&mut state.parser.callbacks_mut().bytes);
+                                (state.revision, response)
                             };
-                            state.parser.process(&buffer[..read]);
-                            state.revision = state.revision.saturating_add(1);
+                            if !response.is_empty() {
+                                let written = match response_writer.lock() {
+                                    Ok(mut writer) => {
+                                        writer.write_all(&response).and_then(|_| writer.flush())
+                                    }
+                                    Err(_) => Err(std::io::Error::other(
+                                        "terminal input writer is unavailable",
+                                    )),
+                                };
+                                if let Err(error) = written {
+                                    if let Ok(mut state) = reader_state.lock() {
+                                        state.output_error = Some(error.to_string());
+                                        state.revision = state.revision.saturating_add(1);
+                                        revision = state.revision;
+                                    }
+                                }
+                            }
                             wait_until_terminal_registered(&reader_registration);
-                            reader_events.changed(&reader_session_id, state.revision);
+                            reader_events.changed(&reader_session_id, revision);
                         }
                         Err(error) => {
-                            if let Ok(mut state) = reader_state.lock() {
-                                if state.process.is_running() {
-                                    state.output_error = Some(error.to_string());
-                                    state.revision = state.revision.saturating_add(1);
-                                    wait_until_terminal_registered(&reader_registration);
-                                    reader_events.changed(&reader_session_id, state.revision);
+                            let revision = reader_state.lock().ok().and_then(|mut state| {
+                                if !state.process.is_running() {
+                                    return None;
                                 }
+                                state.output_error = Some(error.to_string());
+                                state.revision = state.revision.saturating_add(1);
+                                Some(state.revision)
+                            });
+                            if let Some(revision) = revision {
+                                wait_until_terminal_registered(&reader_registration);
+                                reader_events.changed(&reader_session_id, revision);
                             }
                             break;
                         }
@@ -600,6 +690,9 @@ impl DesktopTerminalSession {
             scrollback_position: screen.scrollback(),
             maximum_scrollback_position,
             screen: snapshot_rows(&screen),
+            cells: snapshot_cells(&screen),
+            application_cursor: screen.application_cursor(),
+            bracketed_paste: screen.bracketed_paste(),
             process: state.process.clone(),
             revision: state.revision,
             output_error: state.output_error.clone(),
@@ -777,6 +870,46 @@ fn snapshot_rows(screen: &vt100::Screen) -> Vec<DesktopTerminalRow> {
         .collect()
 }
 
+fn snapshot_cells(screen: &vt100::Screen) -> Vec<lilia_contracts::TerminalGridCell> {
+    use lilia_contracts::{TerminalCellColor, TerminalGridCell};
+    let color = |value| match value {
+        vt100::Color::Default => TerminalCellColor::Default,
+        vt100::Color::Idx(index) => TerminalCellColor::Indexed(index),
+        vt100::Color::Rgb(r, g, b) => TerminalCellColor::Rgb([r, g, b]),
+    };
+    let (rows, columns) = screen.size();
+    (0..rows)
+        .flat_map(|row| {
+            (0..columns).map(move |column| {
+                let Some(cell) = screen.cell(row, column) else {
+                    return TerminalGridCell {
+                        text: " ".into(),
+                        width: 1,
+                        ..Default::default()
+                    };
+                };
+                TerminalGridCell {
+                    text: cell.contents().to_owned(),
+                    width: if cell.is_wide_continuation() {
+                        0
+                    } else if cell.is_wide() {
+                        2
+                    } else {
+                        1
+                    },
+                    foreground: color(cell.fgcolor()),
+                    background: color(cell.bgcolor()),
+                    bold: cell.bold(),
+                    dim: cell.dim(),
+                    italic: cell.italic(),
+                    underline: cell.underline(),
+                    inverse: cell.inverse(),
+                }
+            })
+        })
+        .collect()
+}
+
 fn terminal_style(cell: &vt100::Cell) -> DesktopTerminalStyle {
     DesktopTerminalStyle {
         foreground: terminal_color(cell.fgcolor()),
@@ -786,6 +919,147 @@ fn terminal_style(cell: &vt100::Cell) -> DesktopTerminalStyle {
         italic: cell.italic(),
         underline: cell.underline(),
         inverse: cell.inverse(),
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_queries_survive_read_boundaries_and_use_the_live_cursor() {
+        let mut parser = vt100::Parser::new_with_callbacks(8, 80, 0, TerminalResponses::default());
+        parser.process(b"normal output [6n");
+        assert!(parser.callbacks().bytes.is_empty());
+        parser.process(b"\x1b[3;9H\x1b[");
+        parser.process(b"6");
+        assert!(parser.callbacks().bytes.is_empty());
+        parser.process(b"n");
+        assert_eq!(
+            std::mem::take(&mut parser.callbacks_mut().bytes),
+            b"\x1b[3;9R"
+        );
+        parser.process(b"X\x1b[?6n\x1b[5n");
+        assert_eq!(
+            std::mem::take(&mut parser.callbacks_mut().bytes),
+            b"\x1b[?3;10R\x1b[0n"
+        );
+        parser.process(b"\x1b]0;literal [6n\x07");
+        assert!(parser.callbacks().bytes.is_empty());
+    }
+
+    #[test]
+    fn real_pty_subscriber_can_synchronously_read_committed_output_and_exit() {
+        use std::sync::{mpsc, Weak};
+        use std::time::{Duration, Instant};
+        struct SnapshotSubscriber {
+            service: Weak<DesktopTerminalService>,
+            changed: mpsc::Sender<(u64, Result<DesktopTerminalSnapshot, DesktopTerminalError>)>,
+        }
+        impl TerminalEvents for SnapshotSubscriber {
+            fn changed(&self, id: &DesktopTerminalSessionId, revision: u64) {
+                let Some(service) = self.service.upgrade() else {
+                    return;
+                };
+                let snapshot = service.snapshot(id, 0);
+                let _ = self.changed.send((revision, snapshot));
+            }
+        }
+        let service = Arc::new(DesktopTerminalService::default());
+        let (changes, observed) = mpsc::channel();
+        let events = Arc::new(SnapshotSubscriber {
+            service: Arc::downgrade(&service),
+            changed: changes,
+        });
+        let scope = DesktopTerminalScope::Task(TaskId::new("reentrant-terminal-test").unwrap());
+        #[cfg(windows)]
+        let command = DesktopTerminalCommand {
+            arguments: vec![
+                "/D".into(),
+                "/C".into(),
+                "echo committed-pty-output & exit /b 7".into(),
+            ],
+            ..DesktopTerminalCommand::new("cmd.exe")
+        };
+        #[cfg(not(windows))]
+        let command = DesktopTerminalCommand {
+            arguments: vec![
+                "-c".into(),
+                "printf 'committed-pty-output\n'; exit 7".into(),
+            ],
+            ..DesktopTerminalCommand::new("/bin/sh")
+        };
+        let launch = DesktopTerminalLaunch {
+            scope: scope.clone(),
+            command: Some(command),
+            rows: 8,
+            columns: 80,
+        };
+        let worker_service = service.clone();
+        let (launched, launch_result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = launched.send(worker_service.launch(launch, std::env::temp_dir(), events));
+        });
+        let timeout = Duration::from_secs(15);
+        let started = launch_result
+            .recv_timeout(timeout)
+            .expect("terminal launch or its snapshot deadlocked")
+            .expect("real PTY launch succeeds");
+        let deadline = Instant::now() + timeout;
+        let mut saw_output = false;
+        let mut saw_exit = false;
+        let mut last_observed = None;
+        while !(saw_output && saw_exit) {
+            let (revision, snapshot) = observed
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|error| panic!("subscriber did not observe output and exit: {error:?}; output={saw_output}, exit={saw_exit}, last={last_observed:?}"));
+            let snapshot = snapshot.expect("published session is registered and readable");
+            assert_eq!(snapshot.id, started.id);
+            assert_eq!(snapshot.scope, scope);
+            assert!(revision > 1 && snapshot.revision >= revision);
+            saw_output |= snapshot
+                .screen
+                .iter()
+                .any(|row| row.text.contains("committed-pty-output"));
+            last_observed = Some((
+                snapshot.revision,
+                snapshot.process.clone(),
+                snapshot
+                    .screen
+                    .iter()
+                    .map(|row| row.text.clone())
+                    .collect::<Vec<_>>(),
+            ));
+            saw_exit |= matches!(
+                snapshot.process,
+                DesktopTerminalProcessState::Exited {
+                    success: false,
+                    exit_code: 7,
+                    ..
+                }
+            );
+        }
+        let final_snapshot = service.snapshot(&started.id, 0).unwrap();
+        assert!(!final_snapshot.process.is_running());
+        service.forget(&started.id).unwrap();
+    }
+
+    #[test]
+    fn grid_preserves_wide_continuations_combining_text_and_ansi_style() {
+        let mut parser = vt100::Parser::new(2, 8, 0);
+        parser.process("\u{1b}[31;1m中e\u{301}\u{1b}[0m!".as_bytes());
+        let cells = snapshot_cells(parser.screen());
+        assert_eq!(cells.len(), 16);
+        assert_eq!((&*cells[0].text, cells[0].width), ("中", 2));
+        assert_eq!(cells[1].width, 0);
+        assert_eq!((&*cells[2].text, cells[2].width), ("e\u{301}", 1));
+        assert_eq!(
+            cells[0].foreground,
+            lilia_contracts::TerminalCellColor::Indexed(1)
+        );
+        assert!(cells[2].bold);
+        assert!(!cells[3].bold);
+        assert_eq!(cells[3].text, "!");
     }
 }
 
@@ -803,4 +1077,3 @@ fn operation_error(operation: &'static str, error: std::io::Error) -> DesktopTer
         message: error.to_string(),
     }
 }
-

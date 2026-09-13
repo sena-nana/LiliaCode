@@ -10,22 +10,22 @@ use lilia_contracts::{
     PendingProjection, ProjectId, TaskId, TimelineProjectionCommand, TimelineProjectionEvent,
 };
 use lilia_feature_agent_session::{
-    apply_title_proposal, build_title_prompt_for_job, respond_title_update,
-    respond_title_update_review, run_title_update_after_turn, task_title_state, TitleError,
-    TitleHost, TitleModelRequest,
+    TitleError, TitleHost, TitleModelRequest, apply_title_proposal, build_title_prompt_for_job,
+    respond_title_update, respond_title_update_review, run_title_update_after_turn,
+    task_title_state,
 };
 use lilia_storage::ProjectionApplyResult;
 
 use crate::application::{
-    DesktopApplication, DesktopApplicationError, DesktopTaskPatch, TasksChanged, TimelineChanged,
-    ASSISTANT_AI_CREDENTIAL_KEY,
+    ASSISTANT_AI_CREDENTIAL_KEY, DesktopApplication, DesktopApplicationError, DesktopTaskPatch,
+    TasksChanged, TimelineChanged,
 };
 
 pub use lilia_feature_agent_session::{
-    normalize_title, title_event_id, title_system_instruction, DesktopTaskTitleSource,
-    DesktopTaskTitleState, DesktopTimelineUpperBound, DesktopTitleUpdateCoordinator,
-    DesktopTitleUpdateDecision, DesktopTitleUpdateJob, DesktopTitleUpdateReview,
-    DesktopTitleUpdateScheduler, TITLE_MAX_CHARS, TITLE_MIN_CHARS, TITLE_UPDATE_ACTION_KIND,
+    DesktopTaskTitleSource, DesktopTaskTitleState, DesktopTimelineUpperBound,
+    DesktopTitleUpdateCoordinator, DesktopTitleUpdateDecision, DesktopTitleUpdateJob,
+    DesktopTitleUpdateReview, DesktopTitleUpdateScheduler, TITLE_MAX_CHARS, TITLE_MIN_CHARS,
+    TITLE_UPDATE_ACTION_KIND, normalize_title, title_event_id, title_system_instruction,
 };
 
 impl From<TitleError> for DesktopApplicationError {
@@ -515,14 +515,16 @@ mod tests {
             .unwrap();
         assert_eq!(accepted.title, "最终建议标题");
         assert_eq!(accepted.title_source, DesktopTaskTitleSource::Manual);
-        assert!(application
-            .task_session_snapshot(&task.id)
-            .unwrap()
-            .pending
-            .iter()
-            .any(|item| {
-                item.request_id == third_review.request_id
-                    && item.status == PendingProjectionStatus::Resolved
-            }));
+        assert!(
+            application
+                .task_session_snapshot(&task.id)
+                .unwrap()
+                .pending
+                .iter()
+                .any(|item| {
+                    item.request_id == third_review.request_id
+                        && item.status == PendingProjectionStatus::Resolved
+                })
+        );
     }
 }

@@ -1,4 +1,4 @@
-use objc2::{AnyThread, MainThreadMarker, rc::Retained};
+use objc2::{rc::Retained, AnyThread, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSImage, NSWindow};
 use objc2_foundation::NSData;
 

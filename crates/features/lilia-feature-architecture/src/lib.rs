@@ -51,6 +51,15 @@ pub trait ArchitectureStore: Send {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DesktopArchitectureError {
+    #[error(transparent)]
+    Product(#[from] lilia_contracts::ProductError),
+    #[error(transparent)]
+    Authority(#[from] lilia_service::ServiceAuthorityError),
+    #[error("architecture task {task_id} must belong to project {project_id}")]
+    TaskProjectMismatch {
+        project_id: lilia_contracts::ProjectId,
+        task_id: lilia_contracts::TaskId,
+    },
     #[error("architecture project id must not be empty")]
     EmptyProjectId,
     #[error("architecture task id must not be empty")]
@@ -144,6 +153,6 @@ impl Feature for ArchitectureFeature {
     }
 
     fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
-        cx.provide::<ArchitectureServiceKey>(self.service.clone())
+        cx.provide::<ArchitectureServiceKey>(self.service.clone().with_events(cx.events().clone()))
     }
 }

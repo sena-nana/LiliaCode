@@ -8,15 +8,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
+use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
 use notify::{EventKind, RecursiveMode, Watcher};
 
 use crate::application::{
-    DesktopApplication, DesktopApplicationError, DesktopEvent, HooksRegistryChanged,
-    McpRegistryChanged, PluginsRegistryChanged, ProjectQuery, SkillsRegistryChanged,
+    DesktopApplication, DesktopApplicationError, DesktopEvent, DesktopEventBus,
+    HooksRegistryChanged, McpRegistryChanged, PluginsRegistryChanged, ProjectQuery,
+    SkillsRegistryChanged,
 };
 
 pub const REGISTRY_WATCH_SOURCE: &str = "registry-file-watch";
@@ -37,67 +39,71 @@ pub(crate) struct RegistryFileWatch {
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
-struct RegistryWatchRunGuard(DesktopApplication);
-
-impl Drop for RegistryWatchRunGuard {
-    fn drop(&mut self) {
-        self.0
-            .inner
-            .registry_file_watch
-            .running
-            .store(false, Ordering::SeqCst);
-    }
+/// Owns external registry-file invalidation and its one process-local watcher.
+#[derive(Clone)]
+pub struct RegistryFileWatchService {
+    paths: lilia_storage::LiliaDataPaths,
+    project_tasks: lilia_feature_task::ProjectTaskService,
+    events: DesktopEventBus,
+    enabled: bool,
+    state: Arc<RegistryFileWatch>,
 }
 
-impl Default for RegistryFileWatch {
-    fn default() -> Self {
+impl RegistryFileWatchService {
+    pub(crate) fn new(
+        paths: lilia_storage::LiliaDataPaths,
+        project_tasks: lilia_feature_task::ProjectTaskService,
+        events: DesktopEventBus,
+        enabled: bool,
+    ) -> Self {
         Self {
-            stop: AtomicBool::new(false),
-            running: AtomicBool::new(false),
-            thread: Mutex::new(None),
+            paths,
+            project_tasks,
+            events,
+            enabled,
+            state: Arc::new(RegistryFileWatch::default()),
         }
     }
-}
 
-impl DesktopApplication {
-    pub fn start_registry_file_watch(&self) -> Result<(), DesktopApplicationError> {
-        if self.inner.authority.data_paths().is_none() {
+    pub fn start(&self) -> Result<(), DesktopApplicationError> {
+        if !self.enabled {
             return Ok(());
         }
-        let watch = &self.inner.registry_file_watch;
-        if watch
+        if self
+            .state
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
             return Ok(());
         }
-        watch.stop.store(false, Ordering::SeqCst);
-        let application = self.clone();
+        self.state.stop.store(false, Ordering::SeqCst);
+        let service = self.clone();
         let handle = match thread::Builder::new()
             .name("lilia-registry-file-watch".to_owned())
-            .spawn(move || registry_watch_loop(application))
+            .spawn(move || registry_watch_loop(service))
         {
             Ok(handle) => handle,
             Err(error) => {
-                watch.running.store(false, Ordering::SeqCst);
+                self.state.running.store(false, Ordering::SeqCst);
                 return Err(DesktopApplicationError::InvalidInput {
                     field: "registry_file_watch",
                     message: format!("failed to start registry file watch: {error}"),
                 });
             }
         };
-        *watch
+        *self
+            .state
             .thread
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle);
         Ok(())
     }
 
-    pub fn stop_registry_file_watch(&self) {
-        let watch = &self.inner.registry_file_watch;
-        watch.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = watch
+    pub fn stop(&self) {
+        self.state.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self
+            .state
             .thread
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -105,16 +111,21 @@ impl DesktopApplication {
         {
             let _ = handle.join();
         }
-        watch.running.store(false, Ordering::SeqCst);
+        self.state.running.store(false, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn is_running(&self) -> bool {
+        self.state.running.load(Ordering::SeqCst)
     }
 
     /// Recomputes watched paths and publishes coalesced invalidation events for
     /// the supplied filesystem paths. Used by tests and the background watcher.
-    pub fn publish_registry_path_changes(
+    pub fn publish_path_changes(
         &self,
         paths: &[PathBuf],
     ) -> Result<Vec<DesktopEvent>, DesktopApplicationError> {
-        let watched = self.registry_watch_targets()?;
+        let watched = self.targets()?;
         let mut kinds = BTreeSet::new();
         for path in paths {
             for target in &watched {
@@ -126,36 +137,35 @@ impl DesktopApplication {
         let mut published = Vec::new();
         for kind in kinds {
             published.push(match kind {
-                RegistryWatchKind::Hooks => self.emit_event(HooksRegistryChanged),
-                RegistryWatchKind::Skills => self.emit_event(SkillsRegistryChanged),
-                RegistryWatchKind::Mcp => self.emit_event(McpRegistryChanged),
-                RegistryWatchKind::Plugins => self.emit_event(PluginsRegistryChanged),
+                RegistryWatchKind::Hooks => self.events.publish(HooksRegistryChanged),
+                RegistryWatchKind::Skills => self.events.publish(SkillsRegistryChanged),
+                RegistryWatchKind::Mcp => self.events.publish(McpRegistryChanged),
+                RegistryWatchKind::Plugins => self.events.publish(PluginsRegistryChanged),
             });
         }
         Ok(published)
     }
 
-    fn registry_watch_targets(&self) -> Result<Vec<RegistryWatchTarget>, DesktopApplicationError> {
-        let paths = self.config().data_paths();
+    fn targets(&self) -> Result<Vec<RegistryWatchTarget>, DesktopApplicationError> {
         let mut targets = vec![
             RegistryWatchTarget {
-                path: lilia_storage::user_hooks_document_path(&paths),
+                path: lilia_storage::user_hooks_document_path(&self.paths),
                 kind: RegistryWatchKind::Hooks,
             },
             RegistryWatchTarget {
-                path: lilia_storage::skills_registry_path(&paths),
+                path: lilia_storage::skills_registry_path(&self.paths),
                 kind: RegistryWatchKind::Skills,
             },
             RegistryWatchTarget {
-                path: lilia_storage::mcp_registry_path(&paths),
+                path: lilia_storage::mcp_registry_path(&self.paths),
                 kind: RegistryWatchKind::Mcp,
             },
             RegistryWatchTarget {
-                path: lilia_storage::plugins_registry_path(&paths),
+                path: lilia_storage::plugins_registry_path(&self.paths),
                 kind: RegistryWatchKind::Plugins,
             },
         ];
-        for project in self.query_projects(ProjectQuery::default())? {
+        for project in self.project_tasks.query_projects(ProjectQuery::default())? {
             let Some(workspace) = project
                 .workspace_path
                 .as_deref()
@@ -173,14 +183,87 @@ impl DesktopApplication {
     }
 }
 
+pub struct RegistryFileWatchServiceKey;
+
+impl ServiceKey for RegistryFileWatchServiceKey {
+    type Value = RegistryFileWatchService;
+    const NAME: &'static str = "lilia.registry-file-watch";
+}
+
+pub struct RegistryFileWatchFeature {
+    service: RegistryFileWatchService,
+}
+
+impl RegistryFileWatchFeature {
+    pub fn new(service: RegistryFileWatchService) -> Self {
+        Self { service }
+    }
+}
+
+impl Feature for RegistryFileWatchFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.registry-file-watch").expect("nonempty feature id")
+    }
+
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<RegistryFileWatchServiceKey>()]
+    }
+
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        cx.provide::<RegistryFileWatchServiceKey>(self.service.clone())
+    }
+}
+
+struct RegistryWatchRunGuard(RegistryFileWatchService);
+
+impl Drop for RegistryWatchRunGuard {
+    fn drop(&mut self) {
+        self.0.state.running.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Default for RegistryFileWatch {
+    fn default() -> Self {
+        Self {
+            stop: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+            thread: Mutex::new(None),
+        }
+    }
+}
+
+impl DesktopApplication {
+    pub fn start_registry_file_watch(&self) -> Result<(), DesktopApplicationError> {
+        self.registry_file_watch_service().start()
+    }
+
+    pub fn stop_registry_file_watch(&self) {
+        self.registry_file_watch_service().stop();
+    }
+
+    /// Recomputes watched paths and publishes coalesced invalidation events for
+    /// the supplied filesystem paths. Used by tests and the background watcher.
+    pub fn publish_registry_path_changes(
+        &self,
+        paths: &[PathBuf],
+    ) -> Result<Vec<DesktopEvent>, DesktopApplicationError> {
+        self.registry_file_watch_service()
+            .publish_path_changes(paths)
+    }
+
+    pub fn registry_file_watch_service(&self) -> RegistryFileWatchService {
+        self.inner.registry_file_watch.clone()
+    }
+}
+
 #[derive(Clone, Debug)]
 struct RegistryWatchTarget {
     path: PathBuf,
     kind: RegistryWatchKind,
 }
 
-fn registry_watch_loop(application: DesktopApplication) {
-    let _running = RegistryWatchRunGuard(application.clone());
+fn registry_watch_loop(service: RegistryFileWatchService) {
+    let _running = RegistryWatchRunGuard(service.clone());
     let (sender, receiver) = std::sync::mpsc::channel();
     let callback_sender = sender.clone();
     let mut watcher = notify::recommended_watcher(move |result| {
@@ -197,12 +280,7 @@ fn registry_watch_loop(application: DesktopApplication) {
     let mut last_watcher_attempt = Instant::now();
 
     loop {
-        if application
-            .inner
-            .registry_file_watch
-            .stop
-            .load(Ordering::SeqCst)
-        {
+        if service.state.stop.load(Ordering::SeqCst) {
             break;
         }
 
@@ -216,7 +294,7 @@ fn registry_watch_loop(application: DesktopApplication) {
             .ok();
         }
 
-        if let Ok(targets) = application.registry_watch_targets() {
+        if let Ok(targets) = service.targets() {
             for path in scan_registry_target_changes(&targets, &mut target_stamps) {
                 pending.insert(path);
                 last_change = Instant::now();
@@ -263,7 +341,7 @@ fn registry_watch_loop(application: DesktopApplication) {
                 if !pending.is_empty() && last_change.elapsed() >= DEBOUNCE {
                     let paths = pending.iter().cloned().collect::<Vec<_>>();
                     pending.clear();
-                    if let Err(error) = application.publish_registry_path_changes(&paths) {
+                    if let Err(error) = service.publish_path_changes(&paths) {
                         eprintln!("[registry-file-watch] publish failed: {error}");
                     }
                 }
@@ -398,9 +476,9 @@ mod tests {
         let app = DesktopApplication::bootstrap(config, Arc::new(TestHost)).unwrap();
 
         app.start_registry_file_watch().unwrap();
-        assert!(app.inner.registry_file_watch.running.load(Ordering::SeqCst));
+        assert!(app.registry_file_watch_service().is_running());
         app.stop_registry_file_watch();
-        assert!(!app.inner.registry_file_watch.running.load(Ordering::SeqCst));
+        assert!(!app.registry_file_watch_service().is_running());
 
         app.start_registry_file_watch().unwrap();
         app.stop_registry_file_watch();

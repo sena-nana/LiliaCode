@@ -4,17 +4,19 @@
 //! lifecycle. Which directory a session starts in is a project or worktree
 //! fact, so the caller resolves the working directory and passes it in.
 
+mod process;
 mod session;
 
 use std::sync::Arc;
 
-use lilia_kernel::{Event, EventBus, Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
+use lilia_kernel::{
+    Event, EventBus, Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef,
+};
 
 pub use session::{
-    canonical_directory,
-    DesktopTerminalColor, DesktopTerminalCommand, DesktopTerminalError, DesktopTerminalLaunch,
-    DesktopTerminalProcessState, DesktopTerminalRestoration, DesktopTerminalRow,
-    DesktopTerminalScope, DesktopTerminalService, DesktopTerminalSessionId,
+    canonical_directory, DesktopTerminalColor, DesktopTerminalCommand, DesktopTerminalError,
+    DesktopTerminalLaunch, DesktopTerminalProcessState, DesktopTerminalRestoration,
+    DesktopTerminalRow, DesktopTerminalScope, DesktopTerminalService, DesktopTerminalSessionId,
     DesktopTerminalSnapshot, DesktopTerminalStyle, DesktopTerminalStyleSpan,
 };
 

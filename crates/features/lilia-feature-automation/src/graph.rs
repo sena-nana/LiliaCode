@@ -190,12 +190,12 @@ pub fn automation_active_outgoing_edges<'a>(
                 }
                 Some("output" | "success") if selected_handles.is_empty() => true,
                 Some("output") if selected_handles.contains("success") => true,
-                Some(handle) => selected_handles.contains(handle),
                 None => {
                     selected_handles.is_empty()
                         || selected_handles.contains("success")
                         || selected_handles.contains("true")
                 }
+                Some(handle) => selected_handles.contains(handle),
             }
         })
         .collect()

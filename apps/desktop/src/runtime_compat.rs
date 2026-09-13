@@ -33,16 +33,7 @@ pub type HostedWindowSettings = WindowSettings;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HostedUiCommand {
-    Focus {
-        window_id: WindowId,
-        target: String,
-    },
-    ScrollBy {
-        window_id: WindowId,
-        target: String,
-        x: f32,
-        y: f32,
-    },
+    Focus { window_id: WindowId, target: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +61,9 @@ impl HostedWindowAction {
 
 pub fn window_event_id(event: &WindowEvent) -> WindowId {
     match event {
-        WindowEvent::Ready { id, .. }
+        WindowEvent::OpenFailed { id, .. }
+        | WindowEvent::MousePassthroughChanged { id, .. }
+        | WindowEvent::Ready { id, .. }
         | WindowEvent::Resized { id, .. }
         | WindowEvent::Moved { id, .. }
         | WindowEvent::VisibilityChanged { id, .. }
@@ -83,8 +76,6 @@ pub fn window_event_id(event: &WindowEvent) -> WindowId {
         | WindowEvent::FileHoverCancelled { id }
         | WindowEvent::FileDialogCompleted { id, .. }
         | WindowEvent::FileDialogRejected { id, .. }
-        | WindowEvent::OpenFailed { id, .. }
-        | WindowEvent::MousePassthroughChanged { id, .. }
         | WindowEvent::AppearanceChanged { id, .. } => *id,
     }
 }

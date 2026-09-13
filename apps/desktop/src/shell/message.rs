@@ -231,6 +231,9 @@ pub enum RemoteMessage {
     CancelPairing,
     CopyPairingUri,
     RevokeDevice(String),
+    ConfirmRevokeDevice,
+    CancelRevokeDevice,
+    Refresh,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -259,6 +262,10 @@ pub enum ProjectMessage {
     RestoreProject(ProjectId),
     SelectProject(ProjectId),
     SaveProjectSettings,
+    SetWorktreeMode(String),
+    PickWorktreeParent,
+    WorktreeInstructionsChanged(String),
+    ToggleWorktreeCleanup,
     OpenProjectWorkspace,
     OpenNativeProjectTerminal,
     OpenProjectFiles,
@@ -306,7 +313,6 @@ pub enum SidebarMessage {
     SidebarToggleTaskPinned(TaskId),
     SidebarRequestTaskWorktreeMerge(TaskId),
     SidebarArchiveTask(TaskId),
-    SidebarStopTask(TaskId),
     SidebarTreeDrop {
         source: SidebarTreeNode,
         target: SidebarTreeNode,

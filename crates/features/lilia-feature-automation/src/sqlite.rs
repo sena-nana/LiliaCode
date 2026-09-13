@@ -465,6 +465,17 @@ impl AutomationStore for SqliteAutomationStore {
                 workflow_id: input.workflow_id.clone(),
             }
         })?;
+        if let Some(expected) = input
+            .expected_version_id
+            .as_ref()
+            .filter(|expected| *expected != &version_id)
+        {
+            return Err(AutomationStoreError::PublishedVersionChanged {
+                workflow_id: input.workflow_id,
+                expected: expected.clone(),
+                actual: version_id,
+            });
+        }
         let version = version_on(&transaction, &version_id)?.ok_or_else(|| {
             AutomationStoreError::VersionNotFound {
                 version_id: version_id.clone(),
@@ -1378,6 +1389,7 @@ mod tests {
                     let mut store = SqliteAutomationStore::open(path).unwrap();
                     barrier.wait();
                     store.try_begin_run(AutomationBeginRunInput {
+                        expected_version_id: None,
                         workflow_id: "workflow-1".to_owned(),
                         trigger: signal(&format!("signal-{index}")),
                     })
@@ -1418,6 +1430,7 @@ mod tests {
         let input = AutomationBeginRunInput {
             workflow_id: "workflow-1".to_owned(),
             trigger: signal("durable-product-event-42"),
+            expected_version_id: None,
         };
         let mut original = {
             let mut store = published_store(&path);
@@ -1445,11 +1458,43 @@ mod tests {
         assert!(matches!(
             store.try_begin_run(AutomationBeginRunInput {
                 workflow_id: "workflow-1".to_owned(),
-                trigger
+                trigger,
+                expected_version_id: None,
             }),
             Err(AutomationStoreError::SignalNotMatched { .. })
         ));
         assert!(store.list_runs(Some("workflow-1")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn queued_start_cannot_silently_execute_a_new_publication() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = published_store(&directory.path().join("automation.sqlite3"));
+        let previous = store
+            .workflow("workflow-1")
+            .unwrap()
+            .unwrap()
+            .published_version_id
+            .unwrap();
+        let current = store.publish("workflow-1").unwrap();
+        let result = store.try_begin_run(AutomationBeginRunInput {
+            workflow_id: "workflow-1".into(),
+            expected_version_id: Some(previous),
+            trigger: signal("stale"),
+        });
+        assert!(matches!(
+            result,
+            Err(AutomationStoreError::PublishedVersionChanged { .. })
+        ));
+        assert!(store.list_runs(Some("workflow-1")).unwrap().is_empty());
+        let run = store
+            .try_begin_run(AutomationBeginRunInput {
+                workflow_id: "workflow-1".into(),
+                expected_version_id: Some(current.id.clone()),
+                trigger: signal("current"),
+            })
+            .unwrap();
+        assert_eq!(run.run.workflow_version_id, current.id);
     }
 
     #[test]
@@ -1471,6 +1516,7 @@ mod tests {
             .unwrap();
 
         let result = store.try_begin_run(AutomationBeginRunInput {
+            expected_version_id: None,
             workflow_id: "workflow-1".to_owned(),
             trigger: signal("rollback"),
         });
@@ -1493,6 +1539,7 @@ mod tests {
         let mut store = published_store(&path);
         let run = store
             .try_begin_run(AutomationBeginRunInput {
+                expected_version_id: None,
                 workflow_id: "workflow-1".to_owned(),
                 trigger: signal("active-delete"),
             })

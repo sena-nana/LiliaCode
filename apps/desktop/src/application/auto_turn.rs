@@ -1,10 +1,10 @@
 use lilia_agent::{NativeControlModelRequest, NativeControlModelResult};
 use lilia_contracts::{
-    auto_context_thresholds_for_scale, auto_model_for_provider_family_tier,
+    ChatContextUsage, auto_context_thresholds_for_scale, auto_model_for_provider_family_tier,
     auto_preset_for_context_scale, auto_preset_for_workflow_type, auto_reasoning_effort_for_preset,
     auto_reasoning_effort_for_tier, auto_turn_decision_request_instruction,
     auto_turn_decision_system_instruction, auto_turn_decision_tier_policy, builtin_preset_label,
-    plan_mode_preset, ChatContextUsage,
+    plan_mode_preset,
 };
 use mutsuki_agent_contracts::{ANTHROPIC_CREDENTIAL_PROVIDER_ID, OPENAI_CREDENTIAL_PROVIDER_ID};
 use serde::Deserialize;
@@ -500,8 +500,8 @@ fn tier_for_existing_model(model: Option<&str>) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use lilia_service::ServiceAuthority;
 
@@ -602,10 +602,12 @@ mod tests {
         let selection = selected.automatic_selection.unwrap();
         assert_eq!(selection.tier, "deep");
         assert_eq!(selection.decision_provider_id, "deterministic");
-        assert!(selection
-            .signals
-            .iter()
-            .any(|signal| signal == "工作流 lilia_review"));
+        assert!(
+            selection
+                .signals
+                .iter()
+                .any(|signal| signal == "工作流 lilia_review")
+        );
     }
 
     #[test]

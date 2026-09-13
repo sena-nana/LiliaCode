@@ -217,6 +217,7 @@ pub const AUTOMATIONS_SCOPE_INCLUDE_INBOX: &str = "lilia.automations.scope.inclu
 pub const AUTOMATIONS_NODE_TITLE: &str = "lilia.automations.node.title";
 pub const AUTOMATIONS_NODE_CONFIG: &str = "lilia.automations.node.config";
 pub const AUTOMATIONS_NODE_SAVE: &str = "lilia.automations.node.save";
+pub const AUTOMATIONS_NODE_CLOSE: &str = "lilia.automations.node.close";
 pub const AUTOMATIONS_PUBLISH: &str = "lilia.automations.publish";
 pub const AUTOMATIONS_TOGGLE: &str = "lilia.automations.toggle";
 pub const AUTOMATIONS_DELETE: &str = "lilia.automations.delete";
@@ -598,6 +599,10 @@ pub fn automation_scope(field: &str, value: &str) -> String {
 
 pub fn automation_node_config(field: &str) -> String {
     format!("lilia.automations.node.config.{field}")
+}
+
+pub fn automation_node(workflow_id: &str, node_id: &str) -> String {
+    format!("lilia.automations.graph.{workflow_id}.node.{node_id}")
 }
 
 pub fn milestone(milestone_id: &str) -> String {
@@ -1277,4 +1282,8 @@ fn stable_target_hash(value: &str) -> u64 {
         .fold(0xcbf29ce484222325, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
         })
+}
+
+pub fn browser_control(window: u64, pane: &str, resource: &str, control: &str) -> String {
+    format!("lilia.browser.{window}.{pane}.{resource}.{control}")
 }

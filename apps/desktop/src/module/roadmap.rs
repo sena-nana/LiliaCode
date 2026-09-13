@@ -4,12 +4,14 @@
 //! One instance per window, so two windows can edit different milestones of the
 //! same project without the shell swapping state around each call.
 
-use lilia_feature_roadmap::{MilestoneUpdatePatch, ProjectRoadmap};
+use lilia_feature_roadmap::{MilestoneUpdatePatch, ProjectRoadmap, RoadmapServiceKey};
 use lilia_kernel::FeatureId;
 
 use crate::application::ProjectWorkspaceSurface;
-use crate::runtime_shell::{PrimaryShellSnapshot, ShellProjectPage, ShellRoadmapCard};
+use crate::runtime_shell::ShellProjectPage;
+pub mod view;
 use crate::ui_module::{ShellEffect, UiModule, UiModuleContext, UiModuleOutcome};
+use view::{RoadmapCard, RoadmapTask, RoadmapViewSnapshot};
 
 /// The roadmap domain's own message vocabulary.
 #[derive(Debug, Clone)]
@@ -35,9 +37,10 @@ pub struct RoadmapModule {
     title: String,
     description: String,
     due_date: String,
+    loaded_title: String,
+    loaded_description: String,
+    loaded_due_date: String,
     error: Option<String>,
-    editor_dirty: bool,
-    loaded_project: Option<lilia_contracts::ProjectId>,
 }
 
 impl RoadmapModule {
@@ -64,7 +67,7 @@ impl RoadmapModule {
     /// Restores the milestone a window remembered, falling back to the first one
     /// when the saved id no longer exists.
     pub fn restore_selection(&mut self, milestone_id: Option<String>) {
-        let selected = milestone_id
+        self.selected = milestone_id
             .filter(|selected| self.has(selected))
             .or_else(|| {
                 self.roadmap
@@ -72,10 +75,6 @@ impl RoadmapModule {
                     .first()
                     .map(|milestone| milestone.id.clone())
             });
-        if self.editor_dirty && self.selected == selected {
-            return;
-        }
-        self.selected = selected;
         self.load_selected();
     }
 
@@ -102,39 +101,21 @@ impl RoadmapModule {
             self.load_selected();
             return UiModuleOutcome::dirty();
         };
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
             }
         };
-        match application.project_roadmap(&project_id) {
+        match service.list(&project_id) {
             Ok(roadmap) => {
-                let preserve_draft = self.editor_dirty
-                    && self.loaded_project.as_ref() == Some(&project_id)
-                    && self.selected.as_ref().is_some_and(|selected| {
-                        roadmap
-                            .milestones
-                            .iter()
-                            .any(|milestone| milestone.id == *selected)
-                    });
-                self.loaded_project = Some(project_id);
                 self.roadmap = roadmap;
-                if !self
-                    .selected
-                    .as_deref()
-                    .is_some_and(|selected| self.has(selected))
-                {
-                    self.selected = self
-                        .roadmap
-                        .milestones
-                        .first()
-                        .map(|milestone| milestone.id.clone());
-                }
-                if !preserve_draft {
-                    self.load_selected();
-                }
+                self.apply_loaded_records();
                 self.error = None;
             }
             Err(error) => self.error = Some(format!("无法读取路线图：{error}")),
@@ -151,10 +132,55 @@ impl RoadmapModule {
         UiModuleOutcome::dirty()
     }
 
+    fn editor_is_dirty(&self) -> bool {
+        if self.selected.is_none() {
+            return !self.title.is_empty()
+                || !self.description.is_empty()
+                || !self.due_date.is_empty();
+        }
+        self.title != self.loaded_title
+            || self.description != self.loaded_description
+            || self.due_date != self.loaded_due_date
+    }
+
+    fn apply_loaded_records(&mut self) {
+        let selected_missing = self
+            .selected
+            .as_deref()
+            .is_some_and(|selected| !self.has(selected));
+        if selected_missing {
+            if self.editor_is_dirty() {
+                self.selected = None;
+                return;
+            }
+            self.selected = self
+                .roadmap
+                .milestones
+                .first()
+                .map(|milestone| milestone.id.clone());
+            self.load_selected();
+            return;
+        }
+        if self.editor_is_dirty() {
+            return;
+        }
+        if self
+            .selected
+            .as_deref()
+            .is_none_or(|selected| !self.has(selected))
+        {
+            self.selected = self
+                .roadmap
+                .milestones
+                .first()
+                .map(|milestone| milestone.id.clone());
+        }
+        self.load_selected();
+    }
+
     /// Refills the editor fields from the selected milestone, so an edit always
     /// starts from what is stored rather than from the previous selection.
     fn load_selected(&mut self) {
-        self.editor_dirty = false;
         match self.milestone() {
             Some(milestone) => {
                 let title = milestone.title.clone();
@@ -163,14 +189,20 @@ impl RoadmapModule {
                     .due_date
                     .map(crate::desktop::format_civil_date)
                     .unwrap_or_default();
-                self.title = title;
-                self.description = description;
-                self.due_date = due_date;
+                self.title = title.clone();
+                self.description = description.clone();
+                self.due_date = due_date.clone();
+                self.loaded_title = title;
+                self.loaded_description = description;
+                self.loaded_due_date = due_date;
             }
             None => {
                 self.title.clear();
                 self.description.clear();
                 self.due_date.clear();
+                self.loaded_title.clear();
+                self.loaded_description.clear();
+                self.loaded_due_date.clear();
             }
         }
     }
@@ -179,14 +211,21 @@ impl RoadmapModule {
         let Some(project_id) = cx.selected_project() else {
             return UiModuleOutcome::clean();
         };
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
             }
         };
-        match application.create_milestone(&project_id, "新里程碑") {
+        if self.editor_is_dirty() && self.selected.is_none() {
+            return self.save(cx);
+        }
+        match service.create(&project_id, "新里程碑") {
             Ok(milestone) => {
                 self.refresh(cx);
                 self.select(milestone.id)
@@ -199,10 +238,12 @@ impl RoadmapModule {
     }
 
     fn save(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
-        let (Some(project_id), Some(milestone_id)) = (cx.selected_project(), self.selected.clone())
-        else {
+        let Some(project_id) = cx.selected_project() else {
             return UiModuleOutcome::clean();
         };
+        if self.title.trim().is_empty() {
+            return UiModuleOutcome::clean();
+        }
         let due_date = match crate::desktop::parse_civil_date_update(&self.due_date) {
             Ok(due_date) => due_date,
             Err(error) => {
@@ -210,8 +251,12 @@ impl RoadmapModule {
                 return UiModuleOutcome::dirty();
             }
         };
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
@@ -223,10 +268,30 @@ impl RoadmapModule {
             status: None,
             due_date,
         };
-        match application.update_milestone(&project_id, &milestone_id, patch) {
+        let result = match self.selected.clone() {
+            Some(milestone_id) if self.has(&milestone_id) => {
+                service.update(&project_id, &milestone_id, patch)
+            }
+            _ => match service.create(&project_id, &self.title) {
+                Ok(milestone) => {
+                    self.selected = Some(milestone.id.clone());
+                    self.refresh(cx);
+                    match service.update(&project_id, &milestone.id, patch) {
+                        Ok(updated) => Ok(updated),
+                        Err(error) => {
+                            self.refresh(cx);
+                            Err(error)
+                        }
+                    }
+                }
+                Err(error) => Err(error),
+            },
+        };
+        match result {
             Ok(_) => {
-                self.editor_dirty = false;
-                self.refresh(cx)
+                let outcome = self.refresh(cx);
+                self.load_selected();
+                outcome
             }
             Err(error) => {
                 self.error = Some(format!("无法保存里程碑：{error}"));
@@ -246,8 +311,12 @@ impl RoadmapModule {
         else {
             return UiModuleOutcome::clean();
         };
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
@@ -257,7 +326,7 @@ impl RoadmapModule {
             status: Some(status),
             ..MilestoneUpdatePatch::default()
         };
-        match application.update_milestone(&project_id, &milestone_id, patch) {
+        match service.update(&project_id, &milestone_id, patch) {
             Ok(_) => self.refresh(cx),
             Err(error) => {
                 self.error = Some(format!("无法更新里程碑状态：{error}"));
@@ -283,8 +352,12 @@ impl RoadmapModule {
         if target < 0 || target >= self.roadmap.milestones.len() as isize {
             return UiModuleOutcome::clean();
         }
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
@@ -297,7 +370,7 @@ impl RoadmapModule {
             .map(|milestone| milestone.id.clone())
             .collect::<Vec<_>>();
         ids.swap(index, target as usize);
-        match application.reorder_milestones(&project_id, ids) {
+        match service.reorder(&project_id, ids) {
             Ok(_) => self.refresh(cx),
             Err(error) => {
                 self.error = Some(format!("无法调整里程碑顺序：{error}"));
@@ -311,16 +384,26 @@ impl RoadmapModule {
         else {
             return UiModuleOutcome::clean();
         };
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
             }
         };
-        match application.delete_milestone(&project_id, &milestone_id) {
+        match service.delete(&project_id, &milestone_id) {
             Ok(_) => {
                 self.selected = None;
+                self.title.clear();
+                self.description.clear();
+                self.due_date.clear();
+                self.loaded_title.clear();
+                self.loaded_description.clear();
+                self.loaded_due_date.clear();
                 self.refresh(cx)
             }
             Err(error) => {
@@ -335,8 +418,12 @@ impl RoadmapModule {
         else {
             return UiModuleOutcome::clean();
         };
-        let application = match cx.application() {
-            Ok(application) => application,
+        let service = match cx
+            .kernel()
+            .service::<RoadmapServiceKey>()
+            .map_err(|error| format!("路线图服务不可用：{error}"))
+        {
+            Ok(service) => service,
             Err(error) => {
                 self.error = Some(error);
                 return UiModuleOutcome::dirty();
@@ -352,11 +439,7 @@ impl RoadmapModule {
         if !task_ids.remove(&task_id) {
             task_ids.insert(task_id);
         }
-        match application.set_milestone_tasks(
-            &project_id,
-            &milestone_id,
-            task_ids.into_iter().collect(),
-        ) {
+        match service.set_tasks(&project_id, &milestone_id, task_ids.into_iter().collect()) {
             Ok(_) => self.refresh(cx),
             Err(error) => {
                 self.error = Some(format!("无法更新关联任务：{error}"));
@@ -367,6 +450,8 @@ impl RoadmapModule {
 }
 
 impl UiModule for RoadmapModule {
+    type Projection<'a> = crate::ui_module::projection::RoadmapProjection<'a>;
+
     type Message = RoadmapMessage;
 
     fn feature(&self) -> FeatureId {
@@ -382,19 +467,16 @@ impl UiModule for RoadmapModule {
             RoadmapMessage::Select(milestone_id) => self.select(milestone_id),
             RoadmapMessage::TitleChanged(value) => {
                 self.title = value;
-                self.editor_dirty = true;
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
             RoadmapMessage::DescriptionChanged(value) => {
                 self.description = value;
-                self.editor_dirty = true;
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
             RoadmapMessage::DueDateChanged(value) => {
                 self.due_date = value;
-                self.editor_dirty = true;
                 self.error = None;
                 UiModuleOutcome::dirty()
             }
@@ -412,7 +494,7 @@ impl UiModule for RoadmapModule {
         envelope: &lilia_kernel::EventEnvelope,
         cx: &UiModuleContext<'_>,
     ) -> UiModuleOutcome {
-        let Some(event) = envelope.downcast::<crate::application::RoadmapChanged>() else {
+        let Some(event) = envelope.downcast::<lilia_feature_roadmap::RoadmapChanged>() else {
             return UiModuleOutcome::clean();
         };
         if cx.selected_project().as_ref() != Some(&event.project_id) {
@@ -421,82 +503,70 @@ impl UiModule for RoadmapModule {
         self.refresh(cx)
     }
 
-    fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
-        // The editor title is a composer-region input, rendered outside the
-        // roadmap page's own body, so it travels regardless of the active page.
-        into.milestone_editor_identity = cx
-            .selected_project()
-            .zip(self.selected.as_ref())
-            .map(|(project, milestone)| (project.as_str().to_owned(), milestone.clone()));
-        into.milestone_title = self.title.clone();
-        into.milestone_description = self.description.clone();
-        into.milestone_due_date = self.due_date.clone();
-        into.milestone_status_label = self
-            .milestone()
-            .map(|milestone| crate::desktop::milestone_status_label(milestone.status).to_owned())
-            .unwrap_or_default();
+    fn project_fields(&self, cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
         if !cx.shows(ShellProjectPage::Roadmap) {
             return;
         }
-        let tasks = cx
-            .workspace()
-            .and_then(|workspace| workspace.snapshot().ok())
-            .map(|snapshot| snapshot.tasks)
-            .unwrap_or_default();
-        into.project_page_body = self
-            .error
-            .clone()
-            .unwrap_or_else(|| format!("{} 个里程碑", self.roadmap.milestones.len()));
-        into.roadmap_tasks = self
-            .selected
-            .as_ref()
-            .map(|selected| {
-                tasks
-                    .iter()
-                    .map(|task| {
-                        (
-                            task.id.as_str().to_owned(),
-                            task.title.clone(),
-                            self.roadmap.links.iter().any(|link| {
-                                link.milestone_id == *selected && link.task_id == task.id.as_str()
-                            }),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        into.roadmap_cards = self
-            .roadmap
-            .milestones
-            .iter()
-            .map(|milestone| ShellRoadmapCard {
-                id: milestone.id.clone(),
-                title: milestone.title.clone(),
-                status: {
-                    let linked = tasks
-                        .iter()
-                        .filter(|task| {
-                            self.roadmap.links.iter().any(|link| {
-                                link.milestone_id == milestone.id
-                                    && link.task_id == task.id.as_str()
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    let completed = linked
-                        .iter()
-                        .filter(|task| task.status == lilia_contracts::ProductTaskStatus::Done)
-                        .count();
-                    format!(
-                        "{} · {completed}/{} 已完成",
+        *into.roadmap = RoadmapViewSnapshot {
+            project_id: cx.selected_project().map(|id| id.as_str().to_owned()),
+            selected: self.selected.clone(),
+            title: self.title.clone(),
+            description: self.description.clone(),
+            due_date: self.due_date.clone(),
+            status_label: self
+                .milestone()
+                .map(|milestone| {
+                    crate::desktop::milestone_status_label(milestone.status).to_owned()
+                })
+                .unwrap_or_default(),
+            error: self.error.clone(),
+            cards: self
+                .roadmap
+                .milestones
+                .iter()
+                .map(|milestone| RoadmapCard {
+                    id: milestone.id.clone(),
+                    title: milestone.title.clone(),
+                    subtitle: format!(
+                        "{} · {}",
                         crate::desktop::milestone_status_label(milestone.status),
-                        linked.len()
-                    )
-                },
-                date: milestone
-                    .due_date
-                    .map(crate::desktop::format_civil_date)
-                    .unwrap_or_else(|| "无截止日期".to_owned()),
-            })
-            .collect();
+                        milestone
+                            .due_date
+                            .map(|due| due.to_string())
+                            .unwrap_or_else(|| "无截止日期".to_owned())
+                    ),
+                })
+                .collect(),
+            tasks: {
+                let selected = self.selected.clone();
+                let linked = self
+                    .roadmap
+                    .links
+                    .iter()
+                    .filter(|link| selected.as_deref() == Some(link.milestone_id.as_str()))
+                    .map(|link| link.task_id.clone())
+                    .collect::<std::collections::BTreeSet<_>>();
+                cx.workspace_snapshot()
+                    .map(|snapshot| {
+                        snapshot
+                            .tasks
+                            .into_iter()
+                            .map(|task| {
+                                let id = task.id.as_str().to_owned();
+                                RoadmapTask {
+                                    linked: linked.contains(&id),
+                                    id,
+                                    title: if task.title.trim().is_empty() {
+                                        "未命名会话".to_owned()
+                                    } else {
+                                        task.title
+                                    },
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            },
+        };
     }
 }

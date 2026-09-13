@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -87,7 +88,44 @@ impl From<ProjectContextError> for ProjectFilesError {
     }
 }
 
-impl DesktopApplication {
+#[derive(Clone)]
+pub struct ProjectFilesService {
+    projects: lilia_feature_task::ProjectTaskService,
+    documents: crate::application::DesktopDocumentService,
+    events: lilia_kernel::EventBus,
+    watchers: Arc<Mutex<BTreeMap<String, ProjectFilesWatcher>>>,
+    revisions: Arc<Mutex<BTreeMap<String, AtomicU64>>>,
+}
+
+impl ProjectFilesService {
+    pub(crate) fn new(
+        projects: lilia_feature_task::ProjectTaskService,
+        documents: crate::application::DesktopDocumentService,
+        events: lilia_kernel::EventBus,
+    ) -> Self {
+        Self {
+            projects,
+            documents,
+            events,
+            watchers: Arc::new(Mutex::new(BTreeMap::new())),
+            revisions: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    fn project_context(
+        &self,
+        project_id: &ProjectId,
+    ) -> Result<ProjectContext, DesktopApplicationError> {
+        let project = self.projects.get_project(project_id)?;
+        if project.archive == ProjectArchiveState::Archived {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "projectId",
+                message: format!("project `{}` is archived", project_id.as_str()),
+            });
+        }
+        Ok(ProjectContext::from_project(&project)?)
+    }
+
     pub fn list_project_directory(
         &self,
         project_id: &ProjectId,
@@ -102,7 +140,7 @@ impl DesktopApplication {
         project_id: &ProjectId,
         view: ProjectFilesViewState,
     ) -> Result<ProjectFilesSnapshot, DesktopApplicationError> {
-        let project = self.get_project(project_id)?;
+        let project = self.projects.get_project(project_id)?;
         if project.archive == ProjectArchiveState::Archived {
             return Err(DesktopApplicationError::InvalidInput {
                 field: "projectId",
@@ -113,6 +151,12 @@ impl DesktopApplication {
         let view = sanitize_view_state(&context, view)?;
         let revision = self.project_files_revision(project_id);
         let entries = build_tree(&context, &view.expanded_paths)?;
+        if self.project_context(project_id)?.active_root() != context.active_root() {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "projectId",
+                message: "project workspace changed while reading the directory".into(),
+            });
+        }
         Ok(ProjectFilesSnapshot {
             project_id: project_id.clone(),
             root_name: project.name,
@@ -141,10 +185,16 @@ impl DesktopApplication {
         if metadata.len() > MAX_OPEN_FILE_BYTES {
             return Err(ProjectFilesError::FileTooLarge(relative_path.to_owned()).into());
         }
-        let bytes = fs::read(&absolute).map_err(|error| ProjectFilesError::Io {
-            path: relative_path.to_owned(),
-            message: error.to_string(),
-        })?;
+        let mut bytes = Vec::new();
+        fs::File::open(&absolute)
+            .and_then(|file| file.take(MAX_OPEN_FILE_BYTES + 1).read_to_end(&mut bytes))
+            .map_err(|error| ProjectFilesError::Io {
+                path: relative_path.to_owned(),
+                message: error.to_string(),
+            })?;
+        if bytes.len() as u64 > MAX_OPEN_FILE_BYTES {
+            return Err(ProjectFilesError::FileTooLarge(relative_path.to_owned()).into());
+        }
         if bytes.contains(&0) {
             return Err(ProjectFilesError::BinaryFile(relative_path.to_owned()).into());
         }
@@ -154,7 +204,14 @@ impl DesktopApplication {
             path: relative_path.to_owned(),
             message: error.to_string(),
         })?;
-        let (snapshot, _) = self.open_document(absolute, text, None, false)?;
+        let current = self.project_context(project_id)?;
+        if current.active_root() != context.active_root() {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "projectId",
+                message: "project workspace changed while opening the file".into(),
+            });
+        }
+        let (snapshot, _) = self.documents.open_document(absolute, text, None, false)?;
         self.ensure_project_files_watcher(project_id)?;
         Ok(snapshot)
     }
@@ -168,33 +225,41 @@ impl DesktopApplication {
         if !root.is_dir() {
             return Err(ProjectFilesError::NotADirectory(root.display().to_string()).into());
         }
-        let mut watchers = self
-            .inner
-            .project_files_watchers
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("project files watchers"))?;
-        if let Some(existing) = watchers.get(project_id.as_str()) {
-            if existing.root == root && !existing.stop_flag.load(Ordering::SeqCst) {
+        let previous = {
+            let mut watchers = self
+                .watchers
+                .lock()
+                .map_err(|_| DesktopApplicationError::StateUnavailable("project files watchers"))?;
+            if watchers.get(project_id.as_str()).is_some_and(|existing| {
+                existing.root == root && !existing.stop_flag.load(Ordering::SeqCst)
+            }) {
                 return Ok(());
             }
-            existing.stop();
-        }
-        let watcher = ProjectFilesWatcher::start(
-            self.clone(),
-            project_id.clone(),
-            root.clone(),
-            self.inner.project_files_revisions.clone(),
-        )?;
-        watchers.insert(project_id.as_str().to_owned(), watcher);
+            let watcher = ProjectFilesWatcher::start(
+                self.projects.clone(),
+                self.events.clone(),
+                project_id.clone(),
+                root,
+                self.revisions.clone(),
+            )?;
+            let previous = watchers.insert(project_id.as_str().to_owned(), watcher);
+            if let Some(previous) = &previous {
+                previous.stop_flag.store(true, Ordering::SeqCst);
+                bump_revision(&self.revisions, project_id.as_str());
+            }
+            previous
+        };
+        drop(previous);
         Ok(())
     }
 
     pub fn stop_project_files_watcher(&self, project_id: &ProjectId) {
-        if let Ok(mut watchers) = self.inner.project_files_watchers.lock() {
-            if let Some(watcher) = watchers.remove(project_id.as_str()) {
-                watcher.stop();
-            }
-        }
+        let watcher = self
+            .watchers
+            .lock()
+            .ok()
+            .and_then(|mut watchers| watchers.remove(project_id.as_str()));
+        drop(watcher);
     }
 
     pub fn project_files_view_state_from_value(
@@ -211,8 +276,7 @@ impl DesktopApplication {
     }
 
     fn project_files_revision(&self, project_id: &ProjectId) -> u64 {
-        self.inner
-            .project_files_revisions
+        self.revisions
             .lock()
             .ok()
             .and_then(|revisions| {
@@ -224,6 +288,90 @@ impl DesktopApplication {
     }
 }
 
+pub enum ProjectFilesServiceKey {}
+impl lilia_kernel::ServiceKey for ProjectFilesServiceKey {
+    type Value = ProjectFilesService;
+    const NAME: &'static str = "lilia.project.files.operations";
+}
+pub struct ProjectFilesFeature {
+    service: ProjectFilesService,
+}
+impl ProjectFilesFeature {
+    pub fn new(service: ProjectFilesService) -> Self {
+        Self { service }
+    }
+}
+impl lilia_kernel::Feature for ProjectFilesFeature {
+    fn id(&self) -> lilia_kernel::FeatureId {
+        lilia_kernel::FeatureId::new("lilia.feature.project-files").expect("valid feature id")
+    }
+    fn provides(&self) -> Vec<lilia_kernel::ServiceRef> {
+        vec![lilia_kernel::ServiceRef::of::<ProjectFilesServiceKey>()]
+    }
+    fn mount(
+        &self,
+        cx: &mut lilia_kernel::FeatureContext<'_>,
+    ) -> Result<(), lilia_kernel::KernelError> {
+        cx.provide::<ProjectFilesServiceKey>(self.service.clone())
+    }
+}
+impl DesktopApplication {
+    pub fn project_files_service(&self) -> ProjectFilesService {
+        self.inner.project_files.clone()
+    }
+    pub fn list_project_directory(
+        &self,
+        id: &ProjectId,
+        path: &str,
+    ) -> Result<Vec<ProjectFileEntry>, DesktopApplicationError> {
+        self.inner.project_files.list_project_directory(id, path)
+    }
+    pub fn project_files_snapshot(
+        &self,
+        id: &ProjectId,
+        view: ProjectFilesViewState,
+    ) -> Result<ProjectFilesSnapshot, DesktopApplicationError> {
+        self.inner.project_files.project_files_snapshot(id, view)
+    }
+    pub fn open_project_file(
+        &self,
+        id: &ProjectId,
+        path: &str,
+    ) -> Result<DocumentSnapshot, DesktopApplicationError> {
+        self.inner.project_files.open_project_file(id, path)
+    }
+    pub fn ensure_project_files_watcher(
+        &self,
+        id: &ProjectId,
+    ) -> Result<(), DesktopApplicationError> {
+        self.inner.project_files.ensure_project_files_watcher(id)
+    }
+    pub fn stop_project_files_watcher(&self, id: &ProjectId) {
+        self.inner.project_files.stop_project_files_watcher(id);
+    }
+    pub fn project_files_view_state_from_value(
+        value: Option<&serde_json::Value>,
+    ) -> ProjectFilesViewState {
+        ProjectFilesService::project_files_view_state_from_value(value)
+    }
+    pub fn project_files_view_state_value(state: &ProjectFilesViewState) -> serde_json::Value {
+        ProjectFilesService::project_files_view_state_value(state)
+    }
+}
+
+fn watcher_scope_is_current(
+    projects: &lilia_feature_task::ProjectTaskService,
+    id: &ProjectId,
+    root: &Path,
+) -> bool {
+    projects
+        .get_project(id)
+        .ok()
+        .filter(|project| project.archive == ProjectArchiveState::Active)
+        .and_then(|project| ProjectContext::from_project(&project).ok())
+        .is_some_and(|context| context.active_root() == root)
+}
+
 pub(crate) struct ProjectFilesWatcher {
     root: PathBuf,
     stop_flag: Arc<AtomicBool>,
@@ -233,20 +381,27 @@ pub(crate) struct ProjectFilesWatcher {
 
 impl ProjectFilesWatcher {
     fn start(
-        application: DesktopApplication,
+        projects: lilia_feature_task::ProjectTaskService,
+        events: lilia_kernel::EventBus,
         project_id: ProjectId,
         root: PathBuf,
         revisions: Arc<Mutex<BTreeMap<String, AtomicU64>>>,
     ) -> Result<Self, DesktopApplicationError> {
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut watcher = notify::recommended_watcher(move |result| {
-            let _ = tx.send(result);
-        })
-        .map_err(|error| ProjectFilesError::Io {
-            path: root.display().to_string(),
-            message: error.to_string(),
-        })?;
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let mut watcher =
+            notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+                if result
+                    .as_ref()
+                    .map_or(true, |event| event_is_relevant(&event.kind))
+                {
+                    let _ = tx.try_send(());
+                }
+            })
+            .map_err(|error| ProjectFilesError::Io {
+                path: root.display().to_string(),
+                message: error.to_string(),
+            })?;
         watcher
             .watch(&root, RecursiveMode::Recursive)
             .map_err(|error| ProjectFilesError::Io {
@@ -265,25 +420,27 @@ impl ProjectFilesWatcher {
                     .unwrap_or_else(Instant::now);
                 while !stop_flag_thread.load(Ordering::SeqCst) {
                     match rx.recv_timeout(WATCHER_DEBOUNCE) {
-                        Ok(Ok(event)) => {
-                            if event_is_relevant(&event.kind) {
-                                pending = true;
-                            }
-                        }
-                        Ok(Err(_)) => pending = true,
+                        Ok(()) => pending = true,
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                     if pending && last_fire.elapsed() >= WATCHER_DEBOUNCE {
                         pending = false;
                         last_fire = Instant::now();
-                        bump_revision(&revisions, project_id.as_str());
-                        application.emit_event(ProjectFilesChanged {
+                        if stop_flag_thread.load(Ordering::SeqCst)
+                            || !watcher_scope_is_current(&projects, &project_id, &root_thread)
+                        {
+                            break;
+                        }
+                        let revision = bump_revision(&revisions, project_id.as_str());
+                        events.publish(ProjectFilesChanged {
                             project_id: project_id.clone(),
+                            workspace_root: root_thread.clone(),
+                            revision,
                         });
                     }
                 }
-                let _ = root_thread;
+                stop_flag_thread.store(true, Ordering::SeqCst);
             })
             .map_err(|error| ProjectFilesError::Io {
                 path: root.display().to_string(),
@@ -302,7 +459,9 @@ impl ProjectFilesWatcher {
         self.stop_flag.store(true, Ordering::SeqCst);
         if let Ok(mut join) = self.join.lock() {
             if let Some(handle) = join.take() {
-                let _ = handle.join();
+                if handle.thread().id() != thread::current().id() {
+                    let _ = handle.join();
+                }
             }
         }
     }
@@ -314,13 +473,15 @@ impl Drop for ProjectFilesWatcher {
     }
 }
 
-fn bump_revision(revisions: &Arc<Mutex<BTreeMap<String, AtomicU64>>>, project_id: &str) {
-    if let Ok(mut guard) = revisions.lock() {
-        guard
-            .entry(project_id.to_owned())
-            .or_insert_with(|| AtomicU64::new(0))
-            .fetch_add(1, Ordering::SeqCst);
-    }
+fn bump_revision(revisions: &Arc<Mutex<BTreeMap<String, AtomicU64>>>, project_id: &str) -> u64 {
+    let mut guard = revisions
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard
+        .entry(project_id.to_owned())
+        .or_insert_with(|| AtomicU64::new(0))
+        .fetch_add(1, Ordering::SeqCst)
+        + 1
 }
 
 fn event_is_relevant(kind: &EventKind) -> bool {
@@ -503,8 +664,8 @@ mod tests {
         ProjectWorkspaceSurface, WorkspaceItemRestoration,
     };
     use lilia_service::ServiceAuthority;
-    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -551,6 +712,118 @@ mod tests {
             })
             .unwrap();
         (app, project.id)
+    }
+
+    #[test]
+    fn watcher_can_stop_from_its_event_callback_and_release_its_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let (app, project_id) = app_with_project(root.path());
+        let bus = lilia_kernel::EventBus::default();
+        let service = Arc::new(ProjectFilesService::new(
+            app.inner.project_tasks.clone(),
+            app.document_service(),
+            bus.clone(),
+        ));
+        let weak = Arc::downgrade(&service);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _subscription = bus.on::<ProjectFilesChanged, _>(None, move |event| {
+            let service = weak.upgrade().unwrap();
+            let snapshot = service
+                .project_files_snapshot(&event.project_id, Default::default())
+                .unwrap();
+            assert_eq!(snapshot.workspace_root, event.workspace_root);
+            assert!(snapshot.revision >= event.revision);
+            service.stop_project_files_watcher(&event.project_id);
+            tx.send(snapshot).unwrap();
+        });
+        service.ensure_project_files_watcher(&project_id).unwrap();
+        write_file(&root.path().join("callback.txt"), "ready");
+        let snapshot = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("reentrant stop must not deadlock");
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.name == "callback.txt")
+        );
+        assert!(service.watchers.lock().unwrap().is_empty());
+        service.ensure_project_files_watcher(&project_id).unwrap();
+        let stopped = service.watchers.lock().unwrap()[project_id.as_str()]
+            .stop_flag
+            .clone();
+        drop(service);
+        assert!(
+            stopped.load(Ordering::SeqCst),
+            "worker must not retain its owning service"
+        );
+    }
+
+    #[test]
+    fn old_root_watcher_stops_after_project_rebind_and_archived_files_are_rejected() {
+        let old_root = tempfile::tempdir().unwrap();
+        let new_root = tempfile::tempdir().unwrap();
+        let (app, project_id) = app_with_project(old_root.path());
+        let service = app.project_files_service();
+        service.ensure_project_files_watcher(&project_id).unwrap();
+        let stopped = service.watchers.lock().unwrap()[project_id.as_str()]
+            .stop_flag
+            .clone();
+        app.inner
+            .project_tasks
+            .update_project(
+                &project_id,
+                crate::application::DesktopProjectPatch {
+                    workspace_path: crate::application::DesktopOptionalTextUpdate::Set(
+                        new_root.path().display().to_string(),
+                    ),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        write_file(&old_root.path().join("stale.txt"), "old");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            stopped.load(Ordering::SeqCst),
+            "changed authority must stop the old root watcher"
+        );
+        service.ensure_project_files_watcher(&project_id).unwrap();
+        write_file(&new_root.path().join("current.txt"), "new");
+        let snapshot = service
+            .project_files_snapshot(&project_id, Default::default())
+            .unwrap();
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.name == "current.txt")
+        );
+        assert!(
+            !snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.name == "stale.txt")
+        );
+        app.inner
+            .project_tasks
+            .update_project(
+                &project_id,
+                crate::application::DesktopProjectPatch {
+                    archived: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(service.list_project_directory(&project_id, "").is_err());
+        assert!(
+            service
+                .open_project_file(&project_id, "current.txt")
+                .is_err()
+        );
+        assert!(service.ensure_project_files_watcher(&project_id).is_err());
     }
 
     #[test]
@@ -640,7 +913,7 @@ mod tests {
                 if matches!(
                     event.downcast::<ProjectFilesChanged>(),
                     Some(ProjectFilesChanged {
-                        project_id: changed
+                        project_id: changed, ..
                     }) if changed == &project_id
                 ) {
                     observed = true;
@@ -653,10 +926,12 @@ mod tests {
             .project_files_snapshot(&project_id, ProjectFilesViewState::default())
             .unwrap();
         assert!(after.revision > before);
-        assert!(after
-            .entries
-            .iter()
-            .any(|entry| entry.relative_path == "b.txt"));
+        assert!(
+            after
+                .entries
+                .iter()
+                .any(|entry| entry.relative_path == "b.txt")
+        );
 
         let item = app
             .project_workspace_item(&project_id, ProjectWorkspaceSurface::Files)

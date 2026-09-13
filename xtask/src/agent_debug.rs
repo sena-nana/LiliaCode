@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -34,6 +34,69 @@ mod extensions_execution;
 
 #[path = "agent_debug_source.rs"]
 mod source;
+
+mod automation_view;
+mod browser_agent;
+mod settings_view;
+mod task_view;
+
+fn binary_fingerprint(path: &Path) -> Result<Value> {
+    use sha2::{Digest, Sha256};
+    let mut file = fs::File::open(path)
+        .map_err(|e| XtaskError::io("debug_binary_missing", "open desktop artifact", e))?;
+    let metadata = file.metadata().map_err(|e| {
+        XtaskError::io("debug_binary_metadata", "read desktop artifact metadata", e)
+    })?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let size = file
+            .read(&mut buffer)
+            .map_err(|e| XtaskError::io("debug_binary_hash", "hash desktop artifact", e))?;
+        if size == 0 {
+            break;
+        }
+        hash.update(&buffer[..size]);
+    }
+    Ok(serde_json::json!({
+        "path": path,
+        "sha256": hex::encode(hash.finalize()),
+        "sizeBytes": metadata.len(),
+        "modifiedUnixMs": metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis()),
+    }))
+}
+
+pub(crate) fn verify_same_binary(first_run: &Path, second_run: &Path) -> Result<()> {
+    let load_artifacts = |run: &Path| -> Result<Value> {
+        let file = fs::File::open(run.join("desktop-binary.json")).map_err(|error| {
+            XtaskError::io(
+                "debug_binary_missing",
+                "read desktop binary evidence",
+                error,
+            )
+        })?;
+        serde_json::from_reader(file)
+            .map_err(|error| XtaskError::failure("debug_binary_invalid", error.to_string()))
+    };
+    let primary_artifacts = load_artifacts(first_run)?;
+    let browser_artifacts = load_artifacts(second_run)?;
+    for field in ["/sha256", "/hostLibrary/sha256"] {
+        let primary_hash = primary_artifacts.pointer(field).and_then(Value::as_str);
+        if primary_hash.is_none()
+            || primary_hash != browser_artifacts.pointer(field).and_then(Value::as_str)
+        {
+            return Err(XtaskError::failure(
+                "debug_binary_changed",
+                "desktop artifact changed between validation sessions",
+            ));
+        }
+    }
+    Ok(())
+}
 
 pub struct Session {
     child: Child,
@@ -297,6 +360,125 @@ impl Session {
         })
     }
 
+    pub fn start_reusing(profile: &str) -> Result<Self> {
+        Self::start_with_endpoint(profile, DISCARD_MODEL_ENDPOINT, true)
+    }
+
+    pub(super) fn start_with_endpoint(
+        profile: &str,
+        endpoint: &str,
+        reuse_binary: bool,
+    ) -> Result<Self> {
+        let root = repo_root()?;
+        let run_dir = root
+            .join("agent-debug-runs")
+            .join(format!("lilia-{profile}-{}", timestamp()));
+        fs::create_dir_all(&run_dir).map_err(|error| {
+            XtaskError::io(
+                "artifact_directory_failed",
+                "create Agent Debug artifact directory",
+                error,
+            )
+        })?;
+        let ready = run_dir.join("ready.txt");
+        let home = run_dir.join("home");
+        fs::create_dir_all(&home).map_err(|error| {
+            XtaskError::io("debug_home_failed", "create isolated LILIA_HOME", error)
+        })?;
+        if !reuse_binary {
+            run_command(
+                crate::command("cargo").current_dir(&root).args([
+                    "build",
+                    "--locked",
+                    "-p",
+                    "lilia-desktop",
+                ]),
+                "build native desktop",
+            )?;
+        }
+        let metadata = crate::output(
+            crate::command("cargo").current_dir(&root).args([
+                "metadata",
+                "--locked",
+                "--format-version",
+                "1",
+                "--no-deps",
+            ]),
+            "locate native desktop build",
+        )?;
+        let metadata: Value = serde_json::from_str(&metadata)
+            .map_err(|error| XtaskError::failure("cargo_metadata_invalid", error.to_string()))?;
+        let target = metadata
+            .get("target_directory")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                XtaskError::failure(
+                    "cargo_target_missing",
+                    "Cargo did not report its target directory",
+                )
+            })?;
+        let binary = Path::new(target)
+            .join("debug")
+            .join(crate::executable("liliacode"));
+        let stdout = fs::File::create(run_dir.join("desktop.stdout.log")).map_err(|error| {
+            XtaskError::io("debug_log_failed", "create desktop stdout log", error)
+        })?;
+        let stderr = fs::File::create(run_dir.join("desktop.stderr.log")).map_err(|error| {
+            XtaskError::io("debug_log_failed", "create desktop stderr log", error)
+        })?;
+        let started = Instant::now();
+        let mut desktop = Command::new(&binary);
+        desktop
+            .current_dir(&root)
+            .env("LILIA_HOME", &home)
+            .env("LILIA_AGENT_DEBUG", "1")
+            .env("LILIA_AGENT_DEBUG_ADDR", "127.0.0.1:0")
+            .env("LILIA_AGENT_DEBUG_READY", &ready)
+            .env("LILIA_AGENT_DEBUG_SEED", "1")
+            .env_remove("LILIA_AGENT_DEBUG_RESUME")
+            .env("LILIA_AGENT_DEBUG_EPHEMERAL_CREDENTIALS", "1")
+            .env("LILIA_JOURNAL_PATH", run_dir.join("journal.jsonl"))
+            .env("LILIA_AGENT_DEBUG_MODEL_ENDPOINT", endpoint)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+        let mut child = desktop.spawn().map_err(|error| {
+            XtaskError::io(
+                "desktop_launch_failed",
+                &format!("launch {}", binary.display()),
+                error,
+            )
+        })?;
+        let address = match wait_ready(&ready) {
+            Ok(address) => address,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(describe_startup_failure(error, &run_dir));
+            }
+        };
+        let startup_ms = started.elapsed().as_secs_f64() * 1_000.0;
+        let session = Self {
+            child,
+            address,
+            run_dir,
+            startup_ms,
+            model_fixture: None,
+            capture_enabled: true,
+        };
+        let host_library = binary.with_file_name(format!(
+            "{}liliacode_host{}",
+            std::env::consts::DLL_PREFIX,
+            std::env::consts::DLL_SUFFIX,
+        ));
+        let mut artifacts = binary_fingerprint(&binary)?;
+        artifacts["hostLibrary"] = binary_fingerprint(&host_library)?;
+        artifacts["reused"] = Value::Bool(reuse_binary);
+        artifacts["sourceRebuilt"] = Value::Bool(!reuse_binary);
+        write_json(&session.run_dir.join("desktop-binary.json"), &artifacts)?;
+        Ok(session)
+    }
+
     pub fn request(&self, payload: &Value) -> Result<Value> {
         request(&self.address, payload)
     }
@@ -327,6 +509,18 @@ pub fn run() -> Result {
 
 pub fn run_with_capture(capture_enabled: bool) -> Result {
     run_with_viewport(capture_enabled, None)
+}
+
+pub fn run_browser_agent(reuse_binary: bool) -> Result {
+    if !cfg!(target_os = "windows") {
+        return Err(XtaskError::blocker(
+            "windows_required",
+            "Browser Agent acceptance requires Windows with a real native desktop",
+        ));
+    }
+    let result = browser_agent::run(reuse_binary)?;
+    println!("agent-debug browser-agent: {result}");
+    Ok(())
 }
 
 pub fn run_matrix() -> Result {
@@ -383,15 +577,8 @@ fn run_with_viewport(capture_enabled: bool, viewport: Option<(u32, u32, &str)>) 
     let mut scenarios = Vec::new();
     for tab in [
         "appearance",
-        "preferences",
         "project",
         "provider",
-        "credentials",
-        "assistant",
-        "model-config",
-        "plugin-packages",
-        "plugin-hooks",
-        "plugin-mcp",
         "agent",
         "quota",
         "extensions",
@@ -649,7 +836,7 @@ fn run_with_viewport(capture_enabled: bool, viewport: Option<(u32, u32, &str)>) 
 /// awareness, or Windows virtualises `GetClientRect` down to 96dpi and
 /// `PrintWindow` silently crops the physical window to that smaller bitmap.
 const CAPTURE_SCRIPT: &str = r#"
-param([int]$ProcessId, [string]$Output, [long]$NativeWindowId = 0, [switch]$ListOnly)
+param([int]$ProcessId, [string]$Output, [long]$NativeWindowId = 0, [switch]$ListOnly, [int]$LogicalWidth = 0, [int]$LogicalHeight = 0)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
@@ -662,8 +849,11 @@ public static class LiliaCapture {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr handle, out uint pid);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr handle, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out RECT rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr handle, IntPtr context, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr handle);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     public struct RECT { public int Left, Top, Right, Bottom; }
     public static long[] VisibleWindows(uint target) {
@@ -712,32 +902,165 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
 }
 if ($handle -eq [IntPtr]::Zero) { throw 'desktop window not ready' }
 [LiliaCapture]::ShowWindow($handle, 9) | Out-Null
-Start-Sleep -Milliseconds 700
-$rect = New-Object LiliaCapture+RECT
-[LiliaCapture]::GetClientRect($handle, [ref]$rect) | Out-Null
-$width = $rect.Right - $rect.Left
-$height = $rect.Bottom - $rect.Top
-if ($width -le 0 -or $height -le 0) { throw 'desktop window has invalid bounds' }
-$bitmap = New-Object Drawing.Bitmap $width, $height
-$graphics = [Drawing.Graphics]::FromImage($bitmap)
-$context = $graphics.GetHdc()
-# PW_RENDERFULLCONTENT: required for composited GPU surfaces.
-$printed = [LiliaCapture]::PrintWindow($handle, $context, 2)
-$graphics.ReleaseHdc($context)
-$graphics.Dispose()
-if (-not $printed) { $bitmap.Dispose(); throw 'PrintWindow refused the desktop window' }
-$bitmap.Save($Output, [Drawing.Imaging.ImageFormat]::Png)
-$bitmap.Dispose()
-@{ windowId = $handle.ToInt64(); pid = $ProcessId; pixelWidth = $width; pixelHeight = $height; platform = 'windows'; captureStatus = 'complete' } | ConvertTo-Json -Compress
+$previous = New-Object LiliaCapture+RECT
+$dpi = 0
+$resized = $false
+$restore = $false
+try {
+    if ($LogicalWidth -ne 0 -or $LogicalHeight -ne 0) {
+        if ($LogicalWidth -le 0 -or $LogicalHeight -le 0) { throw 'desktop window resize failed: LogicalWidth and LogicalHeight are required together' }
+        if (-not [LiliaCapture]::GetWindowRect($handle, [ref]$previous)) { throw 'desktop window resize failed: previous bounds unavailable' }
+        $dpi = [LiliaCapture]::GetDpiForWindow($handle)
+        if ($dpi -eq 0) { throw 'desktop window resize failed: dpi unavailable' }
+        $client = New-Object LiliaCapture+RECT
+        if (-not [LiliaCapture]::GetClientRect($handle, [ref]$client)) { throw 'desktop window resize failed: client bounds unavailable' }
+        $frameW = ($previous.Right - $previous.Left) - ($client.Right - $client.Left)
+        $frameH = ($previous.Bottom - $previous.Top) - ($client.Bottom - $client.Top)
+        $targetW = [int][Math]::Round($LogicalWidth * $dpi / 96.0)
+        $targetH = [int][Math]::Round($LogicalHeight * $dpi / 96.0)
+        if (-not [LiliaCapture]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, $targetW + $frameW, $targetH + $frameH, 0x16)) {
+            throw 'desktop window resize failed'
+        }
+        $resized = $true
+        $restore = $true
+    }
+    Start-Sleep -Milliseconds 700
+    $rect = New-Object LiliaCapture+RECT
+    [LiliaCapture]::GetClientRect($handle, [ref]$rect) | Out-Null
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
+    if ($width -le 0 -or $height -le 0) {
+        if ($resized) { throw 'desktop window resize failed: client bounds unavailable' }
+        throw 'desktop window has invalid bounds'
+    }
+    if ($resized) {
+        $targetW = [int][Math]::Round($LogicalWidth * $dpi / 96.0)
+        $targetH = [int][Math]::Round($LogicalHeight * $dpi / 96.0)
+        if ([Math]::Abs($width - $targetW) -gt 1 -or [Math]::Abs($height - $targetH) -gt 1) {
+            throw "desktop window resize failed: client ${width}x${height}, expected ${targetW}x${targetH}"
+        }
+    }
+    $bitmap = New-Object Drawing.Bitmap $width, $height
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $context = $graphics.GetHdc()
+    # PW_RENDERFULLCONTENT: required for composited GPU surfaces.
+    $printed = [LiliaCapture]::PrintWindow($handle, $context, 2)
+    $graphics.ReleaseHdc($context)
+    $graphics.Dispose()
+    if (-not $printed) { $bitmap.Dispose(); throw 'PrintWindow refused the desktop window' }
+    $bitmap.Save($Output, [Drawing.Imaging.ImageFormat]::Png)
+    $bitmap.Dispose()
+    $restore = $false
+    $result = @{ windowId = $handle.ToInt64(); pid = $ProcessId; pixelWidth = $width; pixelHeight = $height; platform = 'windows'; captureStatus = 'complete' }
+    if ($resized) {
+        $result.logicalWidth = $LogicalWidth
+        $result.logicalHeight = $LogicalHeight
+        $result.scaleFactor = $dpi / 96.0
+        $result.previousOuterWidth = $previous.Right - $previous.Left
+        $result.previousOuterHeight = $previous.Bottom - $previous.Top
+    }
+    $result | ConvertTo-Json -Compress
+} finally {
+    if ($restore) {
+        [LiliaCapture]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, ($previous.Right - $previous.Left), ($previous.Bottom - $previous.Top), 0x16) | Out-Null
+    }
+}
 "#;
 
-pub(crate) fn capture_window(pid: u32, output: &Path) -> Result {
-    capture_selected_window(pid, output, None)
+fn browser_target(observation: &Value, suffix: &str) -> Option<String> {
+    observation
+        .pointer("/observation/visibleTargetIds")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|target| target.starts_with("lilia.browser.") && target.ends_with(suffix))
+        .map(str::to_owned)
 }
 
-fn capture_selected_window(pid: u32, output: &Path, native_window: Option<u64>) -> Result {
+fn wait_browser(
+    session: &Session,
+    name: &str,
+    predicate: impl Fn(&Value) -> bool,
+) -> Result<Value> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let state = session.request(&serde_json::json!({"command": "observe"}))?;
+        require_ok(&state, "observe browser")?;
+        if predicate(&state) {
+            return Ok(state);
+        }
+        if state
+            .pointer("/observation/iabError")
+            .is_some_and(|error| !error.is_null())
+            || Instant::now() >= deadline
+        {
+            write_json(
+                &session.run_dir.join(format!("browser-{name}-blocked.json")),
+                &state,
+            )?;
+            capture_window(
+                session.pid(),
+                &session.run_dir.join(format!("browser-{name}-blocked.png")),
+            )?;
+            write_json(
+                &session.run_dir.join("browser-acceptance.json"),
+                &serde_json::json!({
+                    "passed": false,
+                    "blockedAt": name,
+                    "recovery": "Use the browser Retry or Install runtime action; this scenario did not pass."
+                }),
+            )?;
+            return Err(XtaskError::blocker(
+                "browser_acceptance_blocked",
+                format!(
+                    "browser {name} did not become available; inspect browser-{name}-blocked.json/png and use its runtime recovery action"
+                ),
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn record_browser(session: &Session, name: &str, state: &Value) -> Result {
+    if state.to_string().contains("sk-native-agent-debug-fixture") {
+        return Err(XtaskError::failure(
+            "agent_debug_secret_leak",
+            "browser observation contains the secret canary",
+        ));
+    }
+    write_json(&session.run_dir.join(format!("browser-{name}.json")), state)?;
+    capture_window(
+        session.pid(),
+        &session.run_dir.join(format!("browser-{name}.png")),
+    )
+}
+
+pub(crate) fn capture_window(pid: u32, output: &Path) -> Result {
+    capture_selected_window(pid, output, None, None)
+}
+
+fn capture_named_window(pid: u32, output: &Path, _title: &str) -> Result {
+    capture_window(pid, output)
+}
+
+pub(super) fn capture_resized_window(pid: u32, output: &Path, size: [u32; 2]) -> Result {
+    capture_selected_window(pid, output, None, Some(size))
+}
+
+fn capture_selected_window(
+    pid: u32,
+    output: &Path,
+    native_window: Option<u64>,
+    size: Option<[u32; 2]>,
+) -> Result {
     require_interactive_desktop_session()?;
     if cfg!(target_os = "macos") {
+        if size.is_some() {
+            return Err(XtaskError::blocker(
+                "capture_window_resize_failed",
+                "resized window capture requires Windows",
+            ));
+        }
         return capture_macos_window(pid, output, native_window);
     }
     // A `-Command` string cannot carry this much inline C#, so the script goes to
@@ -750,23 +1073,41 @@ fn capture_selected_window(pid: u32, output: &Path, native_window: Option<u64>) 
             error,
         )
     })?;
-    let metadata = crate::output(
-        crate::command("powershell.exe").args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            &script.display().to_string(),
-            "-ProcessId",
-            &pid.to_string(),
-            "-Output",
-            &output.display().to_string(),
-            "-NativeWindowId",
-            &native_window.unwrap_or(0).to_string(),
-        ]),
-        "capture native desktop screenshot",
-    )?;
+    let script_path = script.display().to_string();
+    let output_path = output.display().to_string();
+    let pid_text = pid.to_string();
+    let window_text = native_window.unwrap_or(0).to_string();
+    let width_text = size.map(|value| value[0].to_string());
+    let height_text = size.map(|value| value[1].to_string());
+    let mut command = crate::command("powershell.exe");
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        &script_path,
+        "-ProcessId",
+        &pid_text,
+        "-Output",
+        &output_path,
+        "-NativeWindowId",
+        &window_text,
+    ]);
+    if let (Some(width), Some(height)) = (&width_text, &height_text) {
+        command.args(["-LogicalWidth", width, "-LogicalHeight", height]);
+    }
+    let metadata =
+        crate::output(&mut command, "capture native desktop screenshot").map_err(|error| {
+            if size.is_some()
+                && error.code == "command_failed"
+                && error.message.contains("desktop window resize failed")
+            {
+                XtaskError::blocker("capture_window_resize_failed", error.message)
+            } else {
+                error
+            }
+        })?;
     if !output.is_file() || output.metadata().map(|value| value.len()).unwrap_or(0) == 0 {
         return Err(XtaskError::failure(
             "agent_debug_screenshot_missing",
@@ -778,6 +1119,30 @@ fn capture_selected_window(pid: u32, output: &Path, native_window: Option<u64>) 
     let image = image::open(output)
         .map_err(|error| XtaskError::failure("capture_image_invalid", error.to_string()))?;
     validate_capture_content(&image)?;
+    if let Some([width, height]) = size {
+        let scale = metadata
+            .get("scaleFactor")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0);
+        let expected_width = (f64::from(width) * scale).round() as u32;
+        let expected_height = (f64::from(height) * scale).round() as u32;
+        if image.width().abs_diff(expected_width) > 1
+            || image.height().abs_diff(expected_height) > 1
+        {
+            let _ = fs::remove_file(output);
+            return Err(XtaskError::blocker(
+                "capture_window_resize_failed",
+                format!(
+                    "screenshot {} is {}x{}, expected {}x{} for logical {width}x{height}",
+                    output.display(),
+                    image.width(),
+                    image.height(),
+                    expected_width,
+                    expected_height
+                ),
+            ));
+        }
+    }
     write_json(&output.with_extension("window.json"), &metadata)
 }
 
@@ -912,7 +1277,7 @@ fn capture_task_popup(
     require_ok(&snapshot, "observe popup immediately before native capture")?;
     let output = session.run_dir.join("task-popup.png");
     write_json(&session.run_dir.join("task-popup-ui.json"), &snapshot)?;
-    capture_selected_window(session.pid(), &output, Some(native_window))?;
+    capture_selected_window(session.pid(), &output, Some(native_window), None)?;
     let confirmed = visible_native_windows(session.pid())?;
     if !confirmed.contains(&native_window) {
         return Err(XtaskError::failure(

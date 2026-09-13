@@ -38,8 +38,7 @@ use lilia_storage::Db;
 
 use crate::application::DesktopApplication;
 use crate::shell_service::{
-    ApplicationFeature, TaskSessionFeature, TaskSessions, WorkspaceSessionFeature,
-    WorkspaceSessions,
+    TaskSessionFeature, TaskSessions, WorkspaceSessionFeature, WorkspaceSessions,
 };
 
 /// Authorities the desktop process already owns and hands to the features it
@@ -194,26 +193,93 @@ fn features(services: KernelServices) -> Vec<Arc<dyn Feature>> {
         Arc::new(UpdateFeature::new(update)),
         Arc::new(CodingFeature::new(code_search, coding_refresh)),
         Arc::new(TaskFeature::new(project_tasks, project_task_events)),
-        Arc::new(ComposerFeature::new(db.clone(), prompt_optimize)),
+        Arc::new(ComposerFeature::new(
+            application.composer_input_service().draft_service(),
+            prompt_optimize,
+        )),
+        Arc::new(crate::application::ComposerInputFeature::new(
+            application.composer_input_service(),
+        )),
+        Arc::new(crate::application::TurnSubmissionServiceFeature::new(
+            application.turn_submission_service(),
+        )),
         Arc::new(AgentSessionFeature::new(db.clone(), titles, turns)),
-        Arc::new(WorktreeFeature::new(db, worktrees)),
+        Arc::new(WorktreeFeature::new(
+            application.worktree_service().store(),
+            worktrees,
+        )),
+        Arc::new(crate::application::WorktreeServiceFeature::new(
+            application.worktree_service(),
+        )),
         Arc::new(TimelineFeature::new(authority)),
         Arc::new(TerminalFeature::new(terminals)),
         Arc::new(DocumentFeature::new(documents, languages, language)),
+        Arc::new(crate::application::ProviderRuntimeSettingsFeature::new(
+            application.provider_runtime_settings_service(),
+        )),
+        Arc::new(crate::application::ProjectSettingsFeature::new(
+            application.project_settings_service(),
+        )),
+        Arc::new(crate::application::TodoServiceFeature::new(
+            application.todo_service(),
+        )),
+        Arc::new(crate::application::UpdateServiceFeature::new(
+            application.update_service(),
+        )),
+        Arc::new(crate::application::DocumentServiceFeature::new(
+            application.document_service(),
+        )),
+        Arc::new(crate::application::ExtensionRegistryServiceFeature::new(
+            application.extension_registry_service(),
+        )),
+        Arc::new(
+            crate::application::ConversationSuggestionGenerationServiceFeature::new(
+                application.conversation_suggestion_generation_service(),
+            ),
+        ),
+        Arc::new(crate::application::ProjectFilesFeature::new(
+            application.project_files_service(),
+        )),
+        Arc::new(crate::application::ProjectCommandRunFeature::new(
+            application.project_command_run_service(),
+        )),
+        Arc::new(crate::application::SessionSearchFeature::new(
+            application.session_search_service(),
+        )),
         Arc::new(MemoryFeature::new(memory)),
         Arc::new(RoadmapFeature::new(roadmap)),
         Arc::new(ArchitectureFeature::new(architecture)),
-        Arc::new(AutomationFeature::new(automation)),
+        Arc::new(
+            AutomationFeature::new(automation)
+                .with_operations(Arc::new(application.automation_operation_service())),
+        ),
         Arc::new(ExtensionsFeature::new(extensions)),
         Arc::new(RemoteFeature::new(remote)),
         Arc::new(HooksFeature),
         Arc::new(ProviderFeature::new(credentials, assistant_probes)),
+        Arc::new(crate::application::ProviderCredentialServiceFeature::new(
+            application.provider_credential_service(),
+        )),
         Arc::new(UsageFeature::new(usage)),
         Arc::new(GitHubFeature::new(github)),
         Arc::new(ImportFeature::new(imports)),
         Arc::new(SuggestionsFeature::new(suggestions)),
         Arc::new(WorkspaceSessionFeature::new(workspace_sessions)),
-        Arc::new(ApplicationFeature::new(application)),
+        Arc::new(crate::application::AgentInteractionFeature::new(
+            application.agent_interaction_service(),
+        )),
+        Arc::new(crate::application::HookDocumentsFeature::new(
+            application.hook_documents_service(),
+        )),
+        Arc::new(crate::application::HookExecutionFeature::new(
+            application.hook_execution_service(),
+        )),
+        Arc::new(crate::application::RegistryFileWatchFeature::new(
+            application.registry_file_watch_service(),
+        )),
+        Arc::new(crate::application::ProductChangeFeedFeature::new(
+            application.product_change_feed_service(),
+        )),
         Arc::new(TaskSessionFeature::new(task_sessions)),
         Arc::new(crate::module::ShellUiFeature),
     ]
@@ -438,6 +504,8 @@ mod tests {
             nana_ui_platform::WindowId::PRIMARY,
             application.default_workspace_session(),
         );
+        let documents = application.document_store().clone();
+        let languages = application.language_registry().clone();
         KernelServices {
             workspace_sessions,
             application,
@@ -446,14 +514,14 @@ mod tests {
                 .with_journal(journal.clone()),
             project_task_events,
             journal,
-            authority,
+            authority: authority.clone(),
             db: db.clone(),
             terminals: Arc::new(DesktopTerminalService::default()),
-            documents: SharedDocumentStore::default(),
-            languages: SharedLanguageRegistry::default(),
+            documents,
+            languages,
             memory: DesktopMemoryService::in_memory().expect("the memory service opens"),
             roadmap: DesktopRoadmapService::from_db(db.clone()).expect("the roadmap opens"),
-            architecture: DesktopArchitectureService::from_db(db.clone())
+            architecture: DesktopArchitectureService::from_db(db.clone(), authority.clone())
                 .expect("the architecture opens"),
             automation: DesktopAutomationService::from_db(db, Arc::new(SilentAutomationEvents))
                 .expect("the automation service opens"),
@@ -494,6 +562,82 @@ mod tests {
     /// A module is built from `&Kernel` and its window alone, so the session it
     /// renders has to be reachable through the registry and has to be the
     /// shell's own instance rather than a second session over the same rows.
+    #[test]
+    fn full_bootstrap_registers_update_and_provider_state_beside_their_job_features() {
+        let services = test_services("in-memory:state-services-with-jobs");
+        let application = services.application.clone();
+        let host = KernelHost::start(services, |_| {}).expect("full desktop bootstrap");
+        let extension_registry = host
+            .kernel()
+            .service::<crate::application::ExtensionRegistryServiceKey>()
+            .unwrap();
+        extension_registry.mutate(|| Ok(())).unwrap();
+        let suggestion_generation = host
+            .kernel()
+            .service::<crate::application::ConversationSuggestionGenerationServiceKey>()
+            .unwrap();
+        suggestion_generation.generate(|| Ok(())).unwrap();
+        assert!(
+            host.kernel()
+                .service::<crate::application::TurnSubmissionServiceKey>()
+                .is_ok()
+        );
+        assert!(
+            host.kernel()
+                .service::<crate::application::HookExecutionServiceKey>()
+                .is_ok()
+        );
+        assert!(
+            host.kernel()
+                .service::<crate::application::RegistryFileWatchServiceKey>()
+                .is_ok()
+        );
+        assert!(
+            host.kernel()
+                .service::<crate::application::ProductChangeFeedServiceKey>()
+                .is_ok()
+        );
+        let update = host
+            .kernel()
+            .service::<crate::application::UpdateServiceKey>()
+            .unwrap();
+        assert!(update.check_for_update("preview").is_err());
+        assert_eq!(
+            update.update_state().unwrap(),
+            application.update_state().unwrap()
+        );
+        assert!(matches!(
+            application.update_state().unwrap(),
+            crate::application::DesktopUpdateState::Failed { .. }
+        ));
+        let provider = host
+            .kernel()
+            .service::<crate::application::ProviderRuntimeSettingsKey>()
+            .unwrap();
+        let previous = provider.settings().unwrap();
+        let saved = provider
+            .save(crate::application::DesktopAgentRuntimeSettingsUpdate {
+                expected_revision: previous.revision,
+                openai_endpoint: None,
+                anthropic_endpoint: None,
+                model: Some("bootstrap-model".into()),
+            })
+            .unwrap();
+        assert_eq!(application.provider_runtime_settings().unwrap(), saved);
+        assert!(
+            host.kernel()
+                .mounted_features()
+                .iter()
+                .any(|id| id.as_str() == "lilia.feature.update")
+        );
+        assert!(
+            host.kernel()
+                .mounted_features()
+                .iter()
+                .any(|id| id.as_str() == "lilia.feature.update-operations")
+        );
+    }
+
     #[test]
     fn a_windows_workspace_session_is_resolvable_from_the_registry() {
         let services = test_services("in-memory:workspace-slot");

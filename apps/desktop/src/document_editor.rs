@@ -4,9 +4,9 @@
 //! dirty/conflict facts come from the shared application DocumentStore.
 
 use crate::application::{
-    BufferRevision, DesktopDocumentDefinitionTarget, DesktopDocumentDiagnosticsSnapshot,
-    DesktopDocumentDiagnosticsState, Diagnostic, DocumentId, DocumentSnapshot, WorkspaceItem,
-    DOCUMENT_WORKSPACE_ITEM_KIND,
+    BufferRevision, DOCUMENT_WORKSPACE_ITEM_KIND, DesktopDocumentDefinitionTarget,
+    DesktopDocumentDiagnosticsSnapshot, DesktopDocumentDiagnosticsState, Diagnostic, DocumentId,
+    DocumentSnapshot, WorkspaceItem,
 };
 use crate::text_editor_state::{TextEditorCursor, TextEditorPosition, TextEditorState};
 use lilia_contracts::ProjectId;
@@ -131,6 +131,7 @@ pub struct DocumentEditorViewState {
     pub language_label: String,
     pub revision: BufferRevision,
     pub dirty: bool,
+    pub unapplied_edit: bool,
     pub read_only: bool,
     pub conflict_message: Option<String>,
     pub status_message: Option<String>,
@@ -156,6 +157,7 @@ impl DocumentEditorViewState {
                 .unwrap_or_else(|| "plaintext".to_owned()),
             revision: snapshot.buffer.revision,
             dirty: snapshot.buffer.is_dirty(),
+            unapplied_edit: false,
             read_only: snapshot.read_only,
             conflict_message: None,
             status_message: None,
@@ -171,6 +173,10 @@ impl DocumentEditorViewState {
     }
 
     pub fn sync_from_snapshot(&mut self, snapshot: &DocumentSnapshot) {
+        if self.unapplied_edit && self.document_id == snapshot.id {
+            self.read_only = snapshot.read_only;
+            return;
+        }
         self.document_id = snapshot.id;
         self.path_label = snapshot.canonical_path.display().to_string();
         self.language_label = snapshot
@@ -191,6 +197,18 @@ impl DocumentEditorViewState {
         }
     }
 
+    pub fn retain_edit_conflict(&mut self, latest: Option<&DocumentSnapshot>) {
+        if !self.unapplied_edit {
+            if let Some(snapshot) = latest.filter(|snapshot| snapshot.id == self.document_id) {
+                self.revision = snapshot.buffer.revision;
+            }
+        }
+        self.unapplied_edit = true;
+        self.dirty = true;
+        self.note_text_changed();
+        self.definition_targets.clear();
+    }
+
     pub fn mark_diagnostics_checking(&mut self) {
         self.diagnostics_state = DesktopDocumentDiagnosticsState::Checking;
     }
@@ -205,7 +223,10 @@ impl DocumentEditorViewState {
     }
 
     pub fn sync_diagnostics(&mut self, snapshot: &DesktopDocumentDiagnosticsSnapshot) {
-        if snapshot.document_id != self.document_id || snapshot.buffer_revision != self.revision {
+        if self.unapplied_edit
+            || snapshot.document_id != self.document_id
+            || snapshot.buffer_revision != self.revision
+        {
             return;
         }
         self.diagnostics_state = snapshot.state;
@@ -224,8 +245,8 @@ mod tests {
     };
 
     use super::{
-        byte_position, document_editor_cursor_offset, select_hosted_textarea_range,
-        DocumentEditorViewState,
+        DocumentEditorViewState, byte_position, document_editor_cursor_offset,
+        select_hosted_textarea_range,
     };
     use crate::text_editor_state::{TextEditorCursor, TextEditorPosition, TextEditorState};
 

@@ -4,7 +4,7 @@ use lilia_contracts::{
     AgentSessionRef, ProjectionEventId, TaskId, TimelineProjectionCommand, TimelineProjectionEvent,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::application::{DesktopApplication, DesktopApplicationError};
 use crate::application::{GoalChanged, TimelineChanged};
@@ -206,8 +206,8 @@ fn now_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use lilia_contracts::{ProductEntity, ProductTask};
     use lilia_service::ServiceAuthority;

@@ -2,12 +2,13 @@
 
 pub mod application;
 
+pub mod platform;
 mod ports;
 
 #[cfg(debug_assertions)]
 mod agent_debug;
-mod architecture_panel;
 mod ask_user;
+mod browser_workbench;
 mod cli_import;
 mod conversation_suggestions;
 mod data_import;
@@ -16,22 +17,22 @@ mod debug_fixture;
 mod debug_timeline;
 mod desktop;
 mod document_editor;
+mod form_view;
 mod host;
-mod iab_panel;
 mod image_textures;
 mod journal_export;
 mod kernel_host;
 mod markdown_images;
 mod module;
+mod navigation;
+#[cfg(test)]
+mod offscreen_remaining;
 mod pending_import;
 mod project_files_panel;
 mod provider_ai_settings;
 mod runtime_compat;
-mod runtime_conversation;
-mod runtime_empty_suggestions;
 mod runtime_extensions;
 mod runtime_layout;
-mod runtime_pending;
 mod runtime_shell;
 mod runtime_surface;
 mod runtime_windows;
@@ -49,9 +50,10 @@ mod todo_panel;
 mod ui_module;
 mod updater;
 mod windows_identity;
+mod workspace_view;
 
 use desktop::{LiliaShell, PRODUCT_NAME};
-use nana_ui::{run_runtime, RuntimeWindowSettings};
+use nana_ui::{RuntimeWindowSettings, run_runtime};
 
 #[no_mangle]
 pub extern "system" fn liliacode_run(startup_window: isize) -> i32 {

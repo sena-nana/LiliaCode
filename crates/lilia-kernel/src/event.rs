@@ -122,12 +122,7 @@ impl EventBus {
     pub fn publish<E: Event>(&self, event: E) -> EventEnvelope {
         if E::JOURNALED {
             if let Some(journal) = &self.inner.journal {
-                journal.append(
-                    RecordKind::Event,
-                    E::NAME,
-                    event.subject(),
-                    event.detail(),
-                );
+                journal.append(RecordKind::Event, E::NAME, event.subject(), event.detail());
             }
         }
         let envelope = EventEnvelope {

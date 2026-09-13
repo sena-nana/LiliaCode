@@ -37,14 +37,14 @@ pub(super) fn action_button(id: &str, label: &str) -> nana_ui::runtime::Button {
         }
         _ => (label.to_owned(), 104.0),
     };
-    let mut button = super::product_action_button(&label, false);
+    let mut button = super::extra_button(&label, nana_ui::ButtonKind::Subtle);
     let layout = Arc::make_mut(&mut button.style.layout);
     layout.min_width = Some(LengthSpec::Px(width));
     layout.flex_shrink = Some(0.0);
     button
 }
 
-pub(super) fn trend(daily: &[QuotaUsageDailyBucket], window_width: f32) -> TimeSeriesChart {
+pub(crate) fn trend(daily: &[QuotaUsageDailyBucket], window_width: f32) -> TimeSeriesChart {
     let values = |pick: fn(&QuotaUsageDailyBucket) -> i64| {
         daily.iter().map(move |bucket| pick(bucket).max(0) as f64)
     };

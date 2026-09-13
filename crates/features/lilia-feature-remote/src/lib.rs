@@ -49,12 +49,20 @@ pub const OPERATE_PROTOCOL: &str = "lilia.remote/operate@1";
 pub enum RemoteRequest {
     /// Re-reads the host status without changing it.
     Refresh,
-    SetEnabled { enabled: bool },
-    SetPcName { name: String },
-    SetKeepAwake { enabled: bool },
+    SetEnabled {
+        enabled: bool,
+    },
+    SetPcName {
+        name: String,
+    },
+    SetKeepAwake {
+        enabled: bool,
+    },
     StartPairing,
     CancelPairing,
-    RevokeDevice { device_id: String },
+    RevokeDevice {
+        device_id: String,
+    },
 }
 
 /// Applies one remote operation and returns the resulting host status as JSON.
@@ -87,9 +95,7 @@ impl Feature for RemoteFeature {
         let port = Arc::clone(&self.port);
         vec![JobProtocol::new(
             OPERATE_PROTOCOL,
-            Arc::new(move |payload, _context: &JobContext| {
-                run_operate_job(payload, port.as_ref())
-            }),
+            Arc::new(move |payload, _context: &JobContext| run_operate_job(payload, port.as_ref())),
         )]
     }
 

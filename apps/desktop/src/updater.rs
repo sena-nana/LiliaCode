@@ -12,9 +12,9 @@ use crate::application::{
 };
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};
+use reqwest::Url;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, CONTENT_LENGTH};
-use reqwest::Url;
 use semver::Version;
 use serde::Deserialize;
 

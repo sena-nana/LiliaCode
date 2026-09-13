@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use lilia_contracts::{ProductTask, Project, ProjectId, TaskId};
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ struct SessionDoc {
 
 /// 语料的 bigram 与 IDF 只依赖任务事实。指纹相同就复用，避免每次搜索都重建。
 /// 用指纹而不是事件失效：漏一次订阅会让搜索结果长期陈旧，指纹不会。
-pub(crate) struct SessionSearchCorpus {
+struct SessionSearchCorpus {
     fingerprint: u64,
     docs: Vec<SessionDoc>,
     idf: HashMap<String, f64>,
@@ -74,7 +74,19 @@ fn corpus_fingerprint(projects: &[Project], tasks: &[ProductTask]) -> u64 {
     hasher.finish()
 }
 
-impl DesktopApplication {
+#[derive(Clone)]
+pub struct SessionSearchService {
+    projects: lilia_feature_task::ProjectTaskService,
+    corpus: Arc<Mutex<Option<Arc<SessionSearchCorpus>>>>,
+}
+impl SessionSearchService {
+    pub(crate) fn new(projects: lilia_feature_task::ProjectTaskService) -> Self {
+        Self {
+            projects,
+            corpus: Arc::new(Mutex::new(None)),
+        }
+    }
+
     pub fn search_sessions(
         &self,
         query: &str,
@@ -116,12 +128,11 @@ impl DesktopApplication {
     }
 
     fn session_search_corpus(&self) -> Result<Arc<SessionSearchCorpus>, DesktopApplicationError> {
-        let projects = self.query_projects(ProjectQuery::default())?;
-        let tasks = self.query_tasks(TaskQuery::default())?;
+        let projects = self.projects.query_projects(ProjectQuery::default())?;
+        let tasks = self.projects.query_tasks(TaskQuery::default())?;
         let fingerprint = corpus_fingerprint(&projects, &tasks);
         if let Some(cached) = self
-            .inner
-            .session_search_cache
+            .corpus
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
@@ -171,11 +182,50 @@ impl DesktopApplication {
             idf,
         });
         *self
-            .inner
-            .session_search_cache
+            .corpus
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(Arc::clone(&corpus));
         Ok(corpus)
+    }
+}
+
+pub enum SessionSearchServiceKey {}
+impl lilia_kernel::ServiceKey for SessionSearchServiceKey {
+    type Value = SessionSearchService;
+    const NAME: &'static str = "lilia.session.search";
+}
+pub struct SessionSearchFeature {
+    service: SessionSearchService,
+}
+impl SessionSearchFeature {
+    pub fn new(service: SessionSearchService) -> Self {
+        Self { service }
+    }
+}
+impl lilia_kernel::Feature for SessionSearchFeature {
+    fn id(&self) -> lilia_kernel::FeatureId {
+        lilia_kernel::FeatureId::new("lilia.feature.session-search").expect("valid feature id")
+    }
+    fn provides(&self) -> Vec<lilia_kernel::ServiceRef> {
+        vec![lilia_kernel::ServiceRef::of::<SessionSearchServiceKey>()]
+    }
+    fn mount(
+        &self,
+        cx: &mut lilia_kernel::FeatureContext<'_>,
+    ) -> Result<(), lilia_kernel::KernelError> {
+        cx.provide::<SessionSearchServiceKey>(self.service.clone())
+    }
+}
+impl DesktopApplication {
+    pub fn session_search_service(&self) -> SessionSearchService {
+        self.inner.session_search.clone()
+    }
+    pub fn search_sessions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<DesktopSessionSearchResult>, DesktopApplicationError> {
+        self.inner.session_search.search_sessions(query, limit)
     }
 }
 
@@ -396,6 +446,56 @@ mod tests {
         assert!(!results[0].highlights.is_empty());
         assert!(results.iter().all(|result| result.title.contains("login")
             || result.score > 0.0 && result.task_id == matching.id));
+    }
+
+    #[test]
+    fn direct_search_refreshes_renamed_and_archived_facts_without_a_subscription() {
+        let (_dir, app) = temp_app();
+        let project = app
+            .create_project(DesktopProjectCreate::new("Original"))
+            .unwrap();
+        let task = app
+            .create_task(DesktopTaskCreate::new(
+                Some(project.id.clone()),
+                "unique needle",
+            ))
+            .unwrap();
+        let service = app.session_search_service();
+        assert_eq!(
+            service.search_sessions("needle", 10).unwrap()[0]
+                .project_name
+                .as_deref(),
+            Some("Original")
+        );
+        app.inner
+            .project_tasks
+            .update_project(
+                &project.id,
+                crate::application::DesktopProjectPatch {
+                    name: Some("Renamed".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        app.inner
+            .project_tasks
+            .update_task(
+                &task.id,
+                crate::application::DesktopTaskPatch {
+                    title: Some("unique changed".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let result = service.search_sessions("changed", 10).unwrap();
+        assert_eq!(result[0].task_id, task.id);
+        assert_eq!(result[0].title, "unique changed");
+        assert_eq!(result[0].project_name.as_deref(), Some("Renamed"));
+        app.inner
+            .project_tasks
+            .set_task_archived(&task.id, true)
+            .unwrap();
+        assert!(service.search_sessions("changed", 10).unwrap().is_empty());
     }
 
     #[test]

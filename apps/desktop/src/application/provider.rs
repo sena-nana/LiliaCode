@@ -188,56 +188,85 @@ impl DesktopApplication {
         self.read_host_credential_text_result(key).ok().flatten()
     }
 
-    pub fn provider_runtime_settings(
-        &self,
-    ) -> Result<DesktopAgentRuntimeSettings, DesktopApplicationError> {
-        self.inner
-            .provider_settings
-            .lock()
-            .map(|settings| settings.current())
-            .map_err(|_| DesktopProviderError::SettingsStateUnavailable.into())
+    pub fn provider_credential_service(&self) -> ProviderCredentialService {
+        self.inner.provider_credentials.clone()
     }
-
-    pub fn save_provider_runtime_settings(
-        &self,
-        update: DesktopAgentRuntimeSettingsUpdate,
-    ) -> Result<DesktopAgentRuntimeSettings, DesktopApplicationError> {
-        let runtime = self.authority().shared_runtime();
-        let mut state = self
-            .inner
-            .provider_settings
-            .lock()
-            .map_err(|_| DesktopProviderError::SettingsStateUnavailable)?;
-        let previous = state.current();
-        let next = state.prepare_update(update)?;
-        state.persist(&next)?;
-        if let Err(error) = runtime
-            .inner()
-            .configure_model_runtime(runtime_configuration(&next))
-        {
-            let rollback = state.persist(&previous);
-            return Err(DesktopProviderError::RuntimeSettingsApply {
-                message: error.to_string(),
-                rollback_failed: rollback.err().map(|error| error.to_string()),
-            }
-            .into());
-        }
-        state.commit(next.clone());
-        drop(state);
-        let revision = self
-            .inner
-            .provider_revision
-            .fetch_add(1, Ordering::AcqRel)
-            .saturating_add(1);
-        self.emit_event(ProviderChanged {
-            provider_id: None,
-            revision,
-        });
-        Ok(next)
-    }
-
     pub fn provider_snapshot(&self) -> DesktopProviderSnapshot {
-        let runtime = self.authority().shared_runtime();
+        self.inner.provider_credentials.provider_snapshot()
+    }
+    pub fn login_provider_credential(
+        &self,
+        input: DesktopProviderCredentialInput,
+    ) -> Result<DesktopCredentialView, DesktopApplicationError> {
+        self.inner
+            .provider_credentials
+            .login_provider_credential(input)
+    }
+    pub fn import_provider_credential(
+        &self,
+        input: DesktopProviderCredentialImportInput,
+    ) -> Result<DesktopCredentialView, DesktopApplicationError> {
+        self.inner
+            .provider_credentials
+            .import_provider_credential(input)
+    }
+    pub fn revoke_provider_credential(
+        &self,
+        credential_id: impl Into<String>,
+        revision: u64,
+        reason: Option<String>,
+    ) -> Result<DesktopCredentialView, DesktopApplicationError> {
+        self.inner
+            .provider_credentials
+            .revoke_provider_credential(credential_id, revision, reason)
+    }
+    pub fn refresh_provider_runtime(
+        &self,
+        provider_id: Option<String>,
+    ) -> Result<DesktopProviderSnapshot, DesktopApplicationError> {
+        self.inner
+            .provider_credentials
+            .refresh_provider_runtime(provider_id)
+    }
+}
+
+pub trait ProviderProfileRefreshPort: Send + Sync {
+    fn refresh(&self) -> Result<(), DesktopProviderError>;
+}
+struct SharedProviderProfileRefresh(lilia_service::ServiceAuthority);
+impl ProviderProfileRefreshPort for SharedProviderProfileRefresh {
+    fn refresh(&self) -> Result<(), DesktopProviderError> {
+        self.0
+            .shared_runtime()
+            .inner()
+            .refresh_product_profile(None)
+            .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
+        Ok(())
+    }
+}
+#[derive(Clone)]
+pub struct ProviderCredentialService {
+    authority: lilia_service::ServiceAuthority,
+    revision: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    events: lilia_kernel::EventBus,
+    refresh: std::sync::Arc<dyn ProviderProfileRefreshPort>,
+}
+impl ProviderCredentialService {
+    pub fn new(
+        authority: lilia_service::ServiceAuthority,
+        revision: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        events: lilia_kernel::EventBus,
+    ) -> Self {
+        let refresh = std::sync::Arc::new(SharedProviderProfileRefresh(authority.clone()));
+        Self {
+            authority,
+            revision,
+            events,
+            refresh,
+        }
+    }
+    pub fn provider_snapshot(&self) -> DesktopProviderSnapshot {
+        let runtime = self.authority.shared_runtime();
         let runtime = runtime.inner();
         let providers = runtime
             .credentials()
@@ -259,7 +288,7 @@ impl DesktopApplication {
         let diagnostics = runtime.independent_diagnostics();
         let quota = runtime.native_quota_surface();
         DesktopProviderSnapshot {
-            revision: self.inner.provider_revision.load(Ordering::Acquire),
+            revision: self.revision.load(Ordering::Acquire),
             providers,
             credentials: diagnostics
                 .credential
@@ -311,7 +340,7 @@ impl DesktopApplication {
         input: DesktopProviderCredentialInput,
     ) -> Result<DesktopCredentialView, DesktopApplicationError> {
         let credential = self.validate_provider_credential_input(input)?;
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let descriptor = runtime
             .inner()
             .credentials()
@@ -323,11 +352,10 @@ impl DesktopApplication {
                 source: credential.source,
             })
             .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
-        runtime
-            .inner()
-            .refresh_product_profile(None)
-            .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
-        Ok(self.finish_provider_credential_change(credential.provider_id, descriptor))
+        let refreshed = self.refresh.refresh();
+        let view = self.finish_provider_credential_change(credential.provider_id, descriptor);
+        refreshed?;
+        Ok(view)
     }
 
     pub fn import_provider_credential(
@@ -335,7 +363,7 @@ impl DesktopApplication {
         input: DesktopProviderCredentialImportInput,
     ) -> Result<DesktopCredentialView, DesktopApplicationError> {
         let credential = self.validate_provider_credential_input(input.credential)?;
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let descriptor = runtime
             .inner()
             .credentials()
@@ -349,11 +377,10 @@ impl DesktopApplication {
                 independent_revoke_uri: input.independent_revoke_uri,
             })
             .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
-        runtime
-            .inner()
-            .refresh_product_profile(None)
-            .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
-        Ok(self.finish_provider_credential_change(credential.provider_id, descriptor))
+        let refreshed = self.refresh.refresh();
+        let view = self.finish_provider_credential_change(credential.provider_id, descriptor);
+        refreshed?;
+        Ok(view)
     }
 
     pub fn revoke_provider_credential(
@@ -367,7 +394,7 @@ impl DesktopApplication {
         if credential_id.is_empty() {
             return Err(DesktopProviderError::InvalidCredentialId.into());
         }
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let descriptor = runtime
             .inner()
             .credentials()
@@ -379,29 +406,23 @@ impl DesktopApplication {
                 reason,
             )
             .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
-        runtime
-            .inner()
-            .refresh_product_profile(None)
-            .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
+        let refreshed = self.refresh.refresh();
         let provider_id = descriptor.provider_id.clone();
-        Ok(self.finish_provider_credential_change(provider_id, descriptor))
+        let view = self.finish_provider_credential_change(provider_id, descriptor);
+        refreshed?;
+        Ok(view)
     }
 
     pub fn refresh_provider_runtime(
         &self,
         provider_id: Option<String>,
     ) -> Result<DesktopProviderSnapshot, DesktopApplicationError> {
-        self.authority()
-            .shared_runtime()
-            .inner()
-            .refresh_product_profile(None)
-            .map_err(|error| DesktopProviderError::Runtime(error.to_string()))?;
+        self.refresh.refresh()?;
         let revision = self
-            .inner
-            .provider_revision
+            .revision
             .fetch_add(1, Ordering::AcqRel)
             .saturating_add(1);
-        self.emit_event(ProviderChanged {
+        self.events.publish(ProviderChanged {
             provider_id,
             revision,
         });
@@ -413,7 +434,7 @@ impl DesktopApplication {
         input: DesktopProviderCredentialInput,
     ) -> Result<ValidatedProviderCredential, DesktopProviderError> {
         let provider_id = input.provider_id.trim().to_owned();
-        let runtime = self.authority().shared_runtime();
+        let runtime = self.authority.shared_runtime();
         let provider = runtime
             .inner()
             .credentials()
@@ -448,21 +469,49 @@ impl DesktopApplication {
         descriptor: CredentialDescriptorView,
     ) -> DesktopCredentialView {
         let revision = self
-            .inner
-            .provider_revision
+            .revision
             .fetch_add(1, Ordering::AcqRel)
             .saturating_add(1);
         let view = desktop_credential_view(descriptor);
-        self.emit_event(CredentialChanged {
+        self.events.publish(CredentialChanged {
             provider_id: provider_id.clone(),
             credential_id: view.credential_id.clone(),
             revision,
         });
-        self.emit_event(ProviderChanged {
+        self.events.publish(ProviderChanged {
             provider_id: Some(provider_id),
             revision,
         });
         view
+    }
+}
+
+pub struct ProviderCredentialServiceKey;
+impl lilia_kernel::ServiceKey for ProviderCredentialServiceKey {
+    type Value = ProviderCredentialService;
+    const NAME: &'static str = "lilia.provider.credentials";
+}
+pub struct ProviderCredentialServiceFeature {
+    service: ProviderCredentialService,
+}
+impl ProviderCredentialServiceFeature {
+    pub fn new(service: ProviderCredentialService) -> Self {
+        Self { service }
+    }
+}
+impl lilia_kernel::Feature for ProviderCredentialServiceFeature {
+    fn id(&self) -> lilia_kernel::FeatureId {
+        lilia_kernel::FeatureId::new("lilia.feature.provider-credentials")
+            .expect("nonempty feature id")
+    }
+    fn provides(&self) -> Vec<lilia_kernel::ServiceRef> {
+        vec![lilia_kernel::ServiceRef::of::<ProviderCredentialServiceKey>()]
+    }
+    fn mount(
+        &self,
+        cx: &mut lilia_kernel::FeatureContext<'_>,
+    ) -> Result<(), lilia_kernel::KernelError> {
+        cx.provide::<ProviderCredentialServiceKey>(self.service.clone())
     }
 }
 
@@ -553,6 +602,100 @@ mod tests {
             Arc::new(TestHost),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn credential_service_outlives_facade_and_rejected_input_has_no_fact_event() {
+        let app = application();
+        let events = app.subscribe_events();
+        let service = app.provider_credential_service();
+        drop(app);
+        let initial = service.provider_snapshot();
+        assert!(
+            service
+                .login_provider_credential(DesktopProviderCredentialInput {
+                    provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
+                    kind: DesktopCredentialKind::ApiKey,
+                    secret: DesktopSecret::new(Vec::new()),
+                    account_label: None,
+                    source: None,
+                })
+                .is_err()
+        );
+        assert!(events.try_recv().is_err());
+        assert_eq!(service.provider_snapshot().revision, initial.revision);
+        assert!(service.provider_snapshot().credentials.is_empty());
+        let saved = service
+            .login_provider_credential(DesktopProviderCredentialInput {
+                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
+                kind: DesktopCredentialKind::ApiKey,
+                secret: DesktopSecret::new(b"sk-service-owned-test-0123456789abcdef".to_vec()),
+                account_label: None,
+                source: None,
+            })
+            .unwrap();
+        assert_eq!(service.provider_snapshot().credentials, vec![saved]);
+        assert!(events.try_recv().unwrap().is::<CredentialChanged>());
+        assert!(events.try_recv().unwrap().is::<ProviderChanged>());
+    }
+
+    #[test]
+    fn committed_credentials_publish_truth_even_when_runtime_refresh_fails() {
+        struct FailedRefresh;
+        impl ProviderProfileRefreshPort for FailedRefresh {
+            fn refresh(&self) -> Result<(), DesktopProviderError> {
+                Err(DesktopProviderError::Runtime(
+                    "injected profile refresh failure".into(),
+                ))
+            }
+        }
+        let app = application();
+        let events = app.subscribe_events();
+        let mut service = app.provider_credential_service();
+        service.refresh = Arc::new(FailedRefresh);
+        let before = service.provider_snapshot().revision;
+        assert!(
+            service
+                .login_provider_credential(DesktopProviderCredentialInput {
+                    provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
+                    kind: DesktopCredentialKind::ApiKey,
+                    secret: DesktopSecret::new(b"sk-committed-test-0123456789abcdef".to_vec()),
+                    account_label: None,
+                    source: None,
+                })
+                .is_err()
+        );
+        let committed = service.provider_snapshot();
+        assert_eq!(committed.credentials.len(), 1);
+        assert_eq!(
+            committed.credentials[0].status,
+            DesktopCredentialStatus::Active
+        );
+        assert!(committed.revision > before);
+        let credential_event = events.try_recv().unwrap();
+        let changed = credential_event.downcast::<CredentialChanged>().unwrap();
+        assert_eq!(
+            changed.credential_id,
+            committed.credentials[0].credential_id
+        );
+        assert_eq!(changed.revision, committed.revision);
+        assert!(events.try_recv().unwrap().is::<ProviderChanged>());
+        assert!(
+            service
+                .revoke_provider_credential(
+                    committed.credentials[0].credential_id.clone(),
+                    committed.credentials[0].revision,
+                    None
+                )
+                .is_err()
+        );
+        assert_eq!(
+            service.provider_snapshot().credentials[0].status,
+            DesktopCredentialStatus::Revoked
+        );
+        assert!(events.try_recv().unwrap().is::<CredentialChanged>());
+        assert!(events.try_recv().unwrap().is::<ProviderChanged>());
+        assert!(events.try_recv().is_err());
     }
 
     #[test]

@@ -107,32 +107,36 @@ mod tests {
                     left.height > 600.0 && right.height > 600.0,
                     "wide columns fill remaining viewport"
                 );
-                assert!(cx
-                    .world()
-                    .node(browser.root.stable_id())
-                    .unwrap()
-                    .children
-                    .contains(&browser.body.stable_id()));
+                assert!(
+                    cx.world()
+                        .node(browser.root.stable_id())
+                        .unwrap()
+                        .children
+                        .contains(&browser.body.stable_id())
+                );
             } else {
                 assert!(left.height >= 260.0 && right.height >= 360.0);
                 assert!(right.y >= left.y + left.height - 1.0);
-                assert!(cx
-                    .world()
-                    .node(browser.content_scroll.stable_id())
-                    .unwrap()
-                    .children
-                    .contains(&browser.body.stable_id()));
+                assert!(
+                    cx.world()
+                        .node(browser.content_scroll.stable_id())
+                        .unwrap()
+                        .children
+                        .contains(&browser.body.stable_id())
+                );
             }
         }
-        assert!(cx
-            .replace_text_input_selection(browser.search, "review")
-            .unwrap());
+        assert!(
+            cx.replace_text_input_selection(browser.search, "review")
+                .unwrap()
+        );
         assert!(
             matches!(events.lock().unwrap().last(), Some(ShellIntent::ExtensionsCommand(ExtensionsMessage::SearchChanged(query))) if query == "review")
         );
-        assert!(cx
-            .activate_node(browser.rows["skill:user:b"].stable_id())
-            .unwrap());
+        assert!(
+            cx.activate_node(browser.rows["skill:user:b"].stable_id())
+                .unwrap()
+        );
         assert!(
             matches!(events.lock().unwrap().last(), Some(ShellIntent::ExtensionsCommand(ExtensionsMessage::SelectEntry { key, .. })) if key == "skill:user:b")
         );
@@ -242,8 +246,10 @@ mod tests {
                 let measured = cx.world().text_metrics(target).unwrap();
                 assert_eq!(label.content.as_ref(), expected);
                 assert!(measured.width > 0.0);
-                assert!((label.bounds.width - measured.width).abs() < 0.5,
-                    "{width}: {name} must display its full shaped label: {label:?}, metrics={measured:?}");
+                assert!(
+                    (label.bounds.width - measured.width).abs() < 0.5,
+                    "{width}: {name} must display its full shaped label: {label:?}, metrics={measured:?}"
+                );
                 assert!(
                     label.bounds.x >= bounds.x
                         && label.bounds.x + label.bounds.width <= bounds.x + bounds.width + 0.5
@@ -275,9 +281,10 @@ mod tests {
                 ))
             ));
         }
-        assert!(cx
-            .replace_text_input_selection(browser.plugin_source, "-edited")
-            .unwrap());
+        assert!(
+            cx.replace_text_input_selection(browser.plugin_source, "-edited")
+                .unwrap()
+        );
         assert!(
             matches!(events.lock().unwrap().last(), Some(ShellIntent::ExtensionsCommand(ExtensionsMessage::PluginSourceChanged(value))) if value.contains("-edited"))
         );
@@ -398,9 +405,11 @@ mod tests {
         for cycle in 0..3 {
             let started = cycle * 1_000;
             cx.advance_animations(std::time::Duration::from_millis(started));
-            assert!(browser
-                .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
-                .unwrap());
+            assert!(
+                browser
+                    .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
+                    .unwrap()
+            );
             cx.layout_document(doc, LayoutViewport::new(960.0, 800.0))
                 .unwrap();
             cx.advance_animations(std::time::Duration::from_millis(started + 400));
@@ -421,11 +430,12 @@ mod tests {
             browser
                 .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
                 .unwrap();
-            assert!(cx
-                .read(browser.dialog.unwrap(), |dialog| dialog
+            assert!(
+                cx.read(browser.dialog.unwrap(), |dialog| dialog
                     .close_policy
                     .close_disabled)
-                .unwrap());
+                    .unwrap()
+            );
             editor.busy = false;
             browser
                 .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
@@ -551,10 +561,8 @@ impl ExtensionBrowser {
         let detail_panel = cx.create_detached_component(doc, Stack::fill_column(0.0))?;
         let detail_header = cx.create_detached_component(doc, detail_header_layout(false))?;
         let detail_title = cx.create_detached_component(doc, Text::new("选择一项"))?;
-        let detail_action_row = cx.create_detached_component(
-            doc,
-            crate::runtime_conversation::wrapping_controls_row(6.0),
-        )?;
+        let detail_action_row =
+            cx.create_detached_component(doc, crate::runtime_layout::wrapping_controls_row(6.0))?;
         let detail_scroll = cx.create_detached_component(
             doc,
             ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),

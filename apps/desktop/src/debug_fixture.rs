@@ -9,8 +9,8 @@ use lilia_contracts::{
     TimelineProjectionCommand, TimelineProjectionEvent,
 };
 use lilia_storage::{
-    mcp_registry_path, save_mcp_registry, skills_registry_path, AgentkitMcpRegistry,
-    AgentkitMcpRegistryEntry, AgentkitSkillPackageRef, AgentkitSkillsRegistry,
+    AgentkitMcpRegistry, AgentkitMcpRegistryEntry, AgentkitSkillPackageRef, AgentkitSkillsRegistry,
+    mcp_registry_path, save_mcp_registry, skills_registry_path,
 };
 use mutsuki_agent_contracts::{
     CredentialKind, InteractionKind, InteractionRequest, OPENAI_CREDENTIAL_PROVIDER_ID,
@@ -98,6 +98,7 @@ pub fn prepare(application: &DesktopApplication) -> Result<(), String> {
         })
         .map_err(|error| error.to_string())?;
     for (id, title) in [
+        ("native-agent-debug-draft-switch-task", "验证独立任务草稿"),
         (PLAN_REPLAY_TASK_ID, "验证 Native 计划重启回放"),
         (PLAN_CANCEL_TASK_ID, "验证 Native 计划取消"),
         (QUESTION_REPLAY_TASK_ID, "验证 Native 提问重启回放"),

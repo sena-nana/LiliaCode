@@ -2,9 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use lilia_contracts::{
-    GitWorkspaceRef, LiliaCodeTaskHandoff, LiliaCodeTaskHandoffKind, ProductTask,
-    ProductTaskHandoffImport, ProductTaskHandoffRecord, Project, ProjectArchiveState, ProjectId,
-    TaskId, LILIA_CODE_TASK_HANDOFF_PROTOCOL, LILIA_CODE_TASK_HANDOFF_VERSION,
+    GitWorkspaceRef, LILIA_CODE_TASK_HANDOFF_PROTOCOL, LILIA_CODE_TASK_HANDOFF_VERSION,
+    LiliaCodeTaskHandoff, LiliaCodeTaskHandoffKind, ProductTask, ProductTaskHandoffImport,
+    ProductTaskHandoffRecord, Project, ProjectArchiveState, ProjectId, TaskId,
 };
 use serde::Serialize;
 use uuid::Uuid;

@@ -174,8 +174,11 @@ mod tests {
 
     #[test]
     fn an_unreadable_payload_fails_the_job_instead_of_panicking() {
-        let error = run_check_job(serde_json::json!({ "channel": 7 }), &RecordingPort::default())
-            .expect_err("a malformed request cannot be checked");
+        let error = run_check_job(
+            serde_json::json!({ "channel": 7 }),
+            &RecordingPort::default(),
+        )
+        .expect_err("a malformed request cannot be checked");
 
         assert!(error.contains("invalid update check request"), "{error}");
     }

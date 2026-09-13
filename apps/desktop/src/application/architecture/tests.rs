@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lilia_service::ServiceAuthority;
 use mutsuki_agent_contracts::{AgentPermissionMode, InteractionKind, InteractionRequest};
@@ -256,11 +256,17 @@ fn rollback_restores_authoritative_graph_and_records_a_new_version_once() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].before_graph.as_ref().unwrap().nodes.len(), 1);
     assert_eq!(history[0].after_graph.as_ref().unwrap().nodes.len(), 0);
-    assert!(application
-        .rollback_project_architecture(&project.id, &task.id, ArchitectureBackend::NativeAgentkit)
-        .unwrap()
-        .event
-        .is_none());
+    assert!(
+        application
+            .rollback_project_architecture(
+                &project.id,
+                &task.id,
+                ArchitectureBackend::NativeAgentkit
+            )
+            .unwrap()
+            .event
+            .is_none()
+    );
     assert_eq!(
         application
             .project_architecture_changes(&project.id, 40)

@@ -127,25 +127,7 @@ pub struct AutomationWorkflowVersion {
     pub created_at: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AutomationSignalEnvelope {
-    pub id: String,
-    pub kind: String,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub task_id: Option<String>,
-    #[serde(default)]
-    pub backend: Option<String>,
-    #[serde(default)]
-    pub event_kind: Option<String>,
-    #[serde(default)]
-    pub automation_run_id: Option<String>,
-    #[serde(default)]
-    pub payload: JsonValue,
-    pub created_at: i64,
-}
+pub use lilia_contracts::AutomationSignalEnvelope;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -238,12 +220,7 @@ pub struct AutomationRunDetail {
     pub nodes: Vec<AutomationRunNodeState>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AutomationBeginRunInput {
-    pub workflow_id: String,
-    pub trigger: AutomationSignalEnvelope,
-}
+pub use lilia_contracts::AutomationBeginRunInput;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphExecution {

@@ -5,9 +5,9 @@ use crate::application::{
 };
 use lilia_contracts::{ProductTask, TaskId};
 use lilia_service::ServiceAuthority;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 #[test]

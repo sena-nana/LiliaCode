@@ -48,11 +48,9 @@ impl AutomationExecutionRepository for DesktopAutomationService {
             })?;
             store.apply_execution_transition(transition)?
         };
-        self.inner.events.run_changed(
-            &detail.run.workflow_id,
-            &detail.run.id,
-            detail.run.status,
-        );
+        self.inner
+            .events
+            .run_changed(&detail.run.workflow_id, &detail.run.id, detail.run.status);
         Ok(detail)
     }
 }
@@ -143,11 +141,9 @@ impl DesktopAutomationService {
         input: AutomationBeginRunInput,
     ) -> Result<AutomationRunDetail, DesktopAutomationError> {
         let detail = self.store()?.try_begin_run(input)?;
-        self.inner.events.run_changed(
-            &detail.run.workflow_id,
-            &detail.run.id,
-            detail.run.status,
-        );
+        self.inner
+            .events
+            .run_changed(&detail.run.workflow_id, &detail.run.id, detail.run.status);
         Ok(detail)
     }
 
@@ -237,6 +233,7 @@ mod tests {
         events.take().unwrap();
         let detail = service
             .try_begin_run(AutomationBeginRunInput {
+                expected_version_id: None,
                 workflow_id: workflow.id.clone(),
                 trigger: AutomationSignalEnvelope {
                     id: "signal-1".to_owned(),

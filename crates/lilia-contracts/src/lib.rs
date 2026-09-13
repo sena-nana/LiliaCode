@@ -7,7 +7,9 @@
 mod artifact;
 mod assistant;
 mod attachment;
+mod automation;
 mod binding;
+mod browser;
 mod command;
 mod context;
 mod conversation;
@@ -25,6 +27,7 @@ mod revision;
 mod secret;
 mod sidebar;
 mod task;
+mod terminal;
 mod workflow;
 
 pub use artifact::{
@@ -47,7 +50,18 @@ pub use attachment::{
     ChatAttachment, ChatAttachmentDirectoryMeta, ChatAttachmentKind, ChatContextSearchMatch,
     ChatContextSearchResult,
 };
+pub use automation::{
+    AutomationBeginRunInput, AutomationOperationRequest, AutomationOperationResult,
+    AutomationSignalEnvelope, AutomationSwitchCases,
+};
 pub use binding::{AgentSessionBinding, AgentSessionRef};
+pub use browser::{
+    BrowserControl, BrowserOperation, BrowserPage, BrowserRequest, BrowserScope, BrowserState,
+    BrowserTarget, BROWSER_CONTRACT_JSON,
+};
+pub use browser::{
+    BrowserHostDecision, BrowserHostRequest, BrowserHostRequestKind, BrowserTabRestoration,
+};
 pub use command::{
     IdempotencyKey, Page, PageRequest, ProductCommandMeta, ProductCommandResult, ProductEvent,
     ProductEventSequence, SortDirection,
@@ -96,6 +110,7 @@ pub use task::{
     ProductTaskReorderEntry, ProductTaskReorderOutcome, ProductTaskStatus, TaskDependencyGraph,
     TaskDependencyRule, AGENT_TODO_PROMOTION_REQUIRED,
 };
+pub use terminal::{TerminalCellColor, TerminalGridCell, TERMINAL_GRID_CONTRACT_JSON};
 pub use workflow::{
     AssignmentStatus, LiliaAgentWorkflow, LiliaReviewTarget, ProductAssignment, ProductWorkflow,
     ProductWorkflowRun, ProductWorkflowRunStatus, ProductWorkflowStatus,

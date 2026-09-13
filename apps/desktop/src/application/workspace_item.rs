@@ -1,20 +1,88 @@
-use lilia_contracts::{ProductError, ProductTask, Project, ProjectArchiveState, ProjectId, TaskId};
+use lilia_contracts::{
+    BrowserTabRestoration, ProductError, ProductTask, Project, ProjectArchiveState, ProjectId,
+    TaskId,
+};
 
 use crate::application::{
-    document_resource_key, path_from_document_resource_key, DesktopApplication,
-    DesktopApplicationError, DocumentId, DocumentSnapshot, WorkspaceItemId,
+    DesktopApplication, DesktopApplicationError, DocumentId, DocumentSnapshot, WorkspaceItemId,
+    document_resource_key, path_from_document_resource_key,
 };
 
 pub use lilia_feature_workspace::{
-    ApplicationWorkspaceSurface, ProjectWorkspaceSurface, WorkspaceFocusTarget, WorkspaceItem,
-    WorkspaceItemCapabilities, WorkspaceItemError, WorkspaceItemKind, WorkspaceItemRestoration,
-    WorkspaceResourceId, ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND,
+    ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND, ApplicationWorkspaceSurface,
     DOCUMENT_WORKSPACE_ITEM_KIND, MEMORY_WORKSPACE_ITEM_KIND, PROJECT_FILES_WORKSPACE_ITEM_KIND,
-    ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND, TASK_WORKSPACE_ITEM_KIND,
-    TERMINAL_WORKSPACE_ITEM_KIND,
+    ProjectWorkspaceSurface, ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND,
+    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND, WorkspaceFocusTarget, WorkspaceItem,
+    WorkspaceItemCapabilities, WorkspaceItemError, WorkspaceItemKind, WorkspaceItemRestoration,
+    WorkspaceResourceId,
 };
 
+pub const BROWSER_WORKSPACE_ITEM_KIND: &str = "task-browser";
+
+pub fn browser_tab_restoration(
+    restoration: &WorkspaceItemRestoration,
+) -> Result<Option<BrowserTabRestoration>, WorkspaceItemError> {
+    if restoration.kind.as_str() != BROWSER_WORKSPACE_ITEM_KIND {
+        return Ok(None);
+    }
+    let invalid = || WorkspaceItemError::InvalidRestorationIdentity {
+        item_id: restoration.id.as_str().into(),
+        kind: BROWSER_WORKSPACE_ITEM_KIND.into(),
+    };
+    let state: BrowserTabRestoration =
+        serde_json::from_value(restoration.serialized_state.clone().ok_or_else(invalid)?)
+            .map_err(|_| invalid())?;
+    let base = format!("browser:{}", state.scope.task_id.as_str());
+    let valid_tab = state.scope.tab_id == base
+        || state
+            .scope
+            .tab_id
+            .strip_prefix(&format!("{base}:"))
+            .is_some_and(|suffix| uuid::Uuid::parse_str(suffix).is_ok());
+    if !valid_tab
+        || restoration.id.as_str() != state.scope.tab_id
+        || restoration
+            .resource_id
+            .as_ref()
+            .map(WorkspaceResourceId::as_str)
+            != Some(state.scope.tab_id.as_str())
+        || !(state.url == "about:blank"
+            || state.url.starts_with("http://")
+            || state.url.starts_with("https://"))
+    {
+        return Err(invalid());
+    }
+    Ok(Some(state))
+}
+
+pub fn browser_workspace_item(
+    state: &BrowserTabRestoration,
+) -> Result<WorkspaceItem, WorkspaceItemError> {
+    let item = WorkspaceItem::new(
+        WorkspaceItemId::new(state.scope.tab_id.clone()).map_err(|_| {
+            WorkspaceItemError::InvalidRestorationIdentity {
+                item_id: state.scope.tab_id.clone(),
+                kind: BROWSER_WORKSPACE_ITEM_KIND.into(),
+            }
+        })?,
+        WorkspaceResourceId::new(state.scope.tab_id.clone())?,
+        WorkspaceItemKind::new(BROWSER_WORKSPACE_ITEM_KIND)?,
+        "浏览器",
+        WorkspaceFocusTarget::new("browser-page")?,
+        WorkspaceItemCapabilities {
+            closable: true,
+            splittable: false,
+            movable_across_windows: true,
+            persistent: true,
+        },
+    )?
+    .with_serialized_state(Some(serde_json::json!(state)));
+    browser_tab_restoration(&item.restoration().expect("browser items are persistent"))?;
+    Ok(item)
+}
+
 pub trait WorkspaceItemResolve {
+    fn browser_restoration(&self) -> Result<Option<BrowserTabRestoration>, WorkspaceItemError>;
     fn document_path(&self) -> Result<Option<std::path::PathBuf>, WorkspaceItemError>;
     fn terminal_session_id(
         &self,
@@ -22,6 +90,15 @@ pub trait WorkspaceItemResolve {
 }
 
 impl WorkspaceItemResolve for WorkspaceItem {
+    fn browser_restoration(&self) -> Result<Option<BrowserTabRestoration>, WorkspaceItemError> {
+        browser_tab_restoration(&WorkspaceItemRestoration {
+            id: self.id.clone(),
+            resource_id: Some(self.resource_id.clone()),
+            kind: self.kind.clone(),
+            serialized_state: self.serialized_state.clone(),
+        })
+    }
+
     fn document_path(&self) -> Result<Option<std::path::PathBuf>, WorkspaceItemError> {
         if self.kind.as_str() != DOCUMENT_WORKSPACE_ITEM_KIND {
             return Ok(None);
@@ -152,6 +229,37 @@ impl DesktopApplication {
         &self,
         restoration: &WorkspaceItemRestoration,
     ) -> Result<Option<WorkspaceItem>, DesktopApplicationError> {
+        if let Some(state) = browser_tab_restoration(restoration)? {
+            let task = match self.get_task(&state.scope.task_id) {
+                Ok(task) => task,
+                Err(DesktopApplicationError::Product(ProductError::NotFound { .. })) => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+            if task.project_id.as_ref() != Some(&state.scope.project_id) {
+                return Err(WorkspaceItemError::InvalidRestorationIdentity {
+                    item_id: restoration.id.as_str().into(),
+                    kind: BROWSER_WORKSPACE_ITEM_KIND.into(),
+                }
+                .into());
+            }
+            if task.archived {
+                return Ok(None);
+            }
+            let project = match self.get_project(&state.scope.project_id) {
+                Ok(project) => project,
+                Err(DesktopApplicationError::Product(ProductError::NotFound { .. })) => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+            if project.archive == ProjectArchiveState::Archived {
+                return Ok(None);
+            }
+            return browser_workspace_item(&state).map(Some).map_err(Into::into);
+        }
+
         if restoration.kind.as_str() == DOCUMENT_WORKSPACE_ITEM_KIND {
             let resource_id = restoration.resource_id.clone().unwrap_or_else(|| {
                 WorkspaceResourceId::new(restoration.id.as_str().to_owned())
@@ -538,6 +646,170 @@ fn terminal_item_with_instance_id(
 mod tests {
     use super::*;
     use crate::application::WorkspaceItemResolve;
+
+    fn browser_application() -> DesktopApplication {
+        use crate::application::*;
+        struct Host;
+        impl DesktopHost for Host {
+            fn execute(
+                &self,
+                _: &DesktopHostContext,
+                _: DesktopHostAction,
+            ) -> Result<DesktopHostResult, DesktopHostError> {
+                Ok(DesktopHostResult::Completed)
+            }
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        DesktopApplication::from_authority(
+            DesktopApplicationConfig::new(std::env::temp_dir().join(&id), &id).unwrap(),
+            lilia_service::ServiceAuthority::bootstrap_in_memory_named(&id, &id).unwrap(),
+            std::sync::Arc::new(Host),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn browser_restoration_preserves_scope_url_and_rejects_corrupted_identity() {
+        let state = BrowserTabRestoration {
+            scope: lilia_contracts::BrowserScope {
+                project_id: ProjectId::new("project").unwrap(),
+                task_id: TaskId::new("task").unwrap(),
+                tab_id: "browser:task".into(),
+            },
+            url: "https://example.test/path".into(),
+        };
+        for tab in [
+            "browser:task".to_owned(),
+            format!("browser:task:{}", uuid::Uuid::new_v4()),
+        ] {
+            let mut state = state.clone();
+            state.scope.tab_id = tab;
+            let item = browser_workspace_item(&state).unwrap();
+            assert!(item.capabilities.persistent);
+            assert_eq!(item.browser_restoration().unwrap(), Some(state));
+        }
+        let record = browser_workspace_item(&state)
+            .unwrap()
+            .restoration()
+            .unwrap();
+        let original = serde_json::to_value(&record).unwrap();
+        for mutation in 0..6 {
+            let mut changed = record.clone();
+            match mutation {
+                0 => changed.id = WorkspaceItemId::new("browser:other").unwrap(),
+                1 => changed.resource_id = Some(WorkspaceResourceId::new("browser:other").unwrap()),
+                2 => {
+                    changed.serialized_state.as_mut().unwrap()["scope"]["taskId"] =
+                        serde_json::json!("other")
+                }
+                3 => {
+                    changed.serialized_state.as_mut().unwrap()["scope"]["tabId"] =
+                        serde_json::json!("browser:task:invalid")
+                }
+                4 => changed.serialized_state = None,
+                _ => {
+                    changed.serialized_state.as_mut().unwrap()["url"] =
+                        serde_json::json!("file:///secret")
+                }
+            }
+            let before = serde_json::to_value(&changed).unwrap();
+            assert!(browser_tab_restoration(&changed).is_err());
+            assert_eq!(serde_json::to_value(&changed).unwrap(), before);
+        }
+        assert_eq!(serde_json::to_value(&record).unwrap(), original);
+    }
+
+    #[test]
+    fn browser_restore_requires_live_task_in_the_recorded_project_and_preserves_record() {
+        let app = browser_application();
+        let first = app
+            .create_project(crate::application::DesktopProjectCreate::new("first"))
+            .unwrap();
+        let second = app
+            .create_project(crate::application::DesktopProjectCreate::new("second"))
+            .unwrap();
+        let task = app
+            .create_task(crate::application::DesktopTaskCreate::new(
+                Some(first.id.clone()),
+                "task",
+            ))
+            .unwrap();
+        let state = BrowserTabRestoration {
+            scope: lilia_contracts::BrowserScope {
+                project_id: first.id,
+                task_id: task.id.clone(),
+                tab_id: format!("browser:{}", task.id.as_str()),
+            },
+            url: "about:blank".into(),
+        };
+        let record = browser_workspace_item(&state)
+            .unwrap()
+            .restoration()
+            .unwrap();
+        let original = serde_json::to_value(&record).unwrap();
+        let restored = app.restore_workspace_item(&record).unwrap().unwrap();
+        assert_eq!(restored.browser_restoration().unwrap(), Some(state.clone()));
+        let mut crossed = record.clone();
+        crossed.serialized_state.as_mut().unwrap()["scope"]["projectId"] =
+            serde_json::json!(second.id);
+        let crossed_original = serde_json::to_value(&crossed).unwrap();
+        assert!(app.restore_workspace_item(&crossed).is_err());
+        assert_eq!(serde_json::to_value(&crossed).unwrap(), crossed_original);
+        let mut absent = state;
+        absent.scope.task_id = TaskId::new("missing-task").unwrap();
+        absent.scope.tab_id = "browser:missing-task".into();
+        assert!(
+            app.restore_workspace_item(
+                &browser_workspace_item(&absent)
+                    .unwrap()
+                    .restoration()
+                    .unwrap()
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(serde_json::to_value(&record).unwrap(), original);
+    }
+
+    #[test]
+    fn browser_restore_omits_archived_tasks_and_projects_without_mutating_records() {
+        let app = browser_application();
+        let client = app.authority().client().unwrap();
+        for archived_project in [false, true] {
+            let project_id = ProjectId::new(format!("project-{archived_project}")).unwrap();
+            let mut project = Project::new(project_id.clone(), "project").unwrap();
+            if archived_project {
+                project.archive = ProjectArchiveState::Archived;
+            }
+            client
+                .products()
+                .create_entity(lilia_contracts::ProductEntity::Project(project))
+                .unwrap();
+            let task_id = TaskId::new(format!("task-{archived_project}")).unwrap();
+            let mut task =
+                ProductTask::new(task_id.clone(), Some(project_id.clone()), "task").unwrap();
+            task.archived = !archived_project;
+            client
+                .products()
+                .create_entity(lilia_contracts::ProductEntity::Task(task))
+                .unwrap();
+            let state = BrowserTabRestoration {
+                scope: lilia_contracts::BrowserScope {
+                    project_id,
+                    tab_id: format!("browser:{}", task_id.as_str()),
+                    task_id,
+                },
+                url: "about:blank".into(),
+            };
+            let record = browser_workspace_item(&state)
+                .unwrap()
+                .restoration()
+                .unwrap();
+            let original = record.clone();
+            assert!(app.restore_workspace_item(&record).unwrap().is_none());
+            assert_eq!(record, original);
+        }
+    }
 
     #[test]
     fn restoration_does_not_duplicate_presentation_or_product_facts() {

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use reqwest::blocking::Client;
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 
 #[derive(Clone, Debug)]
 pub(crate) struct DesktopAuxiliaryModelRequest {

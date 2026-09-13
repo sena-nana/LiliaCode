@@ -13,15 +13,15 @@ use lilia_kernel::{
     JobContext, JobError, JobHandler, JobProtocol, TaskProgress, TaskRuntime, TaskSpec, TaskTicket,
 };
 use mutsuki_runtime_contracts::{
-    PluginDeploymentKind, ProtocolClass, RuntimeProfile, RuntimeProfileMode, Task, TaskHandle,
-    TaskOutcome,
-};
-use mutsuki_runtime_host::{HostRuntime, HostRuntimeConfig, RuntimeBootstrapper};
-use mutsuki_runtime_contracts::{
     BatchEntry, CompletionBatch, EntryCompletion, RunnerDescriptor, RunnerResult, RuntimeError,
     ScalarValue, WorkBatch,
 };
+use mutsuki_runtime_contracts::{
+    PluginDeploymentKind, ProtocolClass, RuntimeProfile, RuntimeProfileMode, Task, TaskHandle,
+    TaskOutcome,
+};
 use mutsuki_runtime_core::{Runner, RunnerContext, RuntimeResult};
+use mutsuki_runtime_host::{HostRuntime, HostRuntimeConfig, RuntimeBootstrapper};
 use mutsuki_runtime_sdk::{HostRuntime as _, PluginBuilder, ProtocolDescriptorBuilder};
 use serde_json::Value;
 
@@ -38,10 +38,7 @@ struct ContextRegistry {
 
 impl ContextRegistry {
     fn open(&self, task_id: &str) -> JobContext {
-        self.locked()
-            .entry(task_id.to_owned())
-            .or_default()
-            .clone()
+        self.locked().entry(task_id.to_owned()).or_default().clone()
     }
 
     fn get(&self, task_id: &str) -> Option<JobContext> {
@@ -98,11 +95,9 @@ impl LiliaJobRuntimeBuilder {
         self,
         protocols: impl IntoIterator<Item = JobProtocol>,
     ) -> Result<Self, JobRuntimeError> {
-        protocols
-            .into_iter()
-            .try_fold(self, |builder, protocol| {
-                builder.protocol(protocol.id, protocol.handler)
-            })
+        protocols.into_iter().try_fold(self, |builder, protocol| {
+            builder.protocol(protocol.id, protocol.handler)
+        })
     }
 
     pub fn build(self) -> Result<LiliaJobRuntime, JobRuntimeError> {
@@ -232,7 +227,9 @@ impl TaskRuntime for LiliaJobRuntime {
             .is_some_and(|context| context.is_cancelled());
         let progress = match outcome {
             None if cancelled => TaskProgress::Cancelled,
-            None => TaskProgress::Running(context.map_or(Value::Null, |context| context.progress())),
+            None => {
+                TaskProgress::Running(context.map_or(Value::Null, |context| context.progress()))
+            }
             Some(_) if cancelled => TaskProgress::Cancelled,
             Some(TaskOutcome::Completed { output, .. }) => {
                 TaskProgress::Completed(output.unwrap_or(Value::Null))
@@ -267,7 +264,11 @@ impl Runner for JobRunner {
         &self.descriptor
     }
 
-    fn run_batch(&mut self, _ctx: RunnerContext, batch: WorkBatch) -> RuntimeResult<CompletionBatch> {
+    fn run_batch(
+        &mut self,
+        _ctx: RunnerContext,
+        batch: WorkBatch,
+    ) -> RuntimeResult<CompletionBatch> {
         let mut results = Vec::with_capacity(batch.entries.len());
         for entry in &batch.entries {
             let completion = match batch.payload_task(entry.payload_index) {
@@ -331,11 +332,7 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
     "no panic message".to_owned()
 }
 
-fn failed_entry(
-    entry: &BatchEntry,
-    code: &str,
-    message: String,
-) -> EntryCompletion {
+fn failed_entry(entry: &BatchEntry, code: &str, message: String) -> EntryCompletion {
     let mut error = RuntimeError::new(code, PLUGIN_ID, format!("task.{}", entry.task_id));
     error
         .evidence
@@ -485,7 +482,9 @@ mod tests {
         let jobs = Jobs::new(lilia_kernel::EventBus::new(), lilia_kernel::Journal::new());
         jobs.install_runtime(Arc::new(runtime));
 
-        let exploding = jobs.submit(JobRequest::new(ECHO, json!("explode"))).unwrap();
+        let exploding = jobs
+            .submit(JobRequest::new(ECHO, json!("explode")))
+            .unwrap();
         assert!(matches!(
             settled(&jobs, exploding.id()),
             JobState::Failed { .. }
@@ -562,7 +561,10 @@ mod tests {
         assert_eq!(jobs.state(first.id()), Some(JobState::Superseded));
         let _ = release_sender.send(());
         let _ = release_sender.send(());
-        assert_eq!(settled(&jobs, second.id()), JobState::Completed { output: json!(2) });
+        assert_eq!(
+            settled(&jobs, second.id()),
+            JobState::Completed { output: json!(2) }
+        );
         jobs.shutdown();
     }
 
@@ -602,7 +604,10 @@ mod tests {
             ) {
                 break;
             }
-            assert!(Instant::now() < deadline, "progress never reached the kernel");
+            assert!(
+                Instant::now() < deadline,
+                "progress never reached the kernel"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
 

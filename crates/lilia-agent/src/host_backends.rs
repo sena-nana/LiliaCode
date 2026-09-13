@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -172,7 +173,6 @@ fn join_reader(
         .map_err(|error| AgentError::new("lilia.host.process.read", error.to_string()))
 }
 
-#[derive(Default)]
 pub(crate) struct HostHttpBackend;
 
 impl BrowserGateway for HostHttpBackend {
@@ -180,29 +180,119 @@ impl BrowserGateway for HostHttpBackend {
         &self,
         request: &BrowserNavigateRequest,
     ) -> Result<(String, String, Vec<u8>), AgentError> {
-        let client = Client::builder()
-            .timeout(Duration::from_millis(request.limits.timeout_ms.max(1)))
-            .build()
-            .map_err(|error| AgentError::new("lilia.host.http.client", error.to_string()))?;
-        let response = client
-            .get(&request.url)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| AgentError::new("lilia.host.http.request", error.to_string()))?;
-        let final_url = response.url().to_string();
-        let bytes = response
-            .bytes()
-            .map_err(|error| AgentError::new("lilia.host.http.body", error.to_string()))?;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        self.snapshot_inner(request, &cancelled)
+    }
+    fn cancel(&self, _handle_id: &str) -> Result<(), AgentError> { Ok(()) }
+}
+
+impl HostHttpBackend {
+    fn snapshot_inner(&self, request: &BrowserNavigateRequest, cancelled: &AtomicBool) -> Result<(String, String, Vec<u8>), AgentError> {
+        let mut current_url = reqwest::Url::parse(&request.url)
+            .map_err(|_| AgentError::invalid_input("browser URL is invalid"))?;
+        if cancelled.load(Ordering::Acquire) { return Err(AgentError::new("lilia.host.http.cancelled", "browser request cancelled")); }
+        let response = (0..=3)
+            .find_map(|redirect| {
+                let addresses = browser_url_addresses(current_url.as_str())?;
+                let host = current_url.host_str()?;
+                let client = match Client::builder()
+                    .timeout(Duration::from_millis(request.limits.timeout_ms.max(1)))
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .resolve_to_addrs(host, &addresses)
+                    .build()
+                {
+                    Ok(client) => client,
+                    Err(error) => return Some(Err(AgentError::new("lilia.host.http.client", error.to_string()))),
+                };
+                if cancelled.load(Ordering::Acquire) { return Some(Err(AgentError::new("lilia.host.http.cancelled", "browser request cancelled"))); }
+                let response = match client.get(current_url.clone()).send() {
+                    Ok(response) => response,
+                    Err(error) => return Some(Err(AgentError::new("lilia.host.http.request", error.to_string()))),
+                };
+                if response.status().is_redirection() {
+                    if redirect == 3 {
+                        return Some(Err(AgentError::new(
+                            "lilia.host.http.redirect",
+                            "too many browser redirects",
+                        )));
+                    }
+                    let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+                        return Some(Err(AgentError::new("lilia.host.http.redirect", "redirect is missing Location")));
+                    };
+                    let Ok(location) = location.to_str() else {
+                        return Some(Err(AgentError::new("lilia.host.http.redirect", "redirect Location is invalid")));
+                    };
+                    let Ok(next_url) = current_url.join(location) else {
+                        return Some(Err(AgentError::new("lilia.host.http.redirect", "redirect Location is invalid")));
+                    };
+                    current_url = next_url;
+                    None
+                } else {
+                    Some(response.error_for_status().map_err(|error| {
+                        AgentError::new("lilia.host.http.request", error.to_string())
+                    }))
+                }
+            })
+            .ok_or_else(|| AgentError::new("lilia.host.http.redirect", "invalid browser redirect"))??;
+        let final_url = current_url.to_string();
         let limit = usize::try_from(request.limits.max_output_bytes)
             .unwrap_or(usize::MAX)
             .max(1);
-        let body = bytes[..bytes.len().min(limit)].to_vec();
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
+            return Err(AgentError::new(
+                "lilia.host.http.body",
+                "browser response exceeds the output limit",
+            ));
+        }
+        let mut body = Vec::with_capacity(limit.min(64 * 1024));
+        if cancelled.load(Ordering::Acquire) { return Err(AgentError::new("lilia.host.http.cancelled", "browser request cancelled")); }
+        response
+            .take(limit as u64 + 1)
+            .read_to_end(&mut body)
+            .map_err(|error| AgentError::new("lilia.host.http.body", error.to_string()))?;
+        if body.len() > limit {
+            return Err(AgentError::new(
+                "lilia.host.http.body",
+                "browser response exceeds the output limit",
+            ));
+        }
         let title = html_title(&body).unwrap_or_else(|| final_url.clone());
         Ok((final_url, title, body))
     }
 
-    fn cancel(&self, _handle_id: &str) -> Result<(), AgentError> {
-        Ok(())
+    fn cancel(&self, _handle_id: &str) -> Result<(), AgentError> { Ok(()) }
+}
+
+#[cfg(test)]
+fn browser_url_allowed(value: &str) -> bool {
+    browser_url_addresses(value).is_some_and(|addresses| !addresses.is_empty())
+}
+
+fn browser_url_addresses(value: &str) -> Option<Vec<SocketAddr>> {
+    let Ok(url) = reqwest::Url::parse(value) else { return None; };
+    if !matches!(url.scheme(), "http" | "https") || url.username() != "" || url.password().is_some() {
+        return None;
+    }
+    let Some(host) = url.host_str() else { return None; };
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return None;
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return public_ip(ip).then(|| vec![SocketAddr::new(ip, url.port_or_known_default().unwrap_or(443))]);
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs = (host, port).to_socket_addrs().ok()?.collect::<Vec<_>>();
+    (!addrs.is_empty() && addrs.iter().all(|addr| public_ip(addr.ip()))).then_some(addrs)
+}
+
+fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => !(ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || ip.is_broadcast() || ip.octets()[0] == 0 || (ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))),
+        IpAddr::V6(ip) => !(ip.is_loopback() || ip.is_unspecified() || ip.is_unique_local() || ip.is_unicast_link_local()),
     }
 }
 
@@ -278,5 +368,13 @@ mod tests {
             html_title(b"<html><TITLE>Workspace</TITLE></html>").as_deref(),
             Some("Workspace")
         );
+    }
+
+    #[test]
+    fn browser_url_policy_rejects_local_and_credential_bearing_targets() {
+        assert!(!browser_url_allowed("http://127.0.0.1/") );
+        assert!(!browser_url_allowed("http://localhost/"));
+        assert!(!browser_url_allowed("http://user:pass@example.com/"));
+        assert!(!browser_url_allowed("file:///etc/passwd"));
     }
 }

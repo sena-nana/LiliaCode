@@ -65,7 +65,7 @@ struct ProjectCommandDefinition {
     path: PathBuf,
 }
 
-impl DesktopApplication {
+impl crate::application::ComposerInputService {
     pub fn search_task_slash_commands(
         &self,
         task_id: &TaskId,
@@ -89,6 +89,29 @@ impl DesktopApplication {
             })
             .transpose()?;
         Ok(search_commands(workspace.as_deref(), query, limit))
+    }
+}
+
+impl DesktopApplication {
+    pub fn search_task_slash_commands(
+        &self,
+        task_id: &TaskId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<DesktopSlashCommandSearchResult>, DesktopApplicationError> {
+        self.inner
+            .composer_input
+            .search_task_slash_commands(task_id, query, limit)
+    }
+    pub fn search_project_slash_commands(
+        &self,
+        project_id: Option<&ProjectId>,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<DesktopSlashCommandSearchResult>, DesktopApplicationError> {
+        self.inner
+            .composer_input
+            .search_project_slash_commands(project_id, query, limit)
     }
 
     pub(crate) fn resolve_task_slash_command(

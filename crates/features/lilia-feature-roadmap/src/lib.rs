@@ -64,6 +64,6 @@ impl Feature for RoadmapFeature {
     }
 
     fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
-        cx.provide::<RoadmapServiceKey>(self.service.clone())
+        cx.provide::<RoadmapServiceKey>(self.service.clone().with_events(cx.events().clone()))
     }
 }

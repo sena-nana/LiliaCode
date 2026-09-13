@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "layout": "row-major",
+  "cellWidth": {"0": "wide continuation", "1": "single column", "2": "double column"},
+  "color": ["default", "indexed", "rgb"],
+  "rules": {
+    "coordinates": "Rows, columns and cursor positions are terminal cells, never UTF-8 byte offsets",
+    "ownership": "PTY parser owns screen contents; each view owns selection and focus",
+    "input": "Application owns process, permissions, writes and terminal size"
+  }
+}

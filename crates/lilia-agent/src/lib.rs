@@ -8,6 +8,8 @@
 
 mod agentkit_host;
 mod anthropic_adapter;
+mod browser;
+mod browser_tool;
 mod credential;
 mod host_backends;
 mod job_runtime;
@@ -23,6 +25,9 @@ mod wire_service;
 pub use anthropic_adapter::{
     resolve_anthropic_endpoint, AnthropicMessagesAdapter, ANTHROPIC_MESSAGES_ADAPTER_ID,
     DEFAULT_ANTHROPIC_ENDPOINT, DEFAULT_ANTHROPIC_MODEL, ENV_ANTHROPIC_ENDPOINT,
+};
+pub use browser::{
+    BrowserCancellation, BrowserError, BrowserScopeAuthority, BrowserSessions, TaskBrowserHost,
 };
 pub use credential::{
     CredentialDescriptorView, CredentialHealthSnapshot, InMemoryProductCredentialRegistry,

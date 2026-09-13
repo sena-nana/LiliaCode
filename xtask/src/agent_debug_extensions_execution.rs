@@ -216,8 +216,13 @@ pub(super) fn replay(session: &Session) -> Result {
     let mcp = McpFixture::start()?;
     let home = session.run_dir.join("home");
     let marker = home.join("native-hook-executions.jsonl");
-    let quoted = format!("'{}'", marker.to_string_lossy().replace('\'', "'\"'\"'"));
-    let command = format!("/bin/cat >> {quoted}; /usr/bin/printf '\\n' >> {quoted}");
+    #[cfg(windows)]
+    let command = windows_hook_append_command(&marker);
+    #[cfg(not(windows))]
+    let command = {
+        let quoted = format!("'{}'", marker.to_string_lossy().replace('\'', "'\"'\"'"));
+        format!("/bin/cat >> {quoted}; /usr/bin/printf '\\n' >> {quoted}")
+    };
     select_hook(session)?;
     ui_click(session, &format!("lilia.ui.settings.hook-edit-{HOOK}"))?;
     extension_editor_input(session, &format!("hook-{HOOK}-0-command"), &command)?;
@@ -366,5 +371,18 @@ pub(super) fn replay(session: &Session) -> Result {
     write_json(
         &session.run_dir.join("extensions-runtime-verified.json"),
         &serde_json::json!({"hook":records,"hookRequest":hook_request,"hookDisabledNoExecution":true,"mcpRequest":mcp_request,"mcpCalls":calls,"resumedRequest":resumed,"disabledRequest":disabled,"mcpDisabledNoExecution":true}),
+    )
+}
+
+#[cfg(windows)]
+fn windows_hook_append_command(path: &Path) -> String {
+    let escaped = path.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "$in=[Console]::OpenStandardInput();$fs=[IO.File]::Open('{escaped}',[IO.FileMode]::Append,[IO.FileAccess]::Write,[IO.FileShare]::Read);$b=New-Object byte[] 65536;do{{$n=$in.Read($b,0,$b.Length);if($n -gt 0){{$fs.Write($b,0,$n)}}}}while($n -gt 0);$fs.Write([byte[]](10),0,1);$fs.Dispose()"
+    );
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    format!(
+        "powershell -NoProfile -EncodedCommand {}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, utf16)
     )
 }

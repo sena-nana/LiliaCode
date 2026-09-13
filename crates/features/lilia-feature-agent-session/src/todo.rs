@@ -381,7 +381,35 @@ impl DesktopTodoStore {
         id: &str,
         update: DesktopTodoUpdate,
     ) -> Result<Option<DesktopTaskTodo>, DesktopTodoError> {
-        let current = self.get_editable(id)?;
+        self.update_scoped(id, None, update)
+    }
+
+    pub fn update_for_task(
+        &self,
+        id: &str,
+        task_id: &TaskId,
+        update: DesktopTodoUpdate,
+    ) -> Result<Option<DesktopTaskTodo>, DesktopTodoError> {
+        self.update_scoped(id, Some(task_id), update)
+    }
+
+    fn update_scoped(
+        &self,
+        id: &str,
+        task_id: Option<&TaskId>,
+        update: DesktopTodoUpdate,
+    ) -> Result<Option<DesktopTaskTodo>, DesktopTodoError> {
+        let mut connection = self.connection();
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| DesktopTodoError::Storage {
+                operation: "begin todo update",
+                message: error.to_string(),
+            })?;
+        let current = Self::get_from(&transaction, id)?.filter(|todo| {
+            todo.source == DesktopTodoSource::Lilia
+                && task_id.is_none_or(|task_id| task_id == &todo.task_id)
+        });
         let Some(mut todo) = current else {
             return Ok(None);
         };
@@ -411,7 +439,7 @@ impl DesktopTodoStore {
             todo.guide_status = Some(guide_status);
         }
         todo.updated_at = now_millis();
-        self.connection()
+        transaction
             .execute(
                 r#"UPDATE task_todos SET text = ?1, done = ?2, "order" = ?3,
                           priority = ?4, guide_status = ?5, updated_at = ?6
@@ -430,28 +458,49 @@ impl DesktopTodoStore {
                 operation: "update todo",
                 message: error.to_string(),
             })?;
+        transaction
+            .commit()
+            .map_err(|error| DesktopTodoError::Storage {
+                operation: "commit todo update",
+                message: error.to_string(),
+            })?;
         Ok(Some(todo))
     }
 
     pub fn delete(&self, id: &str) -> Result<Option<TaskId>, DesktopTodoError> {
-        let task_id = self
-            .connection()
-            .query_row(
-                "SELECT task_id FROM task_todos WHERE id = ?1 AND source = 'lilia' AND (guide_status IS NULL OR guide_status != 'queued')",
-                params![id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
+        self.delete_scoped(id, None)
+    }
+
+    pub fn delete_for_task(
+        &self,
+        id: &str,
+        task_id: &TaskId,
+    ) -> Result<Option<TaskId>, DesktopTodoError> {
+        self.delete_scoped(id, Some(task_id))
+    }
+
+    fn delete_scoped(
+        &self,
+        id: &str,
+        expected_task: Option<&TaskId>,
+    ) -> Result<Option<TaskId>, DesktopTodoError> {
+        let mut connection = self.connection();
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| DesktopTodoError::Storage {
-                operation: "find todo before delete",
+                operation: "begin todo delete",
                 message: error.to_string(),
-            })?
-            .map(TaskId::new)
-            .transpose()?;
+            })?;
+        let task_id = Self::get_from(&transaction, id)?
+            .filter(|todo| {
+                todo.source == DesktopTodoSource::Lilia
+                    && expected_task.is_none_or(|task_id| task_id == &todo.task_id)
+            })
+            .map(|todo| todo.task_id);
         if task_id.is_none() {
             return Ok(None);
         }
-        self.connection()
+        let deleted = transaction
             .execute(
                 "DELETE FROM task_todos WHERE id = ?1 AND source = 'lilia' AND (guide_status IS NULL OR guide_status != 'queued')",
                 params![id],
@@ -460,24 +509,18 @@ impl DesktopTodoStore {
                 operation: "delete todo",
                 message: error.to_string(),
             })?;
-        Ok(task_id)
+        transaction
+            .commit()
+            .map_err(|error| DesktopTodoError::Storage {
+                operation: "commit todo delete",
+                message: error.to_string(),
+            })?;
+        Ok((deleted > 0).then_some(task_id).flatten())
     }
 
     fn get_editable(&self, id: &str) -> Result<Option<DesktopTaskTodo>, DesktopTodoError> {
-        self.connection()
-            .query_row(
-                r#"SELECT id, task_id, text, done, "order", source, priority,
-                          guide_status, attachments_json, created_at, updated_at,
-                          conversation_references_json, workflow_json
-                   FROM task_todos WHERE id = ?1 AND source = 'lilia'"#,
-                params![id],
-                row_to_todo,
-            )
-            .optional()
-            .map_err(|error| DesktopTodoError::Storage {
-                operation: "read todo",
-                message: error.to_string(),
-            })
+        Self::get_from(&self.connection(), id)
+            .map(|todo| todo.filter(|todo| todo.source == DesktopTodoSource::Lilia))
     }
 
     pub fn get_from(
@@ -809,6 +852,84 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn concurrent_store_handles_preserve_independent_fields_and_delete_only_once() {
+        use std::sync::{Arc, Barrier};
+        for _ in 0..12 {
+            let db = Db::in_memory().unwrap();
+            let first = Arc::new(DesktopTodoStore::from_shared(db.clone()).unwrap());
+            let second = Arc::new(DesktopTodoStore::from_shared(db).unwrap());
+            let task = TaskId::new("concurrent-todo").unwrap();
+            let todo = first
+                .create(DesktopTodoCreate {
+                    task_id: task.clone(),
+                    text: "before".into(),
+                    priority: DesktopTodoPriority::default(),
+                    attachments: vec![],
+                    conversation_references: vec![],
+                    workflow: None,
+                })
+                .unwrap();
+            let barrier = Arc::new(Barrier::new(2));
+            let handles = [first.clone(), second.clone()]
+                .into_iter()
+                .enumerate()
+                .map(|(index, store)| {
+                    let barrier = barrier.clone();
+                    let id = todo.id.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        store
+                            .update(
+                                &id,
+                                if index == 0 {
+                                    DesktopTodoUpdate {
+                                        text: Some("after".into()),
+                                        ..Default::default()
+                                    }
+                                } else {
+                                    DesktopTodoUpdate {
+                                        done: Some(true),
+                                        ..Default::default()
+                                    }
+                                },
+                            )
+                            .unwrap()
+                    })
+                })
+                .collect::<Vec<_>>();
+            for handle in handles {
+                assert!(handle.join().unwrap().is_some());
+            }
+            let updated = &first.list(&task).unwrap()[0];
+            assert_eq!(updated.text, "after");
+            assert!(updated.done);
+            assert!(first
+                .delete_for_task(&todo.id, &TaskId::new("wrong-task").unwrap())
+                .unwrap()
+                .is_none());
+            let barrier = Arc::new(Barrier::new(2));
+            let handles = [first, second]
+                .into_iter()
+                .map(|store| {
+                    let barrier = barrier.clone();
+                    let id = todo.id.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        store.delete(&id).unwrap().is_some()
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                handles
+                    .into_iter()
+                    .map(|handle| usize::from(handle.join().unwrap()))
+                    .sum::<usize>(),
+                1
+            );
+        }
+    }
 
     #[test]
     fn manual_todo_crud_preserves_old_desktop_schema_semantics() {

@@ -18,11 +18,15 @@ mod automation_execution_gate;
 mod automation_inbox;
 mod automation_ports;
 mod auxiliary_model;
+mod browser_authority;
+pub use browser_authority::ProductBrowserScopeAuthority;
 mod change_feed;
 mod cli;
 mod coding_services;
 mod command;
 mod composer;
+mod composer_input;
+pub use composer_input::{ComposerInputFeature, ComposerInputService, ComposerInputServiceKey};
 mod config;
 mod context_compaction;
 mod context_search;
@@ -31,6 +35,11 @@ mod contributions;
 mod conversation_reference;
 mod conversation_suggestions;
 mod document;
+mod document_service;
+pub use document_service::{
+    DesktopDocumentChanged, DesktopDocumentService, DocumentChangeKind, DocumentServiceFeature,
+    DocumentServiceKey,
+};
 mod domain_services;
 #[cfg(debug_assertions)]
 mod equivalence;
@@ -39,6 +48,10 @@ mod extensions;
 mod goal;
 mod handoff;
 mod hooks;
+pub use hooks::{
+    HookDocumentsFeature, HookDocumentsService, HookDocumentsServiceKey, HookExecutionFeature,
+    HookExecutionService, HookExecutionServiceKey,
+};
 mod host;
 mod iab;
 mod language_service;
@@ -52,6 +65,11 @@ mod project_settings;
 mod project_tasks;
 mod prompt_optimize;
 pub(crate) mod provider;
+mod provider_settings;
+pub use provider_settings::{
+    ProviderModelRuntimePort, ProviderRuntimeSettingsFeature, ProviderRuntimeSettingsKey,
+    ProviderRuntimeSettingsService,
+};
 mod provider_ui_settings;
 mod registry_watch;
 mod remote;
@@ -62,8 +80,10 @@ mod terminal;
 mod timeline_retry;
 mod title_update;
 mod todo;
+pub use todo::{DesktopTodoService, TodoServiceFeature, TodoServiceKey};
 mod tool_consent;
 mod update;
+pub use update::{DesktopUpdateService, UpdateHostPort, UpdateServiceFeature, UpdateServiceKey};
 mod usage;
 pub(crate) mod workflow;
 mod workspace;
@@ -84,16 +104,17 @@ pub use crate::ports::import::{
     DesktopImportReportItemStatus, DesktopImportReportStatus, DesktopLegacyConfigurationImport,
 };
 pub use agent::{
-    DesktopApprovalResponse, DesktopArchitectureInteractionDecision,
+    APPROVAL_PROTOCOL, DesktopApprovalResponse, DesktopArchitectureInteractionDecision,
     DesktopArchitectureInteractionResponse, DesktopAutomaticTurnSelection,
     DesktopAutomationTurnCorrelation, DesktopExecutionPermission, DesktopInteractionResponse,
     DesktopInterruptResult, DesktopSessionBranchAnchor, DesktopSessionBranchMode,
     DesktopTaskRuntimeSnapshot, DesktopTurnDispatch, DesktopTurnDispatchKind, DesktopTurnExecutor,
-    DesktopTurnRequest, APPROVAL_PROTOCOL, INTERACTION_PROTOCOL, TURN_PROTOCOL,
+    DesktopTurnRequest, INTERACTION_PROTOCOL, TURN_PROTOCOL,
 };
 #[cfg(debug_assertions)]
 pub use agent::{DesktopDurableTurnDebugSnapshot, DesktopQuarantinedTurnDebugSnapshot};
 pub use agent_interaction::{
+    AgentInteractionFeature, AgentInteractionService, AgentInteractionServiceKey,
     DesktopAgentInteractionError, DesktopAgentInteractionSettings,
     DesktopAgentInteractionSettingsUpdate, DesktopAutoTurnDecisionSettings,
     DesktopCustomSubagentCatalog, DesktopCustomSubagentDefinition, DesktopCustomSubagentUpsert,
@@ -112,13 +133,16 @@ pub use assistant_ai_probe::{
     DesktopAssistantAiModelsResult, DesktopAssistantAiProbeInput, DesktopAssistantAiTestResult,
 };
 pub use attachment::{
-    clipboard_text_should_be_attachment, describe_attachment_path, describe_attachment_paths,
-    save_clipboard_image_attachment, save_clipboard_text_attachment,
-    save_encoded_clipboard_image_attachment, DesktopAttachmentError, DesktopClipboardEncodedImage,
-    LONG_CLIPBOARD_TEXT_ATTACHMENT_THRESHOLD, MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES,
+    DesktopAttachmentError, DesktopClipboardEncodedImage, LONG_CLIPBOARD_TEXT_ATTACHMENT_THRESHOLD,
+    MAX_CLIPBOARD_TEXT_ATTACHMENT_BYTES, clipboard_text_should_be_attachment,
+    describe_attachment_path, describe_attachment_paths, save_clipboard_image_attachment,
+    save_clipboard_text_attachment, save_encoded_clipboard_image_attachment,
 };
-pub use auto_turn::{preview_automatic_turn_selection, DesktopAutoTurnDecisionError};
-pub use change_feed::PRODUCT_CHANGE_FEED_SOURCE;
+pub use auto_turn::{DesktopAutoTurnDecisionError, preview_automatic_turn_selection};
+pub use change_feed::{
+    PRODUCT_CHANGE_FEED_SOURCE, ProductChangeFeedFeature, ProductChangeFeedService,
+    ProductChangeFeedServiceKey,
+};
 pub use coding_services::{
     DesktopCodeSearchHit, DesktopCodeSearchMode, DesktopCodeSearchResult, DesktopCodeSearchScope,
     DesktopCodingServicesSnapshot, DesktopGitChange, DesktopGitDiff, DesktopGitDiffScope,
@@ -135,17 +159,18 @@ pub use config::{DesktopApplicationConfig, DesktopApplicationConfigError};
 pub use context_compaction::DesktopContextCompactionResult;
 pub use context_search::search_context_attachments;
 pub use conversation_suggestions::{
-    request_model_completion, ConversationSuggestionModelPort,
+    CONVERSATION_SUGGESTION_SETTINGS_KEY, ConversationSuggestionGenerationServiceFeature,
+    ConversationSuggestionGenerationServiceKey, ConversationSuggestionModelPort,
     DesktopApplicationSuggestionModelPort, DesktopConversationSuggestionError,
-    DesktopConversationSuggestionSettings, DesktopConversationSuggestionSource,
-    DesktopSuggestionGitHubActivityRef, DesktopSuggestionItem, DesktopSuggestionItemSource,
-    DesktopSuggestionLocalGitContextRef, DesktopSuggestionLocalGitProbe,
-    DesktopSuggestionModelRequest, DesktopSuggestionSessionThreadRef, DesktopSuggestionSourceProbe,
-    CONVERSATION_SUGGESTION_SETTINGS_KEY,
+    DesktopConversationSuggestionGenerationService, DesktopConversationSuggestionSettings,
+    DesktopConversationSuggestionSource, DesktopSuggestionGitHubActivityRef, DesktopSuggestionItem,
+    DesktopSuggestionItemSource, DesktopSuggestionLocalGitContextRef,
+    DesktopSuggestionLocalGitProbe, DesktopSuggestionModelRequest,
+    DesktopSuggestionSessionThreadRef, DesktopSuggestionSourceProbe, request_model_completion,
 };
 pub use document::{
-    document_resource_key, path_from_document_resource_key, DocumentError, DocumentId,
-    DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    DocumentError, DocumentId, DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    document_resource_key, path_from_document_resource_key,
 };
 #[cfg(debug_assertions)]
 pub use equivalence::{
@@ -171,17 +196,18 @@ pub use events::{
     WorktreeOperationFailed,
 };
 pub use extensions::{
-    DesktopExtensionsSnapshot, DesktopMcpActivationReport, DesktopMcpActivationResult,
-    DesktopMcpCredentialKind, DesktopMcpCredentialView, DesktopMcpPromptArgumentView,
-    DesktopMcpPromptFragmentView, DesktopMcpPromptGetView, DesktopMcpPromptView,
-    DesktopMcpResourceContentView, DesktopMcpResourceReadView, DesktopMcpResourceView,
-    DesktopMcpServerUpsert, DesktopMcpServerView, DesktopMcpToolView, DesktopMcpTransport,
-    DesktopRuntimeServiceView, DesktopSkillCreate, DesktopSkillPackageView, DesktopSkillScope,
+    DesktopExtensionRegistryService, DesktopExtensionsSnapshot, DesktopMcpActivationReport,
+    DesktopMcpActivationResult, DesktopMcpCredentialKind, DesktopMcpCredentialView,
+    DesktopMcpPromptArgumentView, DesktopMcpPromptFragmentView, DesktopMcpPromptGetView,
+    DesktopMcpPromptView, DesktopMcpResourceContentView, DesktopMcpResourceReadView,
+    DesktopMcpResourceView, DesktopMcpServerUpsert, DesktopMcpServerView, DesktopMcpToolView,
+    DesktopMcpTransport, DesktopRuntimeServiceView, DesktopSkillCreate, DesktopSkillPackageView,
+    DesktopSkillScope, ExtensionRegistryServiceFeature, ExtensionRegistryServiceKey,
 };
 pub use goal::{DesktopGoalSnapshot, DesktopGoalStatus};
 pub use handoff::{
-    describe_task_handoff, prepare_task_handoff_reference, DesktopImportedTaskHandoff,
-    DesktopTaskHandoffOpen,
+    DesktopImportedTaskHandoff, DesktopTaskHandoffOpen, describe_task_handoff,
+    prepare_task_handoff_reference,
 };
 pub use hooks::{
     DesktopHookDocumentUpdate, DesktopHookDocumentView, DesktopHookError, DesktopHookHandlerUpdate,
@@ -208,24 +234,23 @@ pub use lilia_contracts::{
 };
 pub use lilia_feature_agent_session::DesktopTurnQueueError;
 pub use lilia_feature_automation::{
-    automation_active_outgoing_edges, automation_initial_active_nodes, automation_json_path,
-    automation_selected_output_handles, automation_topological_order, render_automation_template,
-    validate_automation_graph, AutomationActiveRunConflict, AutomationAddTodoRequest,
-    AutomationAgentActivation, AutomationAgentDispatch, AutomationAgentPort, AutomationAgentTarget,
-    AutomationBeginRunInput, AutomationCompleteAgentInput, AutomationCreateTaskRequest,
-    AutomationDraft, AutomationEdge, AutomationExecutionEngine, AutomationExecutionError,
-    AutomationExecutionPorts, AutomationExecutionRepository, AutomationExecutionResult,
-    AutomationExecutionTransition, AutomationGraphError, AutomationGuidePort,
-    AutomationIdempotencyKey, AutomationNode, AutomationNodePosition, AutomationNodeStateUpdate,
-    AutomationPortContext, AutomationPortError, AutomationRecordKind,
-    AutomationRecordTimelineRequest, AutomationResumeRunInput, AutomationRun, AutomationRunDetail,
-    AutomationRunNodeState, AutomationRunOnceInput, AutomationRunStateUpdate, AutomationRunStatus,
-    AutomationRunSummary, AutomationSaveDraftInput, AutomationScopeFilter,
+    AutomationActiveRunConflict, AutomationAddTodoRequest, AutomationAgentActivation,
+    AutomationAgentDispatch, AutomationAgentPort, AutomationAgentTarget, AutomationBeginRunInput,
+    AutomationCompleteAgentInput, AutomationCreateTaskRequest, AutomationDraft, AutomationEdge,
+    AutomationExecutionEngine, AutomationExecutionError, AutomationExecutionPorts,
+    AutomationExecutionRepository, AutomationExecutionResult, AutomationExecutionTransition,
+    AutomationGraphError, AutomationGuidePort, AutomationIdempotencyKey, AutomationNode,
+    AutomationNodePosition, AutomationNodeStateUpdate, AutomationPortContext, AutomationPortError,
+    AutomationRecordKind, AutomationRecordTimelineRequest, AutomationResumeRunInput, AutomationRun,
+    AutomationRunDetail, AutomationRunNodeState, AutomationRunOnceInput, AutomationRunStateUpdate,
+    AutomationRunStatus, AutomationRunSummary, AutomationSaveDraftInput, AutomationScopeFilter,
     AutomationSendGuideRequest, AutomationSignalEnvelope, AutomationStartAgentRequest,
     AutomationStore, AutomationStoreError, AutomationTaskPort, AutomationTimelinePort,
     AutomationTodoPort, AutomationUpdateTaskStatusRequest, AutomationWorkflow,
     AutomationWorkflowVersion, DesktopAutomationError, DesktopAutomationService, GraphExecution,
-    SqliteAutomationStore,
+    SqliteAutomationStore, automation_active_outgoing_edges, automation_initial_active_nodes,
+    automation_json_path, automation_selected_output_handles, automation_topological_order,
+    render_automation_template, validate_automation_graph,
 };
 pub use lilia_feature_document::{
     BufferError, BufferId, BufferRevision, BufferSnapshot, BufferStore, Diagnostic,
@@ -234,8 +259,8 @@ pub use lilia_feature_document::{
 };
 pub use lilia_feature_memory::{
     DesktopMemory, DesktopMemoryError, DesktopMemoryService, InMemoryMemorySettingsStore,
-    MemoryInjectionState, MemoryScope, MemorySettings, MemorySettingsStore, MemoryStore,
-    MemoryStoreError, MemoryUpsertInput, SqliteMemoryStore, MEMORY_SETTINGS_KEY,
+    MEMORY_SETTINGS_KEY, MemoryInjectionState, MemoryScope, MemorySettings, MemorySettingsStore,
+    MemoryStore, MemoryStoreError, MemoryUpsertInput, SqliteMemoryStore,
 };
 pub use lilia_feature_roadmap::{
     DesktopRoadmapService, Milestone, MilestoneDueDateUpdate, MilestoneStatus,
@@ -254,9 +279,9 @@ pub use mcp_elicitation::{
     MCP_ELICITATION_INTERACTION_KIND,
 };
 pub use panel::{
-    default_panel_states, DockSlot, PaneId, PaneNode, PanelId, PanelLayoutError,
-    PanelLayoutSnapshot, PanelState, SplitAxis, WorkspaceItemId, CODING_TOOLS_PANEL_ID,
-    DIAGNOSTICS_PANEL_ID, IAB_PANEL_ID, RESOURCES_PANEL_ID, TASK_INSPECTOR_PANEL_ID,
+    CODING_TOOLS_PANEL_ID, DIAGNOSTICS_PANEL_ID, DockSlot, IAB_PANEL_ID, PaneId, PaneNode, PanelId,
+    PanelLayoutError, PanelLayoutSnapshot, PanelState, RESOURCES_PANEL_ID, SplitAxis,
+    TASK_INSPECTOR_PANEL_ID, WorkspaceItemId, default_panel_states,
 };
 pub use plugins::{DesktopPluginInstall, DesktopPluginPackageView};
 pub use popup_settings::{
@@ -264,16 +289,18 @@ pub use popup_settings::{
     POPUP_WINDOW_SETTINGS_KEY,
 };
 pub use project_files::{
-    ProjectFileEntry, ProjectFileKind, ProjectFilesError, ProjectFilesSnapshot,
-    ProjectFilesViewState,
+    ProjectFileEntry, ProjectFileKind, ProjectFilesError, ProjectFilesFeature, ProjectFilesService,
+    ProjectFilesServiceKey, ProjectFilesSnapshot, ProjectFilesViewState,
 };
 pub use project_settings::{
-    default_worktree_auto_instructions, DesktopProjectSettings, DesktopProjectSettingsError,
-    DesktopWorktreeSelectionMode, DesktopWorktreeSettings, PROJECT_SETTINGS_KEY,
+    DesktopProjectSettings, DesktopProjectSettingsError, DesktopWorktreeSelectionMode,
+    DesktopWorktreeSettings, PROJECT_SETTINGS_KEY, ProjectSettingsFeature, ProjectSettingsService,
+    ProjectSettingsServiceKey, WorktreePreferencesPort, default_worktree_auto_instructions,
 };
 pub use project_tasks::{
     DesktopProjectTaskCatalog, DesktopProjectTaskError, DesktopProjectTaskLaunch,
-    DesktopProjectTaskView,
+    DesktopProjectTaskView, ProjectCommandRunFeature, ProjectCommandRunService,
+    ProjectCommandRunServiceKey,
 };
 pub use prompt_optimize::{
     DesktopPromptOptimizeInput, DesktopPromptOptimizeResult, DesktopPromptRoute,
@@ -284,41 +311,52 @@ pub use provider::{
     DesktopProviderCapabilityView, DesktopProviderCredentialImportInput,
     DesktopProviderCredentialInput, DesktopProviderError, DesktopProviderRuntimeState,
     DesktopProviderSnapshot, DesktopProviderView, DesktopRemoteQuotaState,
+    ProviderCredentialService, ProviderCredentialServiceFeature, ProviderCredentialServiceKey,
+    ProviderProfileRefreshPort,
 };
 pub use provider_ui_settings::{
-    normalize_assistant_ai_settings, normalize_model_feature_settings, normalize_model_pool,
-    normalize_router_mode_settings, DesktopAssistantAiConfigurationUpdate,
+    ASSISTANT_AI_CREDENTIAL_KEY, ASSISTANT_AI_SETTINGS_KEY, DesktopAssistantAiConfigurationUpdate,
     DesktopAssistantAiModelPoolItem, DesktopAssistantAiSecretUpdate, DesktopAssistantAiSettings,
     DesktopAssistantAiSettingsUpdate, DesktopModelFeatureChatSettings, DesktopModelFeatureSettings,
     DesktopModelFeatureSettingsUpdate, DesktopModelPresetGroup, DesktopProviderUiSettingsError,
-    DesktopRouterModeSettings, DesktopRouterModeSettingsUpdate, ASSISTANT_AI_CREDENTIAL_KEY,
-    ASSISTANT_AI_SETTINGS_KEY, MODEL_FEATURE_SETTINGS_KEY, ROUTER_MODE_SETTINGS_KEY,
+    DesktopRouterModeSettings, DesktopRouterModeSettingsUpdate, MODEL_FEATURE_SETTINGS_KEY,
+    ROUTER_MODE_SETTINGS_KEY, normalize_assistant_ai_settings, normalize_model_feature_settings,
+    normalize_model_pool, normalize_router_mode_settings,
 };
-pub use registry_watch::REGISTRY_WATCH_SOURCE;
+pub use registry_watch::{
+    REGISTRY_WATCH_SOURCE, RegistryFileWatchFeature, RegistryFileWatchService,
+    RegistryFileWatchServiceKey,
+};
 pub use remote::{
-    DesktopRemoteControlError, DesktopRemoteControlService, RemoteCapabilitySet,
-    RemoteControlStatus, RemoteEndpointAddress, RemotePairDeviceInput, RemotePairingTicket,
-    RemotePeerSummary, RemoteRequestEnvelope, REMOTE_ALPN, REMOTE_MIN_PROTOCOL_VERSION,
-    REMOTE_PROTOCOL_VERSION,
+    DesktopRemoteControlError, DesktopRemoteControlService, REMOTE_ALPN,
+    REMOTE_MIN_PROTOCOL_VERSION, REMOTE_PROTOCOL_VERSION, RemoteCapabilitySet, RemoteControlStatus,
+    RemoteEndpointAddress, RemotePairDeviceInput, RemotePairingTicket, RemotePeerSummary,
+    RemoteRequestEnvelope,
 };
-pub use session_search::{DesktopSessionSearchKind, DesktopSessionSearchResult};
+pub use session_search::{
+    DesktopSessionSearchKind, DesktopSessionSearchResult, SessionSearchFeature,
+    SessionSearchService, SessionSearchServiceKey,
+};
 pub use slash_command::{
     DesktopSlashCommand, DesktopSlashCommandAction, DesktopSlashCommandExecution,
     DesktopSlashCommandSearchResult, DesktopSlashCommandSource,
 };
-pub use submission::DesktopSubmissionError;
+pub use submission::{
+    DesktopSubmissionError, DesktopTurnSubmissionService, TurnSubmissionServiceFeature,
+    TurnSubmissionServiceKey,
+};
 pub use terminal::{
     DesktopTerminalColor, DesktopTerminalCommand, DesktopTerminalError, DesktopTerminalLaunch,
     DesktopTerminalProcessState, DesktopTerminalRestoration, DesktopTerminalRow,
     DesktopTerminalScope, DesktopTerminalSessionId, DesktopTerminalSnapshot, DesktopTerminalStyle,
     DesktopTerminalStyleSpan,
 };
-pub use timeline_retry::{timeline_retry_context, DesktopTimelineRetryContext};
+pub use timeline_retry::{DesktopTimelineRetryContext, timeline_retry_context};
 pub use title_update::{
-    normalize_title, title_event_id, title_system_instruction, DesktopTaskTitleSource,
-    DesktopTaskTitleState, DesktopTimelineUpperBound, DesktopTitleUpdateCoordinator,
-    DesktopTitleUpdateDecision, DesktopTitleUpdateJob, DesktopTitleUpdateReview,
-    DesktopTitleUpdateScheduler, TITLE_MAX_CHARS, TITLE_MIN_CHARS, TITLE_UPDATE_ACTION_KIND,
+    DesktopTaskTitleSource, DesktopTaskTitleState, DesktopTimelineUpperBound,
+    DesktopTitleUpdateCoordinator, DesktopTitleUpdateDecision, DesktopTitleUpdateJob,
+    DesktopTitleUpdateReview, DesktopTitleUpdateScheduler, TITLE_MAX_CHARS, TITLE_MIN_CHARS,
+    TITLE_UPDATE_ACTION_KIND, normalize_title, title_event_id, title_system_instruction,
 };
 pub use todo::{
     DesktopGuideDispatchResult, DesktopGuideDispatchWindow, DesktopTaskTodo, DesktopTodoCreate,
@@ -342,14 +380,17 @@ pub use workspace::{
     DesktopWorkspaceTask, DesktopWorkspaceTransferOutcome, WorkspaceSessionError,
 };
 pub use workspace_item::{
-    ApplicationWorkspaceSurface, ProjectWorkspaceSurface, WorkspaceFocusTarget, WorkspaceItem,
-    WorkspaceItemCapabilities, WorkspaceItemError, WorkspaceItemKind, WorkspaceItemResolve,
-    WorkspaceItemRestoration, WorkspaceResourceId, ARCHITECTURE_WORKSPACE_ITEM_KIND,
-    AUTOMATION_WORKSPACE_ITEM_KIND, DOCUMENT_WORKSPACE_ITEM_KIND, MEMORY_WORKSPACE_ITEM_KIND,
-    PROJECT_FILES_WORKSPACE_ITEM_KIND, ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND,
-    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND,
+    ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND, ApplicationWorkspaceSurface,
+    BROWSER_WORKSPACE_ITEM_KIND, DOCUMENT_WORKSPACE_ITEM_KIND, MEMORY_WORKSPACE_ITEM_KIND,
+    PROJECT_FILES_WORKSPACE_ITEM_KIND, ProjectWorkspaceSurface, ROADMAP_WORKSPACE_ITEM_KIND,
+    SETTINGS_WORKSPACE_ITEM_KIND, TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND,
+    WorkspaceFocusTarget, WorkspaceItem, WorkspaceItemCapabilities, WorkspaceItemError,
+    WorkspaceItemKind, WorkspaceItemResolve, WorkspaceItemRestoration, WorkspaceResourceId,
+    browser_tab_restoration, browser_workspace_item,
 };
 pub use worktree::{
     DesktopInitialWorktreeSelection, DesktopTaskWorktree, DesktopWorktreeError,
-    DesktopWorktreeListItem, DesktopWorktreeMergeResult, DesktopWorktreeStatus,
+    DesktopWorktreeListItem, DesktopWorktreeMergeResult, DesktopWorktreeService,
+    DesktopWorktreeStatus, GitWorktreePort, NativeGitWorktreePort, WorktreeRuntimePort,
+    WorktreeServiceFeature, WorktreeServiceKey, WorktreeTaskPort,
 };

@@ -5,30 +5,30 @@ use std::thread;
 
 use lilia_contracts::{PendingProjection, ProductTask, TaskId, TimelineProjectionEvent};
 use mutsuki_agent_contracts::AgentWireRequestEnvelope;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::application::{
-    timeline_retry_context, DesktopApplication, DesktopApplicationError,
-    DesktopArchitectureInteractionDecision, DesktopExecutionPermission, DesktopHost,
-    DesktopHostAction, DesktopHostContext, DesktopTerminalCommand, DesktopTerminalLaunch,
-    DesktopTerminalProcessState, DesktopTerminalScope, DesktopTerminalSessionId,
-    DesktopTurnRequest, ProjectQuery, TaskQuery,
+    DesktopApplication, DesktopApplicationError, DesktopArchitectureInteractionDecision,
+    DesktopExecutionPermission, DesktopHost, DesktopHostAction, DesktopHostContext,
+    DesktopTerminalCommand, DesktopTerminalLaunch, DesktopTerminalProcessState,
+    DesktopTerminalScope, DesktopTerminalSessionId, DesktopTurnRequest, ProjectQuery, TaskQuery,
+    timeline_retry_context,
 };
 
 pub use lilia_feature_remote::{
-    advertised_bridge_url, cancel_pairing, database_error, endpoint_id, host_enabled, now_millis,
-    pair_device, refresh_trusted_peer_seen, remote_status, set_setting, DesktopRemoteControlError,
-    DesktopRemoteControlService, RemoteCapabilitySet, RemoteChatPermission, RemoteChatSpec,
-    RemoteControlStatus, RemoteEndpointAddress, RemoteHost, RemotePairDeviceInput,
-    RemotePairingTicket, RemotePeerSummary, RemoteRequestEnvelope, RemoteWakeHost,
-    DEFAULT_HTTP_BRIDGE_PORT, HOST_ENABLED_KEY, KEEP_AWAKE_ENABLED_KEY, PC_NAME_KEY, REMOTE_ALPN,
-    REMOTE_MIN_PROTOCOL_VERSION, REMOTE_PROTOCOL_VERSION,
+    DEFAULT_HTTP_BRIDGE_PORT, DesktopRemoteControlError, DesktopRemoteControlService,
+    HOST_ENABLED_KEY, KEEP_AWAKE_ENABLED_KEY, PC_NAME_KEY, REMOTE_ALPN,
+    REMOTE_MIN_PROTOCOL_VERSION, REMOTE_PROTOCOL_VERSION, RemoteCapabilitySet,
+    RemoteChatPermission, RemoteChatSpec, RemoteControlStatus, RemoteEndpointAddress, RemoteHost,
+    RemotePairDeviceInput, RemotePairingTicket, RemotePeerSummary, RemoteRequestEnvelope,
+    RemoteWakeHost, advertised_bridge_url, cancel_pairing, database_error, endpoint_id,
+    host_enabled, now_millis, pair_device, refresh_trusted_peer_seen, remote_status, set_setting,
 };
 
 #[cfg(test)]
 pub use lilia_feature_remote::{
-    remote_capabilities, remote_process_session_command, remote_session_fork_command,
-    RemoteProcessSessionCommand,
+    RemoteProcessSessionCommand, remote_capabilities, remote_process_session_command,
+    remote_session_fork_command,
 };
 
 pub(crate) struct DesktopRemoteWakeHost {
@@ -622,9 +622,8 @@ mod tests {
     use super::*;
     use crate::application::{
         DesktopApplicationConfig, DesktopHostError, DesktopHostResult, DesktopProjectCreate,
-        DesktopTaskCreate, DesktopTaskPatch,
+        DesktopTaskCreate,
     };
-    use lilia_contracts::ProductTaskStatus;
     use uuid::Uuid;
 
     #[derive(Default)]
@@ -697,19 +696,21 @@ mod tests {
             })
             .unwrap();
         assert_eq!(peer.endpoint_id, "android-test");
-        assert!(application
-            .pair_remote_device(RemotePairDeviceInput {
-                ticket_id: ticket.id,
-                challenge: ticket.challenge,
-                device_name: "Phone".to_owned(),
-                android_endpoint: RemoteEndpointAddress {
-                    endpoint_id: "android-test".to_owned(),
-                    relay_url: None,
-                    direct_addresses: Vec::new(),
-                },
-                protocol_version: 1,
-            })
-            .is_err());
+        assert!(
+            application
+                .pair_remote_device(RemotePairDeviceInput {
+                    ticket_id: ticket.id,
+                    challenge: ticket.challenge,
+                    device_name: "Phone".to_owned(),
+                    android_endpoint: RemoteEndpointAddress {
+                        endpoint_id: "android-test".to_owned(),
+                        relay_url: None,
+                        direct_addresses: Vec::new(),
+                    },
+                    protocol_version: 1,
+                })
+                .is_err()
+        );
 
         let response = application.dispatch_remote_request(RemoteRequestEnvelope {
             id: "request-1".to_owned(),
@@ -1225,26 +1226,36 @@ mod tests {
             .inner()
             .session_snapshot(&source_session_id)
             .unwrap();
-        assert!(source
-            .events
-            .iter()
-            .any(|event| event.meta.turn_id.as_deref() == Some(second.turn_id.as_str())));
+        assert!(
+            source
+                .events
+                .iter()
+                .any(|event| event.meta.turn_id.as_deref() == Some(second.turn_id.as_str()))
+        );
         let target = runtime.inner().session_snapshot(target_session_id).unwrap();
-        assert!(target
-            .messages
-            .iter()
-            .any(|message| message.content == "first"));
-        assert!(target
-            .messages
-            .iter()
-            .any(|message| message.content == "third"));
-        assert!(!target
-            .messages
-            .iter()
-            .any(|message| message.content == "second"));
-        assert!(!target
-            .events
-            .iter()
-            .any(|event| event.meta.turn_id.as_deref() == Some(second.turn_id.as_str())));
+        assert!(
+            target
+                .messages
+                .iter()
+                .any(|message| message.content == "first")
+        );
+        assert!(
+            target
+                .messages
+                .iter()
+                .any(|message| message.content == "third")
+        );
+        assert!(
+            !target
+                .messages
+                .iter()
+                .any(|message| message.content == "second")
+        );
+        assert!(
+            !target
+                .events
+                .iter()
+                .any(|event| event.meta.turn_id.as_deref() == Some(second.turn_id.as_str()))
+        );
     }
 }

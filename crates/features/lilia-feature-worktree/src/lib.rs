@@ -17,7 +17,6 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-
 const WORKTREE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS task_worktrees (
   task_id        TEXT PRIMARY KEY,
@@ -28,6 +27,7 @@ CREATE TABLE IF NOT EXISTS task_worktrees (
   base_branch    TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'active'
                  CHECK (status IN ('active','merged','removed')),
+  merge_attempted INTEGER NOT NULL DEFAULT 0,
   created_at     INTEGER NOT NULL,
   updated_at     INTEGER NOT NULL
 );
@@ -134,13 +134,18 @@ pub struct DesktopWorktreeStore {
 
 impl DesktopWorktreeStore {
     pub fn from_db(connection: Db) -> Result<Self, DesktopWorktreeError> {
-        connection
-            .lock()
-            .execute_batch(WORKTREE_SCHEMA)
-            .map_err(|error| DesktopWorktreeError::Storage {
-                operation: "initialize worktree schema",
-                message: error.to_string(),
-            })?;
+        {
+            let db = connection.lock();
+            db.execute_batch(WORKTREE_SCHEMA)
+                .map_err(|error| DesktopWorktreeError::Storage {
+                    operation: "initialize worktree schema",
+                    message: error.to_string(),
+                })?;
+            let has_attempt: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('task_worktrees') WHERE name = 'merge_attempted')", [], |row| row.get(0)).map_err(|error| DesktopWorktreeError::Storage { operation: "inspect worktree schema", message: error.to_string() })?;
+            if !has_attempt {
+                db.execute_batch("ALTER TABLE task_worktrees ADD COLUMN merge_attempted INTEGER NOT NULL DEFAULT 0").map_err(|error| DesktopWorktreeError::Storage { operation: "migrate worktree merge progress", message: error.to_string() })?;
+            }
+        }
         Ok(Self { connection })
     }
 
@@ -155,6 +160,27 @@ impl DesktopWorktreeStore {
                           base_branch, status, created_at, updated_at
                    FROM task_worktrees
                    WHERE task_id = ?1 AND status = 'active'"#,
+                params![task_id.as_str()],
+                row_to_task_worktree,
+            )
+            .optional()
+            .map_err(|error| DesktopWorktreeError::Storage {
+                operation: "read task worktree",
+                message: error.to_string(),
+            })
+    }
+
+    pub fn for_task(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<Option<DesktopTaskWorktree>, DesktopWorktreeError> {
+        self.connection
+            .lock()
+            .query_row(
+                r#"SELECT task_id, project_id, base_repo_path, worktree_path, branch_name,
+                          base_branch, status, created_at, updated_at
+                   FROM task_worktrees
+                   WHERE task_id = ?1"#,
                 params![task_id.as_str()],
                 row_to_task_worktree,
             )
@@ -196,7 +222,8 @@ impl DesktopWorktreeStore {
         base_branch: &str,
     ) -> Result<DesktopTaskWorktree, DesktopWorktreeError> {
         let now = now_millis();
-        self.connection
+        let changed = self
+            .connection
             .lock()
             .execute(
                 r#"INSERT INTO task_worktrees
@@ -210,7 +237,9 @@ impl DesktopWorktreeStore {
                      branch_name = excluded.branch_name,
                      base_branch = excluded.base_branch,
                      status = 'active',
-                     updated_at = excluded.updated_at"#,
+                     merge_attempted = 0,
+                     updated_at = excluded.updated_at
+                   WHERE task_worktrees.status != 'active'"#,
                 params![
                     task_id.as_str(),
                     project_id.map(ProjectId::as_str),
@@ -225,6 +254,9 @@ impl DesktopWorktreeStore {
                 operation: "save task worktree",
                 message: error.to_string(),
             })?;
+        if changed == 0 {
+            return Err(DesktopWorktreeError::AlreadyBound(task_id.clone()));
+        }
         Ok(DesktopTaskWorktree {
             task_id: task_id.clone(),
             project_id: project_id.cloned(),
@@ -236,6 +268,29 @@ impl DesktopWorktreeStore {
             created_at: now,
             updated_at: now,
         })
+    }
+
+    pub fn merge_attempted(&self, task_id: &TaskId) -> Result<bool, DesktopWorktreeError> {
+        self.connection
+            .lock()
+            .query_row(
+                "SELECT merge_attempted FROM task_worktrees WHERE task_id = ?1",
+                params![task_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(false))
+            .map_err(|error| DesktopWorktreeError::Storage {
+                operation: "read worktree merge progress",
+                message: error.to_string(),
+            })
+    }
+    pub fn mark_merge_attempted(&self, task_id: &TaskId) -> Result<(), DesktopWorktreeError> {
+        let changed = self.connection.lock().execute("UPDATE task_worktrees SET merge_attempted = 1 WHERE task_id = ?1 AND status = 'active'", params![task_id.as_str()]).map_err(|error| DesktopWorktreeError::Storage { operation: "save worktree merge progress", message: error.to_string() })?;
+        if changed == 0 {
+            return Err(DesktopWorktreeError::NotBound(task_id.clone()));
+        }
+        Ok(())
     }
 
     pub fn mark_status(
@@ -291,8 +346,9 @@ impl DesktopWorktreeStore {
         &self,
         task_id: &TaskId,
     ) -> Result<Option<DesktopInitialWorktreeSelection>, DesktopWorktreeError> {
-        let stored = self.connection
-                .lock()
+        let stored = self
+            .connection
+            .lock()
             .query_row(
                 "SELECT mode, worktree_path FROM initial_worktree_intents WHERE task_id = ?1",
                 params![task_id.as_str()],
@@ -328,7 +384,6 @@ impl DesktopWorktreeStore {
             })
     }
 }
-
 
 pub fn parse_worktree_porcelain(input: &str) -> Vec<GitWorktree> {
     let mut worktrees = Vec::new();
@@ -689,7 +744,6 @@ pub enum DesktopWorktreeError {
     },
 }
 
-
 use std::sync::Arc;
 
 use lilia_kernel::{
@@ -710,13 +764,13 @@ impl ServiceKey for WorktreeStoreKey {
 }
 
 pub struct WorktreeFeature {
-    db: Db,
+    store: Arc<DesktopWorktreeStore>,
     port: Arc<dyn WorktreePort>,
 }
 
 impl WorktreeFeature {
-    pub fn new(db: Db, port: Arc<dyn WorktreePort>) -> Self {
-        Self { db, port }
+    pub fn new(store: Arc<DesktopWorktreeStore>, port: Arc<dyn WorktreePort>) -> Self {
+        Self { store, port }
     }
 }
 
@@ -734,11 +788,6 @@ impl Feature for WorktreeFeature {
     }
 
     fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
-        let store =
-            DesktopWorktreeStore::from_db(self.db.clone()).map_err(|error| KernelError::Mount {
-                feature: self.id(),
-                source: Box::new(error),
-            })?;
-        cx.provide::<WorktreeStoreKey>(Arc::new(store))
+        cx.provide::<WorktreeStoreKey>(self.store.clone())
     }
 }

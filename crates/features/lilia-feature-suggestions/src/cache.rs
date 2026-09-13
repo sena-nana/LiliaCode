@@ -21,18 +21,11 @@ pub fn cache_scope_key(project_id: Option<&str>, source: &SuggestionSource) -> S
     format!("{}:{}", source.as_str(), project_id.unwrap_or("__recent__"))
 }
 
-pub fn cache_entry_is_valid(
-    entry: &SuggestionCacheEntry,
-    cache_key: &str,
-    now: i64,
-) -> bool {
+pub fn cache_entry_is_valid(entry: &SuggestionCacheEntry, cache_key: &str, now: i64) -> bool {
     entry.cache_key == cache_key && now.saturating_sub(entry.generated_at) <= CACHE_TTL_MS
 }
 
-pub fn build_cache_key(
-    scope: &SuggestionScope,
-    model: &DesktopSuggestionModelRequest,
-) -> String {
+pub fn build_cache_key(scope: &SuggestionScope, model: &DesktopSuggestionModelRequest) -> String {
     let signal_fingerprint = scope
         .tasks
         .iter()
@@ -86,12 +79,12 @@ pub fn build_cache_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::DesktopConversationSuggestionSource;
     use crate::types::*;
     use crate::types::{
         DesktopSuggestionLocalGitContextRef, DesktopSuggestionSessionThreadRef,
         GitHubActivitySample, LocalGitContextSample, SessionThreadSample, TaskSample,
     };
-    use crate::settings::DesktopConversationSuggestionSource;
 
     #[test]
     fn cache_key_includes_source_and_scope() {

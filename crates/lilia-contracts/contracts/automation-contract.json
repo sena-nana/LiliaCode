@@ -1,4 +1,13 @@
 {
+  "automationOperationProtocol": "lilia.automation/operate@1",
+  "automationOperationRequest": {
+    "tag": "operation",
+    "start": ["workflowId", "expectedVersionId", "trigger"],
+    "resume": ["workflowId", "runId", "nodeId", "payload"],
+    "cancel": ["workflowId", "runId"]
+  },
+  "automationBeginRunExpectedVersion": { "field": "expectedVersionId", "required": false, "meaning": "When supplied, compare the published version inside the run creation transaction; reject stale requests without creating a run." },
+  "automationOperationResult": ["workflowId", "runId", "error"],
   "automationTriggerKinds": [
     "manual",
     "task_changed",
@@ -35,6 +44,14 @@
   ],
   "defaultAutomationLogicKind": "condition",
   "defaultAutomationLogicPath": "trigger.kind",
+  "automationDefaultOutputHandles": [null, "output"],
+  "automationSwitchCases": {
+    "configField": "cases",
+    "writeType": "string[]",
+    "acceptedLegacyType": "newline-delimited string",
+    "default": [],
+    "meaning": "Declared switch output values; default handles unmatched values."
+  },
   "automationLogicKindLabels": {
     "condition": "条件",
     "switch": "Switch",

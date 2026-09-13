@@ -1,15 +1,15 @@
 use std::cell::Cell;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lilia_contracts::{PageRequest, PendingProjectionStatus, ProductEventSequence, TaskId};
 use lilia_feature_automation::{
-    automation_signal_matches, AutomationBeginRunInput, AutomationRunStatus,
-    AutomationSignalEnvelope, AutomationStoreError, DesktopAutomationError,
+    AutomationBeginRunInput, AutomationRunStatus, AutomationSignalEnvelope, AutomationStoreError,
+    DesktopAutomationError, automation_signal_matches,
 };
 use lilia_kernel::{EventBus, SubscriptionId};
 use lilia_storage::SqliteAgentRuntimeStateStore;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
     DesktopApplication, DesktopApplicationError, DesktopEvent, TimelineChanged, TodosChanged,
@@ -213,6 +213,7 @@ impl DesktopApplication {
             let detail = match service.try_begin_run(AutomationBeginRunInput {
                 workflow_id: delivery.workflow_id.clone(),
                 trigger: delivery.signal.clone(),
+                expected_version_id: None,
             }) {
                 Ok(detail) => detail,
                 Err(DesktopAutomationError::Store(AutomationStoreError::ActiveRunExists {
@@ -613,12 +614,7 @@ impl DesktopApplication {
         if let Some(origin) = self.inner.automation_inbox.origin(&key)? {
             return Ok((!origin.is_empty()).then_some(origin));
         }
-        let pending = self
-            .inner
-            .pending_turns
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("pending_turns"))?
-            .list(task_id)?;
+        let pending = self.inner.turn_submissions.queue()?.list(task_id)?;
         if let Some(correlation) = pending
             .iter()
             .find(|turn| turn.turn_id == turn_id)
@@ -800,6 +796,7 @@ mod tests {
                     "task_changed",
                     task_id.clone(),
                 ),
+                expected_version_id: None,
             })
             .unwrap();
         app.automation_service().apply_execution_transition(AutomationExecutionTransition {
@@ -924,14 +921,15 @@ mod tests {
                 app.list_task_todos(&task_id).unwrap().len(),
                 usize::from(status == "completed")
             );
-            assert!(app
-                .inner
-                .pending_turns
-                .lock()
-                .unwrap()
-                .list(&task_id)
-                .unwrap()
-                .is_empty());
+            assert!(
+                app.inner
+                    .turn_submissions
+                    .queue()
+                    .unwrap()
+                    .list(&task_id)
+                    .unwrap()
+                    .is_empty()
+            );
         }
     }
 
@@ -953,14 +951,15 @@ mod tests {
             AutomationRunStatus::Running
         );
         assert!(app.list_task_todos(&task.id).unwrap().is_empty());
-        assert!(app
-            .inner
-            .pending_turns
-            .lock()
-            .unwrap()
-            .list(&task.id)
-            .unwrap()
-            .is_empty());
+        assert!(
+            app.inner
+                .turn_submissions
+                .queue()
+                .unwrap()
+                .list(&task.id)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1135,14 +1134,15 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(first.len(), 1);
-        assert!(app
-            .dispatch_automation_signal(signal(
+        assert!(
+            app.dispatch_automation_signal(signal(
                 "busy-second".into(),
                 "task_changed",
                 task.id.clone()
             ))
             .unwrap()
-            .is_empty());
+            .is_empty()
+        );
         assert_eq!(app.inner.automation_inbox.pending(None).unwrap().len(), 1);
         app.resume_automation_run(
             &first[0],
@@ -1238,14 +1238,15 @@ mod tests {
                 "original-run",
             )
             .unwrap();
-        assert!(app
-            .inner
-            .pending_turns
-            .lock()
-            .unwrap()
-            .list(&task.id)
-            .unwrap()
-            .is_empty());
+        assert!(
+            app.inner
+                .turn_submissions
+                .queue()
+                .unwrap()
+                .list(&task.id)
+                .unwrap()
+                .is_empty()
+        );
         append_source_row(&app, &task.id, "completed-agent", 1, "assistant_message");
         app.capture_automation_task_sources(&task.id, false)
             .unwrap();

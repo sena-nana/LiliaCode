@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 
 use crate::{
-    Contribution, ContributionRegistry, EventBus, Feature, FeatureContext, FeatureId, Jobs, Journal,
-    KernelError, RecordKind, ServiceKey, ServiceRef, ServiceRegistry, SubscriptionId,
+    Contribution, ContributionRegistry, EventBus, Feature, FeatureContext, FeatureId, Jobs,
+    Journal, KernelError, RecordKind, ServiceKey, ServiceRef, ServiceRegistry, SubscriptionId,
 };
 
 struct MountRecord {

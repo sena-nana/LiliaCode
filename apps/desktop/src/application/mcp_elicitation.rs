@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Number, Value};
+use serde_json::{Map, Number, Value, json};
 
 pub const MCP_ELICITATION_INTERACTION_KIND: &str = "mcp_elicitation";
 
@@ -86,7 +86,7 @@ impl DesktopMcpElicitation {
             value => {
                 return Err(DesktopMcpElicitationError::UnsupportedMode(
                     value.to_owned(),
-                ))
+                ));
             }
         };
         let url = optional_string(object, "url");
@@ -335,7 +335,7 @@ fn normalize_field_value(
                     return Err(DesktopMcpElicitationError::InvalidField {
                         field: field.key.clone(),
                         message: "must be a number".to_owned(),
-                    })
+                    });
                 }
             };
             if field.kind == DesktopMcpFormFieldKind::Integer

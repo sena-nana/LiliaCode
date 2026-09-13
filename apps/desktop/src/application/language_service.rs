@@ -50,6 +50,8 @@ pub struct DesktopDocumentDefinitionResult {
 
 #[derive(Clone)]
 struct DocumentLanguageBinding {
+    project_id: ProjectId,
+    root: PathBuf,
     document: LspDocumentId,
     version: i64,
 }
@@ -76,7 +78,7 @@ impl DesktopLanguageServiceState {
     }
 }
 
-impl DesktopApplication {
+impl crate::application::DesktopDocumentService {
     pub fn document_project_id(
         &self,
         document_id: DocumentId,
@@ -100,7 +102,6 @@ impl DesktopApplication {
     ) -> Result<DesktopDocumentDiagnosticsSnapshot, DesktopApplicationError> {
         let snapshot = self.document_snapshot(document_id)?;
         Ok(self
-            .inner
             .language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?
@@ -144,7 +145,7 @@ impl DesktopApplication {
         }
         let binding = self.ensure_project_document_language_binding(project_id, document_id)?;
         let locations = {
-            let _operation = self.inner.language_service_operations.lock().map_err(|_| {
+            let _operation = self.language_service_operations.lock().map_err(|_| {
                 DesktopApplicationError::StateUnavailable("language service operation")
             })?;
             self.authority()
@@ -210,14 +211,13 @@ impl DesktopApplication {
         &self,
         document_id: DocumentId,
     ) -> Result<DesktopDocumentDiagnosticsSnapshot, DesktopApplicationError> {
-        let _operation =
-            self.inner.language_service_operations.lock().map_err(|_| {
-                DesktopApplicationError::StateUnavailable("language service operation")
-            })?;
+        let _operation = self
+            .language_service_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("language service operation"))?;
         let requested = self.document_snapshot(document_id)?;
         let binding = {
             let mut state = self
-                .inner
                 .language_services
                 .lock()
                 .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?;
@@ -249,7 +249,6 @@ impl DesktopApplication {
         };
         let current = self.document_snapshot(document_id)?;
         let mut state = self
-            .inner
             .language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?;
@@ -271,15 +270,14 @@ impl DesktopApplication {
         &self,
         document_id: DocumentId,
     ) -> Result<(), DesktopApplicationError> {
-        let _operation =
-            self.inner.language_service_operations.lock().map_err(|_| {
-                DesktopApplicationError::StateUnavailable("language service operation")
-            })?;
+        let _operation = self
+            .language_service_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("language service operation"))?;
         let snapshot = self.document_snapshot(document_id)?;
         let version = lsp_version(snapshot.buffer.revision)?;
         let binding = {
             let state = self
-                .inner
                 .language_services
                 .lock()
                 .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?;
@@ -301,7 +299,6 @@ impl DesktopApplication {
             return Err(language_service_error(error));
         }
         let mut state = self
-            .inner
             .language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?;
@@ -318,13 +315,12 @@ impl DesktopApplication {
         &self,
         document_id: DocumentId,
     ) -> Result<(), DesktopApplicationError> {
-        let _operation =
-            self.inner.language_service_operations.lock().map_err(|_| {
-                DesktopApplicationError::StateUnavailable("language service operation")
-            })?;
+        let _operation = self
+            .language_service_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("language service operation"))?;
         let snapshot = self.document_snapshot(document_id)?;
         let binding = self
-            .inner
             .language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?
@@ -345,13 +341,12 @@ impl DesktopApplication {
         &self,
         document_id: DocumentId,
     ) -> Result<(), DesktopApplicationError> {
-        let _operation =
-            self.inner.language_service_operations.lock().map_err(|_| {
-                DesktopApplicationError::StateUnavailable("language service operation")
-            })?;
+        let _operation = self
+            .language_service_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("language service operation"))?;
         let binding = {
             let mut state = self
-                .inner
                 .language_services
                 .lock()
                 .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?;
@@ -373,8 +368,7 @@ impl DesktopApplication {
         &self,
         document_id: DocumentId,
     ) -> Result<(), DesktopApplicationError> {
-        self.inner
-            .language_services
+        self.language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?
             .states
@@ -387,12 +381,15 @@ impl DesktopApplication {
         project_id: &ProjectId,
         document_id: DocumentId,
     ) -> Result<DocumentLanguageBinding, DesktopApplicationError> {
-        let _operation =
-            self.inner.language_service_operations.lock().map_err(|_| {
-                DesktopApplicationError::StateUnavailable("language service operation")
-            })?;
+        let _operation = self
+            .language_service_operations
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("language service operation"))?;
+        let context = self.project_context(project_id)?;
+        let snapshot = self.document_snapshot(document_id)?;
+        let (root, canonical_path) =
+            lsp_workspace_document_path(context.active_root(), &snapshot.canonical_path)?;
         if let Some(binding) = self
-            .inner
             .language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?
@@ -400,18 +397,22 @@ impl DesktopApplication {
             .get(&document_id)
             .cloned()
         {
+            if binding.project_id != *project_id || binding.root != root {
+                return Err(DesktopApplicationError::InvalidInput {
+                    field: "project_id",
+                    message: "document language binding belongs to another project workspace"
+                        .into(),
+                });
+            }
             return Ok(binding);
         }
-        let context = self.project_context(project_id)?;
-        let snapshot = self.document_snapshot(document_id)?;
         let language_id = snapshot
             .language
             .as_ref()
             .map(|language| language.as_str())
             .unwrap_or("plaintext");
         let version = lsp_version(snapshot.buffer.revision)?;
-        self.inner
-            .language_services
+        self.language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?
             .states
@@ -421,8 +422,8 @@ impl DesktopApplication {
             .shared_runtime()
             .inner()
             .shared_lsp_open_document(
-                &context.active_root().to_string_lossy(),
-                &snapshot.canonical_path,
+                &root.to_string_lossy(),
+                &canonical_path,
                 language_id,
                 version,
                 snapshot.buffer.text,
@@ -433,15 +434,104 @@ impl DesktopApplication {
                 return Err(language_service_error(error));
             }
         };
-        let binding = DocumentLanguageBinding { document, version };
-        self.inner
-            .language_services
+        let binding = DocumentLanguageBinding {
+            project_id: project_id.clone(),
+            root,
+            document,
+            version,
+        };
+        self.language_services
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language services"))?
             .bindings
             .insert(document_id, binding.clone());
         Ok(binding)
     }
+}
+
+impl DesktopApplication {
+    pub fn document_project_id(
+        &self,
+        document_id: DocumentId,
+    ) -> Result<Option<ProjectId>, DesktopApplicationError> {
+        self.inner.document_service.document_project_id(document_id)
+    }
+    pub fn document_diagnostics(
+        &self,
+        document_id: DocumentId,
+    ) -> Result<DesktopDocumentDiagnosticsSnapshot, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .document_diagnostics(document_id)
+    }
+    pub fn refresh_project_document_diagnostics(
+        &self,
+        project_id: &ProjectId,
+        document_id: DocumentId,
+    ) -> Result<DesktopDocumentDiagnosticsSnapshot, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .refresh_project_document_diagnostics(project_id, document_id)
+    }
+    pub fn project_document_definitions(
+        &self,
+        project_id: &ProjectId,
+        document_id: DocumentId,
+        expected_revision: BufferRevision,
+        source_offset: usize,
+    ) -> Result<DesktopDocumentDefinitionResult, DesktopApplicationError> {
+        self.inner.document_service.project_document_definitions(
+            project_id,
+            document_id,
+            expected_revision,
+            source_offset,
+        )
+    }
+    pub fn refresh_document_diagnostics(
+        &self,
+        document_id: DocumentId,
+    ) -> Result<DesktopDocumentDiagnosticsSnapshot, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .refresh_document_diagnostics(document_id)
+    }
+}
+
+fn lsp_workspace_document_path(
+    root: &Path,
+    document: &Path,
+) -> Result<(PathBuf, PathBuf), DesktopApplicationError> {
+    let io_error = |path: &Path, error: std::io::Error| {
+        DesktopApplicationError::Document(crate::application::DocumentError::Io {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })
+    };
+    let root = fs::canonicalize(root).map_err(|error| io_error(root, error))?;
+    let path = match fs::canonicalize(document) {
+        Ok(path) => path,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && fs::symlink_metadata(document).is_err() =>
+        {
+            let parent = document.parent().ok_or_else(|| {
+                io_error(document, std::io::Error::other("document has no parent"))
+            })?;
+            let parent = fs::canonicalize(parent).map_err(|error| io_error(parent, error))?;
+            let name = document.file_name().ok_or_else(|| {
+                io_error(document, std::io::Error::other("document has no filename"))
+            })?;
+            parent.join(name)
+        }
+        Err(error) => return Err(io_error(document, error)),
+    };
+    if !path.starts_with(&root) {
+        return Err(DesktopApplicationError::InvalidInput {
+            field: "document_id",
+            message: "document is outside the requested project workspace".into(),
+        });
+    }
+    Ok((root, path))
 }
 
 fn project_for_path(
@@ -576,6 +666,74 @@ mod tests {
     }
 
     #[test]
+    fn cached_language_binding_cannot_bypass_project_identity_or_document_scope() {
+        let app = application();
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("code.rs");
+        fs::write(&path, "fn main() {}").unwrap();
+        let create = |name| {
+            let mut input = crate::application::DesktopProjectCreate::new(name);
+            input.workspace_path = Some(home.path().to_string_lossy().into_owned());
+            app.create_project(input).unwrap().id
+        };
+        let first = create("first");
+        let second = create("second");
+        let service = app.document_service();
+        let (snapshot, _) = service.open_document_at_path(&path).unwrap();
+        let binding = DocumentLanguageBinding {
+            project_id: first.clone(),
+            root: fs::canonicalize(home.path()).unwrap(),
+            document: LspDocumentId {
+                workspace: mutsuki_agent_contracts::LspWorkspaceId("cached-workspace".into()),
+                uri: "file:///cached/code.rs".into(),
+            },
+            version: 1,
+        };
+        service
+            .language_services
+            .lock()
+            .unwrap()
+            .bindings
+            .insert(snapshot.id, binding.clone());
+        assert_eq!(
+            service
+                .ensure_project_document_language_binding(&first, snapshot.id)
+                .unwrap()
+                .document,
+            binding.document
+        );
+        assert!(matches!(
+            service.ensure_project_document_language_binding(&second, snapshot.id),
+            Err(DesktopApplicationError::InvalidInput {
+                field: "project_id",
+                ..
+            })
+        ));
+        assert!(
+            service
+                .ensure_project_document_language_binding(
+                    &ProjectId::new("missing").unwrap(),
+                    snapshot.id
+                )
+                .is_err()
+        );
+        let outside = tempfile::tempdir().unwrap();
+        assert!(lsp_workspace_document_path(outside.path(), &path).is_err());
+        assert!(lsp_workspace_document_path(home.path(), &home.path().join("new.rs")).is_ok());
+        assert_eq!(
+            service
+                .language_services
+                .lock()
+                .unwrap()
+                .bindings
+                .get(&snapshot.id)
+                .unwrap()
+                .document,
+            binding.document
+        );
+    }
+
+    #[test]
     fn rejected_dirty_close_keeps_document_diagnostics_state() {
         let app = application();
         let path = std::env::current_dir()
@@ -584,7 +742,7 @@ mod tests {
         let (document, _) = app
             .open_document(path, "fn main() {}", None, false)
             .unwrap();
-        app.inner
+        app.document_service()
             .language_services
             .lock()
             .unwrap()

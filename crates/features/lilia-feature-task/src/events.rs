@@ -80,11 +80,7 @@ impl Event for TasksChanged {
         self.task_id
             .as_ref()
             .map(|id| id.as_str().to_owned())
-            .or_else(|| {
-                self.project_id
-                    .as_ref()
-                    .map(|id| id.as_str().to_owned())
-            })
+            .or_else(|| self.project_id.as_ref().map(|id| id.as_str().to_owned()))
     }
 
     fn detail(&self) -> serde_json::Value {

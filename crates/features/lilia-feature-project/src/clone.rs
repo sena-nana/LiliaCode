@@ -268,9 +268,7 @@ fn prepare_clone(
     } else {
         std::env::current_dir()
             .map(|current| current.join(&request.parent_directory))
-            .map_err(|_| {
-                CloneError::ParentDirectoryUnavailable(request.parent_directory.clone())
-            })?
+            .map_err(|_| CloneError::ParentDirectoryUnavailable(request.parent_directory.clone()))?
     };
     if !parent.is_dir() {
         return Err(CloneError::ParentDirectoryUnavailable(

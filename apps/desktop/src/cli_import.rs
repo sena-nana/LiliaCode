@@ -2,8 +2,8 @@ use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::application::{
@@ -14,7 +14,7 @@ use crate::application::{
 
 use crate::data_import::legacy_instance_identity;
 use crate::host::NativeDesktopHost;
-use crate::storage::{lilia_home, LILIA_INSTANCE_IDENTITY};
+use crate::storage::{LILIA_INSTANCE_IDENTITY, lilia_home};
 
 static NEXT_STAGING_FILE: AtomicU64 = AtomicU64::new(1);
 
@@ -327,15 +327,17 @@ mod tests {
                 credentials: CredentialChoice::Deny,
             })
         );
-        assert!(parse_startup([
-            "import".into(),
-            "execute".into(),
-            "--plan".into(),
-            "plan.json".into(),
-            "--credentials".into(),
-            "yes".into(),
-        ])
-        .is_err());
+        assert!(
+            parse_startup([
+                "import".into(),
+                "execute".into(),
+                "--plan".into(),
+                "plan.json".into(),
+                "--credentials".into(),
+                "yes".into(),
+            ])
+            .is_err()
+        );
         assert!(parse_startup(["import".into(), "unknown".into()]).is_err());
     }
 

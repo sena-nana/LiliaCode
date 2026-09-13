@@ -7,6 +7,7 @@
 mod contract;
 mod execution;
 mod graph;
+mod jobs;
 mod service;
 mod signals;
 mod sqlite;
@@ -29,6 +30,7 @@ pub use graph::{
     automation_selected_output_handles, automation_topological_order, validate_automation_graph,
     AutomationGraphError,
 };
+pub use jobs::{AutomationOperationPort, AUTOMATION_OPERATE_PROTOCOL};
 pub use service::{DesktopAutomationError, DesktopAutomationService};
 pub use signals::automation_signal_matches;
 pub use sqlite::SqliteAutomationStore;
@@ -136,15 +138,36 @@ impl ServiceKey for AutomationServiceKey {
 
 pub struct AutomationFeature {
     service: DesktopAutomationService,
+    operations: Option<std::sync::Arc<dyn AutomationOperationPort>>,
 }
 
 impl AutomationFeature {
     pub fn new(service: DesktopAutomationService) -> Self {
-        Self { service }
+        Self {
+            service,
+            operations: None,
+        }
+    }
+}
+
+impl AutomationFeature {
+    pub fn with_operations(
+        mut self,
+        operations: std::sync::Arc<dyn AutomationOperationPort>,
+    ) -> Self {
+        self.operations = Some(operations);
+        self
     }
 }
 
 impl Feature for AutomationFeature {
+    fn protocols(&self) -> Vec<lilia_kernel::JobProtocol> {
+        self.operations
+            .iter()
+            .map(|port| jobs::operation_protocol(port.clone()))
+            .collect()
+    }
+
     fn id(&self) -> FeatureId {
         FeatureId::new("lilia.feature.automation").expect("the automation feature id is not blank")
     }

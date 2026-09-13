@@ -6,7 +6,7 @@ use crate::application::{DesktopApplication, DesktopApplicationError, ProjectQue
 
 const MAX_CONVERSATION_REFERENCE_RESULTS: usize = 50;
 
-impl DesktopApplication {
+impl crate::application::ComposerInputService {
     pub fn search_conversation_references(
         &self,
         current_task_id: &TaskId,
@@ -80,6 +80,29 @@ impl DesktopApplication {
             .take(limit.clamp(1, MAX_CONVERSATION_REFERENCE_RESULTS))
             .map(|(_, _, reference)| reference)
             .collect())
+    }
+}
+
+impl DesktopApplication {
+    pub fn search_conversation_references(
+        &self,
+        current_task_id: &TaskId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ChatConversationReference>, DesktopApplicationError> {
+        self.inner
+            .composer_input
+            .search_conversation_references(current_task_id, query, limit)
+    }
+    pub fn search_conversation_references_from(
+        &self,
+        current_task_id: &TaskId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ChatConversationReference>, DesktopApplicationError> {
+        self.inner
+            .composer_input
+            .search_conversation_references_from(current_task_id, query, limit)
     }
 }
 

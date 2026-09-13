@@ -1,4 +1,7 @@
-use std::sync::TryLockError;
+use lilia_kernel::{
+    EventBus, Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef,
+};
+use std::sync::{Arc, Mutex, TryLockError};
 
 use crate::application::UpdateStateChanged;
 use crate::application::{
@@ -9,10 +12,119 @@ use crate::application::{
 const UPDATE_CHANNEL_FIELD: &str = "update.channel";
 const UPDATE_VERSION_FIELD: &str = "update.version";
 
+pub trait UpdateHostPort: Send + Sync {
+    fn check(
+        &self,
+        channel: String,
+    ) -> Result<DesktopHostResult, crate::application::DesktopHostError>;
+    fn install(
+        &self,
+        version: String,
+        progress: &mut dyn FnMut(Option<f32>),
+    ) -> Result<DesktopHostResult, crate::application::DesktopHostError>;
+}
+
+struct NativeUpdateHostPort {
+    host: Arc<dyn crate::application::DesktopHost>,
+    context: crate::application::DesktopHostContext,
+}
+impl UpdateHostPort for NativeUpdateHostPort {
+    fn check(
+        &self,
+        channel: String,
+    ) -> Result<DesktopHostResult, crate::application::DesktopHostError> {
+        self.host.execute(
+            &self.context,
+            DesktopHostAction::Update(DesktopUpdateAction::Check { channel }),
+        )
+    }
+    fn install(
+        &self,
+        version: String,
+        progress: &mut dyn FnMut(Option<f32>),
+    ) -> Result<DesktopHostResult, crate::application::DesktopHostError> {
+        self.host.execute_update(
+            &self.context,
+            DesktopUpdateAction::Install { version },
+            progress,
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct DesktopUpdateService {
+    state: Arc<Mutex<DesktopUpdateState>>,
+    operation: Arc<Mutex<()>>,
+    host: Arc<dyn UpdateHostPort>,
+    events: EventBus,
+}
+impl DesktopUpdateService {
+    pub fn new(host: Arc<dyn UpdateHostPort>, events: EventBus) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(DesktopUpdateState::Idle)),
+            operation: Arc::new(Mutex::new(())),
+            host,
+            events,
+        }
+    }
+    pub(crate) fn from_host(
+        host: Arc<dyn crate::application::DesktopHost>,
+        context: crate::application::DesktopHostContext,
+        events: EventBus,
+    ) -> Self {
+        Self::new(Arc::new(NativeUpdateHostPort { host, context }), events)
+    }
+}
+
+pub struct UpdateServiceKey;
+impl ServiceKey for UpdateServiceKey {
+    type Value = DesktopUpdateService;
+    const NAME: &'static str = "lilia.update.service";
+}
+pub struct UpdateServiceFeature {
+    service: DesktopUpdateService,
+}
+impl UpdateServiceFeature {
+    pub fn new(service: DesktopUpdateService) -> Self {
+        Self { service }
+    }
+}
+impl Feature for UpdateServiceFeature {
+    fn id(&self) -> FeatureId {
+        FeatureId::new("lilia.feature.update-operations").expect("nonempty feature id")
+    }
+    fn provides(&self) -> Vec<ServiceRef> {
+        vec![ServiceRef::of::<UpdateServiceKey>()]
+    }
+    fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
+        cx.provide::<UpdateServiceKey>(self.service.clone())
+    }
+}
+
 impl DesktopApplication {
+    pub fn update_service(&self) -> DesktopUpdateService {
+        self.inner.update_service.clone()
+    }
     pub fn update_state(&self) -> Result<DesktopUpdateState, DesktopApplicationError> {
-        self.inner
-            .update_state
+        self.inner.update_service.update_state()
+    }
+    pub fn check_for_update(
+        &self,
+        channel: impl AsRef<str>,
+    ) -> Result<DesktopUpdateState, DesktopApplicationError> {
+        self.inner.update_service.check_for_update(channel)
+    }
+    pub fn install_update(
+        &self,
+        version: impl AsRef<str>,
+    ) -> Result<DesktopUpdateState, DesktopApplicationError> {
+        self.inner.update_service.install_update(version)
+    }
+}
+
+impl DesktopUpdateService {
+    pub fn update_state(&self) -> Result<DesktopUpdateState, DesktopApplicationError> {
+        self.state
             .lock()
             .map(|state| state.clone())
             .map_err(|_| DesktopApplicationError::StateUnavailable("update"))
@@ -26,10 +138,7 @@ impl DesktopApplication {
         let _operation = self.begin_update_operation()?;
         self.set_update_state(DesktopUpdateState::Checking)?;
 
-        match self.inner.host.execute(
-            &self.inner.host_context,
-            DesktopHostAction::Update(DesktopUpdateAction::Check { channel }),
-        ) {
+        match self.host.check(channel) {
             Ok(DesktopHostResult::Update(DesktopUpdateResult::UpToDate)) => {
                 self.set_update_state(DesktopUpdateState::UpToDate)
             }
@@ -98,13 +207,7 @@ impl DesktopApplication {
                 Err(error) => progress_error = Some(error),
             }
         };
-        let result = self.inner.host.execute_update(
-            &self.inner.host_context,
-            DesktopUpdateAction::Install {
-                version: version.clone(),
-            },
-            &mut publish_progress,
-        );
+        let result = self.host.install(version.clone(), &mut publish_progress);
         if let Some(error) = progress_error {
             return Err(error);
         }
@@ -132,7 +235,7 @@ impl DesktopApplication {
     fn begin_update_operation(
         &self,
     ) -> Result<std::sync::MutexGuard<'_, ()>, DesktopApplicationError> {
-        match self.inner.update_operation.try_lock() {
+        match self.operation.try_lock() {
             Ok(operation) => Ok(operation),
             Err(TryLockError::WouldBlock) => Err(DesktopApplicationError::UpdateBusy),
             Err(TryLockError::Poisoned(_)) => Err(DesktopApplicationError::StateUnavailable(
@@ -146,11 +249,10 @@ impl DesktopApplication {
         state: DesktopUpdateState,
     ) -> Result<DesktopUpdateState, DesktopApplicationError> {
         *self
-            .inner
-            .update_state
+            .state
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("update"))? = state.clone();
-        self.emit_event(UpdateStateChanged {
+        self.events.publish(UpdateStateChanged {
             state: state.clone(),
         });
         Ok(state)
@@ -258,6 +360,46 @@ mod tests {
             }),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn registered_update_service_shares_state_and_publishes_committed_transitions_once() {
+        let app = application([Ok(DesktopHostResult::Update(DesktopUpdateResult::UpToDate))]);
+        let service = app.update_service();
+        let kernel = lilia_kernel::Kernel::new();
+        kernel
+            .mount(Arc::new(UpdateServiceFeature::new(service.clone())))
+            .unwrap();
+        let mounted = kernel.service::<UpdateServiceKey>().unwrap();
+        assert!(Arc::ptr_eq(&service.state, &mounted.state));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = service.clone();
+        let _subscription = app
+            .event_bus()
+            .on::<UpdateStateChanged, _>(None, move |event| {
+                tx.send((event.state.clone(), reader.update_state().unwrap()))
+                    .unwrap();
+            });
+        assert!(mounted.check_for_update(" ").is_err());
+        assert!(rx.try_recv().is_err());
+        let operation = service.operation.lock().unwrap();
+        assert!(matches!(
+            mounted.check_for_update("preview"),
+            Err(DesktopApplicationError::UpdateBusy)
+        ));
+        assert!(rx.try_recv().is_err());
+        drop(operation);
+        assert_eq!(
+            mounted.check_for_update("preview").unwrap(),
+            DesktopUpdateState::UpToDate
+        );
+        for expected in [DesktopUpdateState::Checking, DesktopUpdateState::UpToDate] {
+            assert_eq!(rx.try_recv().unwrap(), (expected.clone(), expected));
+        }
+        assert!(rx.try_recv().is_err());
+        assert_eq!(app.update_state().unwrap(), DesktopUpdateState::UpToDate);
+        assert!(mounted.install_update("unchecked").is_err());
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

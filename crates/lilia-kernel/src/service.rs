@@ -52,7 +52,10 @@ impl ServiceRegistry {
     {
         let slot = ServiceRef::of::<K>();
         if let Some(existing) = self.entries.get(&slot.type_id()) {
-            return Err(KernelError::duplicate_service(slot, existing.provider.clone()));
+            return Err(KernelError::duplicate_service(
+                slot,
+                existing.provider.clone(),
+            ));
         }
         self.entries.insert(
             slot.type_id(),

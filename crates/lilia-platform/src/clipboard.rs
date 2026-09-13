@@ -51,7 +51,8 @@ pub fn write_text(value: impl Into<String>) -> PlatformResult<()> {
 }
 
 fn open() -> PlatformResult<arboard::Clipboard> {
-    arboard::Clipboard::new().map_err(|error| PlatformError::transient("clipboard_open_failed", error))
+    arboard::Clipboard::new()
+        .map_err(|error| PlatformError::transient("clipboard_open_failed", error))
 }
 
 fn invalid_image(dimension: &str) -> PlatformError {

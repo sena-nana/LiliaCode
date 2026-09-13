@@ -15,7 +15,6 @@ use lilia_kernel::{
     Event, EventBus, Feature, FeatureContext, FeatureId, JobContext, JobProtocol, KernelError,
     ServiceKey, ServiceRef,
 };
-use lilia_storage::Db;
 use serde_json::Value;
 
 pub use prompt::{
@@ -29,6 +28,8 @@ pub use store::ComposerStore;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ComposerError {
+    #[error("composer task {task_id} is unavailable: {message}")]
+    TaskUnavailable { task_id: TaskId, message: String },
     #[error("composer content changed before paste")]
     ContentConflict,
     #[error("composer revision overflowed")]
@@ -58,18 +59,33 @@ impl Event for ComposerChanged {
     const NAME: &'static str = "lilia.composer.changed";
 }
 
+/// Product authority required before reading or mutating a durable draft.
+pub trait ComposerTaskAuthority: Send + Sync {
+    fn ensure_task(&self, task_id: &TaskId) -> Result<(), ComposerError>;
+}
+
 /// Authority over composer drafts.
 pub struct ComposerService {
-    store: ComposerStore,
+    store: Arc<ComposerStore>,
+    authority: Arc<dyn ComposerTaskAuthority>,
     events: EventBus,
 }
 
 impl ComposerService {
-    pub fn new(store: ComposerStore, events: EventBus) -> Self {
-        Self { store, events }
+    pub fn new(
+        store: Arc<ComposerStore>,
+        authority: Arc<dyn ComposerTaskAuthority>,
+        events: EventBus,
+    ) -> Self {
+        Self {
+            store,
+            authority,
+            events,
+        }
     }
 
     pub fn snapshot(&self, task_id: &TaskId) -> Result<ComposerState, ComposerError> {
+        self.authority.ensure_task(task_id)?;
         self.store.snapshot(task_id)
     }
 
@@ -78,6 +94,7 @@ impl ComposerService {
         task_id: &TaskId,
         command: ComposerCommand,
     ) -> Result<(ComposerState, bool), ComposerError> {
+        self.authority.ensure_task(task_id)?;
         let (state, changed) = self.store.execute(task_id, command)?;
         if changed {
             self.publish(&state);
@@ -85,18 +102,7 @@ impl ComposerService {
         Ok((state, changed))
     }
 
-    pub fn save(&self, state: &ComposerState) -> Result<(), ComposerError> {
-        self.store.save(state)
-    }
-
-    pub fn remove(&self, task_id: &TaskId) -> Result<(), ComposerError> {
-        self.store.remove(task_id)
-    }
-
-    /// Announces a revision the caller committed through another path, such as
-    /// a turn submission that cleared the dispatched payload in its own
-    /// transaction.
-    pub fn publish(&self, state: &ComposerState) {
+    fn publish(&self, state: &ComposerState) {
         self.events.publish(ComposerChanged {
             task_id: state.task_id.clone(),
             revision: state.revision,
@@ -114,14 +120,17 @@ impl ServiceKey for ComposerServiceKey {
 }
 
 pub struct ComposerFeature {
-    db: Db,
+    service: Arc<ComposerService>,
     prompt_optimize: Arc<dyn PromptOptimizePort>,
 }
 
 impl ComposerFeature {
-    pub fn new(db: Db, prompt_optimize: Arc<dyn PromptOptimizePort>) -> Self {
+    pub fn new(
+        service: Arc<ComposerService>,
+        prompt_optimize: Arc<dyn PromptOptimizePort>,
+    ) -> Self {
         Self {
-            db,
+            service,
             prompt_optimize,
         }
     }
@@ -147,12 +156,7 @@ impl Feature for ComposerFeature {
     }
 
     fn mount(&self, cx: &mut FeatureContext<'_>) -> Result<(), KernelError> {
-        let store = ComposerStore::new(self.db.clone()).map_err(|error| KernelError::Mount {
-            feature: self.id(),
-            source: Box::new(error),
-        })?;
-        let service = Arc::new(ComposerService::new(store, cx.events().clone()));
-        cx.provide::<ComposerServiceKey>(service)
+        cx.provide::<ComposerServiceKey>(Arc::clone(&self.service))
     }
 }
 
@@ -193,5 +197,170 @@ mod prompt_job_tests {
                 .expect_err("a failing auxiliary model fails the job");
 
         assert_eq!(error, "the auxiliary model is not configured");
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+    use std::sync::{mpsc, Barrier};
+
+    struct TaskAuthority;
+    impl ComposerTaskAuthority for TaskAuthority {
+        fn ensure_task(&self, task_id: &TaskId) -> Result<(), ComposerError> {
+            if task_id.as_str().starts_with("task-") {
+                Ok(())
+            } else {
+                Err(ComposerError::TaskUnavailable {
+                    task_id: task_id.clone(),
+                    message: "task does not exist".into(),
+                })
+            }
+        }
+    }
+    struct NoPrompt;
+    impl PromptOptimizePort for NoPrompt {
+        fn optimize(&self, _: PromptOptimizeInput) -> Result<PromptOptimizeResult, String> {
+            Err("unused".into())
+        }
+    }
+    fn setup() -> (
+        Arc<ComposerService>,
+        lilia_storage::Db,
+        lilia_kernel::Kernel,
+    ) {
+        let db = lilia_storage::Db::in_memory().unwrap();
+        let kernel = lilia_kernel::Kernel::new();
+        let service = Arc::new(ComposerService::new(
+            Arc::new(ComposerStore::new(db.clone()).unwrap()),
+            Arc::new(TaskAuthority),
+            kernel.events().clone(),
+        ));
+        kernel
+            .mount(Arc::new(ComposerFeature::new(
+                Arc::clone(&service),
+                Arc::new(NoPrompt),
+            )))
+            .unwrap();
+        (service, db, kernel)
+    }
+    #[test]
+    fn unknown_tasks_cannot_create_drafts_or_emit_events() {
+        let (service, db, kernel) = setup();
+        let (tx, rx) = mpsc::channel();
+        let subscription = kernel
+            .events()
+            .on::<ComposerChanged, _>(None, move |event| {
+                tx.send(event.clone()).unwrap();
+            });
+        let missing = TaskId::new("missing").unwrap();
+        assert!(matches!(
+            service.snapshot(&missing),
+            Err(ComposerError::TaskUnavailable { .. })
+        ));
+        assert!(matches!(
+            service.execute(&missing, ComposerCommand::SetContent("orphan".into())),
+            Err(ComposerError::TaskUnavailable { .. })
+        ));
+        assert_eq!(
+            db.lock()
+                .query_row("SELECT COUNT(*) FROM desktop_composer_drafts", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert!(rx.try_recv().is_err());
+        kernel.events().unsubscribe(subscription);
+    }
+    #[test]
+    fn registry_and_direct_writes_emit_once_after_commit_but_conflicts_and_noops_do_not() {
+        let (service, _, kernel) = setup();
+        let mounted = kernel.service::<ComposerServiceKey>().unwrap();
+        assert!(Arc::ptr_eq(&mounted, &service));
+        let reader = Arc::clone(&service);
+        let (tx, rx) = mpsc::channel();
+        let subscription = kernel
+            .events()
+            .on::<ComposerChanged, _>(None, move |event| {
+                tx.send((event.clone(), reader.snapshot(&event.task_id).unwrap()))
+                    .unwrap();
+            });
+        let task = TaskId::new("task-a").unwrap();
+        let (first, changed) = service
+            .execute(&task, ComposerCommand::SetContent("first".into()))
+            .unwrap();
+        assert!(changed);
+        let (event, observed) = rx.try_recv().unwrap();
+        assert_eq!(observed, first);
+        assert_eq!(event.revision, first.revision);
+        assert!(rx.try_recv().is_err());
+        assert!(
+            !mounted
+                .execute(&task, ComposerCommand::SetContent("first".into()))
+                .unwrap()
+                .1
+        );
+        assert!(mounted
+            .execute(
+                &task,
+                ComposerCommand::ApplyPaste {
+                    expected_revision: 0,
+                    expected_content: String::new(),
+                    content: "stale".into(),
+                    attachments: vec![]
+                }
+            )
+            .is_err());
+        assert!(rx.try_recv().is_err());
+        let second = mounted
+            .execute(&task, ComposerCommand::SetContent("second".into()))
+            .unwrap()
+            .0;
+        assert_eq!(rx.try_recv().unwrap().1, second);
+        assert!(rx.try_recv().is_err());
+        kernel.events().unsubscribe(subscription);
+    }
+    #[test]
+    fn concurrent_expected_revision_writers_have_exactly_one_winner() {
+        let (service, _, _) = setup();
+        for attempt in 0..16 {
+            let task = TaskId::new(format!("task-race-{attempt}")).unwrap();
+            let barrier = Arc::new(Barrier::new(2));
+            let workers = ["left", "right"].map(|text| {
+                let service = Arc::clone(&service);
+                let barrier = Arc::clone(&barrier);
+                let task = task.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    service.execute(
+                        &task,
+                        ComposerCommand::ApplyPaste {
+                            expected_revision: 0,
+                            expected_content: String::new(),
+                            content: text.into(),
+                            attachments: vec![],
+                        },
+                    )
+                })
+            });
+            let results = workers.map(|worker| worker.join().unwrap());
+            assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+            assert_eq!(
+                results
+                    .iter()
+                    .filter(|result| matches!(
+                        result,
+                        Err(ComposerError::RevisionConflict {
+                            expected: 0,
+                            actual: 1
+                        })
+                    ))
+                    .count(),
+                1
+            );
+            let winner = results.into_iter().find_map(Result::ok).unwrap().0;
+            assert_eq!(service.snapshot(&task).unwrap(), winner);
+        }
     }
 }

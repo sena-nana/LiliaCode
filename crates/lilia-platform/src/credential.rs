@@ -18,7 +18,9 @@ impl CredentialEntry {
         }
         keyring::Entry::new(service, key)
             .map(|inner| Self { inner })
-            .map_err(|error| PlatformError::new("credential_entry_failed", error.to_string(), false))
+            .map_err(|error| {
+                PlatformError::new("credential_entry_failed", error.to_string(), false)
+            })
     }
 
     /// `Ok(None)` means the entry does not exist.

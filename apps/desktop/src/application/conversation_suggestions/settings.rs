@@ -4,9 +4,9 @@ use crate::application::ConversationSuggestionSettingsChanged;
 use crate::application::{DesktopApplication, DesktopApplicationError};
 
 pub use lilia_feature_suggestions::settings::{
+    CONVERSATION_SUGGESTION_SETTINGS_KEY, CONVERSATION_SUGGESTION_SETTINGS_SCHEMA_VERSION,
     DesktopConversationSuggestionError, DesktopConversationSuggestionSettings,
     DesktopConversationSuggestionSource, StoredConversationSuggestionSettings,
-    CONVERSATION_SUGGESTION_SETTINGS_KEY, CONVERSATION_SUGGESTION_SETTINGS_SCHEMA_VERSION,
 };
 
 /// The suggestions domain reports settings failures as invalid input, which is
@@ -102,8 +102,8 @@ pub fn normalize_conversation_suggestion_settings(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
     use crate::application::{

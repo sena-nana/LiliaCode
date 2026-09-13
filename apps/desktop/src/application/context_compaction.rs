@@ -2,8 +2,8 @@ use lilia_agent::{
     NativeContextCompactionSource, NativeControlModelRequest, NativeControlModelResult,
 };
 use lilia_contracts::{
-    context_compaction_request_instruction, context_compaction_success_message,
-    context_compaction_system_instruction, TaskId,
+    TaskId, context_compaction_request_instruction, context_compaction_success_message,
+    context_compaction_system_instruction,
 };
 use mutsuki_agent_contracts::{AgentEventEnvelope, AgentRole};
 use serde::{Deserialize, Serialize};
@@ -371,9 +371,11 @@ mod tests {
         let (application, task_id, source_session_id) =
             application_with_source_session(&label, endpoint);
 
-        assert!(application
-            .compact_task_agent_context(&task_id, "turn-compaction-failure")
-            .is_err());
+        assert!(
+            application
+                .compact_task_agent_context(&task_id, "turn-compaction-failure")
+                .is_err()
+        );
         server.join().unwrap();
 
         let bindings = application

@@ -1,14 +1,13 @@
 use lilia_contracts::{ProjectId, TaskId};
 
 use crate::application::{
-    ArchitectureBackend, ArchitectureChanged, DesktopApplication, DesktopApplicationError,
-    DesktopArchitectureService, DesktopMemory, DesktopMemoryService, DesktopRoadmapService,
-    MemoryChanged, MemoryInjectionChanged, MemoryInjectionState, MemorySettings,
-    MemorySettingsChanged, MemoryUpsertInput, Milestone, MilestoneUpdatePatch,
+    ArchitectureBackend, DesktopApplication, DesktopApplicationError, DesktopArchitectureService,
+    DesktopMemory, DesktopMemoryService, DesktopRoadmapService, MemoryInjectionState,
+    MemorySettings, MemoryUpsertInput, Milestone, MilestoneUpdatePatch,
     ProjectArchitectureApplyInput, ProjectArchitectureApplyResult, ProjectArchitectureChangeEvent,
     ProjectArchitectureChangeRecord, ProjectArchitectureGraph, ProjectArchitectureQuarantineRecord,
     ProjectArchitectureRejectInput, ProjectArchitectureRollbackResult, ProjectRoadmap,
-    RoadmapChanged, TaskMilestoneLink,
+    TaskMilestoneLink,
 };
 
 impl DesktopApplication {
@@ -20,7 +19,6 @@ impl DesktopApplication {
         &self,
         project_id: &ProjectId,
     ) -> Result<ProjectArchitectureGraph, DesktopApplicationError> {
-        self.get_project(project_id)?;
         Ok(self.inner.architecture.graph(project_id.as_str())?)
     }
 
@@ -29,7 +27,6 @@ impl DesktopApplication {
         project_id: &ProjectId,
         limit: usize,
     ) -> Result<Vec<ProjectArchitectureChangeRecord>, DesktopApplicationError> {
-        self.get_project(project_id)?;
         Ok(self
             .inner
             .architecture
@@ -40,7 +37,6 @@ impl DesktopApplication {
         &self,
         project_id: &ProjectId,
     ) -> Result<Vec<ProjectArchitectureQuarantineRecord>, DesktopApplicationError> {
-        self.get_project(project_id)?;
         Ok(self
             .inner
             .architecture
@@ -51,22 +47,13 @@ impl DesktopApplication {
         &self,
         input: ProjectArchitectureApplyInput,
     ) -> Result<ProjectArchitectureApplyResult, DesktopApplicationError> {
-        let project_id = ProjectId::new(&input.project_id)?;
-        self.validate_architecture_task(&project_id, &input.task_id)?;
-        let result = self.inner.architecture.apply(input)?;
-        self.emit_event(ArchitectureChanged {
-            project_id,
-            version: result.graph.version,
-        });
-        Ok(result)
+        Ok(self.inner.architecture.apply(input)?)
     }
 
     pub fn reject_project_architecture(
         &self,
         input: ProjectArchitectureRejectInput,
     ) -> Result<ProjectArchitectureChangeEvent, DesktopApplicationError> {
-        let project_id = ProjectId::new(&input.project_id)?;
-        self.validate_architecture_task(&project_id, &input.task_id)?;
         Ok(self.inner.architecture.reject(input)?)
     }
 
@@ -76,35 +63,10 @@ impl DesktopApplication {
         task_id: &TaskId,
         backend: ArchitectureBackend,
     ) -> Result<ProjectArchitectureRollbackResult, DesktopApplicationError> {
-        self.validate_architecture_task(project_id, task_id.as_str())?;
-        let result =
-            self.inner
-                .architecture
-                .rollback(project_id.as_str(), task_id.as_str(), backend)?;
-        if result.event.is_some() {
-            self.emit_event(ArchitectureChanged {
-                project_id: project_id.clone(),
-                version: result.graph.version,
-            });
-        }
-        Ok(result)
-    }
-
-    fn validate_architecture_task(
-        &self,
-        project_id: &ProjectId,
-        task_id: &str,
-    ) -> Result<(), DesktopApplicationError> {
-        self.get_project(project_id)?;
-        let task_id = TaskId::new(task_id)?;
-        let task = self.get_task(&task_id)?;
-        if task.project_id.as_ref() != Some(project_id) {
-            return Err(DesktopApplicationError::InvalidInput {
-                field: "taskId",
-                message: "architecture task must belong to the selected project".to_owned(),
-            });
-        }
-        Ok(())
+        Ok(self
+            .inner
+            .architecture
+            .rollback(project_id.as_str(), task_id.as_str(), backend)?)
     }
 
     pub fn memory_service(&self) -> DesktopMemoryService {
@@ -129,39 +91,7 @@ impl DesktopApplication {
         &self,
         input: MemoryUpsertInput,
     ) -> Result<DesktopMemory, DesktopApplicationError> {
-        let previous = input
-            .id
-            .as_deref()
-            .map(|id| self.inner.memory.memory(id))
-            .transpose()?
-            .flatten();
-        let memory = self.inner.memory.save(input)?;
-        let current_project = memory
-            .project_id
-            .as_deref()
-            .and_then(|id| ProjectId::new(id).ok());
-        let previous_project = previous.as_ref().map(|memory| {
-            memory
-                .project_id
-                .as_deref()
-                .and_then(|id| ProjectId::new(id).ok())
-        });
-        let mut affected = vec![current_project];
-        if let Some(previous_project) = previous_project {
-            if !affected.contains(&previous_project) {
-                affected.push(previous_project);
-            }
-        }
-        if affected.contains(&None) {
-            affected = vec![None];
-        }
-        for project_id in affected {
-            self.emit_event(MemoryChanged {
-                memory_id: Some(memory.id.clone()),
-                project_id,
-            });
-        }
-        Ok(memory)
+        Ok(self.inner.memory.save(input)?)
     }
 
     pub fn set_memory_enabled(
@@ -170,18 +100,10 @@ impl DesktopApplication {
         enabled: bool,
         expected_updated_at: Option<i64>,
     ) -> Result<DesktopMemory, DesktopApplicationError> {
-        let memory =
-            self.inner
-                .memory
-                .set_enabled_if_unmodified(memory_id, enabled, expected_updated_at)?;
-        self.emit_event(MemoryChanged {
-            memory_id: Some(memory.id.clone()),
-            project_id: memory
-                .project_id
-                .as_deref()
-                .and_then(|project_id| ProjectId::new(project_id).ok()),
-        });
-        Ok(memory)
+        Ok(self
+            .inner
+            .memory
+            .set_enabled_if_unmodified(memory_id, enabled, expected_updated_at)?)
     }
 
     pub fn delete_memory(
@@ -189,20 +111,10 @@ impl DesktopApplication {
         memory_id: &str,
         expected_updated_at: Option<i64>,
     ) -> Result<bool, DesktopApplicationError> {
-        let previous = self.inner.memory.memory(memory_id)?;
-        let deleted = self
+        Ok(self
             .inner
             .memory
-            .delete_if_unmodified(memory_id, expected_updated_at)?;
-        if deleted {
-            self.emit_event(MemoryChanged {
-                memory_id: Some(memory_id.to_owned()),
-                project_id: previous
-                    .and_then(|memory| memory.project_id)
-                    .and_then(|project_id| ProjectId::new(project_id).ok()),
-            });
-        }
-        Ok(deleted)
+            .delete_if_unmodified(memory_id, expected_updated_at)?)
     }
 
     pub fn memory_settings(&self) -> Result<MemorySettings, DesktopApplicationError> {
@@ -213,9 +125,7 @@ impl DesktopApplication {
         &self,
         settings: MemorySettings,
     ) -> Result<MemorySettings, DesktopApplicationError> {
-        let settings = self.inner.memory.save_settings(settings)?;
-        self.emit_event(MemorySettingsChanged);
-        Ok(settings)
+        Ok(self.inner.memory.save_settings(settings)?)
     }
 
     pub fn memory_injection_state(
@@ -231,15 +141,11 @@ impl DesktopApplication {
         enabled: bool,
         expected_updated_at: Option<i64>,
     ) -> Result<MemoryInjectionState, DesktopApplicationError> {
-        let state = self.inner.memory.set_task_enabled_if_unmodified(
+        Ok(self.inner.memory.set_task_enabled_if_unmodified(
             task_id.as_str(),
             enabled,
             expected_updated_at,
-        )?;
-        self.emit_event(MemoryInjectionChanged {
-            task_id: task_id.clone(),
-        });
-        Ok(state)
+        )?)
     }
 
     pub fn reset_task_memory_cooldown(
@@ -247,14 +153,10 @@ impl DesktopApplication {
         task_id: &TaskId,
         expected_updated_at: Option<i64>,
     ) -> Result<MemoryInjectionState, DesktopApplicationError> {
-        let state = self
+        Ok(self
             .inner
             .memory
-            .reset_task_cooldown_if_unmodified(task_id.as_str(), expected_updated_at)?;
-        self.emit_event(MemoryInjectionChanged {
-            task_id: task_id.clone(),
-        });
-        Ok(state)
+            .reset_task_cooldown_if_unmodified(task_id.as_str(), expected_updated_at)?)
     }
 
     pub fn roadmap_service(&self) -> DesktopRoadmapService {
@@ -265,7 +167,7 @@ impl DesktopApplication {
         &self,
         project_id: &ProjectId,
     ) -> Result<ProjectRoadmap, DesktopApplicationError> {
-        Ok(self.inner.roadmap.list(project_id.as_str())?)
+        Ok(self.inner.roadmap.list(project_id)?)
     }
 
     pub fn create_milestone(
@@ -273,9 +175,7 @@ impl DesktopApplication {
         project_id: &ProjectId,
         title: &str,
     ) -> Result<Milestone, DesktopApplicationError> {
-        let milestone = self.inner.roadmap.create(project_id.as_str(), title)?;
-        self.emit_roadmap_changed(project_id, Some(milestone.id.clone()));
-        Ok(milestone)
+        Ok(self.inner.roadmap.create(project_id, title)?)
     }
 
     pub fn update_milestone(
@@ -284,20 +184,7 @@ impl DesktopApplication {
         milestone_id: &str,
         patch: MilestoneUpdatePatch,
     ) -> Result<Milestone, DesktopApplicationError> {
-        let roadmap = self.inner.roadmap.list(project_id.as_str())?;
-        if !roadmap
-            .milestones
-            .iter()
-            .any(|milestone| milestone.id == milestone_id)
-        {
-            return Err(crate::application::RoadmapStoreError::MilestoneNotFound {
-                milestone_id: milestone_id.to_owned(),
-            }
-            .into());
-        }
-        let milestone = self.inner.roadmap.update(milestone_id, patch)?;
-        self.emit_roadmap_changed(project_id, Some(milestone.id.clone()));
-        Ok(milestone)
+        Ok(self.inner.roadmap.update(project_id, milestone_id, patch)?)
     }
 
     pub fn delete_milestone(
@@ -305,19 +192,7 @@ impl DesktopApplication {
         project_id: &ProjectId,
         milestone_id: &str,
     ) -> Result<bool, DesktopApplicationError> {
-        let roadmap = self.inner.roadmap.list(project_id.as_str())?;
-        if !roadmap
-            .milestones
-            .iter()
-            .any(|milestone| milestone.id == milestone_id)
-        {
-            return Ok(false);
-        }
-        let deleted = self.inner.roadmap.delete(milestone_id)?;
-        if deleted {
-            self.emit_roadmap_changed(project_id, Some(milestone_id.to_owned()));
-        }
-        Ok(deleted)
+        Ok(self.inner.roadmap.delete(project_id, milestone_id)?)
     }
 
     pub fn reorder_milestones(
@@ -325,12 +200,7 @@ impl DesktopApplication {
         project_id: &ProjectId,
         ordered_ids: Vec<String>,
     ) -> Result<Vec<Milestone>, DesktopApplicationError> {
-        let milestones = self
-            .inner
-            .roadmap
-            .reorder(project_id.as_str(), ordered_ids)?;
-        self.emit_roadmap_changed(project_id, None);
-        Ok(milestones)
+        Ok(self.inner.roadmap.reorder(project_id, ordered_ids)?)
     }
 
     pub fn set_milestone_tasks(
@@ -339,26 +209,9 @@ impl DesktopApplication {
         milestone_id: &str,
         task_ids: Vec<String>,
     ) -> Result<Vec<TaskMilestoneLink>, DesktopApplicationError> {
-        let roadmap = self.inner.roadmap.list(project_id.as_str())?;
-        if !roadmap
-            .milestones
-            .iter()
-            .any(|milestone| milestone.id == milestone_id)
-        {
-            return Err(crate::application::RoadmapStoreError::MilestoneNotFound {
-                milestone_id: milestone_id.to_owned(),
-            }
-            .into());
-        }
-        let links = self.inner.roadmap.set_tasks(milestone_id, task_ids)?;
-        self.emit_roadmap_changed(project_id, Some(milestone_id.to_owned()));
-        Ok(links)
-    }
-
-    fn emit_roadmap_changed(&self, project_id: &ProjectId, milestone_id: Option<String>) {
-        self.emit_event(RoadmapChanged {
-            project_id: project_id.clone(),
-            milestone_id,
-        });
+        Ok(self
+            .inner
+            .roadmap
+            .set_tasks(project_id, milestone_id, task_ids)?)
     }
 }

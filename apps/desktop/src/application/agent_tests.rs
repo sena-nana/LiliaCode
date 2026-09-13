@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
 use crate::application::{
@@ -146,12 +146,14 @@ fn mcp_interaction_response_preserves_actions_and_validates_form_content() {
     .unwrap();
     assert!(accepted.0);
     assert_eq!(accepted.1["content"]["project"], "B");
-    assert!(normalized_pending_interaction_response(
-        &pending,
-        true,
-        json!({"action": "accept", "content": {}}),
-    )
-    .is_err());
+    assert!(
+        normalized_pending_interaction_response(
+            &pending,
+            true,
+            json!({"action": "accept", "content": {}}),
+        )
+        .is_err()
+    );
     assert_eq!(
         normalized_pending_interaction_response(&pending, false, json!({"action": "decline"}),)
             .unwrap(),
@@ -189,12 +191,14 @@ fn tool_consent_response_is_supported_and_decision_fenced() {
         normalized_pending_interaction_response(&pending, false, json!({"decision": "allow"}),)
             .is_err()
     );
-    assert!(normalized_pending_interaction_response(
-        &pending,
-        false,
-        json!({"decision": "deny", "updatedInput": "invalid"}),
-    )
-    .is_err());
+    assert!(
+        normalized_pending_interaction_response(
+            &pending,
+            false,
+            json!({"decision": "deny", "updatedInput": "invalid"}),
+        )
+        .is_err()
+    );
 }
 
 #[test]

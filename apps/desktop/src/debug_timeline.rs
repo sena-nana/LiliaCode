@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use lilia_contracts::{PendingProjectionStatus, TaskId};
 use nana_ui::NativeMarkdown;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::task_session::{PendingActionView, TaskTimelineItem};
 
@@ -160,6 +160,8 @@ fn action_spec(
     Option<PendingActionView>,
 ) {
     let pending = |kind: &str, prompt: &str, payload: Value| PendingActionView {
+        task_id: None,
+        turn_id: None,
         request_id: request_id.to_owned(),
         kind: kind.to_owned(),
         prompt: prompt.to_owned(),
@@ -362,6 +364,8 @@ fn ask_action(
         prompt,
         None,
         Some(PendingActionView {
+            task_id: None,
+            turn_id: None,
             request_id: request_id.to_owned(),
             kind: "ask_user".to_owned(),
             prompt: prompt.to_owned(),

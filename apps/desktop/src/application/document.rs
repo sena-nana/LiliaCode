@@ -13,16 +13,15 @@ use crate::application::{
 };
 
 pub use lilia_feature_document::{
-    document_resource_key, path_from_document_resource_key, DocumentError, DocumentId,
-    DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    DocumentError, DocumentId, DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    document_resource_key, path_from_document_resource_key,
 };
-impl DesktopApplication {
+impl crate::application::DesktopDocumentService {
     pub fn register_language(
         &self,
         definition: LanguageDefinition,
     ) -> Result<(), DesktopApplicationError> {
-        self.inner
-            .languages
+        self.languages
             .write()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language registry"))?
             .register(definition)?;
@@ -34,7 +33,6 @@ impl DesktopApplication {
         path: &Path,
     ) -> Result<Option<LanguageDefinition>, DesktopApplicationError> {
         Ok(self
-            .inner
             .languages
             .read()
             .map_err(|_| DesktopApplicationError::StateUnavailable("language registry"))?
@@ -62,19 +60,25 @@ impl DesktopApplication {
         let language = match language {
             Some(language) => Some(language),
             None => self
-                .inner
                 .languages
                 .read()
                 .map_err(|_| DesktopApplicationError::StateUnavailable("language registry"))?
                 .language_for_path(&canonical_path)
                 .map(|definition| definition.id.clone()),
         };
-        Ok(self
-            .inner
+        let (snapshot, opened) = self
             .documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
-            .open_file(canonical_path, text, language, read_only)?)
+            .open_file(canonical_path, text, language, read_only)?;
+        if opened {
+            self.publish(
+                snapshot.id,
+                snapshot.buffer.revision,
+                crate::application::DocumentChangeKind::Opened,
+            );
+        }
+        Ok((snapshot, opened))
     }
 
     pub fn open_document_at_path(
@@ -84,7 +88,6 @@ impl DesktopApplication {
         let canonical_path = canonicalize_existing_file(path.as_ref())?;
         {
             let store = self
-                .inner
                 .documents
                 .lock()
                 .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?;
@@ -123,7 +126,6 @@ impl DesktopApplication {
         id: DocumentId,
     ) -> Result<DocumentSnapshot, DesktopApplicationError> {
         Ok(self
-            .inner
             .documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
@@ -137,13 +139,15 @@ impl DesktopApplication {
         edits: Vec<TextEdit>,
     ) -> Result<BufferRevision, DesktopApplicationError> {
         let revision = self
-            .inner
             .documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
             .apply_edits(id, expected_revision, edits)?;
         if let Err(error) = self.notify_document_language_service_changed(id) {
             eprintln!("failed to synchronize language document change: {error}");
+        }
+        if revision != expected_revision {
+            self.publish(id, revision, crate::application::DocumentChangeKind::Edited);
         }
         Ok(revision)
     }
@@ -155,7 +159,6 @@ impl DesktopApplication {
         text: impl Into<String>,
     ) -> Result<BufferRevision, DesktopApplicationError> {
         let revision = self
-            .inner
             .documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
@@ -164,6 +167,9 @@ impl DesktopApplication {
             if let Err(error) = self.notify_document_language_service_changed(id) {
                 eprintln!("failed to synchronize language document change: {error}");
             }
+        }
+        if revision != expected_revision {
+            self.publish(id, revision, crate::application::DocumentChangeKind::Edited);
         }
         Ok(revision)
     }
@@ -174,7 +180,6 @@ impl DesktopApplication {
         expected_revision: BufferRevision,
     ) -> Result<DocumentSnapshot, DesktopApplicationError> {
         let mut documents = self
-            .inner
             .documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?;
@@ -192,6 +197,11 @@ impl DesktopApplication {
         if let Err(error) = self.notify_document_language_service_saved(id) {
             eprintln!("failed to synchronize language document save: {error}");
         }
+        self.publish(
+            id,
+            snapshot.buffer.revision,
+            crate::application::DocumentChangeKind::Saved,
+        );
         Ok(snapshot)
     }
 
@@ -205,7 +215,6 @@ impl DesktopApplication {
             message: error.to_string(),
         })?;
         let snapshot = self
-            .inner
             .documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
@@ -213,6 +222,11 @@ impl DesktopApplication {
         if let Err(error) = self.notify_document_language_service_changed(id) {
             eprintln!("failed to synchronize reloaded language document: {error}");
         }
+        self.publish(
+            id,
+            snapshot.buffer.revision,
+            crate::application::DocumentChangeKind::Reloaded,
+        );
         Ok(snapshot)
     }
 
@@ -222,11 +236,11 @@ impl DesktopApplication {
         revision: BufferRevision,
     ) -> Result<(), DesktopApplicationError> {
         let fingerprint = content_fingerprint(&self.document_snapshot(id)?.buffer.text);
-        self.inner
-            .documents
+        self.documents
             .lock()
             .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
             .mark_saved(id, revision, fingerprint)?;
+        self.publish(id, revision, crate::application::DocumentChangeKind::Saved);
         Ok(())
     }
 
@@ -235,14 +249,133 @@ impl DesktopApplication {
         id: DocumentId,
         discard_dirty: bool,
     ) -> Result<(), DesktopApplicationError> {
-        self.inner
-            .documents
-            .lock()
-            .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
-            .close(id, discard_dirty)?;
+        let revision = {
+            let mut documents = self
+                .documents
+                .lock()
+                .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?;
+            let revision = documents.snapshot(id)?.buffer.revision;
+            documents.close(id, discard_dirty)?;
+            revision
+        };
         if let Err(error) = self.close_document_language_service(id) {
             eprintln!("failed to close language document: {error}");
         }
+        self.publish(id, revision, crate::application::DocumentChangeKind::Closed);
         Ok(())
+    }
+}
+impl DesktopApplication {
+    pub fn register_language(
+        &self,
+        definition: LanguageDefinition,
+    ) -> Result<(), DesktopApplicationError> {
+        self.inner.document_service.register_language(definition)
+    }
+    pub fn language_for_path(
+        &self,
+        path: &Path,
+    ) -> Result<Option<LanguageDefinition>, DesktopApplicationError> {
+        self.inner.document_service.language_for_path(path)
+    }
+    pub fn project_context(
+        &self,
+        project_id: &ProjectId,
+    ) -> Result<ProjectContext, DesktopApplicationError> {
+        self.inner.document_service.project_context(project_id)
+    }
+    pub fn open_document(
+        &self,
+        canonical_path: impl Into<PathBuf>,
+        text: impl Into<String>,
+        language: Option<LanguageId>,
+        read_only: bool,
+    ) -> Result<(DocumentSnapshot, bool), DesktopApplicationError> {
+        self.inner
+            .document_service
+            .open_document(canonical_path, text, language, read_only)
+    }
+    pub fn open_document_at_path(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<(DocumentSnapshot, bool), DesktopApplicationError> {
+        self.inner.document_service.open_document_at_path(path)
+    }
+    pub fn open_project_document(
+        &self,
+        project_id: &ProjectId,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<(DocumentSnapshot, bool), DesktopApplicationError> {
+        self.inner
+            .document_service
+            .open_project_document(project_id, relative_path)
+    }
+    pub fn open_document_in_context(
+        &self,
+        context: &ProjectContext,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<(DocumentSnapshot, bool), DesktopApplicationError> {
+        self.inner
+            .document_service
+            .open_document_in_context(context, relative_path)
+    }
+    pub fn document_snapshot(
+        &self,
+        id: DocumentId,
+    ) -> Result<DocumentSnapshot, DesktopApplicationError> {
+        self.inner.document_service.document_snapshot(id)
+    }
+    pub fn edit_document(
+        &self,
+        id: DocumentId,
+        expected_revision: BufferRevision,
+        edits: Vec<TextEdit>,
+    ) -> Result<BufferRevision, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .edit_document(id, expected_revision, edits)
+    }
+    pub fn replace_document_text(
+        &self,
+        id: DocumentId,
+        expected_revision: BufferRevision,
+        text: impl Into<String>,
+    ) -> Result<BufferRevision, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .replace_document_text(id, expected_revision, text)
+    }
+    pub fn save_document(
+        &self,
+        id: DocumentId,
+        expected_revision: BufferRevision,
+    ) -> Result<DocumentSnapshot, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .save_document(id, expected_revision)
+    }
+    pub fn discard_document_changes(
+        &self,
+        id: DocumentId,
+    ) -> Result<DocumentSnapshot, DesktopApplicationError> {
+        self.inner.document_service.discard_document_changes(id)
+    }
+    pub fn mark_document_saved(
+        &self,
+        id: DocumentId,
+        revision: BufferRevision,
+    ) -> Result<(), DesktopApplicationError> {
+        self.inner
+            .document_service
+            .mark_document_saved(id, revision)
+    }
+    pub fn close_document(
+        &self,
+        id: DocumentId,
+        discard_dirty: bool,
+    ) -> Result<(), DesktopApplicationError> {
+        self.inner
+            .document_service
+            .close_document(id, discard_dirty)
     }
 }

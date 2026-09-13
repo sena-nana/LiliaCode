@@ -3,12 +3,16 @@
 //! The events themselves live on the task session the shell publishes. This
 //! module owns expansion state for its window.
 
-use std::collections::BTreeSet;
+pub mod view;
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use lilia_contracts::TaskId;
 
 use lilia_kernel::FeatureId;
 
-use crate::runtime_shell::{PrimaryShellSnapshot, ShellTimelineRow};
-use crate::task_session::TaskTimelineItem;
+use self::view::TimelineRow;
+use crate::task_session::{TaskSessionView, TaskTimelineItem};
 use crate::ui_module::{UiModule, UiModuleContext, UiModuleOutcome};
 
 #[derive(Debug, Clone)]
@@ -20,14 +24,18 @@ pub struct TimelineTextSelection {
 #[derive(Debug, Clone)]
 pub enum TimelineModuleMessage {
     Toggle(String),
-    SelectText {
-        event_id: String,
-        text: Option<String>,
-    },
     ClearTextSelection,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TimelineReadingPosition {
+    pub offset: f32,
+    pub extent: f32,
+}
+
 pub struct TimelineModule {
+    reading_positions: BTreeMap<TaskId, TimelineReadingPosition>,
+    reading_histories: VecDeque<(TaskId, TaskSessionView)>,
     toggled_events: BTreeSet<String>,
     text_selection: Option<TimelineTextSelection>,
 }
@@ -35,6 +43,8 @@ pub struct TimelineModule {
 impl Default for TimelineModule {
     fn default() -> Self {
         Self {
+            reading_positions: BTreeMap::new(),
+            reading_histories: VecDeque::new(),
             toggled_events: BTreeSet::new(),
             text_selection: None,
         }
@@ -42,31 +52,16 @@ impl Default for TimelineModule {
 }
 
 impl TimelineModule {
-    pub fn feature_id() -> FeatureId {
-        FeatureId::new("lilia.timeline").expect("the timeline feature id is not blank")
-    }
-
-    pub fn text_selection(&self) -> Option<&TimelineTextSelection> {
-        self.text_selection.as_ref()
-    }
-
-    pub fn is_toggled(&self, id: &str) -> bool {
-        self.toggled_events.contains(id)
-    }
-
-    pub fn rows(
-        session: &crate::task_session::TaskSessionView,
-        toggled: impl Fn(&str) -> bool,
-    ) -> Vec<ShellTimelineRow> {
+    pub(crate) fn rows(&self, session: &TaskSessionView) -> Vec<TimelineRow> {
         let mut rows = Vec::new();
         let mut index = 0;
         while index < session.timeline.len() {
             let item = &session.timeline[index];
             if item.kind == "turn_state"
                 && item.turn_id.is_some()
-                && session.timeline[index + 1..]
-                    .iter()
-                    .any(|later| later.kind == "turn_state" && later.turn_id == item.turn_id)
+                && session.timeline[index + 1..].iter().any(|later| {
+                    later.kind == "turn_state" && later.turn_id == item.turn_id
+                })
             {
                 index += 1;
                 continue;
@@ -82,50 +77,83 @@ impl TimelineModule {
             }
             if end > index + 1 {
                 let group_id = format!("process-group:{}", item.id);
-                let expanded = toggled(&group_id);
-                rows.push(ShellTimelineRow {
-                    selected_text: None,
-                    attachments: Vec::new(),
-                    images: Vec::new(),
+                let expanded = self.toggled_events.contains(&group_id);
+                rows.push(TimelineRow {
                     id: group_id,
-                    title: format!("执行过程 · {} 项", end - index),
-                    role: "process_group".into(),
-                    status: process_status(&session.timeline[index..end]).into(),
-                    markdown: String::new(),
+                    markdown: format!("执行过程 · {} 项", end - index),
+                    images: Vec::new(),
                     expanded,
                     can_expand: true,
-                    can_copy: false,
                     can_retry: false,
+                    can_copy: false,
                     can_branch: false,
-                    can_apply: false,
                 });
                 if expanded {
                     for child in &session.timeline[index..end] {
-                        let mut row = Self::row(child, toggled(&child.id), false);
-                        row.role = format!("process-child:{}", row.role);
-                        rows.push(row);
+                        rows.push(Self::row(
+                            child,
+                            self.toggled_events.contains(&child.id),
+                            false,
+                            false,
+                        ));
                     }
                 }
             } else {
-                let mut row = Self::row(
+                rows.push(Self::row(
                     item,
-                    toggled(&item.id),
+                    self.toggled_events.contains(&item.id),
                     item.can_retry && session.run_block.is_none(),
-                );
-                if session.blocking_pending_count > 0 || session.run_block.is_some() {
-                    row.can_branch = false;
-                    row.can_apply = false;
-                }
-                rows.push(row);
+                    item.session_branch_turn_id.is_some() && session.run_block.is_none(),
+                ));
             }
             index = end;
         }
         rows
     }
 
-    pub fn row(item: &TaskTimelineItem, expanded: bool, can_retry: bool) -> ShellTimelineRow {
+    pub(crate) fn remember_reading_position(
+        &mut self,
+        task_id: TaskId,
+        position: TimelineReadingPosition,
+        session: Option<TaskSessionView>,
+    ) {
+        self.reading_positions.insert(task_id.clone(), position);
+        if let Some(session) = session {
+            self.reading_histories.retain(|(id, _)| id != &task_id);
+            self.reading_histories.push_back((task_id, session));
+            while self.reading_histories.len() > 8 {
+                self.reading_histories.pop_front();
+            }
+        }
+    }
+
+    pub(crate) fn reading_position(&self, task_id: &TaskId) -> Option<TimelineReadingPosition> {
+        self.reading_positions.get(task_id).copied()
+    }
+
+    pub(crate) fn reading_history(&self, task_id: &TaskId) -> Option<&TaskSessionView> {
+        self.reading_histories
+            .iter()
+            .find(|(id, _)| id == task_id)
+            .map(|(_, session)| session)
+    }
+
+    pub fn feature_id() -> FeatureId {
+        FeatureId::new("lilia.timeline").expect("the timeline feature id is not blank")
+    }
+
+    pub fn text_selection(&self) -> Option<&TimelineTextSelection> {
+        self.text_selection.as_ref()
+    }
+
+    pub fn row(
+        item: &TaskTimelineItem,
+        toggled: bool,
+        can_retry: bool,
+        can_branch: bool,
+    ) -> TimelineRow {
         let expanded =
-            matches!(item.message_role.as_deref(), Some("user" | "assistant")) ^ expanded;
+            toggled != matches!(item.message_role.as_deref(), Some("user" | "assistant"));
         let full = item
             .markdown
             .clone()
@@ -137,31 +165,20 @@ impl TimelineModule {
             .clone()
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| item.title.clone());
-        let can_expand = item.message_role.is_none()
-            && item.markdown.as_ref().is_some_and(|markdown| {
-                item.summary
-                    .as_ref()
-                    .is_some_and(|summary| summary != markdown)
-                    || item.title != *markdown
-            });
-        ShellTimelineRow {
-            selected_text: None,
-            attachments: item.attachments.clone(),
-            images: Vec::new(),
+        let can_expand = item.markdown.as_ref().is_some_and(|markdown| {
+            item.summary
+                .as_ref()
+                .is_some_and(|summary| summary != markdown)
+                || item.title != *markdown
+        });
+        TimelineRow {
             id: item.id.clone(),
-            title: item.title.clone(),
-            role: item
-                .message_role
-                .clone()
-                .unwrap_or_else(|| item.kind.clone()),
-            status: item.status.clone(),
-            can_branch: item.session_branch_turn_id.is_some(),
-            can_apply: item.batch_apply.is_some(),
             markdown: if expanded || !can_expand {
                 full
             } else {
                 preview
             },
+            images: Vec::new(),
             expanded,
             can_expand,
             can_retry,
@@ -170,11 +187,26 @@ impl TimelineModule {
                 .as_ref()
                 .or(item.markdown.as_ref())
                 .is_some_and(|text| !text.trim().is_empty()),
+            can_branch,
         }
     }
 }
 
+fn is_process_event(item: &TaskTimelineItem) -> bool {
+    item.message_role.is_none()
+        && matches!(
+            item.kind.as_str(),
+            "reasoning" | "tool" | "tool_call" | "tool_result" | "progress"
+        )
+        && !matches!(item.status.as_str(), "failed" | "error")
+        && !item.can_retry
+        && item.batch_apply.is_none()
+        && item.session_branch_turn_id.is_none()
+}
+
 impl UiModule for TimelineModule {
+    type Projection<'a> = crate::ui_module::projection::TimelineProjection<'a>;
+
     type Message = TimelineModuleMessage;
 
     fn feature(&self) -> FeatureId {
@@ -193,70 +225,22 @@ impl UiModule for TimelineModule {
                 self.text_selection = None;
                 UiModuleOutcome::dirty()
             }
-            TimelineModuleMessage::SelectText { event_id, text } => {
-                if let Some(text) = text.filter(|text| !text.trim().is_empty()) {
-                    self.text_selection = Some(TimelineTextSelection { event_id, text });
-                } else if self
-                    .text_selection
-                    .as_ref()
-                    .is_some_and(|selection| selection.event_id == event_id)
-                {
-                    self.text_selection = None;
-                }
-                UiModuleOutcome::dirty()
-            }
         }
     }
 
-    fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
+    fn project_fields(&self, cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
         if !crate::module::conversation_is_visible(cx) {
             return;
         }
         let Some(session) = cx.task_session() else {
-            into.timeline.clear();
-            into.timeline_layout = nana_ui::VirtualListLayout::default();
-            into.timeline_can_load_earlier = false;
+            into.timeline.rows.clear();
+            into.timeline.layout = nana_ui::VirtualListLayout::default();
+            into.timeline.can_load_earlier = false;
             return;
         };
-        into.timeline_can_load_earlier = session.timeline_has_more_before;
-        into.timeline = Self::rows(&session, |id| self.is_toggled(id));
-        for row in &mut into.timeline {
-            row.selected_text = self
-                .text_selection
-                .as_ref()
-                .filter(|selection| selection.event_id == row.id)
-                .map(|selection| selection.text.clone());
-        }
-        into.timeline_layout = nana_ui::VirtualListLayout::new(into.timeline.iter().map(|row| {
-            if row.role == "process_group" {
-                return 36.0;
-            }
-            let width = if row.role == "user" { 54 } else { 72 };
-            let lines = row
-                .markdown
-                .lines()
-                .map(|line| line.chars().count().max(1).div_ceil(width))
-                .sum::<usize>()
-                .max(1);
-            lines as f32 * 22.0
-                + row.attachments.len() as f32 * 32.0
-                + if row.role == "user" { 24.0 } else { 12.0 }
-                + if row.role != "user" && row.role != "assistant" {
-                    26.0
-                } else {
-                    0.0
-                }
-                + if row.can_expand
-                    || row.can_copy
-                    || row.can_retry
-                    || row.can_branch
-                    || row.can_apply
-                {
-                    30.0
-                } else {
-                    0.0
-                }
-        }));
+        into.timeline.can_load_earlier = session.timeline_has_more_before;
+        into.timeline.layout = session.timeline_layout.clone();
+        into.timeline.rows = self.rows(&session);
     }
 
     fn invalidate(
@@ -282,49 +266,54 @@ impl UiModule for TimelineModule {
     }
 }
 
-fn is_process_event(item: &TaskTimelineItem) -> bool {
-    item.message_role.is_none()
-        && matches!(
-            item.kind.as_str(),
-            "reasoning" | "tool" | "tool_call" | "tool_result" | "progress"
-        )
-        && !matches!(item.status.as_str(), "failed" | "error")
-        && !item.can_retry
-        && item.batch_apply.is_none()
-        && item.session_branch_turn_id.is_none()
-}
-
-fn process_status(items: &[TaskTimelineItem]) -> &str {
-    for statuses in [
-        &["failed", "error", "cancelled"][..],
-        &[
-            "running",
-            "started",
-            "in_progress",
-            "in-progress",
-            "pending",
-            "queued",
-        ][..],
-    ] {
-        if let Some(item) = items
-            .iter()
-            .find(|item| statuses.contains(&item.status.as_str()))
-        {
-            return &item.status;
-        }
-    }
-    items
-        .last()
-        .map(|item| item.status.as_str())
-        .unwrap_or("completed")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task_session::TaskSessionView;
 
-    fn event(id: &str, kind: &str, status: &str) -> TaskTimelineItem {
+    #[test]
+    fn conversation_body_is_visible_and_process_details_are_opt_in() {
+        let mut item = TaskTimelineItem {
+            id: "reply".into(),
+            sequence: 1,
+            turn_id: None,
+            kind: "message".into(),
+            title: "Reply".into(),
+            message_role: Some("assistant".into()),
+            summary: Some("Summary".into()),
+            markdown: Some("Complete response".into()),
+            markdown_document: None,
+            markdown_plain_text: Some("Complete response".into()),
+            markdown_table_count: 0,
+            attachments: Vec::new(),
+            status: "completed".into(),
+            batch_apply: None,
+            session_branch_turn_id: None,
+            selectable_reply: true,
+            can_retry: false,
+        };
+        assert_eq!(
+            TimelineModule::row(&item, false, false, false).markdown,
+            "Complete response"
+        );
+        assert_eq!(
+            TimelineModule::row(&item, true, false, false).markdown,
+            "Summary"
+        );
+        item.message_role = Some("user".into());
+        assert!(TimelineModule::row(&item, false, false, false).expanded);
+        item.message_role = None;
+        item.kind = "tool_call".into();
+        assert_eq!(
+            TimelineModule::row(&item, false, false, false).markdown,
+            "Summary"
+        );
+        assert_eq!(
+            TimelineModule::row(&item, true, false, false).markdown,
+            "Complete response"
+        );
+    }
+
+    fn process_item(id: &str, kind: &str, status: &str) -> TaskTimelineItem {
         TaskTimelineItem {
             id: id.into(),
             sequence: 1,
@@ -345,7 +334,8 @@ mod tests {
             can_retry: false,
         }
     }
-    fn session(timeline: Vec<TaskTimelineItem>) -> TaskSessionView {
+
+    fn process_session(timeline: Vec<TaskTimelineItem>) -> TaskSessionView {
         TaskSessionView {
             task_title: String::new(),
             run_block: None,
@@ -366,92 +356,75 @@ mod tests {
             pending: Vec::new(),
         }
     }
+
     #[test]
-    fn process_groups_aggregate_running_state_and_keep_expanded_event_identity() {
-        let mut reply = event("reply", "message", "completed");
+    fn process_groups_collapse_until_expanded() {
+        let mut reply = process_item("reply", "message", "completed");
         reply.message_role = Some("assistant".into());
         reply.session_branch_turn_id = Some("turn".into());
-        let session = session(vec![
-            event("read", "tool", "success"),
-            event("search", "tool", "running"),
+        let session = process_session(vec![
+            process_item("read", "tool", "success"),
+            process_item("search", "tool", "running"),
             reply,
         ]);
-        let collapsed = TimelineModule::rows(&session, |_| false);
+        let collapsed = TimelineModule::default().rows(&session);
         assert_eq!(collapsed.len(), 2);
         assert_eq!(collapsed[0].id, "process-group:read");
-        assert_eq!(collapsed[0].status, "running");
-        assert!(collapsed[0].markdown.is_empty());
+        assert_eq!(collapsed[0].markdown, "执行过程 · 2 项");
         assert_eq!(collapsed[1].id, "reply");
-        assert!(collapsed[1].can_branch);
-        let expanded =
-            TimelineModule::rows(&session, |id| id == "process-group:read" || id == "search");
+        let mut expanded = TimelineModule::default();
+        expanded
+            .toggled_events
+            .insert("process-group:read".into());
+        let rows = expanded.rows(&session);
         assert_eq!(
-            expanded
-                .iter()
-                .map(|row| row.id.as_str())
-                .collect::<Vec<_>>(),
+            rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
             ["process-group:read", "read", "search", "reply"]
         );
-        assert!(!expanded[1].expanded);
-        assert!(expanded[2].expanded && expanded[2].can_copy);
-        assert_eq!(session.timeline.len(), 3);
-        assert!(session.timeline_has_more_before);
     }
+
     #[test]
     fn failed_retryable_events_stay_visible_when_process_group_is_collapsed() {
-        let mut failure = event("failure", "tool", "error");
+        let mut failure = process_item("failure", "tool", "error");
         failure.can_retry = true;
-        let session = session(vec![
-            event("read", "tool", "success"),
-            event("search", "tool", "success"),
+        let session = process_session(vec![
+            process_item("read", "tool", "success"),
+            process_item("search", "tool", "success"),
             failure,
         ]);
-        let rows = TimelineModule::rows(&session, |_| false);
+        let rows = TimelineModule::default().rows(&session);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].id, "failure");
         assert!(rows[1].can_retry);
-        assert_eq!(rows[1].status, "error");
     }
+
     #[test]
-    fn history_attachments_survive_projection_and_resolve_by_message_identity() {
-        let mut message = event("sent-message", "message", "completed");
-        message.message_role = Some("user".into());
-        message.markdown = None;
-        message.attachments = vec![crate::application::ChatAttachment {
-            id: "capture".into(),
-            name: "capture.png".into(),
-            path: "/history/capture.png".into(),
-            kind: crate::application::ChatAttachmentKind::File,
-            size: Some(42),
-            exists: true,
-            mime: Some("image/png".into()),
-            directory: None,
-        }];
-        let mut other = message.clone();
-        other.id = "other-message".into();
-        other.attachments[0].path = "/other/capture.png".into();
-        let session = session(vec![message, other]);
-        let rows = TimelineModule::rows(&session, |_| false);
-        assert_eq!(rows[0].attachments, session.timeline[0].attachments);
-        assert_eq!(
-            session
-                .timeline_attachment(&rows[0].id, "capture")
-                .unwrap()
-                .path,
-            "/history/capture.png"
+    fn switching_tasks_preserves_independent_reading_positions_and_first_visits() {
+        let task_a = TaskId::new("task-a").unwrap();
+        let task_b = TaskId::new("task-b").unwrap();
+        let mut timeline = TimelineModule::default();
+        assert!(timeline.reading_position(&task_a).is_none());
+        let a = TimelineReadingPosition {
+            offset: 120.0,
+            extent: 600.0,
+        };
+        timeline.remember_reading_position(task_a.clone(), a, None);
+        assert!(timeline.reading_position(&task_b).is_none());
+        let b = TimelineReadingPosition {
+            offset: 980.0,
+            extent: 400.0,
+        };
+        timeline.remember_reading_position(task_b.clone(), b, None);
+        assert_eq!(timeline.reading_position(&task_a), Some(a));
+        assert_eq!(timeline.reading_position(&task_b), Some(b));
+        let reread = TimelineReadingPosition { offset: 240.0, ..a };
+        timeline.remember_reading_position(task_a.clone(), reread, None);
+        assert_eq!(timeline.reading_position(&task_a), Some(reread));
+        assert_eq!(timeline.reading_position(&task_b), Some(b));
+        assert!(
+            TimelineModule::default()
+                .reading_position(&task_a)
+                .is_none()
         );
-        assert_eq!(
-            session
-                .timeline_attachment(&rows[1].id, "capture")
-                .unwrap()
-                .path,
-            "/other/capture.png"
-        );
-        assert!(session
-            .timeline_attachment("not-in-this-task", "capture")
-            .is_none());
-        assert!(session
-            .timeline_attachment("sent-message", "not-attached")
-            .is_none());
     }
 }

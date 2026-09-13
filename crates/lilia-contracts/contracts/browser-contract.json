@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "tool": "task_browser",
+  "protocol": "lilia.agent.task-browser@1",
+  "scope": ["projectId", "taskId", "tabId"],
+  "tabRestoration": ["scope", "url"],
+  "restorationAuthority": "Workspace item identity binds the tab to its task; restore validates live task and project, creates a new human-controlled lifecycle, and never restores targets or approval",
+  "request": ["scope", "lifecycle", "pageVersion", "operation"],
+  "operations": ["observe", "navigate", "back", "forward", "reload", "click", "type", "scroll", "screenshot"],
+  "control": ["agent", "human"],
+  "hostRequest": ["id", "scope", "lifecycle", "pageVersion", "kind"],
+  "hostRequestKinds": ["download", "upload", "new_window"],
+  "hostDecisions": ["reject", "download", "upload", "new_window"],
+  "hostDecisionAuthority": "Only trusted host UI may provide selected local paths or a prepared target tab; no webpage or Agent tool endpoint accepts host decisions",
+  "rules": {
+    "authority": "Host binds Agent session to task; model input never grants scope or approval",
+    "invalidation": "Navigation, DOM change, takeover, cancellation and close invalidate pending targets/results",
+    "resume": "Only explicit human resume grants Agent control after takeover",
+    "profile": "Project-isolated browser profiles, independent task tabs",
+    "secrets": "Do not record typed text or browser credentials in normal task logs"
+  }
+}

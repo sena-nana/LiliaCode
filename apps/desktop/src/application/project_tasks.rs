@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use lilia_contracts::{ProjectArchiveState, ProjectId};
 use serde::{Deserialize, Serialize};
@@ -71,33 +72,84 @@ struct ProjectTaskDefinition {
     allow_concurrent_runs: bool,
 }
 
-impl DesktopApplication {
+type CommandKey = (String, String);
+#[derive(Default)]
+struct ProjectCommandRuns {
+    active: BTreeMap<CommandKey, Vec<DesktopTerminalSessionId>>,
+    starting: BTreeSet<CommandKey>,
+}
+struct LaunchReservation {
+    runs: Arc<Mutex<ProjectCommandRuns>>,
+    key: CommandKey,
+    exclusive: bool,
+}
+impl Drop for LaunchReservation {
+    fn drop(&mut self) {
+        if self.exclusive {
+            self.runs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .starting
+                .remove(&self.key);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ProjectCommandRunService {
+    projects: lilia_feature_task::ProjectTaskService,
+    terminals: Arc<lilia_feature_terminal::DesktopTerminalService>,
+    events: lilia_kernel::EventBus,
+    runs: Arc<Mutex<ProjectCommandRuns>>,
+}
+impl ProjectCommandRunService {
+    pub(crate) fn new(
+        projects: lilia_feature_task::ProjectTaskService,
+        terminals: Arc<lilia_feature_terminal::DesktopTerminalService>,
+        events: lilia_kernel::EventBus,
+    ) -> Self {
+        Self {
+            projects,
+            terminals,
+            events,
+            runs: Arc::new(Mutex::new(ProjectCommandRuns::default())),
+        }
+    }
+    fn project_context(
+        &self,
+        project_id: &ProjectId,
+    ) -> Result<ProjectContext, DesktopApplicationError> {
+        let project = self.projects.get_project(project_id)?;
+        if project.archive == ProjectArchiveState::Archived {
+            return Err(DesktopProjectTaskError::ArchivedProject(project_id.clone()).into());
+        }
+        Ok(ProjectContext::from_project(&project)?)
+    }
     pub fn project_task_catalog(
         &self,
         project_id: &ProjectId,
     ) -> Result<DesktopProjectTaskCatalog, DesktopApplicationError> {
-        let project = self.get_project(project_id)?;
-        if project.archive == ProjectArchiveState::Archived {
-            return Err(DesktopProjectTaskError::ArchivedProject(project_id.clone()).into());
-        }
-        let context = ProjectContext::from_project(&project)?;
+        let context = self.project_context(project_id)?;
         let source_path = context.active_root().join(TASKS_RELATIVE_PATH);
         let definitions = read_project_tasks(context.active_root(), &source_path)?;
-        let active_runs = self
-            .inner
-            .project_task_runs
+        let active = self
+            .runs
             .lock()
             .map_err(|_| DesktopProjectTaskError::StateUnavailable)?
+            .active
             .clone();
         let tasks = definitions
             .into_iter()
             .map(|definition| {
                 let key = (project_id.as_str().to_owned(), definition.id.clone());
-                let running_session_id = active_runs.get(&key).and_then(|session_id| {
-                    self.terminal_snapshot(session_id, 0)
-                        .ok()
-                        .filter(|snapshot| snapshot.process.is_running())
-                        .map(|snapshot| snapshot.id)
+                let running_session_id = active.get(&key).and_then(|ids| {
+                    ids.iter().rev().find_map(|id| {
+                        self.terminals
+                            .snapshot(id, 0)
+                            .ok()
+                            .filter(|snapshot| snapshot.process.is_running())
+                            .map(|snapshot| snapshot.id)
+                    })
                 });
                 DesktopProjectTaskView {
                     id: definition.id,
@@ -113,72 +165,149 @@ impl DesktopApplication {
             tasks,
         })
     }
-
     pub fn launch_project_task(
         &self,
         project_id: &ProjectId,
         task_id: &str,
     ) -> Result<DesktopProjectTaskLaunch, DesktopApplicationError> {
         let task_id = validate_requested_task_id(task_id)?;
-        let project = self.get_project(project_id)?;
-        if project.archive == ProjectArchiveState::Archived {
-            return Err(DesktopProjectTaskError::ArchivedProject(project_id.clone()).into());
-        }
-        let context = ProjectContext::from_project(&project)?;
-        let source_path = context.active_root().join(TASKS_RELATIVE_PATH);
-        let definition = read_project_tasks(context.active_root(), &source_path)?
-            .into_iter()
-            .find(|definition| definition.id == task_id)
-            .ok_or_else(|| DesktopProjectTaskError::TaskNotFound {
-                project_id: project_id.clone(),
-                task_id: task_id.to_owned(),
-            })?;
-
+        let context = self.project_context(project_id)?;
+        let definition = read_project_tasks(
+            context.active_root(),
+            &context.active_root().join(TASKS_RELATIVE_PATH),
+        )?
+        .into_iter()
+        .find(|definition| definition.id == task_id)
+        .ok_or_else(|| DesktopProjectTaskError::TaskNotFound {
+            project_id: project_id.clone(),
+            task_id: task_id.to_owned(),
+        })?;
         let key = (project_id.as_str().to_owned(), task_id.to_owned());
-        let mut active_runs = self
-            .inner
-            .project_task_runs
-            .lock()
-            .map_err(|_| DesktopProjectTaskError::StateUnavailable)?;
-        if !definition.allow_concurrent_runs {
-            if let Some(session_id) = active_runs.get(&key) {
-                match self.terminal_snapshot(session_id, 0) {
-                    Ok(snapshot) if snapshot.process.is_running() => {
-                        return Err(DesktopProjectTaskError::AlreadyRunning {
-                            project_id: project_id.clone(),
-                            task_id: task_id.to_owned(),
-                            session_id: session_id.clone(),
-                        }
-                        .into());
-                    }
-                    Ok(_)
-                    | Err(DesktopApplicationError::Terminal(
-                        DesktopTerminalError::SessionNotFound(_),
-                    )) => {
-                        active_runs.remove(&key);
-                    }
-                    Err(error) => return Err(error),
+        let reservation = {
+            let mut runs = self
+                .runs
+                .lock()
+                .map_err(|_| DesktopProjectTaskError::StateUnavailable)?;
+            if runs.starting.contains(&key) {
+                return Err(DesktopProjectTaskError::LaunchInProgress {
+                    project_id: project_id.clone(),
+                    task_id: task_id.to_owned(),
+                }
+                .into());
+            }
+            let mut running = Vec::new();
+            for id in runs.active.get(&key).into_iter().flatten() {
+                match self.terminals.snapshot(id, 0) {
+                    Ok(snapshot) if snapshot.process.is_running() => running.push(id.clone()),
+                    Ok(_) | Err(DesktopTerminalError::SessionNotFound(_)) => {}
+                    Err(error) => return Err(error.into()),
                 }
             }
+            if !definition.allow_concurrent_runs {
+                if let Some(session_id) = running.last() {
+                    return Err(DesktopProjectTaskError::AlreadyRunning {
+                        project_id: project_id.clone(),
+                        task_id: task_id.to_owned(),
+                        session_id: session_id.clone(),
+                    }
+                    .into());
+                }
+                runs.starting.insert(key.clone());
+            }
+            runs.active.insert(key.clone(), running);
+            LaunchReservation {
+                runs: self.runs.clone(),
+                key: key.clone(),
+                exclusive: !definition.allow_concurrent_runs,
+            }
+        };
+        if self.project_context(project_id)?.active_root() != context.active_root() {
+            return Err(DesktopProjectTaskError::WorkspaceChanged(project_id.clone()).into());
         }
-
-        let terminal = self.launch_terminal(DesktopTerminalLaunch {
-            scope: DesktopTerminalScope::Project(project_id.clone()),
-            command: Some(DesktopTerminalCommand {
-                program: definition.program,
-                arguments: definition.args,
-                environment: definition.env,
-                label: Some(definition.label),
-            }),
-            rows: 24,
-            columns: 80,
-        })?;
-        active_runs.insert(key, terminal.id.clone());
+        let terminal = self.terminals.launch(
+            DesktopTerminalLaunch {
+                scope: DesktopTerminalScope::Project(project_id.clone()),
+                command: Some(DesktopTerminalCommand {
+                    program: definition.program,
+                    arguments: definition.args,
+                    environment: definition.env,
+                    label: Some(definition.label),
+                }),
+                rows: 24,
+                columns: 80,
+            },
+            context.active_root().to_path_buf(),
+            Arc::new(lilia_feature_terminal::KernelTerminalEvents::new(
+                self.events.clone(),
+            )),
+        )?;
+        self.runs
+            .lock()
+            .map_err(|_| DesktopProjectTaskError::StateUnavailable)?
+            .active
+            .entry(key)
+            .or_default()
+            .push(terminal.id.clone());
+        drop(reservation);
+        let still_current = self
+            .project_context(project_id)
+            .is_ok_and(|current| current.active_root() == context.active_root());
+        if !still_current {
+            self.terminals.terminate(&terminal.id)?;
+            return Err(DesktopProjectTaskError::WorkspaceChanged(project_id.clone()).into());
+        }
         Ok(DesktopProjectTaskLaunch {
             project_id: project_id.clone(),
             task_id: task_id.to_owned(),
             terminal,
         })
+    }
+}
+
+pub enum ProjectCommandRunServiceKey {}
+impl lilia_kernel::ServiceKey for ProjectCommandRunServiceKey {
+    type Value = ProjectCommandRunService;
+    const NAME: &'static str = "lilia.project.command-runs";
+}
+pub struct ProjectCommandRunFeature {
+    service: ProjectCommandRunService,
+}
+impl ProjectCommandRunFeature {
+    pub fn new(service: ProjectCommandRunService) -> Self {
+        Self { service }
+    }
+}
+impl lilia_kernel::Feature for ProjectCommandRunFeature {
+    fn id(&self) -> lilia_kernel::FeatureId {
+        lilia_kernel::FeatureId::new("lilia.feature.project-command-runs")
+            .expect("valid feature id")
+    }
+    fn provides(&self) -> Vec<lilia_kernel::ServiceRef> {
+        vec![lilia_kernel::ServiceRef::of::<ProjectCommandRunServiceKey>()]
+    }
+    fn mount(
+        &self,
+        cx: &mut lilia_kernel::FeatureContext<'_>,
+    ) -> Result<(), lilia_kernel::KernelError> {
+        cx.provide::<ProjectCommandRunServiceKey>(self.service.clone())
+    }
+}
+impl DesktopApplication {
+    pub fn project_command_run_service(&self) -> ProjectCommandRunService {
+        self.inner.project_commands.clone()
+    }
+    pub fn project_task_catalog(
+        &self,
+        id: &ProjectId,
+    ) -> Result<DesktopProjectTaskCatalog, DesktopApplicationError> {
+        self.inner.project_commands.project_task_catalog(id)
+    }
+    pub fn launch_project_task(
+        &self,
+        id: &ProjectId,
+        task_id: &str,
+    ) -> Result<DesktopProjectTaskLaunch, DesktopApplicationError> {
+        self.inner.project_commands.launch_project_task(id, task_id)
     }
 }
 
@@ -328,6 +457,13 @@ fn io_error(
 
 #[derive(Debug, thiserror::Error)]
 pub enum DesktopProjectTaskError {
+    #[error("project task `{task_id}` in `{project_id}` is starting")]
+    LaunchInProgress {
+        project_id: ProjectId,
+        task_id: String,
+    },
+    #[error("project `{0}` workspace changed while starting the command")]
+    WorkspaceChanged(ProjectId),
     #[error("project `{0}` is archived")]
     ArchivedProject(ProjectId),
     #[error("project task id `{0}` is invalid")]
@@ -383,8 +519,8 @@ pub enum DesktopProjectTaskError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use lilia_service::ServiceAuthority;
 
@@ -446,6 +582,131 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+    }
+
+    fn long_running_task(concurrent: bool) -> serde_json::Value {
+        #[cfg(windows)]
+        let (program, args) = (
+            "cmd.exe",
+            vec!["/D", "/Q", "/K", "echo project-command-ready"],
+        );
+        #[cfg(not(windows))]
+        let (program, args) = (
+            "/bin/sh",
+            vec!["-c", "printf project-command-ready; exec sleep 10"],
+        );
+        serde_json::json!([{ "id": "serve", "label": "Serve", "program": program,
+            "args": args, "allowConcurrentRuns": concurrent }])
+    }
+    fn stop_and_wait(service: &ProjectCommandRunService, id: &DesktopTerminalSessionId) {
+        service.terminals.terminate(id).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while service
+            .terminals
+            .snapshot(id, 0)
+            .unwrap()
+            .process
+            .is_running()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "terminated process must report exit"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+    #[test]
+    fn concurrent_launches_reserve_one_process_and_terminal_events_can_read_catalog() {
+        let root = tempfile::tempdir().unwrap();
+        write_tasks(root.path(), long_running_task(false));
+        let (app, project_id) = app_with_project(root.path());
+        let service = Arc::new(app.project_command_run_service());
+        let weak = Arc::downgrade(&service);
+        let id = project_id.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _subscription = app
+            .event_bus()
+            .on::<crate::application::TerminalChanged, _>(None, move |_| {
+                if let Some(service) = weak.upgrade() {
+                    tx.send(service.project_task_catalog(&id).unwrap().tasks.len())
+                        .unwrap();
+                }
+            });
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let workers = (0..2)
+            .map(|_| {
+                let service = service.clone();
+                let barrier = barrier.clone();
+                let id = project_id.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    service.launch_project_task(&id, "serve")
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+        let sessions = results
+            .iter()
+            .filter_map(|result| result.as_ref().ok())
+            .map(|launch| launch.terminal.id.clone())
+            .collect::<Vec<_>>();
+        for id in &sessions {
+            stop_and_wait(&service, id);
+        }
+        assert_eq!(sessions.len(), 1);
+        assert!(
+            results
+                .iter()
+                .filter_map(|result| result.as_ref().err())
+                .all(|error| matches!(
+                    error,
+                    DesktopApplicationError::ProjectTask(
+                        DesktopProjectTaskError::AlreadyRunning { .. }
+                            | DesktopProjectTaskError::LaunchInProgress { .. }
+                    )
+                ))
+        );
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            1
+        );
+        assert!(
+            service.project_task_catalog(&project_id).unwrap().tasks[0]
+                .running_session_id
+                .is_none()
+        );
+    }
+    #[test]
+    fn concurrent_catalog_retains_the_older_process_after_the_latest_exits() {
+        let root = tempfile::tempdir().unwrap();
+        write_tasks(root.path(), long_running_task(true));
+        let (app, project_id) = app_with_project(root.path());
+        let service = app.project_command_run_service();
+        let first = service.launch_project_task(&project_id, "serve").unwrap();
+        let second = service.launch_project_task(&project_id, "serve").unwrap();
+        stop_and_wait(&service, &second.terminal.id);
+        let running = service.project_task_catalog(&project_id).unwrap().tasks[0]
+            .running_session_id
+            .clone();
+        stop_and_wait(&service, &first.terminal.id);
+        assert_eq!(running, Some(first.terminal.id));
+    }
+    #[test]
+    fn failed_process_start_releases_the_reservation_for_retry() {
+        let root = tempfile::tempdir().unwrap();
+        write_tasks(
+            root.path(),
+            serde_json::json!([{ "id": "serve", "label": "Missing", "program": "lilia-command-that-does-not-exist-391829" }]),
+        );
+        let (app, project_id) = app_with_project(root.path());
+        let service = app.project_command_run_service();
+        assert!(service.launch_project_task(&project_id, "serve").is_err());
+        write_tasks(root.path(), long_running_task(false));
+        let launched = service.launch_project_task(&project_id, "serve").unwrap();
+        stop_and_wait(&service, &launched.terminal.id);
     }
 
     #[test]

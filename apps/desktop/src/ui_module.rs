@@ -1,14 +1,4 @@
-//! The UI module contract.
-//!
-//! A module owns one domain: its state is private, its message vocabulary is its
-//! own, and it reaches shared facts only through the kernel. That last part is
-//! what makes the state private in practice — a module that had to be handed the
-//! project list would keep a copy of it, and the copy is what drifts.
-//!
-//! Modules fold their slice into the window projection rather than returning a
-//! projection of their own. The shell still assembles one snapshot per frame, so
-//! a domain can move into a module without touching the reconciler or the
-//! domains that have not moved yet.
+//! Window-local UI modules with typed messages and restricted projection fields.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -18,6 +8,9 @@ use lilia_kernel::{Contribution, FeatureId, Kernel};
 use crate::application::{ApplicationWorkspaceSurface, ProjectWorkspaceSurface};
 use crate::runtime_shell::{PrimaryShellSnapshot, ShellProjectPage};
 use nana_ui_platform::WindowId;
+
+pub mod projection;
+use projection::Projection;
 
 /// What the shell owes a module: the kernel, and which window it serves.
 ///
@@ -32,9 +25,20 @@ pub struct UiModuleContext<'a> {
     page: Option<ShellProjectPage>,
     surface: Option<ApplicationWorkspaceSurface>,
     settings_tab: Option<String>,
+    inline_size: f32,
 }
 
 impl<'a> UiModuleContext<'a> {
+    pub fn window(&self) -> WindowId {
+        self.window
+    }
+    pub fn inline_size(&self) -> f32 {
+        self.inline_size
+    }
+    pub fn sized(mut self, inline_size: f32) -> Self {
+        self.inline_size = inline_size;
+        self
+    }
     pub fn new(kernel: &'a Kernel, window: WindowId) -> Self {
         Self {
             kernel,
@@ -42,6 +46,7 @@ impl<'a> UiModuleContext<'a> {
             page: None,
             surface: None,
             settings_tab: None,
+            inline_size: 0.0,
         }
     }
 
@@ -91,6 +96,14 @@ impl<'a> UiModuleContext<'a> {
             .get(self.window)
     }
 
+    /// Reads this window's workspace exactly once for callers that need more
+    /// than one field. Keeping the snapshot operation here makes the window
+    /// boundary explicit and avoids modules independently sampling a mutable
+    /// session mid-reduction.
+    pub fn workspace_snapshot(&self) -> Option<crate::application::DesktopWorkspaceSnapshot> {
+        self.workspace()?.snapshot().ok()
+    }
+
     /// The kernel, for mechanisms a domain write legitimately needs: job
     /// submission above all. Facts still come from service slots, not from
     /// reaching into the kernel for state.
@@ -98,29 +111,21 @@ impl<'a> UiModuleContext<'a> {
         self.kernel
     }
 
-    /// The application facade, through which a domain write is validated and
-    /// broadcast to the other windows.
-    pub fn application(&self) -> Result<crate::application::DesktopApplication, String> {
-        self.kernel
-            .service::<crate::shell_service::ApplicationKey>()
-            .map_err(|error| format!("应用服务不可用：{error}"))
-    }
-
     /// The project this window has selected, read from its session rather than
     /// mirrored, so it cannot disagree with what the sidebar shows.
     pub fn selected_project(&self) -> Option<lilia_contracts::ProjectId> {
-        self.workspace()?.snapshot().ok()?.selected_project
+        self.workspace_snapshot()?.selected_project
     }
 
     /// The task this window has open, if any.
     pub fn selected_task(&self) -> Option<lilia_contracts::TaskId> {
-        self.workspace()?.snapshot().ok()?.selected_task
+        self.workspace_snapshot()?.selected_task
     }
 
     /// The window's first task, which is what a project-scoped write is
     /// attributed to when the user did not pick one.
     pub fn first_task(&self) -> Option<lilia_contracts::TaskId> {
-        Some(self.workspace()?.snapshot().ok()?.tasks.first()?.id.clone())
+        Some(self.workspace_snapshot()?.tasks.first()?.id.clone())
     }
 
     /// The selected task's session view, published by the shell after refresh.
@@ -210,6 +215,8 @@ pub trait UiModule: 'static {
     /// The domain's slice of the shell's message vocabulary.
     type Message: 'static;
 
+    type Projection<'a>: Projection<'a>;
+
     /// The feature that owns this domain. Messages are routed by it.
     fn feature(&self) -> FeatureId;
 
@@ -227,8 +234,15 @@ pub trait UiModule: 'static {
         UiModuleOutcome::clean()
     }
 
-    /// Writes this module's own fields of the projection and no others.
-    fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot);
+    fn job(
+        &mut self,
+        _event: &lilia_kernel::JobEvent,
+        _cx: &UiModuleContext<'_>,
+    ) -> UiModuleOutcome {
+        UiModuleOutcome::clean()
+    }
+
+    fn project_fields(&self, cx: &UiModuleContext<'_>, into: Self::Projection<'_>);
 }
 
 /// Object-safe face of [`UiModule`], so the shell can hold a heterogeneous set.
@@ -237,6 +251,8 @@ pub trait UiModule: 'static {
 /// [`UiModule`], which keeps the typed message in the implementation and the
 /// downcast confined to this file.
 pub trait ErasedUiModule {
+    fn job(&mut self, event: &lilia_kernel::JobEvent, cx: &UiModuleContext<'_>) -> UiModuleOutcome;
+
     fn feature(&self) -> FeatureId;
 
     /// Lets the shell recover the concrete module.
@@ -254,7 +270,7 @@ pub trait ErasedUiModule {
     /// type means the shell's routing table disagrees with the module's message
     /// type, which is a wiring bug rather than a runtime condition.
     fn reduce_erased(&mut self, message: Box<dyn Any>, cx: &UiModuleContext<'_>)
-        -> UiModuleOutcome;
+    -> UiModuleOutcome;
 
     fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot);
 
@@ -269,6 +285,10 @@ impl<M> ErasedUiModule for M
 where
     M: UiModule,
 {
+    fn job(&mut self, event: &lilia_kernel::JobEvent, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        UiModule::job(self, event, cx)
+    }
+
     fn feature(&self) -> FeatureId {
         UiModule::feature(self)
     }
@@ -296,7 +316,7 @@ where
     }
 
     fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
-        UiModule::project(self, cx, into)
+        self.project_fields(cx, M::Projection::fields(into))
     }
 
     fn invalidate(
@@ -311,7 +331,9 @@ where
 /// Builds one module instance. Contributed instead of an instance because every
 /// workspace window needs its own: a module's state is its window's editor
 /// state, and two windows editing the same project must not share it.
-pub type UiModuleFactory = Box<dyn Fn() -> Box<dyn ErasedUiModule + Send> + Send + Sync>;
+pub type UiModuleFactory = Box<
+    dyn Fn(&UiModuleContext<'_>) -> Result<Box<dyn ErasedUiModule + Send>, String> + Send + Sync,
+>;
 
 /// The collection features append their UI module factories to during mount.
 ///
@@ -349,20 +371,16 @@ impl UiModuleRegistry {
     /// contributed it: while the contract lives in the shell's crate, the shell
     /// contributes modules on a feature's behalf. Two modules claiming one domain
     /// is still refused, which is the conflict worth catching.
-    pub fn host(&self) -> Result<UiModuleHost, String> {
+    pub fn host(&self, cx: &UiModuleContext<'_>) -> Result<UiModuleHost, String> {
         let mut host = UiModuleHost::new();
         for (_, factory) in &self.factories {
-            host.register(factory())?;
+            host.register(factory(cx)?)?;
         }
         Ok(host)
     }
 }
 
-/// The modules a shell window hosts, indexed for routing.
-///
-/// Registration order is projection order, so a module added later cannot
-/// silently overwrite an earlier one's fields — it would have to claim the same
-/// fields, which is the conflict this ordering makes visible.
+/// Window-local modules, indexed by their owning feature.
 #[derive(Default)]
 pub struct UiModuleHost {
     modules: Vec<Box<dyn ErasedUiModule>>,
@@ -370,6 +388,23 @@ pub struct UiModuleHost {
 }
 
 impl UiModuleHost {
+    pub fn job(
+        &mut self,
+        event: &lilia_kernel::JobEvent,
+        cx: &UiModuleContext<'_>,
+    ) -> UiModuleOutcome {
+        let mut combined = UiModuleOutcome::clean();
+        for module in &mut self.modules {
+            let outcome = module.job(event, cx);
+            combined.dirty |= outcome.dirty;
+            if combined.error.is_none() {
+                combined.error = outcome.error;
+            }
+            combined.effects.extend(outcome.effects);
+        }
+        combined
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -444,6 +479,21 @@ impl UiModuleHost {
 mod tests {
     use super::*;
 
+    struct TitleProjection<'a>(&'a mut String);
+    struct HeaderProjection<'a>(&'a mut String);
+
+    impl<'a> Projection<'a> for TitleProjection<'a> {
+        fn fields(snapshot: &'a mut PrimaryShellSnapshot) -> Self {
+            Self(&mut snapshot.title_parent)
+        }
+    }
+
+    impl<'a> Projection<'a> for HeaderProjection<'a> {
+        fn fields(snapshot: &'a mut PrimaryShellSnapshot) -> Self {
+            Self(&mut snapshot.heading)
+        }
+    }
+
     /// Writes one snapshot field, so a test can tell whose slice landed.
     struct Titler {
         feature: &'static str,
@@ -456,6 +506,7 @@ mod tests {
 
     impl UiModule for Titler {
         type Message = TitlerMessage;
+        type Projection<'a> = TitleProjection<'a>;
 
         fn feature(&self) -> FeatureId {
             FeatureId::new(self.feature).expect("the test feature id is not blank")
@@ -473,8 +524,8 @@ mod tests {
             }
         }
 
-        fn project(&self, _cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
-            into.title_parent = self.title_parent.clone();
+        fn project_fields(&self, _cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
+            *into.0 = self.title_parent.clone();
         }
     }
 
@@ -489,6 +540,7 @@ mod tests {
 
     impl UiModule for Header {
         type Message = HeaderMessage;
+        type Projection<'a> = HeaderProjection<'a>;
 
         fn feature(&self) -> FeatureId {
             FeatureId::new("test.header").expect("the test feature id is not blank")
@@ -503,8 +555,8 @@ mod tests {
             UiModuleOutcome::dirty()
         }
 
-        fn project(&self, _cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot) {
-            into.heading = self.heading.clone();
+        fn project_fields(&self, _cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
+            *into.0 = self.heading.clone();
         }
     }
 
@@ -552,9 +604,10 @@ mod tests {
             .expect("the slot is free");
 
         let absent = FeatureId::new("test.absent").unwrap();
-        assert!(host
-            .reduce(&absent, Box::new(TitlerMessage::Set(String::new())), &cx)
-            .is_none());
+        assert!(
+            host.reduce(&absent, Box::new(TitlerMessage::Set(String::new())), &cx)
+                .is_none()
+        );
     }
 
     /// Contributes a module the way a feature crate would, so the test covers
@@ -570,10 +623,10 @@ mod tests {
             &self,
             cx: &mut lilia_kernel::FeatureContext<'_>,
         ) -> Result<(), lilia_kernel::KernelError> {
-            cx.contribute::<UiModules>(Box::new(|| {
-                Box::new(Header {
+            cx.contribute::<UiModules>(Box::new(|_| {
+                Ok(Box::new(Header {
                     heading: "from the feature".to_owned(),
-                })
+                }))
             }));
             Ok(())
         }
@@ -590,7 +643,9 @@ mod tests {
 
         let registry = UiModuleRegistry::from_kernel(&kernel);
         for window in [WindowId::PRIMARY, WindowId(7)] {
-            let host = registry.host().expect("the contributed module is accepted");
+            let host = registry
+                .host(&UiModuleContext::new(&kernel, window))
+                .expect("the contributed module is accepted");
             let cx = UiModuleContext::new(&kernel, window);
             let mut snapshot = crate::runtime_shell::empty_snapshot();
             host.project(&cx, &mut snapshot);
@@ -610,8 +665,12 @@ mod tests {
             .expect("the feature mounts");
         let registry = UiModuleRegistry::from_kernel(&kernel);
 
-        let mut first = registry.host().expect("the module is accepted");
-        let second = registry.host().expect("the module is accepted");
+        let mut first = registry
+            .host(&UiModuleContext::new(&kernel, WindowId::PRIMARY))
+            .expect("the module is accepted");
+        let second = registry
+            .host(&UiModuleContext::new(&kernel, WindowId(3)))
+            .expect("the module is accepted");
         let header = FeatureId::new("test.header").unwrap();
         first
             .reduce(
