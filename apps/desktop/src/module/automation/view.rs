@@ -5,9 +5,13 @@ use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, EmptyState, Entity, FormField, FrameworkError,
     GraphCanvas, ScrollAxes, ScrollView, SearchDropdown, SearchDropdownEvent, SearchDropdownOption,
     SidebarFooter, SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowState, SidebarSection,
-    StableNodeId, Stack, Switch, Text, TextArea, TextChanged, TextInput, ToggleChanged, View,
+    StableNodeId, Stack, StatusBadge, Switch, TextArea, TextChanged, TextInput,
+    ToggleChanged, ValidationMessage, View,
 };
-use nana_ui::{ButtonKind, GraphCanvasEvent, GraphModel, GraphSelection, GraphViewport, Icon};
+use nana_ui::{
+    ButtonKind, GraphCanvasEvent, GraphModel, GraphSelection, GraphViewport, Icon, StatusTone,
+    ValidationIntent,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -163,8 +167,8 @@ pub(crate) struct AutomationView {
     node_tools: Entity<Stack>,
     name: Entity<TextInput>,
     name_field: Entity<FormField>,
-    status: Entity<Text>,
-    error: Entity<Text>,
+    status: Entity<StatusBadge>,
+    error: Entity<ValidationMessage>,
     publish: Entity<Button>,
     run: Entity<Button>,
     toggle: Entity<Button>,
@@ -174,7 +178,7 @@ pub(crate) struct AutomationView {
     content_scroll: Entity<ScrollView>,
     run_panel: Entity<Stack>,
     run_picker: Entity<SearchDropdown>,
-    run_detail: Entity<Text>,
+    run_detail: Entity<EmptyState>,
     response: Entity<TextArea>,
     run_actions: Entity<Stack>,
     resume: Entity<Button>,
@@ -341,8 +345,14 @@ impl AutomationView {
             }
         }
         let add_human = add_human.expect("human node tool");
-        let status = context.create_detached_component(document, Text::new(""))?;
-        let error = context.create_detached_component(document, Text::new(""))?;
+        let status = context.create_detached_component(
+            document,
+            StatusBadge::new("", StatusTone::Neutral),
+        )?;
+        let error = context.create_detached_component(
+            document,
+            ValidationMessage::new("", ValidationIntent::Danger),
+        )?;
         let canvas = context.create_detached_component(
             document,
             GraphCanvas::new("automations", snapshot.graph.clone())
@@ -389,7 +399,10 @@ impl AutomationView {
                 }
             }
         })?;
-        let run_detail = context.create_detached_component(document, Text::new("尚无运行记录"))?;
+        let run_detail = context.create_detached_component(
+            document,
+            EmptyState::new("尚无运行记录").compact(true),
+        )?;
         let response = context.create_detached_component(
             document,
             TextArea::new("")
@@ -644,18 +657,17 @@ impl AutomationView {
                 .collect();
             picker.value = selected_run.map(|run| Arc::from(run.id.as_str()));
         })?;
-        context.update_component(self.run_detail, |text, _| {
-            *text = Text::new(
-                selected_run
-                    .map(|run| {
-                        [run.error.as_deref(), run.prompt.as_deref()]
-                            .into_iter()
-                            .flatten()
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_else(|| "尚无运行记录".into()),
-            );
+        context.update_component(self.run_detail, |empty, _| {
+            *empty = if let Some(run) = selected_run {
+                let detail = [run.error.as_deref(), run.prompt.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                EmptyState::new("运行详情").message(detail).compact(true)
+            } else {
+                EmptyState::new("尚无运行记录").compact(true)
+            };
         })?;
         context.update_component(self.response, |field, _| {
             if field.state.value != snapshot.response {
@@ -779,21 +791,24 @@ impl AutomationView {
             *button =
                 Button::new(if snapshot.enabled { "停用" } else { "启用" }).kind(ButtonKind::Subtle)
         })?;
-        context.update_component(self.status, |text, _| {
-            *text = Text::new(if snapshot.operation_pending {
-                "正在处理…"
+        context.update_component(self.status, |badge, _| {
+            *badge = if snapshot.operation_pending {
+                StatusBadge::new("正在处理…", StatusTone::Info)
             } else if snapshot.published {
                 if snapshot.enabled {
-                    "已发布 · 已启用"
+                    StatusBadge::new("已发布 · 已启用", StatusTone::Success)
                 } else {
-                    "已发布 · 已停用"
+                    StatusBadge::new("已发布 · 已停用", StatusTone::Warning)
                 }
             } else {
-                "草稿 · 发布后可运行"
-            })
+                StatusBadge::new("草稿 · 发布后可运行", StatusTone::Neutral)
+            };
         })?;
-        context.update_component(self.error, |text, _| {
-            *text = Text::new(snapshot.error.clone().unwrap_or_default())
+        context.update_component(self.error, |message, _| {
+            *message = ValidationMessage::new(
+                snapshot.error.clone().unwrap_or_default(),
+                ValidationIntent::Danger,
+            )
         })?;
         let mut keep = HashSet::new();
         let mut order = Vec::new();

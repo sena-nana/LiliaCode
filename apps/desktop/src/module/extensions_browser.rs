@@ -316,7 +316,7 @@ fn append_extension_panel(
         ));
     }
     if let Some(error) = module.error() {
-        rows.push(SurfaceControl::text("extensions-error", error));
+        rows.push(SurfaceControl::error("extensions-error", error));
     }
     if part == ExtensionPart::All
         && matches!(
