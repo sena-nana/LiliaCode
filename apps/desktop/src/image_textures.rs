@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use nana_ui::{HostTexture, HostTextureAlphaMode, HostTextureRegistry, HostedGpuResources};
+use nana_ui::{
+    GpuContext, GpuTextureDescriptor, GpuTextureFormat, GpuTextureRegion, GpuTextureUsages,
+    HostTexture, HostTextureAlphaMode, HostTextureRegistry,
+};
 
 use crate::markdown_images::ImagePixels;
 
@@ -11,13 +14,7 @@ pub(crate) struct ImageTextures {
 }
 
 impl ImageTextures {
-    pub fn upload(
-        &mut self,
-        slot: &str,
-        source: &str,
-        pixels: &ImagePixels,
-        gpu: &HostedGpuResources,
-    ) {
+    pub fn upload(&mut self, slot: &str, source: &str, pixels: &ImagePixels, gpu: &GpuContext) {
         if self
             .sources
             .get(slot)
@@ -25,7 +22,7 @@ impl ImageTextures {
         {
             return;
         }
-        let limit = gpu.device().limits().max_texture_dimension_2d;
+        let limit = gpu.capabilities().max_texture_dimension_2d();
         let resized = if pixels.width > limit || pixels.height > limit {
             let image =
                 image::RgbaImage::from_raw(pixels.width, pixels.height, pixels.rgba.to_vec())
@@ -42,21 +39,6 @@ impl ImageTextures {
             .as_ref()
             .map(|image| image.dimensions())
             .unwrap_or((pixels.width, pixels.height));
-        let size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-        let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
-            label: Some("LiliaCode image preview"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
         let mut rgba = resized
             .map(|image| image.into_raw())
             .unwrap_or_else(|| pixels.rgba.to_vec());
@@ -66,24 +48,25 @@ impl ImageTextures {
                 *channel = premultiply_srgb(*channel, alpha);
             }
         }
-        gpu.queue().write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
+        let texture = gpu
+            .create_texture(&GpuTextureDescriptor {
+                label: Some("LiliaCode image preview"),
+                width,
+                height,
+                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
+                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
+            })
+            .expect("image preview texture allocation");
+        gpu.write_texture(
+            &texture,
+            GpuTextureRegion::full(width, height),
             &rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            size,
-        );
+            width * 4,
+        )
+        .expect("image preview texture upload");
         self.registry.register(
             slot,
-            HostTexture::from_wgpu(1, 1, texture.create_view(&Default::default())),
+            HostTexture::new(1, gpu.generation().get(), &texture),
             width,
             height,
             HostTextureAlphaMode::Premultiplied,

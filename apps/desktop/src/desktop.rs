@@ -84,7 +84,7 @@ use crate::module::task::{TaskMoveTarget, TaskParentTarget};
 use crate::runtime_compat::{
     tool_window_settings, window_event_id, HostedProgramContext, HostedProgramUpdate,
     HostedUiCommand, HostedUpdateExt, HostedWindowAction, HostedWindowCommand, HostedWindowEvent,
-    HostedWindowGeometry, HostedWindowId, HostedWindowSettings,
+    HostedWindowGeometry, HostedWindowId,
 };
 use crate::text_editor_state::TextEditorState;
 use lilia_contracts::{
@@ -100,17 +100,16 @@ use mutsuki_agent_contracts::InteractionResolution;
 use nana_ui::runtime::RuntimeDocument;
 use nana_ui::{
     window_material_effect, ActionDescriptor, ActionId, ActionPickerState, ActionRegistry,
-    AppearanceEvent, AppearanceSettings, Colors, CommandPaletteEvent, CommandPaletteItem,
-    ContextPredicate, DropdownEvent, DropdownOption, GraphCanvasEvent,
-    GraphEdge as CanvasGraphEdge, GraphEndpoint, GraphModel, GraphNode as CanvasGraphNode,
-    GraphPoint, GraphPort, GraphPortKind, GraphPortSide, GraphSelection, GraphSize, GraphViewport,
-    Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer, KeyContext, KeyInput, KeyModifiers,
-    KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect, MarkdownImage, NarrowBehavior,
-    NativeMarkdown, RegionId, RegionRole, RegionState, RuntimeProgram, RuntimeRedraw,
-    SettingsModel, SettingsState, SettingsTab, SettingsTabId, SplitAxis as NanaSplitAxis,
-    SplitPaneAction, SplitPaneController, ThemeMode, ThemeModeExt, ThemeTokens,
+    AppearanceEvent, AppearanceSettings, CommandPaletteEvent, CommandPaletteItem, ContextPredicate,
+    DropdownEvent, DropdownOption, GraphCanvasEvent, GraphEdge as CanvasGraphEdge, GraphEndpoint,
+    GraphModel, GraphNode as CanvasGraphNode, GraphPoint, GraphPort, GraphPortKind, GraphPortSide,
+    GraphSelection, GraphSize, GraphViewport, Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer,
+    KeyContext, KeyInput, KeyModifiers, KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect,
+    MarkdownImage, NarrowBehavior, NativeMarkdown, RegionId, RegionRole, RegionState,
+    RuntimeProgram, RuntimeRedraw, SettingsModel, SettingsState, SettingsTab, SettingsTabId,
+    SplitAxis as NanaSplitAxis, SplitPaneAction, SplitPaneController, ThemeMode, ThemeTokens,
     TreeDropPosition as NanaTreeDropPosition, WindowChromeEvent, WindowChromeState,
-    WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel,
+    WindowDescriptor, WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel,
 };
 use nana_ui_platform::WindowId;
 use serde::{Deserialize, Serialize};
@@ -4674,7 +4673,7 @@ impl DesktopProgram {
             .draft_worktree_context(HostedWindowId::PRIMARY)
             .map(|(_, selection)| selection);
         let (provider_badge, _, provider_badge_icon) =
-            self.provider_runtime_badge(self.theme_tokens().colors);
+            self.provider_runtime_badge(self.theme_tokens().palette);
         let project_page = self.shell_project_page();
         crate::runtime_shell::PrimaryShellSnapshot {
             theme: self.theme,
@@ -5360,7 +5359,7 @@ impl DesktopProgram {
         })
     }
 
-    fn prepare_image_textures(&mut self, gpu: &nana_ui::HostedGpuResources) {
+    fn prepare_image_textures(&mut self, gpu: &nana_ui::GpuContext) {
         let mut active = Vec::new();
         for (window, preview) in &self.markdown_image_previews {
             if let Some(MarkdownImageLoadState::Ready(image)) =
@@ -5709,7 +5708,7 @@ impl DesktopProgram {
     }
 
     fn theme_tokens(&self) -> ThemeTokens {
-        ThemeTokens::new(self.theme.colors(), self.appearance.metrics())
+        ThemeTokens::new(self.theme.palette(), self.appearance.metrics())
             .with_workspace_corners(self.appearance.workspace_corners_enabled())
     }
 
@@ -14910,6 +14909,7 @@ impl DesktopProgram {
                 id,
                 paths,
                 position,
+                ..
             } => {
                 if *id == CONVERSATION_STATUS_WINDOW_ID {
                     return Some(HostedProgramUpdate::default());
@@ -14921,6 +14921,7 @@ impl DesktopProgram {
                 id,
                 paths,
                 position,
+                ..
             } => {
                 if *id == CONVERSATION_STATUS_WINDOW_ID {
                     return Some(HostedProgramUpdate::default());
@@ -26787,7 +26788,10 @@ impl DesktopProgram {
         }
     }
 
-    fn provider_runtime_badge(&self, colors: Colors) -> (String, nana_ui::Color, Icon) {
+    fn provider_runtime_badge(
+        &self,
+        colors: nana_ui::theme::SemanticPalette,
+    ) -> (String, nana_ui::Color, Icon) {
         let selected_credential_usable =
             self.selected_provider.as_deref().is_some_and(|provider| {
                 self.provider
@@ -29650,21 +29654,15 @@ impl RuntimeProgram for LiliaShell {
     type Message = Message;
     type Error = String;
 
-    fn surface_mode() -> nana_ui::HostedSurfaceMode {
-        #[cfg(target_os = "windows")]
-        {
-            nana_ui::HostedSurfaceMode::WindowsComposition
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            nana_ui::HostedSurfaceMode::Window
-        }
+    #[cfg(target_os = "windows")]
+    fn gpu_backend_policy() -> nana_ui::GpuBackendPolicy {
+        nana_ui::GpuBackendPolicy::CompositionCapable
     }
     #[cfg(target_os = "windows")]
     fn native_content_frame(
         &mut self,
         id: WindowId,
-        composition: &nana_ui::WindowsComposition,
+        composition: &nana_ui::WindowsCompositionTree,
         regions: &[nana_ui::NativeContentRegion],
         context: &HostedProgramContext<Self::Message>,
     ) -> Result<(), String> {
@@ -29883,21 +29881,15 @@ impl RuntimeProgram for DesktopProgram {
     type Message = Message;
     type Error = String;
 
-    fn surface_mode() -> nana_ui::HostedSurfaceMode {
-        #[cfg(target_os = "windows")]
-        {
-            nana_ui::HostedSurfaceMode::WindowsComposition
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            nana_ui::HostedSurfaceMode::Window
-        }
+    #[cfg(target_os = "windows")]
+    fn gpu_backend_policy() -> nana_ui::GpuBackendPolicy {
+        nana_ui::GpuBackendPolicy::CompositionCapable
     }
     #[cfg(target_os = "windows")]
     fn native_content_frame(
         &mut self,
         id: WindowId,
-        composition: &nana_ui::WindowsComposition,
+        composition: &nana_ui::WindowsCompositionTree,
         regions: &[nana_ui::NativeContentRegion],
         context: &HostedProgramContext<Self::Message>,
     ) -> Result<(), String> {
@@ -30764,6 +30756,10 @@ impl RuntimeProgram for DesktopProgram {
                         HostedWindowCommand::Close(CONVERSATION_STATUS_WINDOW_ID),
                     ])
                 }
+                HostedWindowEvent::SkipTaskbarChanged { .. }
+                | HostedWindowEvent::ReducedMotionChanged { .. }
+                | HostedWindowEvent::PointerPresenceChanged { .. }
+                | HostedWindowEvent::ModeChanged { .. } => HostedProgramUpdate::default(),
             };
         }
         if self.task_popups.contains_key(&window_event_id(&event)) {
@@ -30818,6 +30814,10 @@ impl RuntimeProgram for DesktopProgram {
                         HostedProgramUpdate::redraw_window(id)
                     }
                 }
+                HostedWindowEvent::SkipTaskbarChanged { .. }
+                | HostedWindowEvent::ReducedMotionChanged { .. }
+                | HostedWindowEvent::PointerPresenceChanged { .. }
+                | HostedWindowEvent::ModeChanged { .. } => HostedProgramUpdate::default(),
             };
         }
         match event {
@@ -30893,6 +30893,10 @@ impl RuntimeProgram for DesktopProgram {
             | HostedWindowEvent::FileDialogCompleted { .. }
             | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),
             HostedWindowEvent::CloseRequested { .. } => HostedProgramUpdate::exit(),
+            HostedWindowEvent::SkipTaskbarChanged { .. }
+            | HostedWindowEvent::ReducedMotionChanged { .. }
+            | HostedWindowEvent::PointerPresenceChanged { .. }
+            | HostedWindowEvent::ModeChanged { .. } => HostedProgramUpdate::default(),
         }
     }
 }
@@ -30920,7 +30924,7 @@ fn conversation_status_window_command(
 fn task_popup_window_settings(
     title: &str,
     geometry: Option<NativeWindowState>,
-) -> HostedWindowSettings {
+) -> WindowDescriptor {
     let settings = tool_window_settings(format!("LiliaCode · {title}"), 430.0, 760.0, 320.0, 420.0);
     match geometry {
         Some(geometry) => geometry.apply_to_settings(settings),

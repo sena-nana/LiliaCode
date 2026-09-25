@@ -1,5 +1,6 @@
 use nana_ui::{RuntimeProgramContext, RuntimeProgramUpdate, WindowChromeAction};
-use nana_ui_platform::{WindowCommand, WindowEvent, WindowGeometry, WindowId, WindowSettings};
+use nana_ui_platform::host::WindowCommand;
+use nana_ui_platform::{WindowDescriptor, WindowEvent, WindowGeometry, WindowId};
 
 pub type HostedProgramContext<M> = RuntimeProgramContext<M>;
 pub type HostedProgramUpdate = RuntimeProgramUpdate;
@@ -29,7 +30,6 @@ pub type HostedWindowId = WindowId;
 pub type HostedWindowEvent = WindowEvent;
 pub type HostedWindowCommand = WindowCommand;
 pub type HostedWindowGeometry = WindowGeometry;
-pub type HostedWindowSettings = WindowSettings;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HostedUiCommand {
@@ -76,7 +76,11 @@ pub fn window_event_id(event: &WindowEvent) -> WindowId {
         | WindowEvent::FileHoverCancelled { id }
         | WindowEvent::FileDialogCompleted { id, .. }
         | WindowEvent::FileDialogRejected { id, .. }
-        | WindowEvent::AppearanceChanged { id, .. } => *id,
+        | WindowEvent::AppearanceChanged { id, .. }
+        | WindowEvent::SkipTaskbarChanged { id, .. }
+        | WindowEvent::ReducedMotionChanged { id, .. }
+        | WindowEvent::PointerPresenceChanged { id, .. }
+        | WindowEvent::ModeChanged { id, .. } => *id,
     }
 }
 
@@ -86,8 +90,8 @@ pub fn tool_window_settings(
     height: f64,
     min_width: f64,
     min_height: f64,
-) -> WindowSettings {
-    let mut settings = WindowSettings::new(title)
+) -> WindowDescriptor {
+    let mut settings = WindowDescriptor::new(title)
         .initial_size(width, height)
         .minimum_size(min_width, min_height);
     settings.role = nana_ui_platform::WindowRole::Tool;
@@ -123,6 +127,7 @@ mod tests {
                 id,
                 paths: vec![PathBuf::from("/tmp/project")],
                 position: Some((12.0, 40.0)),
+                modifiers: Default::default(),
             }),
             id
         );
@@ -131,6 +136,7 @@ mod tests {
                 id,
                 paths: vec![PathBuf::from("/tmp/note.md")],
                 position: None,
+                modifiers: Default::default(),
             }),
             id
         );

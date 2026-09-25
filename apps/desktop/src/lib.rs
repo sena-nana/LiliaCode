@@ -53,7 +53,7 @@ mod windows_identity;
 mod workspace_view;
 
 use desktop::{LiliaShell, PRODUCT_NAME};
-use nana_ui::{RuntimeWindowSettings, run_runtime};
+use nana_ui::{run_runtime, WindowDescriptor};
 
 #[no_mangle]
 pub extern "system" fn liliacode_run(startup_window: isize) -> i32 {
@@ -151,7 +151,7 @@ fn run_application() -> i32 {
         nana_ui_platform::register_application_icon(icon);
     }
 
-    let mut settings = RuntimeWindowSettings::new(PRODUCT_NAME)
+    let mut settings = WindowDescriptor::new(PRODUCT_NAME)
         .initial_size(1180.0, 760.0)
         .minimum_size(780.0, 560.0);
     settings.transparent = true;

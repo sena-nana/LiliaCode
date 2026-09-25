@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::module::composer::presentation::{
-    COMPOSER_PERMISSION_OPTIONS, COMPOSER_WORKTREE_OPTIONS, ComposerSlashItem,
+    ComposerSlashItem, COMPOSER_PERMISSION_OPTIONS, COMPOSER_WORKTREE_OPTIONS,
 };
 #[cfg(test)]
 use crate::module::composer::view::ComposerBinding;
@@ -16,30 +16,30 @@ use lilia_feature_workspace::PROJECTS_WORKSPACE_ITEM_KIND;
 #[cfg(test)]
 use nana_ui::runtime::VirtualListLayout;
 use nana_ui::runtime::{
-    Activate, AppContext, Breadcrumb, BreadcrumbItem, BreadcrumbTone, Button, CodeEditing,
-    CommandPalette, ConfirmDialog, ConfirmIntent, ConfirmSlots, ContextMenu, ContextMenuEvent,
-    ContextMenuItem, DesktopShell, DocumentId, EmptyState, Entity, FrameworkError,
-    HighlightRequest, IconButton, ImageViewer, ImageViewerContent, ImageViewerEvent,
-    LengthSpec, List, ListItem, NodeStyle, OverlayChanged, OverlayClosing,
-    OverlayHost, PaneChrome, PaneChromeAction, PaneChromeActionKind, ReorderItem, ReorderList,
-    ReorderListEvent, ScrollAxes, ScrollView, SecondaryPress, SemanticColorRole, SettingsPage, SidebarFooter,
-    SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection,
-    SidebarSectionState, SplitPane, StableNodeId, Stack, TabOption, Tabs, TabsEvent, Text,
-    TextArea, TextChanged, TextDiagnosticSeverity, TextDiagnosticSpan, TextFindScope, TextInput,
-    TextSearchOptions, TreeDropPosition, TreeView, TreeViewEvent, View, sidebar_row_tool_button,
-    sidebar_section_tool_button, sidebar_top_bar_tool_button,
+    sidebar_row_tool_button, sidebar_section_tool_button, sidebar_top_bar_tool_button, Activate,
+    AppContext, Breadcrumb, BreadcrumbItem, BreadcrumbTone, Button, CodeEditing, CommandPalette,
+    ConfirmDialog, ConfirmIntent, ConfirmSlots, ContextMenu, ContextMenuEvent, ContextMenuItem,
+    DesktopShell, DocumentId, EmptyState, Entity, FrameworkError, HighlightRequest, IconButton,
+    ImageViewer, ImageViewerContent, ImageViewerEvent, LengthSpec, List, ListItem, NodeStyle,
+    OverlayChanged, OverlayClosing, OverlayHost, PaneChrome, PaneChromeAction,
+    PaneChromeActionKind, ReorderItem, ReorderList, ReorderListEvent, ScrollAxes, ScrollView,
+    SecondaryPress, SemanticColorRole, SettingsPage, SidebarFooter, SidebarFooterButton,
+    SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection, SidebarSectionState,
+    SplitPane, StableNodeId, Stack, TabOption, Tabs, TabsEvent, Text, TextArea, TextChanged,
+    TextDiagnosticSeverity, TextDiagnosticSpan, TextFindScope, TextInput, TextSearchOptions,
+    TreeDropPosition, TreeView, TreeViewEvent, View,
 };
 use nana_ui::{
     AppearanceEvent, ButtonKind, CommandPaletteEvent, CommandPaletteItem, ControlSize, Icon,
-    SettingsTabId, SplitAxis, SplitPaneModel, ThemeMode, UI_METRICS, WindowChrome,
-    WindowChromeAction, WindowChromeEvent, WorkspaceModel,
+    SettingsTabId, SplitAxis, SplitPaneModel, ThemeMode, WindowChrome, WindowChromeAction,
+    WindowChromeEvent, WorkspaceModel, UI_METRICS,
 };
 
 use crate::application::{
-    ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND, DOCUMENT_WORKSPACE_ITEM_KIND,
-    Diagnostic, DiagnosticSeverity, MEMORY_WORKSPACE_ITEM_KIND, PROJECT_FILES_WORKSPACE_ITEM_KIND,
-    ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND, TASK_WORKSPACE_ITEM_KIND,
-    TERMINAL_WORKSPACE_ITEM_KIND,
+    Diagnostic, DiagnosticSeverity, ARCHITECTURE_WORKSPACE_ITEM_KIND,
+    AUTOMATION_WORKSPACE_ITEM_KIND, DOCUMENT_WORKSPACE_ITEM_KIND, MEMORY_WORKSPACE_ITEM_KIND,
+    PROJECT_FILES_WORKSPACE_ITEM_KIND, ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND,
+    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND,
 };
 use crate::navigation::WindowRoute;
 use crate::runtime_compat::{HostedUiCommand, HostedWindowId};
@@ -1363,7 +1363,7 @@ fn bind_document_input(
     let bindings = Arc::clone(bindings);
     context.on(editor, move |editor, event: &TextChanged, _| {
         editor.diagnostics = Arc::from([]);
-        let intent = bindings.lock().unwrap().edit(event.value.clone());
+        let intent = bindings.lock().unwrap().edit(event.value.to_string());
         if let Some(intent) = intent {
             emit(&sink, intent);
         }
@@ -1842,11 +1842,11 @@ impl EditorSearchView {
         })?;
         let find_draft = Arc::clone(&draft);
         context.on(query, move |_, event: &TextChanged, _| {
-            find_draft.lock().unwrap().query = event.value.clone();
+            find_draft.lock().unwrap().query = event.value.to_string();
         })?;
         let replace_draft = Arc::clone(&draft);
         context.on(replacement, move |_, event: &TextChanged, _| {
-            replace_draft.lock().unwrap().replacement = event.value.clone();
+            replace_draft.lock().unwrap().replacement = event.value.to_string();
         })?;
         context.append_child(find_row, query)?;
         context.append_child(replace_row, replacement)?;
@@ -2345,7 +2345,7 @@ pub fn mount_primary_shell(
     context.on(search_input, move |_, event: &TextChanged, _| {
         emit(
             &search_sink,
-            ShellIntent::SidebarSearchChanged(event.value.clone()),
+            ShellIntent::SidebarSearchChanged(event.value.to_string()),
         );
     })?;
     bind_activate(
@@ -2658,7 +2658,10 @@ pub fn mount_primary_shell(
     context.on(coding_query, {
         let sink = Arc::clone(&sink);
         move |_, event: &TextChanged, _| {
-            emit(&sink, ShellIntent::CodingQueryChanged(event.value.clone()))
+            emit(
+                &sink,
+                ShellIntent::CodingQueryChanged(event.value.to_string()),
+            )
         }
     })?;
     context.append_child(coding_panel, coding_query)?;
@@ -2972,7 +2975,7 @@ fn conversation_root() -> Stack {
     // 每帧整体重投影会抹掉 Primary 区域涂在节点上的底色，因此自带 Background。
     Stack::fill_column(0.0)
         .padding_xy(24.0, 20.0)
-        .radius(UI_METRICS.radius_lg)
+        .radius(nana_ui::theme::RadiusTier::Lg)
         .surface(SemanticColorRole::Background)
 }
 
@@ -6227,12 +6230,10 @@ mod tests {
         handles.sync(&mut document, &snapshot).unwrap();
         assert!(document.context().world().is_mounted(dialog.stable_id()));
         assert!(document.context().world().is_mounted(cancel.stable_id()));
-        assert!(
-            document
-                .context()
-                .active_runtime_overlay(document.document())
-                .is_none()
-        );
+        assert!(document
+            .context()
+            .active_runtime_overlay(document.document())
+            .is_none());
         document
             .context_mut()
             .advance_animations(std::time::Duration::from_millis(200));
@@ -6274,23 +6275,19 @@ mod tests {
         document
             .context_mut()
             .advance_animations(std::time::Duration::from_millis(180));
-        assert!(
-            document
-                .context_mut()
-                .route_overlay_key(doc, nana_ui::runtime::OverlayKey::Escape)
-                .unwrap()
-        );
+        assert!(document
+            .context_mut()
+            .route_overlay_key(doc, nana_ui::runtime::OverlayKey::Escape)
+            .unwrap());
         assert!(matches!(
             handles
                 .take_overlay_dismissals(document.context())
                 .as_slice(),
             [ShellIntent::ToggleTitlebarMenu]
         ));
-        assert!(
-            handles
-                .take_overlay_dismissals(document.context())
-                .is_empty()
-        );
+        assert!(handles
+            .take_overlay_dismissals(document.context())
+            .is_empty());
         snapshot.titlebar_menu_open = false;
         handles.sync(&mut document, &snapshot).unwrap();
         document
@@ -6298,11 +6295,9 @@ mod tests {
             .advance_animations(std::time::Duration::from_millis(200));
         snapshot.titlebar_menu_open = true;
         handles.sync(&mut document, &snapshot).unwrap();
-        assert!(
-            handles
-                .dismissed_overlay_intent(document.context(), menu.stable_id())
-                .is_none()
-        );
+        assert!(handles
+            .dismissed_overlay_intent(document.context(), menu.stable_id())
+            .is_none());
         document
             .context_mut()
             .advance_animations(std::time::Duration::from_millis(380));
@@ -6331,12 +6326,10 @@ mod tests {
             )
             .unwrap();
             handles.sync(&mut document, &snapshot).unwrap();
-            assert!(
-                document
-                    .context()
-                    .world()
-                    .is_mounted(handles.footer_more.stable_id())
-            );
+            assert!(document
+                .context()
+                .world()
+                .is_mounted(handles.footer_more.stable_id()));
             let menu = if sidebar {
                 handles.more_menu.unwrap()
             } else {
@@ -6349,13 +6342,11 @@ mod tests {
             snapshot.sidebar_menu.clear();
             snapshot.titlebar_menu_open = false;
             handles.sync(&mut document, &snapshot).unwrap();
-            assert!(
-                events
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .any(|event| matches!(event, ShellIntent::OverlayPresenceChanged))
-            );
+            assert!(events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, ShellIntent::OverlayPresenceChanged)));
             events.lock().unwrap().clear();
             document
                 .context_mut()
@@ -6365,13 +6356,11 @@ mod tests {
             document
                 .context_mut()
                 .advance_animations(std::time::Duration::from_millis(360));
-            assert!(
-                events
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .any(|event| matches!(event, ShellIntent::OverlayPresenceChanged))
-            );
+            assert!(events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, ShellIntent::OverlayPresenceChanged)));
             handles.sync(&mut document, &snapshot).unwrap();
             assert!(!document.context().world().contains(menu.stable_id()));
         }
@@ -6546,18 +6535,16 @@ mod tests {
                 .and_then(|node| node.parent),
             Some(dock)
         );
-        assert!(
-            document
-                .context()
-                .world()
-                .node(pending)
-                .map(|node| handles
-                    .task_view
-                    .pending_view
-                    .actions()
-                    .is_some_and(|actions| node.children.contains(&actions)))
-                .unwrap_or(false)
-        );
+        assert!(document
+            .context()
+            .world()
+            .node(pending)
+            .map(|node| handles
+                .task_view
+                .pending_view
+                .actions()
+                .is_some_and(|actions| node.children.contains(&actions)))
+            .unwrap_or(false));
         assert_eq!(
             handles
                 .focus_targets
@@ -7177,13 +7164,11 @@ mod tests {
                 nana_ui::runtime::LayoutViewport::new(1400.0, 900.0),
             )
             .expect("layout closed permission menu");
-        assert!(
-            closed_handles
-                .task_view
-                .composer_view
-                .permission_items
-                .is_empty()
-        );
+        assert!(closed_handles
+            .task_view
+            .composer_view
+            .permission_items
+            .is_empty());
         let closed_world = closed_document.context().world();
         let closed_toolbar = closed_world
             .layout_box(
@@ -7770,9 +7755,11 @@ mod tests {
                 .world()
                 .node(handles.task_view.timeline_view.timeline_scroll.stable_id())
                 .map(|node| node.children),
-            Some(vec![
-                handles.task_view.timeline_view.timeline_list.stable_id()
-            ])
+            Some(vec![handles
+                .task_view
+                .timeline_view
+                .timeline_list
+                .stable_id()])
         );
     }
 
@@ -7935,25 +7922,19 @@ mod tests {
             (handles.workspace_editor, handles.workspace_search.clone()),
             (second.editor, second.search.clone()),
         ] {
-            assert!(
-                context
-                    .read(editor, |editor| editor.read_only && !editor.disabled)
-                    .unwrap()
-            );
-            assert!(
-                context
-                    .world()
-                    .node(search.root.stable_id())
-                    .unwrap()
-                    .parent
-                    .is_some()
-            );
+            assert!(context
+                .read(editor, |editor| editor.read_only && !editor.disabled)
+                .unwrap());
+            assert!(context
+                .world()
+                .node(search.root.stable_id())
+                .unwrap()
+                .parent
+                .is_some());
             context.activate_button(search.toggle).unwrap();
-            assert!(
-                context
-                    .read(search.replacement, |input| input.disabled)
-                    .unwrap()
-            );
+            assert!(context
+                .read(search.replacement, |input| input.disabled)
+                .unwrap());
             for button in &search.replace_actions {
                 assert!(!context.activate_button(*button).unwrap());
             }
@@ -7999,13 +7980,11 @@ mod tests {
                 .unwrap(),
             first_selection
         );
-        assert!(
-            intents
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|intent| !matches!(intent, ShellIntent::DocumentChanged { .. }))
-        );
+        assert!(intents
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|intent| !matches!(intent, ShellIntent::DocumentChanged { .. })));
         let target = ShellPaneTarget::primary("second", "read-only");
         assert!(second.matches_document_search(
             &target,
@@ -8533,13 +8512,11 @@ mod tests {
         snapshot.settings.model = model;
         snapshot.settings.provider_secret = "secret".to_owned();
         let (_document, handles, _) = mounted_primary(&snapshot);
-        assert!(
-            handles
-                .settings_view
-                .fields
-                .wrappers
-                .contains_key("provider_secret")
-        );
+        assert!(handles
+            .settings_view
+            .fields
+            .wrappers
+            .contains_key("provider_secret"));
         assert!(handles.settings_view.form_switches.is_empty());
     }
 
@@ -8553,18 +8530,14 @@ mod tests {
         snapshot.settings.model = model;
         snapshot.settings.remote_host_enabled = true;
         let (_document, handles, _) = mounted_primary(&snapshot);
-        assert!(
-            handles
-                .settings_view
-                .form_switches
-                .contains_key("remote_host")
-        );
-        assert!(
-            handles
-                .settings_view
-                .form_switches
-                .contains_key("remote_keep_awake")
-        );
+        assert!(handles
+            .settings_view
+            .form_switches
+            .contains_key("remote_host"));
+        assert!(handles
+            .settings_view
+            .form_switches
+            .contains_key("remote_keep_awake"));
     }
 }
 

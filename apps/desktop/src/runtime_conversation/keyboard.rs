@@ -289,6 +289,7 @@ mod tests {
                 field.state.selection = nana_ui::runtime::TextSelection {
                     anchor: 0,
                     focus: "草".len(),
+                    affinity: Default::default(),
                 };
             })
             .unwrap();

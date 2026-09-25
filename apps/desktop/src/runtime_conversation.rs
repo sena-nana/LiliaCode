@@ -153,7 +153,7 @@ pub fn timeline_stack(row: &crate::runtime_shell::ShellTimelineRow) -> Stack {
         "user" => Stack::column(6.0)
             .padding_xy(14.0, 10.0)
             .surface(SemanticColorRole::AccentSoft)
-            .radius(12.0)
+            .radius(nana_ui::theme::RadiusTier::Lg)
             .width(LengthSpec::FitContent)
             .with_layout(|layout| {
                 layout.position = PositionSpec::Relative;
@@ -668,7 +668,7 @@ impl TimelineContent {
                             .height(LengthSpec::Px(30.0))
                             .padding(3.0)
                             .surface(SemanticColorRole::Surface)
-                            .radius(5.0)
+                            .radius(nana_ui::theme::RadiusTier::Xs)
                             .node_style();
                     })?;
                     context.assemble_markdown(thumbnail)?;
@@ -847,7 +847,7 @@ impl ConversationControlsHandles {
                 &field_sink,
                 intent(
                     window_id,
-                    ConversationAction::ReviewValue(event.value.clone()),
+                    ConversationAction::ReviewValue(event.value.to_string()),
                 ),
             );
         })?;

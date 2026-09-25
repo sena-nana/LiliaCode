@@ -107,7 +107,7 @@ impl TodoPanel {
         context.on(input, move |_, event: &TextChanged, _| {
             input_sink(ShellIntent::Todo {
                 window_id,
-                action: TodoAction::TextChanged(event.value.clone()),
+                action: TodoAction::TextChanged(event.value.to_string()),
             })
         })?;
         context.append_child(editor, input)?;
@@ -406,16 +406,12 @@ mod tests {
                 .1
                 .stable_id()
         };
-        assert!(
-            context
-                .activate_node(button(&panel, "pending-dispatch"))
-                .unwrap()
-        );
-        assert!(
-            !context
-                .activate_node(button(&panel, "queued-delete"))
-                .unwrap()
-        );
+        assert!(context
+            .activate_node(button(&panel, "pending-dispatch"))
+            .unwrap());
+        assert!(!context
+            .activate_node(button(&panel, "queued-delete"))
+            .unwrap());
         assert!(
             matches!(&observed.lock().unwrap()[0], ShellIntent::Todo { window_id: nana_ui_platform::WindowId(71), action: TodoAction::Dispatch(id) } if id == "pending")
         );
@@ -433,11 +429,9 @@ mod tests {
         );
         snapshot.todos[0].guide_status = Some(DesktopTodoGuideStatus::Sent);
         panel.sync(context, document_id, &snapshot).unwrap();
-        assert!(
-            !panel
-                .controls
-                .iter()
-                .any(|(id, _)| id == "pending-dispatch")
-        );
+        assert!(!panel
+            .controls
+            .iter()
+            .any(|(id, _)| id == "pending-dispatch"));
     }
 }

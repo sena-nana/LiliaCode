@@ -1,7 +1,7 @@
 use crate::application::{
-    ChatAttachment, ChatContextUsage, DesktopGoalSnapshot, DesktopTaskRunBlock,
-    DesktopTaskSessionSnapshot, DesktopTaskTodo, DesktopTaskWorktree, TITLE_UPDATE_ACTION_KIND,
-    timeline_retry_context,
+    timeline_retry_context, ChatAttachment, ChatContextUsage, DesktopGoalSnapshot,
+    DesktopTaskRunBlock, DesktopTaskSessionSnapshot, DesktopTaskTodo, DesktopTaskWorktree,
+    TITLE_UPDATE_ACTION_KIND,
 };
 use lilia_contracts::{
     PendingProjectionStatus, TimelineProjectionCursor, TimelineProjectionEvent,
@@ -10,7 +10,7 @@ use lilia_contracts::{
 use nana_ui::{MarkdownBlock, NativeMarkdown, VirtualListLayout};
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TaskTimelineItem {
     pub(crate) id: String,
     pub(crate) sequence: u64,

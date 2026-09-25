@@ -1,14 +1,14 @@
 use super::presentation::{
+    ComposerAttachment, ComposerMentionItem, ComposerSlashItem, ComposerSuggestion,
     COMPOSER_PERMISSION_OPTIONS, COMPOSER_REASONING_OPTIONS, COMPOSER_REVIEW_OPTIONS,
-    COMPOSER_WORKTREE_OPTIONS, ComposerAttachment, ComposerMentionItem, ComposerSlashItem,
-    ComposerSuggestion,
+    COMPOSER_WORKTREE_OPTIONS,
 };
 use crate::runtime_compat::HostedWindowId;
 use crate::runtime_layout::{
     composer_card, composer_interrupt_button, composer_send_button, flatten_composer_textarea,
     reconcile_children, trigger_slot,
 };
-use crate::runtime_shell::{IntentSink, ShellIntent, emit};
+use crate::runtime_shell::{emit, IntentSink, ShellIntent};
 use nana_ui::runtime::{
     ActionMenu, ActionMenuItem, Activate, AppContext, Button, Card, DocumentId, Dropdown,
     DropdownOption, Entity, FrameworkError, IconButton, IconGlyph, JustifySpec, KeyInput,
@@ -289,7 +289,7 @@ pub(crate) fn bind_composer_input(
     binding: Arc<Mutex<ComposerBinding>>,
 ) -> Result<(), FrameworkError> {
     context.on(editor, move |_, event: &TextChanged, _| {
-        let intent = binding.lock().unwrap().edit(event.value.clone());
+        let intent = binding.lock().unwrap().edit(event.value.to_string());
         if let Some(intent) = intent {
             emit(&sink, intent);
         }
@@ -852,14 +852,12 @@ impl ComposerView {
                 &review_value_sink,
                 ShellIntent::AddressedComposer {
                     target: review_value_binding.lock().unwrap().target.clone(),
-                    action: ComposerInputAction::ReviewValue(event.value.clone()),
+                    action: ComposerInputAction::ReviewValue(event.value.to_string()),
                 },
             );
         })?;
-        let review_submit = context.create_detached_component(
-            document_id,
-            extra_button("开始审查", ButtonKind::Subtle),
-        )?;
+        let review_submit = context
+            .create_detached_component(document_id, extra_button("开始审查", ButtonKind::Subtle))?;
         bind_action(
             context,
             review_submit,
@@ -867,10 +865,8 @@ impl ComposerView {
             Arc::clone(&composer_binding),
             ComposerInputAction::SubmitReview,
         )?;
-        let review_cancel = context.create_detached_component(
-            document_id,
-            extra_button("取消", ButtonKind::Ghost),
-        )?;
+        let review_cancel = context
+            .create_detached_component(document_id, extra_button("取消", ButtonKind::Ghost))?;
         bind_action(
             context,
             review_cancel,
@@ -980,8 +976,8 @@ impl ComposerView {
         if snapshot.composer_task_id != self.composer_generation.task_id {
             self.last_failed_revision = None;
         }
-        let failed_resync = snapshot.apply_failed
-            && self.last_failed_revision != Some(snapshot.composer_revision);
+        let failed_resync =
+            snapshot.apply_failed && self.last_failed_revision != Some(snapshot.composer_revision);
         if failed_resync {
             self.last_failed_revision = Some(snapshot.composer_revision);
         }
@@ -1297,7 +1293,8 @@ impl ComposerView {
                 .collect();
         })?;
         let placeholder = review_value_placeholder(target);
-        let write_value = context.world().focused(document_id) != Some(self.review_value.stable_id());
+        let write_value =
+            context.world().focused(document_id) != Some(self.review_value.stable_id());
         context.update_component(self.review_value, |field, _| {
             field.placeholder = Arc::from(placeholder);
             if write_value && field.state.value != snapshot.review_value {
@@ -1378,8 +1375,8 @@ impl ComposerView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nana_ui::RuntimeInputAdapter;
     use nana_ui::runtime::TextSelection;
+    use nana_ui::RuntimeInputAdapter;
     use nana_ui_platform::{InputEvent, InputModifiers};
 
     fn snapshot(window_id: HostedWindowId, task: &str) -> ComposerViewSnapshot {
@@ -1865,11 +1862,9 @@ mod tests {
         )
         .unwrap();
         context.append_child(host, view.composer_dock).unwrap();
-        assert!(
-            context
-                .focus_node(document, view.composer.stable_id())
-                .unwrap()
-        );
+        assert!(context
+            .focus_node(document, view.composer.stable_id())
+            .unwrap());
         (context, document, view, events)
     }
 
@@ -2042,11 +2037,9 @@ mod tests {
 
         snapshot.composer_disabled = false;
         view.sync(&mut context, document, &snapshot).unwrap();
-        assert!(
-            context
-                .focus_node(document, view.composer.stable_id())
-                .unwrap()
-        );
+        assert!(context
+            .focus_node(document, view.composer.stable_id())
+            .unwrap());
         input
             .dispatch(&mut context, document, &key("Enter", false, false))
             .unwrap();

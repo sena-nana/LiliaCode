@@ -1,11 +1,11 @@
 use super::RoadmapMessage;
 use crate::runtime_layout::reconcile_children;
-use nana_ui::ButtonKind;
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, Entity, FormField, FrameworkError, MutationQueue,
     ScrollAxes, ScrollView, StableNodeId, Stack, Switch, Text, TextArea, TextChanged,
     ToggleChanged,
 };
+use nana_ui::ButtonKind;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -137,7 +137,7 @@ impl RoadmapView {
             context.append_child(root, field)?;
             let sink = Arc::clone(&sink);
             context.on(input, move |_, event: &TextChanged, _| {
-                sink(message(event.value.clone()))
+                sink(message(event.value.to_string()))
             })?;
             inputs.push(input);
         }
@@ -532,6 +532,7 @@ mod tests {
         let selection = TextSelection {
             anchor: 2,
             focus: 7,
+            affinity: Default::default(),
         };
         context
             .update_component(body, |input, _| input.state.selection = selection)

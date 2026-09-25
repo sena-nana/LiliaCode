@@ -265,7 +265,7 @@ pub(crate) fn flatten_composer_textarea(area: TextArea) -> TextArea {
     let layout = Arc::make_mut(&mut style.layout);
     layout.border_width = Some(0.0);
     layout.border_radius = Some(0.0);
-    layout.min_height = Some(LengthSpec::Px(ControlSize::Medium.height()));
+    layout.min_height = Some(LengthSpec::Px(ControlSize::Medium.height_in(UI_METRICS)));
     layout.padding_left = Some(LengthSpec::Px(UI_METRICS.field_padding_x));
     layout.padding_right = Some(LengthSpec::Px(UI_METRICS.field_padding_x));
     layout.padding_top = Some(LengthSpec::Px(

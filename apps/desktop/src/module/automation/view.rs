@@ -1,6 +1,6 @@
 use crate::runtime_compat::HostedWindowId;
 use crate::runtime_layout::reconcile_children;
-use crate::runtime_shell::{IntentSink, ShellIntent, bind_activate, emit};
+use crate::runtime_shell::{bind_activate, emit, IntentSink, ShellIntent};
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, EmptyState, Entity, FormField, FrameworkError,
     GraphCanvas, ScrollAxes, ScrollView, SearchDropdown, SearchDropdownEvent, SearchDropdownOption,
@@ -203,10 +203,7 @@ impl AutomationView {
             ("auto-response".into(), self.response.stable_id()),
             ("auto-resume".into(), self.resume.stable_id()),
             ("auto-cancel".into(), self.cancel.stable_id()),
-            (
-                "auto-inspector-panel".into(),
-                self.inspector.stable_id(),
-            ),
+            ("auto-inspector-panel".into(), self.inspector.stable_id()),
             ("auto-inbox".into(), self.inbox.stable_id()),
         ];
         if let Some(target) = self.target.lock().unwrap().as_ref() {
@@ -245,8 +242,7 @@ impl AutomationView {
             context.create_detached_component(document, Stack::fill_column(12.0).padding(16.0))?;
         let content_scroll = context.create_detached_component(
             document,
-            ScrollView::new(ScrollAxes::Vertical)
-                .style(Stack::fill_column(0.0).node_style()),
+            ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
         )?;
         let body = context.create_detached_component(document, Stack::fill_row(16.0))?;
         let editor =
@@ -269,7 +265,7 @@ impl AutomationView {
                     &callback,
                     ShellIntent::Automation {
                         target,
-                        action: AutomationAction::Rename(event.value.clone()),
+                        action: AutomationAction::Rename(event.value.to_string()),
                     },
                 );
             }
@@ -445,7 +441,7 @@ impl AutomationView {
                         action: AutomationAction::Respond {
                             run_id,
                             node_id,
-                            value: event.value.clone(),
+                            value: event.value.to_string(),
                         },
                     },
                 );
@@ -471,8 +467,7 @@ impl AutomationView {
         })?;
         let mut event_toggles = HashMap::new();
         for (value, label) in EVENT_KIND_OPTIONS {
-            let toggle =
-                context.create_detached_component(document, Switch::new(*label, false))?;
+            let toggle = context.create_detached_component(document, Switch::new(*label, false))?;
             let binding = Arc::clone(&target);
             let callback = Arc::clone(&sink);
             let field_value = (*value).to_owned();
@@ -704,7 +699,10 @@ impl AutomationView {
         for (value, label) in EVENT_KIND_OPTIONS {
             if let Some(toggle) = self.event_toggles.get(*value).copied() {
                 context.update_component(toggle, |view, _| {
-                    *view = Switch::new(*label, snapshot.event_kinds.iter().any(|kind| kind == value))
+                    *view = Switch::new(
+                        *label,
+                        snapshot.event_kinds.iter().any(|kind| kind == value),
+                    )
                 })?;
             }
         }
@@ -951,14 +949,12 @@ mod tests {
                 .update_component(button, |_, cx| cx.emit(Activate))
                 .unwrap();
         }
-        assert!(
-            !context
-                .world()
-                .node(view.run_panel.stable_id())
-                .unwrap()
-                .children
-                .contains(&view.response.stable_id())
-        );
+        assert!(!context
+            .world()
+            .node(view.run_panel.stable_id())
+            .unwrap()
+            .children
+            .contains(&view.response.stable_id()));
         state.runs[0].prompt = Some("继续？".into());
         state.runs[0].waiting_node = Some("approval-b".into());
         state.runs[0].can_cancel = true;
@@ -1075,14 +1071,12 @@ mod tests {
             context.read(view.section, |section| section.count).unwrap(),
             Some(1)
         );
-        assert!(
-            context
-                .world()
-                .node(view.content_scroll.stable_id())
-                .unwrap()
-                .children
-                .contains(&view.body.stable_id())
-        );
+        assert!(context
+            .world()
+            .node(view.content_scroll.stable_id())
+            .unwrap()
+            .children
+            .contains(&view.body.stable_id()));
     }
     #[test]
     fn graph_and_name_edits_carry_the_view_target_and_unpublished_workflows_disable_run() {

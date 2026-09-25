@@ -103,12 +103,12 @@ impl PendingPanel {
                         ShellIntent::AskUserPending {
                             request_id,
                             action: "freeform".into(),
-                            value: event.value.clone(),
+                            value: event.value.to_string(),
                         }
                     } else {
                         ShellIntent::PendingDraftChanged {
                             request_id,
-                            value: event.value.clone(),
+                            value: event.value.to_string(),
                         }
                     },
                 );
@@ -127,7 +127,7 @@ impl PendingPanel {
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
                 if let Ok(mut guard) = pending_tool_command_value.lock() {
-                    *guard = event.value.clone();
+                    *guard = event.value.to_string();
                 }
                 let message = pending_tool_message_value
                     .lock()
@@ -137,7 +137,7 @@ impl PendingPanel {
                     &sink,
                     ShellIntent::ToolConsentDraftChanged {
                         request_id,
-                        command: event.value.clone(),
+                        command: event.value.to_string(),
                         message,
                     },
                 );
@@ -156,7 +156,7 @@ impl PendingPanel {
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
                 if let Ok(mut guard) = pending_tool_message_value.lock() {
-                    *guard = event.value.clone();
+                    *guard = event.value.to_string();
                 }
                 let command = pending_tool_command_value
                     .lock()
@@ -167,7 +167,7 @@ impl PendingPanel {
                     ShellIntent::ToolConsentDraftChanged {
                         request_id,
                         command,
-                        message: event.value.clone(),
+                        message: event.value.to_string(),
                     },
                 );
             }
@@ -563,7 +563,7 @@ impl PendingPanel {
                 .create_detached_component(document_id, pending_textarea(value.to_owned(), 74.0))?;
             let sink = Arc::clone(&self.sink);
             context.on(field, move |_, event: &TextChanged, _| {
-                emit(&sink, intent(event.value.clone()));
+                emit(&sink, intent(event.value.to_string()));
             })?;
             self.form_fields.insert(id.to_owned(), field);
             field

@@ -2,7 +2,7 @@ use super::presentation::{
     CredentialRow, CustomAgentRow, McpEditor, McpRow, ProviderRow, SkillRow,
 };
 use crate::runtime_layout::{pill_button as extra_button, reconcile_children};
-use crate::runtime_shell::{IntentSink, ShellActionRow, ShellIntent, emit};
+use crate::runtime_shell::{emit, IntentSink, ShellActionRow, ShellIntent};
 use nana_ui::runtime::{
     AboutMetadata, AboutSection, Activate, AppContext, AppearanceSection, Button, DocumentId,
     DonutChart, DonutSlice, Dropdown, DropdownOption, Entity, FormField, FrameworkError,
@@ -191,7 +191,7 @@ impl SettingsView {
         context.on(project_name, move |_, event: &TextChanged, _| {
             emit(
                 &project_name_sink,
-                ShellIntent::ProjectNameChanged(event.value.clone()),
+                ShellIntent::ProjectNameChanged(event.value.to_string()),
             );
         })?;
         let project_name_field = context.create_detached_component(
@@ -1437,10 +1437,9 @@ mod tests {
             .into_iter()
             .map(|(id, _)| id)
             .collect();
-        assert!(
-            ids.iter()
-                .any(|id| id == "extensions-entry-skill:user:native-debug-skill")
-        );
+        assert!(ids
+            .iter()
+            .any(|id| id == "extensions-entry-skill:user:native-debug-skill"));
         assert!(ids.iter().any(|id| id == "extensions-search"));
     }
 
@@ -1507,11 +1506,9 @@ mod tests {
             960.0,
         )
         .unwrap();
-        assert!(
-            !context
-                .read(view.sidebar_mode, |field| field.opened)
-                .unwrap()
-        );
+        assert!(!context
+            .read(view.sidebar_mode, |field| field.opened)
+            .unwrap());
     }
 
     #[test]
@@ -1540,10 +1537,9 @@ mod tests {
             960.0,
         )
         .unwrap();
-        assert!(
-            view.product_actions
-                .contains_key("action:project-clone-default-pick")
-        );
+        assert!(view
+            .product_actions
+            .contains_key("action:project-clone-default-pick"));
         assert!(view.product_actions.contains_key("action:worktree-parent"));
         assert!(view.form_switches.contains_key("worktree-cleanup"));
         assert!(view.fields.editors.contains_key("worktree-instructions"));
