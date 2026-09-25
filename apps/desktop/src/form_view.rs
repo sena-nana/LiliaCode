@@ -1,4 +1,4 @@
-use crate::runtime_shell::{IntentSink, ShellIntent, emit};
+use crate::runtime_shell::{emit, IntentSink, ShellIntent};
 use nana_ui::runtime::{
     AppContext, DocumentId, Entity, FormField, FrameworkError, StableNodeId, TextArea, TextChanged,
     TextInput,
@@ -23,10 +23,12 @@ impl ProductField {
         match self {
             Self::Single(field) => context
                 .read(field, |field| field.state.value.clone())
-                .unwrap(),
+                .unwrap()
+                .to_string(),
             Self::Multiline(field) => context
                 .read(field, |field| field.state.value.clone())
-                .unwrap(),
+                .unwrap()
+                .to_string(),
         }
     }
 }
@@ -104,7 +106,7 @@ impl ProductFields {
                     TextArea::new(value.to_owned()).height(120.0),
                 )?;
                 context.on(field, move |_, event: &TextChanged, _| {
-                    emit(&sink, intent(event.value.clone()))
+                    emit(&sink, intent(event.value.to_string()))
                 })?;
                 ProductField::Multiline(field)
             } else {
@@ -113,7 +115,7 @@ impl ProductFields {
                     TextInput::new(value.to_owned()).secure(id == "provider_secret"),
                 )?;
                 context.on(field, move |_, event: &TextChanged, _| {
-                    emit(&sink, intent(event.value.clone()))
+                    emit(&sink, intent(event.value.to_string()))
                 })?;
                 ProductField::Single(field)
             };

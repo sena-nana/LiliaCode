@@ -410,7 +410,7 @@ impl SurfaceHandles {
                         let dispatch = sink.clone();
                         context.on(editor, move |_, event: &TextChanged, _| {
                             if let Ok(edit) = current.lock() {
-                                dispatch(edit(event.value.clone()));
+                                dispatch(edit(event.value.to_string()));
                             }
                         })?;
                         SurfaceNode::Secret(wrapper, editor, binding)
@@ -437,7 +437,7 @@ impl SurfaceHandles {
                         let dispatch = sink.clone();
                         context.on(editor, move |_, event: &TextChanged, _| {
                             if let Ok(edit) = current.lock() {
-                                dispatch(edit(event.value.clone()));
+                                dispatch(edit(event.value.to_string()));
                             }
                         })?;
                         SurfaceNode::Field(wrapper, editor, binding)
@@ -456,7 +456,7 @@ impl SurfaceHandles {
                         let dispatch = sink.clone();
                         context.on(editor, move |_, event: &TextChanged, _| {
                             if let Ok(edit) = current.lock() {
-                                dispatch(edit(event.value.clone()));
+                                dispatch(edit(event.value.to_string()));
                             }
                         })?;
                         SurfaceNode::Secret(wrapper, editor, binding)
@@ -495,7 +495,7 @@ impl SurfaceHandles {
                                     .width(LengthSpec::Px(8.0))
                                     .height(LengthSpec::Px(8.0))
                                     .shrink(0.0)
-                                    .radius(4.0)
+                                    .radius(nana_ui::theme::RadiusTier::Xs)
                                     .surface(color),
                             )?;
                             let name = context
@@ -906,13 +906,9 @@ mod tests {
             let mut surface = SurfaceHandles::default();
             let sink: Sink = Arc::new(|_| {});
             let control = |identity: &str, value: &str| {
-                SurfaceControl::field(
-                    "same-target",
-                    "编辑",
-                    value,
-                    multiline,
-                    |_| ShellIntent::RefreshExtensions,
-                )
+                SurfaceControl::field("same-target", "编辑", value, multiline, |_| {
+                    ShellIntent::RefreshExtensions
+                })
                 .binding_identity(identity)
             };
             let rows = surface
@@ -1084,14 +1080,8 @@ mod tests {
                     assert!(context.activate_button(button).unwrap());
                 }
                 let mut events = events.lock().unwrap();
-                assert!(matches!(
-                    events.remove(0),
-                    ShellIntent::RefreshAutomations
-                ));
-                assert!(matches!(
-                    events.remove(0),
-                    ShellIntent::CreateAutomation
-                ));
+                assert!(matches!(events.remove(0), ShellIntent::RefreshAutomations));
+                assert!(matches!(events.remove(0), ShellIntent::CreateAutomation));
                 assert!(events.is_empty());
                 body.stable_id()
             } else {

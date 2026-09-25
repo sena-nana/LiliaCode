@@ -520,7 +520,7 @@ impl ShellHandles {
                             },
                             1.0,
                         )
-                        .radius(8.0)
+                        .radius(nana_ui::theme::RadiusTier::Md)
                         .node_style();
                     if memory.selected {
                         view.style = view.style.clone().outline_mix(
@@ -806,7 +806,7 @@ impl ShellHandles {
                 .padding(12.0)
                 .surface(SemanticColorRole::Surface)
                 .outline(SemanticColorRole::Border, 1.0)
-                .radius(8.0)
+                .radius(nana_ui::theme::RadiusTier::Md)
                 .with_layout(|layout| {
                     if wide {
                         layout.width = Some(LengthSpec::Px(380.0));
@@ -850,7 +850,7 @@ impl ShellHandles {
                         0.10
                     },
                 ))
-                .radius(6.0);
+                .radius(nana_ui::theme::RadiusTier::Sm);
             let error_layout = Arc::make_mut(&mut style.layout);
             error_layout.padding_top = Some(LengthSpec::Px(8.0));
             error_layout.padding_bottom = Some(LengthSpec::Px(8.0));
@@ -916,7 +916,7 @@ impl ShellHandles {
                 Stack::column(8.0)
                     .padding(12.0)
                     .outline(SemanticColorRole::Border, 1.0)
-                    .radius(8.0),
+                    .radius(nana_ui::theme::RadiusTier::Md),
                 &injection,
             )?,
         );

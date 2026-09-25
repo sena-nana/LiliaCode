@@ -6,7 +6,7 @@ use nana_ui::runtime::{
     OverlayHost, ScrollAxes, ScrollView, SemanticColorRole, SidebarRow, SidebarRowState,
     StableNodeId, Stack, Text, TextChanged, TextInput,
 };
-use nana_ui::{DialogClosePolicy, DialogSize, UI_METRICS};
+use nana_ui::{DialogClosePolicy, DialogSize};
 
 use crate::module::extensions::ExtensionEntry;
 use crate::runtime_shell::ShellIntent;
@@ -107,36 +107,32 @@ mod tests {
                     left.height > 600.0 && right.height > 600.0,
                     "wide columns fill remaining viewport"
                 );
-                assert!(
-                    cx.world()
-                        .node(browser.root.stable_id())
-                        .unwrap()
-                        .children
-                        .contains(&browser.body.stable_id())
-                );
+                assert!(cx
+                    .world()
+                    .node(browser.root.stable_id())
+                    .unwrap()
+                    .children
+                    .contains(&browser.body.stable_id()));
             } else {
                 assert!(left.height >= 260.0 && right.height >= 360.0);
                 assert!(right.y >= left.y + left.height - 1.0);
-                assert!(
-                    cx.world()
-                        .node(browser.content_scroll.stable_id())
-                        .unwrap()
-                        .children
-                        .contains(&browser.body.stable_id())
-                );
+                assert!(cx
+                    .world()
+                    .node(browser.content_scroll.stable_id())
+                    .unwrap()
+                    .children
+                    .contains(&browser.body.stable_id()));
             }
         }
-        assert!(
-            cx.replace_text_input_selection(browser.search, "review")
-                .unwrap()
-        );
+        assert!(cx
+            .replace_text_input_selection(browser.search, "review")
+            .unwrap());
         assert!(
             matches!(events.lock().unwrap().last(), Some(ShellIntent::ExtensionsCommand(ExtensionsMessage::SearchChanged(query))) if query == "review")
         );
-        assert!(
-            cx.activate_node(browser.rows["skill:user:b"].stable_id())
-                .unwrap()
-        );
+        assert!(cx
+            .activate_node(browser.rows["skill:user:b"].stable_id())
+            .unwrap());
         assert!(
             matches!(events.lock().unwrap().last(), Some(ShellIntent::ExtensionsCommand(ExtensionsMessage::SelectEntry { key, .. })) if key == "skill:user:b")
         );
@@ -281,10 +277,9 @@ mod tests {
                 ))
             ));
         }
-        assert!(
-            cx.replace_text_input_selection(browser.plugin_source, "-edited")
-                .unwrap()
-        );
+        assert!(cx
+            .replace_text_input_selection(browser.plugin_source, "-edited")
+            .unwrap());
         assert!(
             matches!(events.lock().unwrap().last(), Some(ShellIntent::ExtensionsCommand(ExtensionsMessage::PluginSourceChanged(value))) if value.contains("-edited"))
         );
@@ -405,11 +400,9 @@ mod tests {
         for cycle in 0..3 {
             let started = cycle * 1_000;
             cx.advance_animations(std::time::Duration::from_millis(started));
-            assert!(
-                browser
-                    .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
-                    .unwrap()
-            );
+            assert!(browser
+                .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
+                .unwrap());
             cx.layout_document(doc, LayoutViewport::new(960.0, 800.0))
                 .unwrap();
             cx.advance_animations(std::time::Duration::from_millis(started + 400));
@@ -430,12 +423,11 @@ mod tests {
             browser
                 .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
                 .unwrap();
-            assert!(
-                cx.read(browser.dialog.unwrap(), |dialog| dialog
+            assert!(cx
+                .read(browser.dialog.unwrap(), |dialog| dialog
                     .close_policy
                     .close_disabled)
-                    .unwrap()
-            );
+                .unwrap());
             editor.busy = false;
             browser
                 .sync_dialog(&mut cx, doc, host, Some(&editor), sink.clone())
@@ -507,7 +499,7 @@ impl ExtensionBrowser {
             Stack::fill_column(0.0)
                 .surface(SemanticColorRole::Surface)
                 .outline(SemanticColorRole::BorderSoft, 1.0)
-                .radius(UI_METRICS.radius_md),
+                .radius(nana_ui::theme::RadiusTier::Md),
         )?;
         let toolbar = cx.create_detached_component(
             doc,
@@ -521,7 +513,7 @@ impl ExtensionBrowser {
         let dispatch = sink.clone();
         cx.on(plugin_source, move |_, event: &TextChanged, _| {
             dispatch(ShellIntent::ExtensionsCommand(
-                ExtensionsMessage::PluginSourceChanged(event.value.clone()),
+                ExtensionsMessage::PluginSourceChanged(event.value.to_string()),
             ));
         })?;
         let body = cx.create_detached_component(doc, Stack::fill_row(0.0))?;
@@ -549,7 +541,7 @@ impl ExtensionBrowser {
         )?;
         cx.on(search, move |_, event: &TextChanged, _| {
             sink(ShellIntent::ExtensionsCommand(
-                ExtensionsMessage::SearchChanged(event.value.clone()),
+                ExtensionsMessage::SearchChanged(event.value.to_string()),
             ))
         })?;
         let list = cx.create_detached_component(doc, Stack::column(4.0))?;

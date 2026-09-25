@@ -40,7 +40,7 @@ pub(super) fn selection_toolbar(
     };
     plain
         .padding(4.0)
-        .radius(8.0)
+        .radius(nana_ui::theme::RadiusTier::Md)
         .surface(SemanticColorRole::Surface)
         .outline(SemanticColorRole::BorderSoft, 1.0)
         .with_layout(|layout| {

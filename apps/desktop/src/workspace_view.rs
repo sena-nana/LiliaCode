@@ -492,6 +492,7 @@ mod tests {
                 editor.state.selection = nana_ui::runtime::TextSelection {
                     anchor: 2,
                     focus: 8,
+                    affinity: Default::default(),
                 };
             })
             .unwrap();
@@ -581,10 +582,11 @@ mod tests {
                 ))
                 .unwrap(),
             (
-                "unsaved document".to_owned(),
+                "unsaved document".to_owned().into(),
                 nana_ui::runtime::TextSelection {
                     anchor: 2,
-                    focus: 8
+                    focus: 8,
+                    affinity: Default::default(),
                 }
             )
         );
@@ -600,11 +602,9 @@ mod tests {
             context.world().focused(document),
             Some(conversation.stable_id())
         );
-        assert!(
-            context
-                .read(compact.choice, |button| button.disabled)
-                .unwrap()
-        );
+        assert!(context
+            .read(compact.choice, |button| button.disabled)
+            .unwrap());
         assert!(context.world().contains(editor.stable_id()));
         assert_eq!(
             context
@@ -718,18 +718,16 @@ mod tests {
             })
             .unwrap();
         assert!(intents.lock().unwrap().iter().any(|intent|matches!(intent,ShellIntent::DocumentChanged{target,revision:7,value} if target.window_id==window && target.pane_id=="left" && target.item_id=="a" && value=="changed")));
-        assert!(
-            context
-                .world()
-                .document_order(document)
-                .into_iter()
-                .any(|id| context
-                    .read(Entity::<TextArea>::from_stable_id(id), |view| view
-                        .state
-                        .value
-                        == "beta")
-                    .unwrap_or(false))
-        );
+        assert!(context
+            .world()
+            .document_order(document)
+            .into_iter()
+            .any(|id| context
+                .read(Entity::<TextArea>::from_stable_id(id), |view| view
+                    .state
+                    .value
+                    == "beta")
+                .unwrap_or(false)));
         let old_right = view.panes["right"].root();
         view.sync(
             &mut context,

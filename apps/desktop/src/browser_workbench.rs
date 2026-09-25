@@ -280,7 +280,7 @@ impl BrowserView {
         let state = binding.clone();
         context.on(address, move |_, event: &TextChanged, _| {
             if let Some((_, url, _)) = state.lock().unwrap().as_mut() {
-                *url = event.value.clone();
+                *url = event.value.to_string();
             }
         })?;
         let control = context.create_detached_component(document, Button::new("接管"))?;
@@ -454,7 +454,7 @@ impl BrowserView {
                     .padding(8.0)
                     .surface(SemanticColorRole::Surface)
                     .outline(SemanticColorRole::Border, 1.0)
-                    .radius(8.0),
+                    .radius(nana_ui::theme::RadiusTier::Md),
             )?;
             let (message, approve) = match &request.kind {
                 BrowserHostRequestKind::Download { suggested_filename } => (
@@ -1035,7 +1035,7 @@ impl BrowserWorkbench {
     pub fn frame(
         &mut self,
         id: nana_ui_platform::WindowId,
-        composition: &nana_ui::WindowsComposition,
+        composition: &nana_ui::WindowsCompositionTree,
         regions: &[nana_ui::NativeContentRegion],
         scale: f32,
     ) -> Result<(), String> {

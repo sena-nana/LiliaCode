@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -80,8 +80,8 @@ pub struct NativeWindowState {
 impl NativeWindowState {
     pub fn apply_to_settings(
         self,
-        mut settings: nana_ui::RuntimeWindowSettings,
-    ) -> nana_ui::RuntimeWindowSettings {
+        mut settings: nana_ui::WindowDescriptor,
+    ) -> nana_ui::WindowDescriptor {
         settings.initial_position = Some((f64::from(self.x), f64::from(self.y)));
         settings.initial_size = (f64::from(self.width), f64::from(self.height));
         settings.maximized = self.maximized;
@@ -1192,11 +1192,9 @@ mod tests {
         let source = directory.path().join(WORKSPACE_TOPOLOGY_STATE_FILE);
         let invalid = b"{invalid json";
         fs::write(&source, invalid).unwrap();
-        assert!(
-            super::load_workspace_topology_state(directory.path())
-                .unwrap()
-                .is_none()
-        );
+        assert!(super::load_workspace_topology_state(directory.path())
+            .unwrap()
+            .is_none());
         assert_eq!(fs::read(&source).unwrap(), invalid);
         let archive = fs::read_dir(directory.path())
             .unwrap()

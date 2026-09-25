@@ -1,11 +1,11 @@
 use super::MemoryMessage;
 use crate::runtime_layout::reconcile_children;
-use nana_ui::{ButtonKind, PopoverPlacement};
 use nana_ui::runtime::{
     ActionMenu, ActionMenuItem, Activate, AppContext, Button, DocumentId, Entity, FormField,
     FrameworkError, MutationQueue, PopoverToggled, ScrollAxes, ScrollView, StableNodeId, Stack,
     Switch, Text, TextArea, TextChanged, TextInput, ToggleChanged,
 };
+use nana_ui::{ButtonKind, PopoverPlacement};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -82,10 +82,7 @@ impl MemoryView {
                 self.task_injection.stable_id(),
             ),
             ("composer.memory-save".into(), self.save.stable_id()),
-            (
-                "composer.memory-task-reset".into(),
-                self.reset.stable_id(),
-            ),
+            ("composer.memory-task-reset".into(), self.reset.stable_id()),
             ("memory.task-menu".into(), self.task_menu.stable_id()),
         ];
         for (id, row) in &self.rows {
@@ -149,7 +146,7 @@ impl MemoryView {
             context.append_child(root, field)?;
             let sink = Arc::clone(&sink);
             context.on(input, move |_, event: &TextChanged, _| {
-                sink(message(event.value.clone()))
+                sink(message(event.value.to_string()))
             })?;
             inputs.push(input);
         }
@@ -205,7 +202,7 @@ impl MemoryView {
         context.append_child(cooldown_field, cooldown)?;
         let cooldown_sink = Arc::clone(&sink);
         context.on(cooldown, move |_, event: &TextChanged, _| {
-            cooldown_sink(MemoryMessage::CooldownChanged(event.value.clone()))
+            cooldown_sink(MemoryMessage::CooldownChanged(event.value.to_string()))
         })?;
         let enabled = context.create_detached_component(document, Switch::new("启用记忆", true))?;
         let enabled_sink = Arc::clone(&sink);
@@ -217,7 +214,8 @@ impl MemoryView {
         context.on(global, move |_, _: &ToggleChanged, _| {
             global_sink(MemoryMessage::ToggleGlobal)
         })?;
-        let baseline = context.create_detached_component(document, Switch::new("基线注入", true))?;
+        let baseline =
+            context.create_detached_component(document, Switch::new("基线注入", true))?;
         let baseline_sink = Arc::clone(&sink);
         context.on(baseline, move |_, _: &ToggleChanged, _| {
             baseline_sink(MemoryMessage::ToggleBaseline)
@@ -330,10 +328,7 @@ impl MemoryView {
             toggle.disabled = !snapshot.global_enabled;
         })?;
         context.update_component(self.task_injection, |toggle, _| {
-            *toggle = Switch::new(
-                "为此会话注入记忆",
-                snapshot.task_injection.unwrap_or(false),
-            );
+            *toggle = Switch::new("为此会话注入记忆", snapshot.task_injection.unwrap_or(false));
             toggle.disabled = snapshot.task_injection.is_none();
         })?;
         context.update_component(self.reset, |button, _| {
@@ -360,10 +355,8 @@ impl MemoryView {
                     })?;
                     item
                 } else {
-                    let item = context.create_detached_component(
-                        document,
-                        ActionMenuItem::new(label.clone()),
-                    )?;
+                    let item = context
+                        .create_detached_component(document, ActionMenuItem::new(label.clone()))?;
                     let sink = Arc::clone(&self.sink);
                     let task_id = id.clone();
                     context.on(item, move |_, _: &Activate, _| {
@@ -564,6 +557,7 @@ mod tests {
         let selection = TextSelection {
             anchor: 2,
             focus: 7,
+            affinity: Default::default(),
         };
         context
             .update_component(body, |input, _| input.state.selection = selection)
@@ -650,7 +644,10 @@ mod tests {
         let received = events.lock().unwrap();
         assert!(matches!(
             &received[..],
-            [MemoryMessage::ToggleBaseline, MemoryMessage::ToggleTaskInjection]
+            [
+                MemoryMessage::ToggleBaseline,
+                MemoryMessage::ToggleTaskInjection
+            ]
         ));
         let nodes = view.debug_nodes();
         assert!(nodes.iter().any(|(id, _)| id == "switch.memory-baseline"));

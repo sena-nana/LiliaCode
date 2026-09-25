@@ -303,7 +303,7 @@ impl RequestView {
         let sink = Arc::clone(&self.sink);
         let target = self.target.clone();
         context.on(editor, move |_, event: &TextChanged, _| {
-            sink(target.clone(), action(event.value.clone()))
+            sink(target.clone(), action(event.value.to_string()))
         })?;
         let wrapper = context.create_detached_component(
             document,
@@ -1043,6 +1043,7 @@ mod tests {
         let selection = TextSelection {
             anchor: 2,
             focus: 5,
+            affinity: Default::default(),
         };
         context
             .update_component(editor, |input, cx| {

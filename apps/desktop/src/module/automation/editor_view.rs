@@ -1,13 +1,13 @@
-use super::editor::{NodeEditorAction, NodeEditorSnapshot, field_choices, field_label};
+use super::editor::{field_choices, field_label, NodeEditorAction, NodeEditorSnapshot};
 use super::view::{AutomationAction, AutomationTarget};
 use crate::runtime_layout::reconcile_children;
-use crate::runtime_shell::{IntentSink, ShellIntent, emit};
-use nana_ui::ButtonKind;
+use crate::runtime_shell::{emit, IntentSink, ShellIntent};
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, Entity, FormField, FrameworkError, ScrollAxes,
     ScrollView, SearchDropdown, SearchDropdownEvent, SearchDropdownOption, StableNodeId, Stack,
     Switch, TextArea, TextChanged, TextInput, ToggleChanged,
 };
+use nana_ui::ButtonKind;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -181,7 +181,7 @@ impl NodeEditorView {
             dispatch(
                 &callback,
                 &target,
-                NodeEditorAction::Title(event.value.clone()),
+                NodeEditorAction::Title(event.value.to_string()),
             )
         })?;
         Ok(Self {
@@ -274,7 +274,7 @@ impl NodeEditorView {
                             }),
                     )?;
                     context.on(input, move |_, event: &TextChanged, _| {
-                        let value = Value::String(event.value.clone());
+                        let value = Value::String(event.value.to_string());
                         dispatch(
                             &sink,
                             &binding,
@@ -293,7 +293,7 @@ impl NodeEditorView {
                             &binding,
                             NodeEditorAction::Field {
                                 key: key.clone(),
-                                value: Value::String(event.value.clone()),
+                                value: Value::String(event.value.to_string()),
                             },
                         )
                     })?;
