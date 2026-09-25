@@ -363,7 +363,7 @@ impl DesktopProgram {
                     rows.push(Control::text("assistant-notice", message));
                 }
                 if let Some(error) = &self.provider_error {
-                    rows.push(Control::text("assistant-error", error));
+                    rows.push(Control::error("assistant-error", error));
                 }
             }
             "model-config" => {
@@ -499,7 +499,7 @@ impl DesktopProgram {
                     .enabled(!self.provider_busy()),
                 );
                 if let Some(error) = &self.provider_error {
-                    rows.push(Control::text("models-error", error));
+                    rows.push(Control::error("models-error", error));
                 }
             }
             "agent" => {
@@ -591,7 +591,7 @@ impl DesktopProgram {
                     Intent::SettingsCommand(Action::AgentProgress),
                 ));
                 if let Some(error) = &self.agent_interaction_error {
-                    rows.push(Control::text("agent-error", error));
+                    rows.push(Control::error("agent-error", error));
                 }
             }
             "quota" => {
@@ -817,7 +817,7 @@ impl DesktopProgram {
                     ));
                 }
                 if let Some(error) = &self.project_settings_error {
-                    rows.push(Control::text("preferences-error", error));
+                    rows.push(Control::error("preferences-error", error));
                 }
             }
             "plugin-packages" | "plugin-hooks" | "plugin-mcp" | "extensions" => {}
@@ -1037,7 +1037,7 @@ impl DesktopProgram {
                         ),
                     ));
                     if let Some(error) = &detail.run.error {
-                        rows.push(Control::text("auto-run-error", error));
+                        rows.push(Control::error("auto-run-error", error));
                     }
                     if let Some(waiting) = waiting_human_node(detail) {
                         rows.push(Control::section("auto-human-waiting", "自动化等待确认"));
@@ -1149,7 +1149,7 @@ impl DesktopProgram {
                             ),
                         ));
                         if let Some(error) = &node.error {
-                            rows.push(Control::text("auto-node-error", error));
+                            rows.push(Control::error("auto-node-error", error));
                         }
                     }
                 }
@@ -1235,7 +1235,7 @@ impl DesktopProgram {
             }
         }
         if let Some(error) = &self.automation_error {
-            rows.push(Control::text("auto-error", error));
+            rows.push(Control::error("auto-error", error));
         }
         let identity = match self.automation_inspector_panel.as_str() {
             "node" => format!(
@@ -1769,7 +1769,7 @@ fn append_github_status(
         },
     ));
     if let Some(error) = error {
-        rows.push(Control::text("github-error", error));
+        rows.push(Control::error("github-error", error));
     }
 }
 
@@ -1891,7 +1891,7 @@ fn append_extension_panel(
         ));
     }
     if let Some(error) = module.error() {
-        rows.push(Control::text("extensions-error", error));
+        rows.push(Control::error("extensions-error", error));
     }
     if part == ExtensionPart::All
         && matches!(
@@ -2760,7 +2760,7 @@ fn appearance_controls(
         ),
     ];
     if let Some(error) = error {
-        rows.push(Control::text("appearance-runtime-error", error));
+        rows.push(Control::error("appearance-runtime-error", error));
     }
     rows
 }

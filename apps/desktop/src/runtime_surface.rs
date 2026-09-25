@@ -5,9 +5,9 @@ use nana_ui::runtime::{
     Activate, AlignSpec, AppContext, Button, DocumentId, DonutChart, DonutSlice, Dropdown,
     DropdownOption, Entity, FrameworkError, LengthSpec, NodeStyle, Progress, QrCode,
     SemanticColorRole, SettingsCard, SettingsRow, StableNodeId, Stack, Switch, Text, TextArea,
-    TextChanged, TextInput, ToggleChanged,
+    TextChanged, TextInput, ToggleChanged, ValidationMessage,
 };
-use nana_ui::{ButtonKind, DropdownEvent, DropdownSelection};
+use nana_ui::{ButtonKind, DropdownEvent, DropdownSelection, ValidationIntent};
 
 use crate::runtime_shell::ShellIntent;
 
@@ -34,6 +34,10 @@ pub(crate) enum SurfaceControl {
         edit: Edit,
     },
     Text {
+        id: String,
+        value: String,
+    },
+    Error {
         id: String,
         value: String,
     },
@@ -149,6 +153,12 @@ impl SurfaceControl {
             value: value.into(),
         }
     }
+    pub fn error(id: impl Into<String>, value: impl Into<String>) -> Self {
+        Self::Error {
+            id: id.into(),
+            value: value.into(),
+        }
+    }
     pub fn action(id: impl Into<String>, label: impl Into<String>, intent: ShellIntent) -> Self {
         Self::Action {
             id: id.into(),
@@ -220,6 +230,7 @@ impl SurfaceControl {
             | Self::Toggle { id, .. }
             | Self::Choice { id, .. }
             | Self::Text { id, .. }
+            | Self::Error { id, .. }
             | Self::Action { id, .. }
             | Self::Field { id, .. }
             | Self::Secret { id, .. }
@@ -235,6 +246,7 @@ enum SurfaceNode {
     Toggle(Entity<Switch>, Arc<Mutex<ShellIntent>>),
     Choice(Entity<SettingsRow>, Entity<Dropdown>, Arc<Mutex<Edit>>),
     Text(Entity<Text>),
+    Error(Entity<ValidationMessage>),
     Action(Entity<Button>, Arc<Mutex<ShellIntent>>),
     Field(Entity<SettingsRow>, Entity<TextArea>, Arc<Mutex<Edit>>),
     Secret(Entity<SettingsRow>, Entity<TextInput>, Arc<Mutex<Edit>>),
@@ -255,6 +267,7 @@ impl SurfaceNode {
             Self::Toggle(view, _) => view.stable_id(),
             Self::Choice(view, ..) => view.stable_id(),
             Self::Text(view) => view.stable_id(),
+            Self::Error(view) => view.stable_id(),
             Self::Action(view, _) => view.stable_id(),
             Self::Field(view, ..) => view.stable_id(),
             Self::Secret(view, ..) => view.stable_id(),
@@ -380,6 +393,12 @@ impl SurfaceHandles {
                     }
                     SurfaceControl::Text { value, .. } => SurfaceNode::Text(
                         context.create_detached_component(document, Text::new(value.clone()))?,
+                    ),
+                    SurfaceControl::Error { value, .. } => SurfaceNode::Error(
+                        context.create_detached_component(
+                            document,
+                            ValidationMessage::new(value.clone(), ValidationIntent::Danger),
+                        )?,
                     ),
                     SurfaceControl::Action { label, intent, .. } => {
                         let view = context
@@ -610,6 +629,11 @@ impl SurfaceHandles {
                 (SurfaceNode::Text(view), SurfaceControl::Text { value, .. }) => {
                     context.update_component(*view, |text, _| *text = Text::new(value.clone()))?
                 }
+                (SurfaceNode::Error(view), SurfaceControl::Error { value, .. }) => {
+                    context.update_component(*view, |message, _| {
+                        *message = ValidationMessage::new(value.clone(), ValidationIntent::Danger)
+                    })?
+                }
                 (
                     SurfaceNode::Action(view, binding),
                     SurfaceControl::Action {
@@ -820,6 +844,9 @@ impl SurfaceHandles {
                         context.remove_view(view)?;
                     }
                     SurfaceNode::Text(view) => {
+                        context.remove_view(view)?;
+                    }
+                    SurfaceNode::Error(view) => {
                         context.remove_view(view)?;
                     }
                     SurfaceNode::Action(view, _) => {

@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use nana_ui::runtime::{
-    Activate, AppContext, Dialog, DocumentId, Entity, FrameworkError, LengthSpec, ModalSlots,
+    Activate, AppContext, Dialog, DocumentId, EmptyState, Entity, FrameworkError, LengthSpec,
+    ModalSlots,
     OverlayHost, ScrollAxes, ScrollView, SemanticColorRole, SidebarRow, SidebarRowState,
     StableNodeId, Stack, Text, TextChanged, TextInput,
 };
@@ -478,7 +479,7 @@ pub(crate) struct ExtensionBrowser {
     detail_title: Entity<Text>,
     detail_action_row: Entity<Stack>,
     detail_scroll: Entity<ScrollView>,
-    empty: Entity<Text>,
+    empty: Entity<EmptyState>,
     rows: HashMap<String, Entity<SidebarRow>>,
     toolbar_surface: SurfaceHandles,
     detail_surface: SurfaceHandles,
@@ -559,7 +560,10 @@ impl ExtensionBrowser {
             doc,
             ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
         )?;
-        let empty = cx.create_detached_component(doc, Text::new("没有匹配的条目"))?;
+        let empty = cx.create_detached_component(
+            doc,
+            EmptyState::new("没有匹配的条目").compact(true),
+        )?;
         cx.append_child(list_scroll, list)?;
         cx.append_child(detail_scroll, detail)?;
         cx.append_child(list_panel, search)?;
