@@ -77,9 +77,14 @@ pub enum ProjectFilesError {
 impl From<ProjectContextError> for ProjectFilesError {
     fn from(error: ProjectContextError) -> Self {
         match error {
-            ProjectContextError::InvalidRelativePath(path) => {
+            ProjectContextError::InvalidRelativePath(path)
+            | ProjectContextError::PathEscapesWorkspace(path) => {
                 Self::PathEscapesWorkspace(path.display().to_string())
             }
+            ProjectContextError::Io { path, message } => Self::Io {
+                path: path.display().to_string(),
+                message,
+            },
             other => Self::Io {
                 path: String::new(),
                 message: other.to_string(),
@@ -551,11 +556,22 @@ fn list_directory(
     relative_dir: &str,
 ) -> Result<Vec<ProjectFileEntry>, ProjectFilesError> {
     let relative = normalize_relative_path(relative_dir)?;
+    let canonical_root = context.canonical_active_root()?;
+    let comparison_root =
+        fs::canonicalize(&canonical_root).map_err(|error| ProjectFilesError::Io {
+            path: relative_path_text(&relative),
+            message: error.to_string(),
+        })?;
     let directory = if relative.as_os_str().is_empty() {
-        context.active_root().to_path_buf()
+        canonical_root.clone()
     } else {
         context.resolve_relative(&relative)?
     };
+    if !directory.starts_with(&canonical_root) {
+        return Err(ProjectFilesError::PathEscapesWorkspace(relative_path_text(
+            &relative,
+        )));
+    }
     if !directory.is_dir() {
         return Err(ProjectFilesError::NotADirectory(relative_path_text(
             &relative,
@@ -569,10 +585,11 @@ fn list_directory(
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| !should_skip_project_files_path(path))
+        .filter_map(|path| classify_project_entry(&path, &comparison_root).map(|kind| (path, kind)))
         .collect::<Vec<_>>();
-    children.sort_by(|left, right| {
-        let left_dir = left.is_dir();
-        let right_dir = right.is_dir();
+    children.sort_by(|(left, left_kind), (right, right_kind)| {
+        let left_dir = *left_kind == ProjectFileKind::Directory;
+        let right_dir = *right_kind == ProjectFileKind::Directory;
         right_dir.cmp(&left_dir).then_with(|| {
             left.file_name()
                 .unwrap_or_default()
@@ -581,7 +598,7 @@ fn list_directory(
         })
     });
     let mut entries = Vec::new();
-    for path in children.into_iter().take(MAX_DIRECTORY_ENTRIES) {
+    for (path, kind) in children.into_iter().take(MAX_DIRECTORY_ENTRIES) {
         let name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -595,11 +612,6 @@ fn list_directory(
         } else {
             relative.join(&name)
         };
-        let kind = if path.is_dir() {
-            ProjectFileKind::Directory
-        } else {
-            ProjectFileKind::File
-        };
         entries.push(ProjectFileEntry {
             name,
             relative_path: relative_path_text(&child_relative),
@@ -608,6 +620,26 @@ fn list_directory(
         });
     }
     Ok(entries)
+}
+
+fn classify_project_entry(path: &Path, canonical_root: &Path) -> Option<ProjectFileKind> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if metadata.file_type().is_symlink() {
+        let target = fs::canonicalize(path).ok()?;
+        if !target.starts_with(canonical_root) {
+            return None;
+        }
+        return Some(if target.is_dir() {
+            ProjectFileKind::Directory
+        } else {
+            ProjectFileKind::File
+        });
+    }
+    Some(if metadata.is_dir() {
+        ProjectFileKind::Directory
+    } else {
+        ProjectFileKind::File
+    })
 }
 
 fn should_skip_project_files_path(path: &Path) -> bool {
@@ -888,6 +920,34 @@ mod tests {
         assert_eq!(document.buffer.text, "pub fn ok() {}");
         assert!(matches!(
             app.open_project_file(&project_id, "../outside.rs"),
+            Err(DesktopApplicationError::ProjectFiles(
+                ProjectFilesError::PathEscapesWorkspace(_)
+            ))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_does_not_expand_or_list_an_escaping_directory_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        write_file(&outside.path().join("secret.txt"), "secret");
+        std::os::unix::fs::symlink(outside.path(), root.path().join("escape_dir")).unwrap();
+        let (app, project_id) = app_with_project(root.path());
+
+        let snapshot = app
+            .project_files_snapshot(
+                &project_id,
+                ProjectFilesViewState {
+                    expanded_paths: vec!["escape_dir".to_owned()],
+                    selected_path: None,
+                },
+            )
+            .unwrap();
+        assert!(snapshot.entries.is_empty());
+        assert!(snapshot.view.expanded_paths.is_empty());
+        assert!(matches!(
+            app.list_project_directory(&project_id, "escape_dir"),
             Err(DesktopApplicationError::ProjectFiles(
                 ProjectFilesError::PathEscapesWorkspace(_)
             ))
