@@ -185,7 +185,11 @@ mod tests {
         )
         .unwrap();
         std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
-        let context = context_at(root.path().to_path_buf());
+        let context = ProjectContext {
+            project_id: ProjectId::new("project").unwrap(),
+            workspace_root: root.path().to_path_buf(),
+            worktree_root: None,
+        };
 
         assert_eq!(
             context.resolve_relative(Path::new("alias.rs")).unwrap(),
