@@ -148,8 +148,8 @@ impl DesktopApplication {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use lilia_contracts::{ProductEntity, ProductTask, Project};
     use lilia_service::ServiceAuthority;
@@ -813,12 +813,11 @@ mod tests {
         );
         app.save_document(document.id, revision).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "edited");
-        assert!(
-            !app.document_snapshot(document.id)
-                .unwrap()
-                .buffer
-                .is_dirty()
-        );
+        assert!(!app
+            .document_snapshot(document.id)
+            .unwrap()
+            .buffer
+            .is_dirty());
 
         let persisted = session.persisted_state().unwrap();
         assert_eq!(persisted.workspace_items.len(), 2);
@@ -877,12 +876,11 @@ mod tests {
             .unwrap()
             .workspace;
 
-        assert!(
-            app.execute_command(DesktopCommand::SelectTask(
+        assert!(app
+            .execute_command(DesktopCommand::SelectTask(
                 TaskId::new("missing-task").unwrap()
             ))
-            .is_err()
-        );
+            .is_err());
         assert_eq!(app.workspace_snapshot().unwrap(), before);
     }
 
@@ -959,14 +957,12 @@ mod tests {
             first_snapshot.panel_layout.panel(&tools).unwrap().extent,
             418.0
         );
-        assert!(
-            second
-                .snapshot()
-                .unwrap()
-                .panel_layout
-                .active_panel(crate::application::DockSlot::Right)
-                .is_none()
-        );
+        assert!(second
+            .snapshot()
+            .unwrap()
+            .panel_layout
+            .active_panel(crate::application::DockSlot::Right)
+            .is_none());
 
         first
             .execute(DesktopCommand::SetPanelVisible {
@@ -974,14 +970,12 @@ mod tests {
                 visible: false,
             })
             .unwrap();
-        assert!(
-            first
-                .snapshot()
-                .unwrap()
-                .panel_layout
-                .active_panel(crate::application::DockSlot::Right)
-                .is_none()
-        );
+        assert!(first
+            .snapshot()
+            .unwrap()
+            .panel_layout
+            .active_panel(crate::application::DockSlot::Right)
+            .is_none());
     }
 
     #[test]
@@ -1240,16 +1234,14 @@ mod tests {
         let source_before = source.snapshot().unwrap();
         let target_before = target.snapshot().unwrap();
 
-        assert!(
-            source
-                .transfer_item_to(
-                    &target,
-                    &item_id,
-                    &crate::application::PaneId::new("missing").unwrap(),
-                    None,
-                )
-                .is_err()
-        );
+        assert!(source
+            .transfer_item_to(
+                &target,
+                &item_id,
+                &crate::application::PaneId::new("missing").unwrap(),
+                None,
+            )
+            .is_err());
         assert_eq!(source.snapshot().unwrap(), source_before);
         assert_eq!(target.snapshot().unwrap(), target_before);
     }

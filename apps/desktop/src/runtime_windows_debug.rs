@@ -1,7 +1,7 @@
 use super::*;
 use crate::agent_debug::DebugCommand;
 use nana_ui::runtime::StableNodeId;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 impl TaskPopupHandles {
     fn debug_targets(&self) -> [(&'static str, StableNodeId); 2] {
@@ -105,8 +105,9 @@ impl TaskPopupHandles {
                 context.replace_focused_text(doc, text)?
             }
             DebugCommand::UiKey { key, .. } => {
-                nana_ui::RuntimeInputAdapter::default()
-                    .dispatch(context, doc, &crate::agent_debug::retained_key_event(key))?
+                crate::runtime_input::ScriptedInput::bind(context, doc)
+                    .press_key(context, crate::agent_debug::retained_key_event(key))
+                    .map_err(crate::runtime_input::route_error)?
                     .prevent_default
             }
             _ => false,

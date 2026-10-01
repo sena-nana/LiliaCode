@@ -1,10 +1,66 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use nana_ui::runtime::view::{entity_ref, widget, with_refs, El, Signal};
 use nana_ui::runtime::{
     AlignSpec, AppContext, Button, Card, Chip, DocumentId, Entity, FrameworkError, IconButton,
     JustifySpec, LengthSpec, SemanticColorRole, StableNodeId, Stack, Text, TextArea,
 };
 use nana_ui::{ButtonKind, CardKind, ControlSize, Icon, UI_METRICS};
+
+/// A signal created inside `mount_view`, written later by sync.
+///
+/// `signal()` belongs to the mount scope, so the view closure calls
+/// [`Bound::install`] and sync calls [`Bound::set`].
+#[derive(Clone)]
+pub(crate) struct Bound<T: 'static> {
+    slot: Arc<Mutex<Option<Signal<T>>>>,
+}
+
+impl<T: 'static> Bound<T> {
+    pub(crate) fn new() -> Self {
+        Self {
+            slot: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn install(&self, signal: Signal<T>) -> Signal<T> {
+        *self.slot.lock().expect("signal slot") = Some(signal);
+        signal
+    }
+
+    pub(crate) fn set(&self, value: T) {
+        if let Some(signal) = *self.slot.lock().expect("signal slot") {
+            signal.set(value);
+        }
+    }
+
+    pub(crate) fn signal(&self) -> Signal<T> {
+        self.slot
+            .lock()
+            .expect("signal slot")
+            .expect("signal installed")
+    }
+}
+
+pub(crate) fn view_column(gap: f32) -> El<Stack> {
+    widget(Stack::column(gap))
+}
+
+pub(crate) fn view_fill_column(gap: f32) -> El<Stack> {
+    widget(Stack::fill_column(gap))
+}
+
+pub(crate) fn view_row(gap: f32) -> El<Stack> {
+    widget(Stack::row(gap))
+}
+
+pub(crate) fn view_fill_row(gap: f32) -> El<Stack> {
+    widget(Stack::fill_row(gap))
+}
+
+pub(crate) fn view_bar(gap: f32) -> El<Stack> {
+    widget(Stack::bar(gap))
+}
 
 const COMPOSER_SEND_SIZE: f32 = 30.0;
 const PILL_RADIUS: f32 = 999.0;
@@ -93,32 +149,42 @@ pub(crate) fn mount_empty_headline(
     document: DocumentId,
     title: String,
 ) -> Result<(Entity<Stack>, Entity<Text>, Entity<Stack>), FrameworkError> {
-    let slot =
-        context.create_detached_component(document, headline_slot(!title.trim().is_empty()))?;
-    let group = context.create_detached_component(
-        document,
-        Stack::column(14.0)
-            .align(AlignSpec::Center)
-            .max_width(680.0)
-            .width(LengthSpec::CalcPercentOffset {
-                percent: 100.0,
-                offset_px: -48.0,
-            }),
-    )?;
-    let heading = context.create_detached_component(document, conversation_headline(title))?;
-    let actions = context.create_detached_component(
-        document,
-        Stack::bar(6.0)
-            .justify(JustifySpec::Center)
-            .max_width(560.0)
-            .min_height(LengthSpec::Px(24.0))
-            .wrap(true),
-    )?;
-    let offset = context.create_detached_component(document, headline_offset_space())?;
-    context.append_child(group, heading)?;
-    context.append_child(group, actions)?;
-    context.append_child(slot, group)?;
-    context.append_child(slot, offset)?;
+    let (_, (slot, heading, actions)) = context.mount_view_detached(document, move || {
+        let slot = entity_ref::<Stack>();
+        let group = entity_ref::<Stack>();
+        let heading = entity_ref::<Text>();
+        let actions = entity_ref::<Stack>();
+        let offset = entity_ref::<Stack>();
+        with_refs(
+            widget(headline_slot(!title.trim().is_empty()))
+                .entity_ref(slot)
+                .children((
+                    widget(
+                        Stack::column(14.0)
+                            .align(AlignSpec::Center)
+                            .max_width(680.0)
+                            .width(LengthSpec::CalcPercentOffset {
+                                percent: 100.0,
+                                offset_px: -48.0,
+                            }),
+                    )
+                    .entity_ref(group)
+                    .children((
+                        widget(conversation_headline(title)).entity_ref(heading),
+                        widget(
+                            Stack::bar(6.0)
+                                .justify(JustifySpec::Center)
+                                .max_width(560.0)
+                                .min_height(LengthSpec::Px(24.0))
+                                .wrap(true),
+                        )
+                        .entity_ref(actions),
+                    )),
+                    widget(headline_offset_space()).entity_ref(offset),
+                )),
+            (slot, heading, actions),
+        )
+    })?;
     Ok((slot, heading, actions))
 }
 

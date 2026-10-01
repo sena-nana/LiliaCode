@@ -1,6 +1,6 @@
 use lilia_feature_automation::AutomationSignalEnvelope;
 use lilia_storage::Db;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 
 use super::DesktopApplicationError;
 

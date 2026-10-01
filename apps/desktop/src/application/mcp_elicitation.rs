@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Number, Value, json};
+use serde_json::{json, Map, Number, Value};
 
 pub const MCP_ELICITATION_INTERACTION_KIND: &str = "mcp_elicitation";
 

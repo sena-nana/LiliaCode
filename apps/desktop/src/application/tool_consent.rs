@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub const TOOL_CONSENT_INTERACTION_KIND: &str = "tool_consent";
 

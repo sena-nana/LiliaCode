@@ -207,8 +207,8 @@ pub(crate) fn new_connection(
 mod tests {
     use super::*;
     use lilia_feature_automation::{
-        AutomationDraft, AutomationEdge, AutomationNode, AutomationNodePosition,
-        AutomationScopeFilter, automation_active_outgoing_edges, automation_json_value_to_port,
+        automation_active_outgoing_edges, automation_json_value_to_port, AutomationDraft,
+        AutomationEdge, AutomationNode, AutomationNodePosition, AutomationScopeFilter,
     };
     use serde_json::json;
 
@@ -266,25 +266,21 @@ mod tests {
             1
         );
         assert!(new_connection(&workflow, source, target).unwrap().is_none());
-        assert!(
-            new_connection(
-                &workflow,
-                GraphEndpoint::new("second", "out:output"),
-                GraphEndpoint::new("first", "in:input")
-            )
-            .is_err()
-        );
+        assert!(new_connection(
+            &workflow,
+            GraphEndpoint::new("second", "out:output"),
+            GraphEndpoint::new("first", "in:input")
+        )
+        .is_err());
         workflow.draft.edges[0].source_handle = Some("output".into());
         workflow.draft.edges[0].target_handle = Some("input".into());
-        assert!(
-            new_connection(
-                &workflow,
-                GraphEndpoint::new("first", "out:output"),
-                GraphEndpoint::new("second", "in:input")
-            )
-            .unwrap()
-            .is_none()
-        );
+        assert!(new_connection(
+            &workflow,
+            GraphEndpoint::new("first", "out:output"),
+            GraphEndpoint::new("second", "in:input")
+        )
+        .unwrap()
+        .is_none());
         assert_eq!(
             automation_active_outgoing_edges(
                 &workflow.draft.edges,

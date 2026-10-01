@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use lilia_contracts::{PendingProjectionStatus, TaskId};
-use nana_ui::NativeMarkdown;
-use serde_json::{Value, json};
+use nana_ui::runtime::NativeMarkdown;
+use serde_json::{json, Value};
 
 use crate::task_session::{PendingActionView, TaskTimelineItem};
 

@@ -577,26 +577,22 @@ mod tests {
             .service::<crate::application::ConversationSuggestionGenerationServiceKey>()
             .unwrap();
         suggestion_generation.generate(|| Ok(())).unwrap();
-        assert!(
-            host.kernel()
-                .service::<crate::application::TurnSubmissionServiceKey>()
-                .is_ok()
-        );
-        assert!(
-            host.kernel()
-                .service::<crate::application::HookExecutionServiceKey>()
-                .is_ok()
-        );
-        assert!(
-            host.kernel()
-                .service::<crate::application::RegistryFileWatchServiceKey>()
-                .is_ok()
-        );
-        assert!(
-            host.kernel()
-                .service::<crate::application::ProductChangeFeedServiceKey>()
-                .is_ok()
-        );
+        assert!(host
+            .kernel()
+            .service::<crate::application::TurnSubmissionServiceKey>()
+            .is_ok());
+        assert!(host
+            .kernel()
+            .service::<crate::application::HookExecutionServiceKey>()
+            .is_ok());
+        assert!(host
+            .kernel()
+            .service::<crate::application::RegistryFileWatchServiceKey>()
+            .is_ok());
+        assert!(host
+            .kernel()
+            .service::<crate::application::ProductChangeFeedServiceKey>()
+            .is_ok());
         let update = host
             .kernel()
             .service::<crate::application::UpdateServiceKey>()
@@ -624,18 +620,16 @@ mod tests {
             })
             .unwrap();
         assert_eq!(application.provider_runtime_settings().unwrap(), saved);
-        assert!(
-            host.kernel()
-                .mounted_features()
-                .iter()
-                .any(|id| id.as_str() == "lilia.feature.update")
-        );
-        assert!(
-            host.kernel()
-                .mounted_features()
-                .iter()
-                .any(|id| id.as_str() == "lilia.feature.update-operations")
-        );
+        assert!(host
+            .kernel()
+            .mounted_features()
+            .iter()
+            .any(|id| id.as_str() == "lilia.feature.update"));
+        assert!(host
+            .kernel()
+            .mounted_features()
+            .iter()
+            .any(|id| id.as_str() == "lilia.feature.update-operations"));
     }
 
     #[test]

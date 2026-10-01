@@ -4,9 +4,9 @@
 //! dirty/conflict facts come from the shared application DocumentStore.
 
 use crate::application::{
-    BufferRevision, DOCUMENT_WORKSPACE_ITEM_KIND, DesktopDocumentDefinitionTarget,
-    DesktopDocumentDiagnosticsSnapshot, DesktopDocumentDiagnosticsState, Diagnostic, DocumentId,
-    DocumentSnapshot, WorkspaceItem,
+    BufferRevision, DesktopDocumentDefinitionTarget, DesktopDocumentDiagnosticsSnapshot,
+    DesktopDocumentDiagnosticsState, Diagnostic, DocumentId, DocumentSnapshot, WorkspaceItem,
+    DOCUMENT_WORKSPACE_ITEM_KIND,
 };
 use crate::text_editor_state::{TextEditorCursor, TextEditorPosition, TextEditorState};
 use lilia_contracts::ProjectId;
@@ -245,8 +245,8 @@ mod tests {
     };
 
     use super::{
-        DocumentEditorViewState, byte_position, document_editor_cursor_offset,
-        select_hosted_textarea_range,
+        byte_position, document_editor_cursor_offset, select_hosted_textarea_range,
+        DocumentEditorViewState,
     };
     use crate::text_editor_state::{TextEditorCursor, TextEditorPosition, TextEditorState};
 

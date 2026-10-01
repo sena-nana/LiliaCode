@@ -95,30 +95,26 @@ mod tests {
     use crate::module::timeline::{TimelineModule, TimelineModuleMessage};
     use crate::ui_module::{UiModule, UiModuleContext};
     use nana_ui::runtime::LayoutViewport;
-    use nana_ui::RuntimeInputAdapter;
-    use nana_ui_platform::{InputEvent, InputModifiers, PointerPhase, PointerType};
+    use crate::runtime_input::ScriptedInput;
+    use nana_ui_platform::PointerPhase;
     use std::sync::Mutex;
 
-    fn pointer(phase: PointerPhase, x: f32, y: f32) -> InputEvent {
-        InputEvent::Pointer {
-            phase,
-            pointer_id: 1,
-            pointer_type: PointerType::Mouse,
-            x,
-            y,
-            screen_x: x,
-            screen_y: y,
-            button: 0,
-            buttons: u16::from(phase != PointerPhase::Up),
-            pressure: 1.0,
-            tangential_pressure: 0.0,
-            tilt_x: 0,
-            tilt_y: 0,
-            twist: 0,
-            is_primary: true,
-            activation_click: false,
-            modifiers: InputModifiers::default(),
-        }
+    fn point_at(
+        input: &mut ScriptedInput,
+        context: &mut AppContext,
+        phase: PointerPhase,
+        x: f32,
+        y: f32,
+    ) {
+        input
+            .pointer(
+                context,
+                phase,
+                x,
+                y,
+                u16::from(phase != PointerPhase::Up),
+            )
+            .unwrap();
     }
 
     #[test]
@@ -168,13 +164,11 @@ mod tests {
                 let bounds = geometry.blocks[0].graphemes[index].bounds;
                 (bounds.x + 1.0, bounds.y + bounds.height / 2.0)
             };
-            let mut input = RuntimeInputAdapter::default();
+            let mut input = ScriptedInput::bind(&mut context, document);
             for index in [0, 5] {
                 let (x, y) = point(index);
                 for phase in [PointerPhase::Down, PointerPhase::Up] {
-                    input
-                        .dispatch(&mut context, document, &pointer(phase, x, y))
-                        .unwrap();
+                    point_at(&mut input, &mut context, phase, x, y);
                 }
             }
             {
@@ -189,12 +183,12 @@ mod tests {
             }
             let (x, y) = point(0);
             let (end_x, end_y) = point(3);
-            for event in [
-                pointer(PointerPhase::Down, x, y),
-                pointer(PointerPhase::Move, end_x, end_y),
-                pointer(PointerPhase::Up, end_x, end_y),
+            for (phase, px, py) in [
+                (PointerPhase::Down, x, y),
+                (PointerPhase::Move, end_x, end_y),
+                (PointerPhase::Up, end_x, end_y),
             ] {
-                input.dispatch(&mut context, document, &event).unwrap();
+                point_at(&mut input, &mut context, phase, px, py);
             }
             let kernel = lilia_kernel::Kernel::new();
             let cx = UiModuleContext::new(&kernel, window);
@@ -240,9 +234,7 @@ mod tests {
                     )
                     .unwrap();
                 for phase in [PointerPhase::Down, PointerPhase::Up] {
-                    input
-                        .dispatch(&mut context, document, &pointer(phase, x, y))
-                        .unwrap();
+                    point_at(&mut input, &mut context, phase, x, y);
                 }
             }
             let emitted = events.lock().unwrap();

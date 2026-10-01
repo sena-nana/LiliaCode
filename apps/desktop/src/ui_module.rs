@@ -270,7 +270,7 @@ pub trait ErasedUiModule {
     /// type means the shell's routing table disagrees with the module's message
     /// type, which is a wiring bug rather than a runtime condition.
     fn reduce_erased(&mut self, message: Box<dyn Any>, cx: &UiModuleContext<'_>)
-    -> UiModuleOutcome;
+        -> UiModuleOutcome;
 
     fn project(&self, cx: &UiModuleContext<'_>, into: &mut PrimaryShellSnapshot);
 
@@ -604,10 +604,9 @@ mod tests {
             .expect("the slot is free");
 
         let absent = FeatureId::new("test.absent").unwrap();
-        assert!(
-            host.reduce(&absent, Box::new(TitlerMessage::Set(String::new())), &cx)
-                .is_none()
-        );
+        assert!(host
+            .reduce(&absent, Box::new(TitlerMessage::Set(String::new())), &cx)
+            .is_none());
     }
 
     /// Contributes a module the way a feature crate would, so the test covers

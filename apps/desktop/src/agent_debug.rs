@@ -3,10 +3,10 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub(crate) fn retained_key_event(chord: &str) -> nana_ui_platform::InputEvent {
+pub(crate) fn retained_key_event(chord: &str) -> nana_ui_platform::KeyInput {
     let mut modifiers = nana_ui_platform::InputModifiers::default();
     let mut parts = chord.split('+').peekable();
     let mut key = chord;
@@ -21,25 +21,11 @@ pub(crate) fn retained_key_event(chord: &str) -> nana_ui_platform::InputEvent {
             "Shift" => modifiers.shift = true,
             "Alt" => modifiers.alt = true,
             _ => {
-                return nana_ui_platform::InputEvent::Keyboard {
-                    pressed: true,
-                    key: chord.into(),
-                    code: chord.into(),
-                    text: None,
-                    repeat: false,
-                    modifiers: Default::default(),
-                };
+                return crate::runtime_input::platform_key(chord, Default::default(), false);
             }
         }
     }
-    nana_ui_platform::InputEvent::Keyboard {
-        pressed: true,
-        key: key.into(),
-        code: key.into(),
-        text: None,
-        repeat: false,
-        modifiers,
-    }
+    crate::runtime_input::platform_key(key, modifiers, false)
 }
 
 const ENABLE_ENV: &str = "LILIA_AGENT_DEBUG";

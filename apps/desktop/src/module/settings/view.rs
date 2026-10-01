@@ -3,17 +3,17 @@ use super::presentation::{
 };
 use crate::runtime_layout::{pill_button as extra_button, reconcile_children};
 use crate::runtime_shell::{emit, IntentSink, ShellActionRow, ShellIntent};
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     AboutMetadata, AboutSection, Activate, AppContext, AppearanceSection, Button, DocumentId,
-    DonutChart, DonutSlice, Dropdown, DropdownOption, Entity, FormField, FrameworkError,
-    LengthSpec, NodeStyle, QrCode, SearchDropdown, SearchDropdownEvent, SearchDropdownOption,
-    SemanticColorRole, SettingsBack, SettingsCard, SettingsPage, SettingsRow, SettingsSidebar,
-    SettingsTabSelected, StableNodeId, Stack, Switch, Text, TextChanged, TextInput,
-    TimeSeriesChart, ToggleChanged,
+    DonutChart, DonutSlice, Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity,
+    FormField, FrameworkError, LengthSpec, NodeStyle, QrCode, SearchDropdown, SearchDropdownEvent,
+    SearchDropdownOption, SemanticColorRole, SettingsBack, SettingsCard, SettingsPage, SettingsRow,
+    SettingsSidebar, SettingsTabSelected, StableNodeId, Stack, Switch, Text, TextChanged,
+    TextInput, TimeSeriesChart, ToggleChanged,
 };
 use nana_ui::{
-    AppearanceEvent, AppearanceSettings, ButtonKind, ControlSize, DropdownEvent, DropdownSelection,
-    SettingsModel, SettingsState,
+    AppearanceEvent, AppearanceSettings, ButtonKind, ControlSize, SettingsModel, SettingsState,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -128,171 +128,198 @@ impl SettingsView {
         theme: nana_ui::ThemeMode,
         sink: IntentSink,
     ) -> Result<Self, FrameworkError> {
-        let settings_sidebar = context.create_detached_component(
-            document_id,
-            SettingsSidebar::new(settings.model.clone(), settings.state.clone()),
-        )?;
-        context.on(settings_sidebar, {
-            let sink = Arc::clone(&sink);
-            move |_, _event: &SettingsBack, _| emit(&sink, ShellIntent::CloseSettings)
+        macro_rules! mount_view {
+            ($kind:ty, $view:expr) => {{
+                let (_, entity) = context.mount_view_detached(document_id, || {
+                    let entity = entity_ref::<$kind>();
+                    with_refs(widget($view).entity_ref(entity), entity)
+                })?;
+                entity
+            }};
+        }
+        let close_sink = Arc::clone(&sink);
+        let select_sink = Arc::clone(&sink);
+        let (_, settings_sidebar) = context.mount_view_detached(document_id, move || {
+            let sidebar = entity_ref::<SettingsSidebar>();
+            with_refs(
+                widget(SettingsSidebar::new(
+                    settings.model.clone(),
+                    settings.state.clone(),
+                ))
+                .entity_ref(sidebar)
+                .on(move |_event: &SettingsBack| emit(&close_sink, ShellIntent::CloseSettings))
+                .on(move |event: &SettingsTabSelected| {
+                    emit(
+                        &select_sink,
+                        ShellIntent::SelectSettingsTab(event.tab.clone()),
+                    )
+                }),
+                sidebar,
+            )
         })?;
-        context.on(settings_sidebar, {
-            let sink = Arc::clone(&sink);
-            move |_, event: &SettingsTabSelected, _| {
-                emit(&sink, ShellIntent::SelectSettingsTab(event.tab.clone()))
-            }
+        let appearance_sink = Arc::clone(&sink);
+        let (_, appearance) = context.mount_view_detached(document_id, move || {
+            let appearance = entity_ref::<AppearanceSection>();
+            with_refs(
+                widget(
+                    AppearanceSection::new(theme, settings.appearance.clone())
+                        .material_status(settings.material_status.clone()),
+                )
+                .entity_ref(appearance)
+                .on(move |event: &AppearanceEvent| {
+                    emit(&appearance_sink, ShellIntent::Appearance(*event))
+                }),
+                appearance,
+            )
         })?;
-        let appearance = context.create_detached_component(
-            document_id,
-            AppearanceSection::new(theme, settings.appearance.clone())
-                .material_status(settings.material_status.clone()),
-        )?;
-        context.on(appearance, {
-            let sink = Arc::clone(&sink);
-            move |_, event: &AppearanceEvent, _| emit(&sink, ShellIntent::Appearance(*event))
+        let (_, about) = context.mount_view_detached(document_id, move || {
+            let about = entity_ref::<AboutSection>();
+            with_refs(
+                widget(AboutSection::new(
+                    AboutMetadata::new("LiliaCode", env!("CARGO_PKG_VERSION"))
+                        .description("本机工作区"),
+                ))
+                .entity_ref(about),
+                about,
+            )
         })?;
-        let about = context.create_detached_component(
-            document_id,
-            AboutSection::new(
-                AboutMetadata::new("LiliaCode", env!("CARGO_PKG_VERSION"))
-                    .description("本机工作区"),
-            ),
-        )?;
-        let product_settings =
-            context.create_detached_component(document_id, Stack::column(16.0).max_width(760.0))?;
-        let card_body = context.create_detached_component(document_id, Stack::column(12.0))?;
-        let toolbar = context.create_detached_component(document_id, Stack::bar(8.0).wrap(true))?;
-        let provider = context.create_detached_component(
-            document_id,
-            SearchDropdown::new(None::<String>).placeholder("选择模型服务"),
-        )?;
+        let product_settings = mount_view!(Stack, Stack::column(16.0).max_width(760.0));
+        let card_body = mount_view!(Stack, Stack::column(12.0));
+        let toolbar = mount_view!(Stack, Stack::bar(8.0).wrap(true));
         let provider_sink = Arc::clone(&sink);
-        context.on(provider, move |_, event: &SearchDropdownEvent, _| {
-            if let SearchDropdownEvent::Select(id) = event {
-                emit(&provider_sink, ShellIntent::SelectProvider(id.to_string()));
-            }
+        let (_, provider) = context.mount_view_detached(document_id, move || {
+            let provider = entity_ref::<SearchDropdown>();
+            with_refs(
+                widget(SearchDropdown::new(None::<String>).placeholder("选择模型服务"))
+                    .entity_ref(provider)
+                    .on(move |event: &SearchDropdownEvent| {
+                        if let SearchDropdownEvent::Select(id) = event {
+                            emit(&provider_sink, ShellIntent::SelectProvider(id.to_string()));
+                        }
+                    }),
+                provider,
+            )
         })?;
-        let provider_field = context.create_detached_component(
-            document_id,
-            FormField::new("模型服务").control_child(provider.stable_id()),
-        )?;
+        let provider_field = mount_view!(
+            FormField,
+            FormField::new("模型服务").control_child(provider.stable_id())
+        );
         context.append_child(provider_field, provider)?;
-        let settings_card =
-            context.create_detached_component(document_id, SettingsCard::new(String::new()))?;
-        let product_body =
-            context.create_detached_component(document_id, Text::new(String::new()))?;
-        let product_error =
-            context.create_detached_component(document_id, Text::new(String::new()))?;
-        let project_name = context.create_detached_component(
-            document_id,
-            TextInput::new(settings.project_name.clone()),
-        )?;
+        let settings_card = mount_view!(SettingsCard, SettingsCard::new(String::new()));
+        let product_body = mount_view!(Text, Text::new(String::new()));
+        let product_error = mount_view!(Text, Text::new(String::new()));
         let project_name_sink = Arc::clone(&sink);
-        context.on(project_name, move |_, event: &TextChanged, _| {
-            emit(
-                &project_name_sink,
-                ShellIntent::ProjectNameChanged(event.value.to_string()),
-            );
+        let (_, project_name) = context.mount_view_detached(document_id, move || {
+            let project_name = entity_ref::<TextInput>();
+            with_refs(
+                widget(TextInput::new(settings.project_name.clone()))
+                    .entity_ref(project_name)
+                    .on(move |event: &TextChanged| {
+                        emit(
+                            &project_name_sink,
+                            ShellIntent::ProjectNameChanged(event.value.to_string()),
+                        );
+                    }),
+                project_name,
+            )
         })?;
-        let project_name_field = context.create_detached_component(
-            document_id,
-            FormField::new("项目名称").control_child(project_name.stable_id()),
-        )?;
+        let project_name_field = mount_view!(
+            FormField,
+            FormField::new("项目名称").control_child(project_name.stable_id())
+        );
         context.append_child(project_name_field, project_name)?;
-        let project_workspace = context.create_detached_component(
-            document_id,
-            Text::new(settings.project_workspace.clone()),
-        )?;
-        let project_workspace_row = context.create_detached_component(
-            document_id,
+        let project_workspace = mount_view!(Text, Text::new(settings.project_workspace.clone()));
+        let project_workspace_row = mount_view!(
+            SettingsRow,
             SettingsRow::new("工作区")
                 .stacked(true)
-                .control_child(project_workspace.stable_id()),
-        )?;
+                .control_child(project_workspace.stable_id())
+        );
         context.append_child(project_workspace_row, project_workspace)?;
-        let clone_parent = context.create_detached_component(
-            document_id,
-            Text::new(clone_parent_label(&settings.project_clone_parent)),
-        )?;
-        let clone_parent_row = context.create_detached_component(
-            document_id,
+        let clone_parent = mount_view!(
+            Text,
+            Text::new(clone_parent_label(&settings.project_clone_parent))
+        );
+        let clone_parent_row = mount_view!(
+            SettingsRow,
             SettingsRow::new("Clone 默认父目录")
                 .stacked(true)
-                .control_child(clone_parent.stable_id()),
-        )?;
+                .control_child(clone_parent.stable_id())
+        );
         context.append_child(clone_parent_row, clone_parent)?;
-        let worktree_parent = context.create_detached_component(
-            document_id,
-            Text::new(worktree_parent_label(&settings.project_worktree_parent)),
-        )?;
-        let worktree_parent_row = context.create_detached_component(
-            document_id,
+        let worktree_parent = mount_view!(
+            Text,
+            Text::new(worktree_parent_label(&settings.project_worktree_parent))
+        );
+        let worktree_parent_row = mount_view!(
+            SettingsRow,
             SettingsRow::new("工作树父目录")
                 .stacked(true)
-                .control_child(worktree_parent.stable_id()),
-        )?;
+                .control_child(worktree_parent.stable_id())
+        );
         context.append_child(worktree_parent_row, worktree_parent)?;
-        let worktree_mode = context.create_detached_component(
-            document_id,
-            worktree_mode_dropdown(&settings.project_worktree_mode),
-        )?;
         let worktree_sink = Arc::clone(&sink);
-        context.on(
-            worktree_mode,
-            move |_, event: &DropdownEvent<Arc<str>>, _| {
-                if let DropdownEvent::Select(value) = event {
-                    emit(
-                        &worktree_sink,
-                        ShellIntent::SetProjectWorktreeMode(value.to_string()),
-                    );
-                }
-            },
-        )?;
-        let worktree_mode_row = context.create_detached_component(
-            document_id,
+        let (_, worktree_mode) = context.mount_view_detached(document_id, move || {
+            let worktree_mode = entity_ref::<Dropdown>();
+            with_refs(
+                widget(worktree_mode_dropdown(&settings.project_worktree_mode))
+                    .entity_ref(worktree_mode)
+                    .on(move |event: &DropdownEvent<Arc<str>>| {
+                        if let DropdownEvent::Select(value) = event {
+                            emit(
+                                &worktree_sink,
+                                ShellIntent::SetProjectWorktreeMode(value.to_string()),
+                            );
+                        }
+                    }),
+                worktree_mode,
+            )
+        })?;
+        let worktree_mode_row = mount_view!(
+            SettingsRow,
             SettingsRow::new("工作树默认行为")
                 .stacked(true)
-                .control_child(worktree_mode.stable_id()),
-        )?;
+                .control_child(worktree_mode.stable_id())
+        );
         context.append_child(worktree_mode_row, worktree_mode)?;
-        let remote_pair_hint = context.create_detached_component(
-            document_id,
-            Text::new("请使用 Android 扫码完成配对；过期后重新生成。"),
-        )?;
+        let remote_pair_hint = mount_view!(
+            Text,
+            Text::new("请使用 Android 扫码完成配对；过期后重新生成。")
+        );
         context.append_child(product_settings, settings_card)?;
         context.append_child(settings_card, card_body)?;
-        let sidebar_mode = context.create_detached_component(
-            document_id,
-            sidebar_mode_dropdown(&settings.sidebar_display_mode),
-        )?;
         let sidebar_sink = Arc::clone(&sink);
-        context.on(
-            sidebar_mode,
-            move |_, event: &DropdownEvent<Arc<str>>, _| {
-                if let DropdownEvent::Select(value) = event {
-                    emit(
-                        &sidebar_sink,
-                        ShellIntent::SetSidebarDisplayMode(value.to_string()),
-                    );
-                }
-            },
-        )?;
-        let sidebar_mode_row = context.create_detached_component(
-            document_id,
+        let (_, sidebar_mode) = context.mount_view_detached(document_id, move || {
+            let sidebar_mode = entity_ref::<Dropdown>();
+            with_refs(
+                widget(sidebar_mode_dropdown(&settings.sidebar_display_mode))
+                    .entity_ref(sidebar_mode)
+                    .on(move |event: &DropdownEvent<Arc<str>>| {
+                        if let DropdownEvent::Select(value) = event {
+                            emit(
+                                &sidebar_sink,
+                                ShellIntent::SetSidebarDisplayMode(value.to_string()),
+                            );
+                        }
+                    }),
+                sidebar_mode,
+            )
+        })?;
+        let sidebar_mode_row = mount_view!(
+            SettingsRow,
             SettingsRow::new("侧边栏样式")
                 .stacked(true)
-                .control_child(sidebar_mode.stable_id()),
-        )?;
+                .control_child(sidebar_mode.stable_id())
+        );
         context.append_child(sidebar_mode_row, sidebar_mode)?;
-        let appearance_page =
-            context.create_detached_component(document_id, Stack::column(16.0).max_width(760.0))?;
+        let appearance_page = mount_view!(Stack, Stack::column(16.0).max_width(760.0));
         context.append_child(appearance_page, appearance)?;
         context.append_child(appearance_page, sidebar_mode_row)?;
-        let settings_page = context.create_detached_component(
-            document_id,
+        let settings_page = mount_view!(
+            SettingsPage,
             SettingsPage::new(settings.model.clone(), settings.state.clone())
-                .content(appearance_page.stable_id()),
-        )?;
+                .content(appearance_page.stable_id())
+        );
 
         context.assemble_settings_sidebar(settings_sidebar)?;
         context.assemble_appearance_section(appearance)?;
@@ -532,6 +559,7 @@ impl SettingsView {
         view: Button,
         intent: ShellIntent,
     ) -> Result<Entity<Button>, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         if let Some(button) = self.product_actions.get(id).copied() {
             *self
                 .action_bindings
@@ -542,7 +570,10 @@ impl SettingsView {
             context.update_component(button, |button, _| *button = view)?;
             return Ok(button);
         }
-        let button = context.create_detached_component(document_id, view)?;
+        let (_, button) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<Button>();
+            with_refs(widget(view).entity_ref(button), button)
+        })?;
         let binding = Arc::new(Mutex::new(intent));
         let callback_binding = Arc::clone(&binding);
         let sink = Arc::clone(&self.sink);
@@ -710,16 +741,18 @@ impl SettingsView {
                 }
             }
             "quota" => {
+                use nana_ui::runtime::view::{entity_ref, widget, with_refs};
                 let chart = if let Some(chart) = self.quota_chart {
                     context.update_component(chart, |view, _| {
                         *view = crate::runtime_shell::quota::trend(&settings.quota_daily, 960.0);
                     })?;
                     chart
                 } else {
-                    let chart = context.create_detached_component(
-                        document_id,
-                        crate::runtime_shell::quota::trend(&settings.quota_daily, 960.0),
-                    )?;
+                    let trend = crate::runtime_shell::quota::trend(&settings.quota_daily, 960.0);
+                    let (_, chart) = context.mount_view_detached(document_id, move || {
+                        let chart = entity_ref::<TimeSeriesChart>();
+                        with_refs(widget(trend).entity_ref(chart), chart)
+                    })?;
                     self.quota_chart = Some(chart);
                     chart
                 };
@@ -735,8 +768,11 @@ impl SettingsView {
                         })?;
                         chart
                     } else {
-                        let chart = context
-                            .create_detached_component(document_id, quota_donut_chart(slices))?;
+                        let donut_view = quota_donut_chart(slices);
+                        let (_, chart) = context.mount_view_detached(document_id, move || {
+                            let chart = entity_ref::<DonutChart>();
+                            with_refs(widget(donut_view).entity_ref(chart), chart)
+                        })?;
                         self.quota_donuts.insert(key.to_owned(), chart);
                         chart
                     };
@@ -885,7 +921,11 @@ impl SettingsView {
                             })?;
                             existing
                         } else {
-                            let chart = context.create_detached_component(document_id, qr)?;
+                            let (_, chart) =
+                                context.mount_view_detached(document_id, move || {
+                                    let chart = entity_ref::<QrCode>();
+                                    with_refs(widget(qr).entity_ref(chart), chart)
+                                })?;
                             self.remote_qr = Some(chart);
                             chart
                         };
@@ -910,6 +950,7 @@ impl SettingsView {
         checked: bool,
         intent: ShellIntent,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         keep.insert(id.to_owned());
         let toggle = if let Some(toggle) = self.form_switches.get(id).copied() {
             context.update_component(toggle, |view, _| {
@@ -917,8 +958,14 @@ impl SettingsView {
             })?;
             toggle
         } else {
-            let toggle =
-                context.create_detached_component(document_id, Switch::new(label, checked))?;
+            let label = label.to_owned();
+            let (_, toggle) = context.mount_view_detached(document_id, move || {
+                let toggle = entity_ref::<Switch>();
+                with_refs(
+                    widget(Switch::new(label, checked)).entity_ref(toggle),
+                    toggle,
+                )
+            })?;
             let sink = Arc::clone(&self.sink);
             context.on(toggle, move |_, _event: &ToggleChanged, _| {
                 emit(&sink, intent.clone());

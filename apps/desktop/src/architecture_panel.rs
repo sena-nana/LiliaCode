@@ -4,7 +4,9 @@ use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, Entity, FrameworkError, LengthSpec, ScrollAxes,
     ScrollView, Stack, Text,
 };
-use nana_ui::{GraphCanvasEvent, GraphSelection};
+use nana_ui::runtime::GraphCanvasEvent;
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+use nana_ui::GraphSelection;
 
 use crate::application::{ProjectArchitectureChangeRecord, ProjectArchitectureGraph};
 use crate::runtime_shell::ShellIntent;
@@ -44,12 +46,19 @@ impl ArchitecturePanel {
         document: DocumentId,
         sink: Arc<dyn Fn(ShellIntent) + Send + Sync>,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(
-            document,
-            ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
-        )?;
-        let content = context.create_detached_component(document, Stack::column(8.0))?;
-        context.append_child(root, content)?;
+        let (_, (root, content)) = context.mount_view_detached(document, || {
+            let root = entity_ref::<ScrollView>();
+            let content = entity_ref::<Stack>();
+            with_refs(
+                widget(
+                    ScrollView::new(ScrollAxes::Vertical)
+                        .style(Stack::fill_column(0.0).node_style()),
+                )
+                .entity_ref(root)
+                .children(widget(Stack::column(8.0)).entity_ref(content)),
+                (root, content),
+            )
+        })?;
         Ok(Self {
             root,
             content,
@@ -67,7 +76,11 @@ impl ArchitecturePanel {
         document: DocumentId,
         value: impl Into<String>,
     ) -> Result<(), FrameworkError> {
-        let text = context.create_detached_component(document, Text::new(value))?;
+        let value = value.into();
+        let (_, text) = context.mount_view_detached(document, move || {
+            let text = entity_ref::<Text>();
+            with_refs(widget(Text::new(value)).entity_ref(text), text)
+        })?;
         self.children.push(text.stable_id());
         self.texts.push(text);
         Ok(())
@@ -82,20 +95,22 @@ impl ArchitecturePanel {
         active: bool,
         intent: ShellIntent,
     ) -> Result<(), FrameworkError> {
-        let button = context.create_detached_component(
-            document,
-            Button::new(if active {
-                format!("✓ {label}")
-            } else {
-                label
-            })
-            .layout(
-                Stack::bar(0.0)
-                    .height(LengthSpec::Px(30.0))
-                    .node_style()
-                    .layout,
-            ),
-        )?;
+        let button_label = if active { format!("✓ {label}") } else { label };
+        let (_, button) = context.mount_view_detached(document, move || {
+            let button = entity_ref::<Button>();
+            with_refs(
+                widget(
+                    Button::new(button_label).layout(
+                        Stack::bar(0.0)
+                            .height(LengthSpec::Px(30.0))
+                            .node_style()
+                            .layout,
+                    ),
+                )
+                .entity_ref(button),
+                button,
+            )
+        })?;
         let sink = self.sink.clone();
         context.on(button, move |_, _: &Activate, _| sink(intent.clone()))?;
         self.children.push(button.stable_id());

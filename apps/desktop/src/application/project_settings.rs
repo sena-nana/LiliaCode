@@ -326,8 +326,8 @@ fn normalize_optional_path(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use super::*;
     use crate::application::{

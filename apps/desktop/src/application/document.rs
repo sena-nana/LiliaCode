@@ -13,8 +13,8 @@ use crate::application::{
 };
 
 pub use lilia_feature_document::{
-    DocumentError, DocumentId, DocumentSavePlan, DocumentSnapshot, DocumentStore,
-    document_resource_key, path_from_document_resource_key,
+    document_resource_key, path_from_document_resource_key, DocumentError, DocumentId,
+    DocumentSavePlan, DocumentSnapshot, DocumentStore,
 };
 impl crate::application::DesktopDocumentService {
     pub fn register_language(

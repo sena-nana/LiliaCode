@@ -10,12 +10,12 @@ pub use lilia_feature_suggestions::types::{
     DesktopSuggestionModelRequest, DesktopSuggestionSessionThreadRef, DesktopSuggestionSourceProbe,
 };
 pub use model::{
-    ConversationSuggestionModelPort, DesktopApplicationSuggestionModelPort,
-    request_model_completion,
+    request_model_completion, ConversationSuggestionModelPort,
+    DesktopApplicationSuggestionModelPort,
 };
 pub use settings::{
-    CONVERSATION_SUGGESTION_SETTINGS_KEY, DesktopConversationSuggestionError,
-    DesktopConversationSuggestionSettings, DesktopConversationSuggestionSource,
+    DesktopConversationSuggestionError, DesktopConversationSuggestionSettings,
+    DesktopConversationSuggestionSource, CONVERSATION_SUGGESTION_SETTINGS_KEY,
 };
 
 use cache::{build_cache_key, cache_scope_key};
@@ -298,11 +298,9 @@ mod tests {
                 .unwrap();
         });
         second_attempt_receiver.recv().unwrap();
-        assert!(
-            second_completed_receiver
-                .recv_timeout(Duration::from_millis(50))
-                .is_err()
-        );
+        assert!(second_completed_receiver
+            .recv_timeout(Duration::from_millis(50))
+            .is_err());
 
         release_sender.send(()).unwrap();
         second_completed_receiver.recv().unwrap();
@@ -354,12 +352,10 @@ mod tests {
                 source: DesktopConversationSuggestionSource::AssistantAi,
             })
             .unwrap();
-        assert!(
-            application
-                .conversation_suggestions(None, true, &model)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(application
+            .conversation_suggestions(None, true, &model)
+            .unwrap()
+            .is_empty());
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
     }
 }

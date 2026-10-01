@@ -519,8 +519,8 @@ pub enum DesktopProjectTaskError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use lilia_service::ServiceAuthority;
 
@@ -657,27 +657,23 @@ mod tests {
             stop_and_wait(&service, id);
         }
         assert_eq!(sessions.len(), 1);
-        assert!(
-            results
-                .iter()
-                .filter_map(|result| result.as_ref().err())
-                .all(|error| matches!(
-                    error,
-                    DesktopApplicationError::ProjectTask(
-                        DesktopProjectTaskError::AlreadyRunning { .. }
-                            | DesktopProjectTaskError::LaunchInProgress { .. }
-                    )
-                ))
-        );
+        assert!(results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| matches!(
+                error,
+                DesktopApplicationError::ProjectTask(
+                    DesktopProjectTaskError::AlreadyRunning { .. }
+                        | DesktopProjectTaskError::LaunchInProgress { .. }
+                )
+            )));
         assert_eq!(
             rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
             1
         );
-        assert!(
-            service.project_task_catalog(&project_id).unwrap().tasks[0]
-                .running_session_id
-                .is_none()
-        );
+        assert!(service.project_task_catalog(&project_id).unwrap().tasks[0]
+            .running_session_id
+            .is_none());
     }
     #[test]
     fn concurrent_catalog_retains_the_older_process_after_the_latest_exits() {

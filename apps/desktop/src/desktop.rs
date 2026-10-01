@@ -97,19 +97,21 @@ use lilia_feature_provider::CredentialRequest;
 use lilia_feature_remote::RemoteRequest;
 use lilia_kernel::{JobContext, JobEvent, JobId, JobRequest, JobState};
 use mutsuki_agent_contracts::InteractionResolution;
-use nana_ui::runtime::RuntimeDocument;
+use nana_ui::runtime::{
+    DropdownEvent, DropdownOption, GraphCanvasEvent, KeyCaptureEvent, KeyCaptureLayer, KeyInput,
+    MarkdownImage, NativeMarkdown, RuntimeDocument, TreeDropPosition as NanaTreeDropPosition,
+};
 use nana_ui::{
     window_material_effect, ActionDescriptor, ActionId, ActionPickerState, ActionRegistry,
     AppearanceEvent, AppearanceSettings, CommandPaletteEvent, CommandPaletteItem, ContextPredicate,
-    DropdownEvent, DropdownOption, GraphCanvasEvent, GraphEdge as CanvasGraphEdge, GraphEndpoint,
-    GraphModel, GraphNode as CanvasGraphNode, GraphPoint, GraphPort, GraphPortKind, GraphPortSide,
-    GraphSelection, GraphSize, GraphViewport, Icon, KeyBinding, KeyCaptureEvent, KeyCaptureLayer,
-    KeyContext, KeyInput, KeyModifiers, KeyStroke, Keymap, KeymapMatch, KeymapState, LogicalRect,
-    MarkdownImage, NarrowBehavior, NativeMarkdown, RegionId, RegionRole, RegionState,
-    RuntimeProgram, RuntimeRedraw, SettingsModel, SettingsState, SettingsTab, SettingsTabId,
-    SplitAxis as NanaSplitAxis, SplitPaneAction, SplitPaneController, ThemeMode, ThemeTokens,
-    TreeDropPosition as NanaTreeDropPosition, WindowChromeEvent, WindowChromeState,
-    WindowDescriptor, WorkspaceAction, WorkspaceController, WorkspaceLayout, WorkspaceModel,
+    GraphEdge as CanvasGraphEdge, GraphEndpoint, GraphModel, GraphNode as CanvasGraphNode,
+    GraphPoint, GraphPort, GraphPortKind, GraphPortSide, GraphSelection, GraphSize, GraphViewport,
+    Icon, KeyBinding, KeyContext, KeyModifiers, KeyStroke, Keymap, KeymapMatch, KeymapState,
+    LogicalRect, NarrowBehavior, RegionId, RegionRole, RegionState, RuntimeProgram, RuntimeRedraw,
+    SettingsModel, SettingsState, SettingsTab, SettingsTabId, SplitAxis as NanaSplitAxis,
+    SplitPaneAction, SplitPaneController, ThemeMode, ThemeTokens, WindowChromeEvent,
+    WindowChromeState, WindowDescriptor, WorkspaceAction, WorkspaceController, WorkspaceLayout,
+    WorkspaceModel,
 };
 use nana_ui_platform::WindowId;
 use serde::{Deserialize, Serialize};
@@ -1824,14 +1826,14 @@ impl DesktopProgram {
                     ComposerInputAction::Reasoning(effort) => {
                         self.update_composer_reasoning_selection(
                             target.window_id,
-                            nana_ui::DropdownEvent::Select(effort),
+                            nana_ui::runtime::DropdownEvent::Select(effort),
                         );
                         return None;
                     }
                     ComposerInputAction::Model(model) => {
                         self.update_composer_model_selection(
                             target.window_id,
-                            nana_ui::DropdownEvent::Select(model),
+                            nana_ui::runtime::DropdownEvent::Select(model),
                         );
                         return None;
                     }
@@ -11239,7 +11241,7 @@ impl DesktopProgram {
         };
         let selection_changed = matches!(
             &message,
-            ArchitectureMessage::Graph(nana_ui::GraphCanvasEvent::SelectionChanged(_))
+            ArchitectureMessage::Graph(nana_ui::runtime::GraphCanvasEvent::SelectionChanged(_))
         );
         self.route_architecture_message(message);
         if layout_changed {
@@ -14900,41 +14902,25 @@ impl DesktopProgram {
         self.file_drop_hovered_windows.remove(&window_id);
     }
 
-    fn handle_file_window_event(
+    fn handle_file_drag(
         &mut self,
-        event: &HostedWindowEvent,
-    ) -> Option<HostedProgramUpdate> {
-        match event {
-            HostedWindowEvent::FileHovered {
-                id,
-                paths,
-                position,
-                ..
-            } => {
-                if *id == CONVERSATION_STATUS_WINDOW_ID {
-                    return Some(HostedProgramUpdate::default());
-                }
-                self.apply_file_hover(*id, paths, *position);
-                Some(HostedProgramUpdate::redraw_window(*id))
-            }
-            HostedWindowEvent::FileDropped {
-                id,
-                paths,
-                position,
-                ..
-            } => {
-                if *id == CONVERSATION_STATUS_WINDOW_ID {
-                    return Some(HostedProgramUpdate::default());
-                }
-                self.apply_file_drop(*id, paths, *position);
-                Some(HostedProgramUpdate::redraw_window(*id))
-            }
-            HostedWindowEvent::FileHoverCancelled { id } => {
-                self.clear_file_hover(*id);
-                Some(HostedProgramUpdate::redraw_window(*id))
-            }
-            _ => None,
+        id: HostedWindowId,
+        drag: &nana_ui_platform::FileDragInput,
+    ) -> HostedProgramUpdate {
+        use nana_ui_platform::FileDragKind;
+        if id == CONVERSATION_STATUS_WINDOW_ID && drag.kind != FileDragKind::Cancel {
+            return HostedProgramUpdate::default();
         }
+        match drag.kind {
+            FileDragKind::Hover => {
+                self.apply_file_hover(id, &drag.paths, drag.position);
+            }
+            FileDragKind::Drop => {
+                self.apply_file_drop(id, &drag.paths, drag.position);
+            }
+            FileDragKind::Cancel => self.clear_file_hover(id),
+        }
+        HostedProgramUpdate::redraw_window(id)
     }
 
     fn window_accepts_attachment_drop(&self, window_id: HostedWindowId) -> bool {
@@ -29931,26 +29917,24 @@ impl RuntimeProgram for DesktopProgram {
         input: nana_ui::RoutedInput<'_>,
         _context: &HostedProgramContext<Self::Message>,
     ) -> Result<HostedProgramUpdate, nana_ui::runtime::FrameworkError> {
+        if let nana_ui_platform::InputPayload::FileDrag(drag) = &input.event.payload {
+            return Ok(self.handle_file_drag(id, drag));
+        }
         if input.disposition.prevent_default {
             return Ok(HostedProgramUpdate::redraw(id));
         }
-        if let nana_ui_platform::InputEvent::Keyboard {
-            pressed,
-            key,
-            modifiers,
-            repeat,
-            ..
-        } = input.event
-        {
+        if let nana_ui_platform::InputPayload::Key(key) = &input.event.payload {
+            let pressed = key.is_pressed();
+            let logical = key.logical.0.as_ref();
             if self.shell_shortcut_capturing {
                 let key_input = KeyInput::new(
-                    *pressed,
-                    key,
-                    modifiers.alt,
-                    modifiers.control,
-                    modifiers.shift,
-                    modifiers.meta,
-                    *repeat,
+                    pressed,
+                    logical,
+                    key.modifiers.alt,
+                    key.modifiers.control,
+                    key.modifiers.shift,
+                    key.modifiers.meta,
+                    key.repeat,
                 );
                 let mut layer = KeyCaptureLayer::new().recording(true);
                 if let Some(capture) = layer.handle_key(&key_input) {
@@ -29963,17 +29947,17 @@ impl RuntimeProgram for DesktopProgram {
                     return Ok(HostedProgramUpdate::redraw(id));
                 }
             }
-            if *pressed && !*repeat && (modifiers.meta || modifiers.control) {
+            if pressed && !key.repeat && (key.modifiers.meta || key.modifiers.control) {
                 self.update_message(Message::Chrome(ChromeMessage::CommandKeyStroke {
                     window_id: id,
                     item_id: self.active_item_for_window(id),
                     stroke: KeyStroke::new(
-                        key.as_str(),
+                        logical,
                         KeyModifiers {
-                            control: modifiers.control,
-                            alt: modifiers.alt,
-                            shift: modifiers.shift,
-                            meta: modifiers.meta,
+                            control: key.modifiers.control,
+                            alt: key.modifiers.alt,
+                            shift: key.modifiers.shift,
+                            meta: key.modifiers.meta,
                         },
                     ),
                 }));
@@ -30717,9 +30701,6 @@ impl RuntimeProgram for DesktopProgram {
             self.error_message = Some(format!("无法打开窗口：{error}"));
             return HostedProgramUpdate::redraw_primary();
         }
-        if let Some(update) = self.handle_file_window_event(&event) {
-            return update;
-        }
         if window_event_id(&event) == CONVERSATION_STATUS_WINDOW_ID {
             return match event {
                 HostedWindowEvent::Ready { geometry, .. } => {
@@ -30740,11 +30721,7 @@ impl RuntimeProgram for DesktopProgram {
                 | HostedWindowEvent::MousePassthroughChanged { .. }
                 | HostedWindowEvent::VisibilityChanged { .. }
                 | HostedWindowEvent::FocusChanged { .. }
-                | HostedWindowEvent::Ime { .. }
                 | HostedWindowEvent::Closed { .. }
-                | HostedWindowEvent::FileHovered { .. }
-                | HostedWindowEvent::FileDropped { .. }
-                | HostedWindowEvent::FileHoverCancelled { .. }
                 | HostedWindowEvent::FileDialogRejected { .. }
                 | HostedWindowEvent::FileDialogCompleted { .. }
                 | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),
@@ -30798,11 +30775,7 @@ impl RuntimeProgram for DesktopProgram {
                 | HostedWindowEvent::MousePassthroughChanged { .. }
                 | HostedWindowEvent::VisibilityChanged { .. }
                 | HostedWindowEvent::FocusChanged { .. }
-                | HostedWindowEvent::Ime { .. }
                 | HostedWindowEvent::Closed { .. }
-                | HostedWindowEvent::FileHovered { .. }
-                | HostedWindowEvent::FileDropped { .. }
-                | HostedWindowEvent::FileHoverCancelled { .. }
                 | HostedWindowEvent::FileDialogRejected { .. }
                 | HostedWindowEvent::FileDialogCompleted { .. }
                 | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),
@@ -30884,11 +30857,7 @@ impl RuntimeProgram for DesktopProgram {
             | HostedWindowEvent::MousePassthroughChanged { .. }
             | HostedWindowEvent::VisibilityChanged { .. }
             | HostedWindowEvent::FocusChanged { .. }
-            | HostedWindowEvent::Ime { .. }
             | HostedWindowEvent::Closed { .. }
-            | HostedWindowEvent::FileHovered { .. }
-            | HostedWindowEvent::FileDropped { .. }
-            | HostedWindowEvent::FileHoverCancelled { .. }
             | HostedWindowEvent::FileDialogRejected { .. }
             | HostedWindowEvent::FileDialogCompleted { .. }
             | HostedWindowEvent::AppearanceChanged { .. } => HostedProgramUpdate::default(),

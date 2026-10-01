@@ -1,5 +1,5 @@
 use crate::module::extensions::{
-    ExtensionsModule, mcp_credential_draft_key, parse_hook_handlers_draft,
+    mcp_credential_draft_key, parse_hook_handlers_draft, ExtensionsModule,
 };
 use crate::runtime_extensions::ExtensionBrowserSnapshot;
 use crate::runtime_shell::ShellIntent;

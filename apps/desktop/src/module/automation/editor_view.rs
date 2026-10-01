@@ -2,10 +2,13 @@ use super::editor::{field_choices, field_label, NodeEditorAction, NodeEditorSnap
 use super::view::{AutomationAction, AutomationTarget};
 use crate::runtime_layout::reconcile_children;
 use crate::runtime_shell::{emit, IntentSink, ShellIntent};
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+#[cfg(test)]
+use nana_ui::runtime::Activate;
 use nana_ui::runtime::{
-    Activate, AppContext, Button, DocumentId, Entity, FormField, FrameworkError, ScrollAxes,
-    ScrollView, SearchDropdown, SearchDropdownEvent, SearchDropdownOption, StableNodeId, Stack,
-    Switch, TextArea, TextChanged, TextInput, ToggleChanged,
+    AppContext, Button, DocumentId, Entity, FormField, FrameworkError, ScrollAxes, ScrollView,
+    SearchDropdown, SearchDropdownEvent, SearchDropdownOption, StableNodeId, Stack, Switch,
+    TextArea, TextChanged, TextInput, ToggleChanged,
 };
 use nana_ui::ButtonKind;
 use serde_json::Value;
@@ -140,50 +143,54 @@ impl NodeEditorView {
         document: DocumentId,
         sink: IntentSink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::fill_column(8.0))?;
-        let actions = context.create_detached_component(document, Stack::bar(8.0).wrap(true))?;
-        let save = context.create_detached_component(
-            document,
-            Button::new("保存节点").kind(ButtonKind::Primary),
-        )?;
-        let close = context.create_detached_component(
-            document,
-            Button::new("返回画布").kind(ButtonKind::Subtle),
-        )?;
         let binding = Arc::new(Mutex::new(None));
-        for (button, action) in [
-            (save, NodeEditorAction::Save),
-            (close, NodeEditorAction::Close),
-        ] {
-            let target = Arc::clone(&binding);
-            let callback = Arc::clone(&sink);
-            context.on(button, move |_, _: &Activate, _| {
-                dispatch(&callback, &target, action.clone())
+        let save_target = Arc::clone(&binding);
+        let save_sink = Arc::clone(&sink);
+        let close_target = Arc::clone(&binding);
+        let close_sink = Arc::clone(&sink);
+        let title_target = Arc::clone(&binding);
+        let title_sink = Arc::clone(&sink);
+        let (_, (root, fields, title, save, _close, _title_field)) =
+            context.mount_view_detached(document, move || {
+                let root = entity_ref::<Stack>();
+                let fields = entity_ref::<Stack>();
+                let title = entity_ref::<TextInput>();
+                let save = entity_ref::<Button>();
+                let close = entity_ref::<Button>();
+                let title_field = entity_ref::<FormField>();
+                let title_control =
+                    widget(TextInput::new(""))
+                        .entity_ref(title)
+                        .on(move |event: &TextChanged| {
+                            dispatch(
+                                &title_sink,
+                                &title_target,
+                                NodeEditorAction::Title(event.value.to_string()),
+                            )
+                        });
+                with_refs(
+                    widget(Stack::fill_column(8.0)).entity_ref(root).children((
+                        widget(Stack::bar(8.0).wrap(true)).children((
+                            widget(Button::new("保存节点").kind(ButtonKind::Primary))
+                                .entity_ref(save)
+                                .on_activate(move || {
+                                    dispatch(&save_sink, &save_target, NodeEditorAction::Save)
+                                }),
+                            widget(Button::new("返回画布").kind(ButtonKind::Subtle))
+                                .entity_ref(close)
+                                .on_activate(move || {
+                                    dispatch(&close_sink, &close_target, NodeEditorAction::Close)
+                                }),
+                        )),
+                        widget(FormField::new("节点名称"))
+                            .entity_ref(title_field)
+                            .child_slot(title_control, |field, id| field.control_child(id)),
+                        widget(ScrollView::new(ScrollAxes::Vertical))
+                            .children(widget(Stack::column(12.0)).entity_ref(fields)),
+                    )),
+                    (root, fields, title, save, close, title_field),
+                )
             })?;
-            context.append_child(actions, button)?;
-        }
-        let scroll =
-            context.create_detached_component(document, ScrollView::new(ScrollAxes::Vertical))?;
-        let fields = context.create_detached_component(document, Stack::column(12.0))?;
-        let title = context.create_detached_component(document, TextInput::new(""))?;
-        let title_field = context.create_detached_component(
-            document,
-            FormField::new("节点名称").control_child(title.stable_id()),
-        )?;
-        context.append_child(title_field, title)?;
-        context.append_child(root, actions)?;
-        context.append_child(root, title_field)?;
-        context.append_child(root, scroll)?;
-        context.append_child(scroll, fields)?;
-        let target = Arc::clone(&binding);
-        let callback = Arc::clone(&sink);
-        context.on(title, move |_, event: &TextChanged, _| {
-            dispatch(
-                &callback,
-                &target,
-                NodeEditorAction::Title(event.value.to_string()),
-            )
-        })?;
         Ok(Self {
             root,
             fields,
@@ -229,10 +236,11 @@ impl NodeEditorView {
                 let sink = Arc::clone(&self.sink);
                 let choices = field_choices(&key);
                 let input = if key == "createTask" {
-                    let input = context.create_detached_component(
-                        document,
-                        Switch::new(field_label(&key), false),
-                    )?;
+                    let label = field_label(&key);
+                    let (_, input) = context.mount_view_detached(document, move || {
+                        let input = entity_ref::<Switch>();
+                        with_refs(widget(Switch::new(label, false)).entity_ref(input), input)
+                    })?;
                     context.on(input, move |_, event: &ToggleChanged, _| {
                         dispatch(
                             &sink,
@@ -245,10 +253,14 @@ impl NodeEditorView {
                     })?;
                     Input::Toggle(input)
                 } else if !choices.is_empty() {
-                    let input = context.create_detached_component(
-                        document,
-                        SearchDropdown::new(None::<String>).placeholder("请选择"),
-                    )?;
+                    let (_, input) = context.mount_view_detached(document, || {
+                        let input = entity_ref::<SearchDropdown>();
+                        with_refs(
+                            widget(SearchDropdown::new(None::<String>).placeholder("请选择"))
+                                .entity_ref(input),
+                            input,
+                        )
+                    })?;
                     context.on(input, move |_, event: &SearchDropdownEvent, _| {
                         if let SearchDropdownEvent::Select(value) = event {
                             dispatch(
@@ -263,16 +275,19 @@ impl NodeEditorView {
                     })?;
                     Input::Choice(input)
                 } else if matches!(key.as_str(), "prompt" | "text" | "summary" | "cases") {
-                    let input = context.create_detached_component(
-                        document,
-                        TextArea::new("")
-                            .height(120.0)
-                            .placeholder(if key == "cases" {
-                                "每行一个匹配值"
-                            } else {
-                                ""
-                            }),
-                    )?;
+                    let placeholder = if key == "cases" {
+                        "每行一个匹配值"
+                    } else {
+                        ""
+                    };
+                    let (_, input) = context.mount_view_detached(document, move || {
+                        let input = entity_ref::<TextArea>();
+                        with_refs(
+                            widget(TextArea::new("").height(120.0).placeholder(placeholder))
+                                .entity_ref(input),
+                            input,
+                        )
+                    })?;
                     context.on(input, move |_, event: &TextChanged, _| {
                         let value = Value::String(event.value.to_string());
                         dispatch(
@@ -286,7 +301,10 @@ impl NodeEditorView {
                     })?;
                     Input::Multi(input)
                 } else {
-                    let input = context.create_detached_component(document, TextInput::new(""))?;
+                    let (_, input) = context.mount_view_detached(document, || {
+                        let input = entity_ref::<TextInput>();
+                        with_refs(widget(TextInput::new("")).entity_ref(input), input)
+                    })?;
                     context.on(input, move |_, event: &TextChanged, _| {
                         dispatch(
                             &sink,
@@ -299,15 +317,19 @@ impl NodeEditorView {
                     })?;
                     Input::Single(input)
                 };
-                let row = context.create_detached_component(
-                    document,
-                    FormField::new(if field.key == "createTask" {
-                        "任务目标"
-                    } else {
-                        field_label(&field.key)
-                    })
-                    .control_child(input.id()),
-                )?;
+                let row_label = if field.key == "createTask" {
+                    "任务目标".to_owned()
+                } else {
+                    field_label(&field.key).to_owned()
+                };
+                let input_id = input.id();
+                let (_, row) = context.mount_view_detached(document, move || {
+                    let row = entity_ref::<FormField>();
+                    with_refs(
+                        widget(FormField::new(row_label).control_child(input_id)).entity_ref(row),
+                        row,
+                    )
+                })?;
                 reconcile_children(context, row.stable_id(), &[input.id()])?;
                 self.inputs.insert(field.key.clone(), Field { row, input });
             }

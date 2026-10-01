@@ -836,11 +836,9 @@ mod tests {
         assert!(enabled.enabled);
         assert!(enabled.runtime_available);
         let skills = application.extensions_snapshot().unwrap().skills;
-        assert!(
-            skills
-                .iter()
-                .any(|skill| { skill.skill_id == "review" && skill.runtime_available })
-        );
+        assert!(skills
+            .iter()
+            .any(|skill| { skill.skill_id == "review" && skill.runtime_available }));
         let server_id = "plugin.review-tools.remote";
         application
             .set_mcp_server_credential(
@@ -862,11 +860,9 @@ mod tests {
                 .present
         );
 
-        assert!(
-            application
-                .set_plugin_package_enabled("review-tools", false, 1)
-                .is_err()
-        );
+        assert!(application
+            .set_plugin_package_enabled("review-tools", false, 1)
+            .is_err());
         application
             .set_plugin_package_enabled("review-tools", false, 2)
             .unwrap();
@@ -903,11 +899,9 @@ mod tests {
             "changed",
         )
         .unwrap();
-        assert!(
-            application
-                .set_plugin_package_enabled("review-tools", true, 1)
-                .is_err()
-        );
+        assert!(application
+            .set_plugin_package_enabled("review-tools", true, 1)
+            .is_err());
         let view = application.plugin_packages().unwrap().2.remove(0);
         assert!(!view.runtime_available);
         assert!(!view.warnings.is_empty());

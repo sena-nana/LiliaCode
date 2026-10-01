@@ -657,11 +657,9 @@ mod tests {
             }),
             "plan: {plan:#?}\nreport: {report:#?}"
         );
-        assert!(
-            LiliaDataPaths::from_home(&staging_home)
-                .product_db()
-                .is_file()
-        );
+        assert!(LiliaDataPaths::from_home(&staging_home)
+            .product_db()
+            .is_file());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -778,13 +776,12 @@ mod tests {
             .unwrap();
         assert_eq!(id, "imported");
         drop(activated);
-        assert!(
-            home.join("import-backups")
-                .join("plan-activate")
-                .join("db")
-                .join("product.db")
-                .is_file()
-        );
+        assert!(home
+            .join("import-backups")
+            .join("plan-activate")
+            .join("db")
+            .join("product.db")
+            .is_file());
         assert!(!manifest_path(&home).exists());
         assert!(!staging.exists());
         fs::remove_dir_all(home).unwrap();

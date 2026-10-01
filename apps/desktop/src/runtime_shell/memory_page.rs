@@ -2,6 +2,7 @@ use super::*;
 use crate::application::MemoryScope;
 use crate::module::memory::MemoryMessage;
 use nana_ui::runtime::{Checkbox, NumberChanged, NumberInput};
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 
 fn message(message: MemoryMessage) -> ShellIntent {
     ShellIntent::MemoryCommand(message)
@@ -164,7 +165,10 @@ impl ShellHandles {
             cx.update_component(entity, |old, _| *old = view)?;
             entity
         } else {
-            let entity = cx.create_detached_component(doc, view)?;
+            let (_, entity) = cx.mount_view_detached(doc, move || {
+                let entity = entity_ref::<IconButton>();
+                with_refs(widget(view).entity_ref(entity), entity)
+            })?;
             bind_activate(cx, entity, self.sink.clone(), intent)?;
             self.memory_icons.insert(key.to_owned(), entity);
             entity
@@ -183,7 +187,10 @@ impl ShellHandles {
             cx.update_component(entity, |view, _| *view = stack)?;
             entity
         } else {
-            let entity = cx.create_detached_component(doc, stack)?;
+            let (_, entity) = cx.mount_view_detached(doc, move || {
+                let entity = entity_ref::<Stack>();
+                with_refs(widget(stack).entity_ref(entity), entity)
+            })?;
             self.memory_layout.insert(key.to_owned(), entity);
             entity
         };
@@ -202,7 +209,10 @@ impl ShellHandles {
             cx.update_component(entity, |view, _| *view = Text::new(value).style(style))?;
             entity
         } else {
-            let entity = cx.create_detached_component(doc, Text::new(value).style(style))?;
+            let (_, entity) = cx.mount_view_detached(doc, move || {
+                let entity = entity_ref::<Text>();
+                with_refs(widget(Text::new(value).style(style)).entity_ref(entity), entity)
+            })?;
             self.memory_group_titles.insert(key.to_owned(), entity);
             entity
         };
@@ -278,7 +288,10 @@ impl ShellHandles {
             cx.update_component(entity, |current, _| *current = view)?;
             entity
         } else {
-            let entity = cx.create_detached_component(doc, view)?;
+            let (_, entity) = cx.mount_view_detached(doc, move || {
+                let entity = entity_ref::<Checkbox>();
+                with_refs(widget(view).entity_ref(entity), entity)
+            })?;
             let sink = Arc::clone(&self.sink);
             cx.on(entity, move |_, _: &ToggleChanged, _| {
                 emit(&sink, intent.clone())
@@ -391,13 +404,19 @@ impl ShellHandles {
             })?;
             number
         } else {
-            let number = cx.create_detached_component(
-                doc,
-                NumberInput::new(value)
-                    .range(1.0, 100.0)
-                    .precision(0)
-                    .style(number_style),
-            )?;
+            let (_, number) = cx.mount_view_detached(doc, move || {
+                let number = entity_ref::<NumberInput>();
+                with_refs(
+                    widget(
+                        NumberInput::new(value)
+                            .range(1.0, 100.0)
+                            .precision(0)
+                            .style(number_style),
+                    )
+                    .entity_ref(number),
+                    number,
+                )
+            })?;
             let sink = self.sink.clone();
             cx.on(number, move |_, event: &NumberChanged, _| {
                 emit(
@@ -494,10 +513,14 @@ impl ShellHandles {
                 let row = if let Some(row) = self.project_cards.get(&id).copied() {
                     row
                 } else {
-                    let row = cx.create_detached_component(
-                        doc,
-                        ListItem::new(memory.title.clone()).auto_height(true),
-                    )?;
+                    let title = memory.title.clone();
+                    let (_, row) = cx.mount_view_detached(doc, move || {
+                        let row = entity_ref::<ListItem>();
+                        with_refs(
+                            widget(ListItem::new(title).auto_height(true)).entity_ref(row),
+                            row,
+                        )
+                    })?;
                     bind_activate(
                         cx,
                         row,
@@ -673,9 +696,21 @@ impl ShellHandles {
                 SegmentedControl::radio_group().size(nana_ui_core::ControlSize::Small);
             control.orientation = SelectionOrientation::Horizontal;
             control.style = Stack::row(8.0).node_style();
-            let group = cx.create_detached_component(doc, control)?;
-            let project = cx.create_detached_component(doc, SegmentedOption::new("项目"))?;
-            let user = cx.create_detached_component(doc, SegmentedOption::new("用户"))?;
+            let (_, group) = cx.mount_view_detached(doc, move || {
+                let group = entity_ref::<SegmentedControl>();
+                with_refs(widget(control).entity_ref(group), group)
+            })?;
+            let (_, project) = cx.mount_view_detached(doc, || {
+                let project = entity_ref::<SegmentedOption>();
+                with_refs(
+                    widget(SegmentedOption::new("项目")).entity_ref(project),
+                    project,
+                )
+            })?;
+            let (_, user) = cx.mount_view_detached(doc, || {
+                let user = entity_ref::<SegmentedOption>();
+                with_refs(widget(SegmentedOption::new("用户")).entity_ref(user), user)
+            })?;
             let sink = self.sink.clone();
             cx.on(group, move |_, event: &SegmentedSelectionRequested, _| {
                 let scope = if event.option == project.stable_id() {
@@ -1114,17 +1149,14 @@ mod tests {
             .read(user, |option| option.selected())
             .unwrap());
         let doc = document.document();
-        let event = nana_ui_platform::InputEvent::Keyboard {
-            pressed: true,
-            key: "ArrowLeft".into(),
-            text: None,
-            code: "ArrowLeft".into(),
-            repeat: false,
-            modifiers: Default::default(),
-        };
         assert!(
-            nana_ui::RuntimeInputAdapter::default()
-                .dispatch(document.context_mut(), doc, &event)
+            crate::runtime_input::ScriptedInput::bind(document.context_mut(), doc)
+                .press(
+                    document.context_mut(),
+                    "ArrowLeft",
+                    Default::default(),
+                    false,
+                )
                 .unwrap()
                 .prevent_default
         );
@@ -1248,24 +1280,19 @@ mod tests {
     }
 
     fn history_key(cx: &mut AppContext, doc: DocumentId, key: &str, control: bool) {
-        nana_ui::RuntimeInputAdapter::default()
-            .dispatch(
-                cx,
-                doc,
-                &if control {
-                    crate::agent_debug::retained_key_event(&format!("Meta+{key}"))
-                } else {
-                    nana_ui_platform::InputEvent::Keyboard {
-                        pressed: true,
-                        key: key.into(),
-                        code: key.into(),
-                        text: Some(key.into()),
-                        repeat: false,
-                        modifiers: Default::default(),
-                    }
-                },
-            )
-            .unwrap();
+        let mut input = crate::runtime_input::ScriptedInput::bind(cx, doc);
+        if control {
+            input
+                .press_key(
+                    cx,
+                    crate::agent_debug::retained_key_event(&format!("Meta+{key}")),
+                )
+                .unwrap();
+        } else {
+            input
+                .press_text(cx, key, Default::default(), false, Some(key))
+                .unwrap();
+        }
     }
 
     #[test]
@@ -1451,26 +1478,20 @@ mod tests {
         let doc = document.document();
         let title = handles.form_fields["memory-title"].stable_id();
         document.context_mut().focus_node(doc, title).unwrap();
-        let clipboard =
-            nana_ui_platform::shared_clipboard(nana_ui_platform::MemoryClipboard::new());
-        clipboard
-            .lock()
-            .unwrap()
-            .write_text(&format!("{}😀", "a".repeat(119)));
-        let event = nana_ui_platform::InputEvent::Keyboard {
-            pressed: true,
-            key: "v".into(),
-            code: "KeyV".into(),
-            text: None,
-            repeat: false,
-            modifiers: nana_ui_platform::InputModifiers {
-                control: true,
-                ..Default::default()
-            },
-        };
-        nana_ui::RuntimeInputAdapter::default()
-            .with_clipboard(clipboard)
-            .dispatch(document.context_mut(), doc, &event)
+        let mut input = crate::runtime_input::ScriptedInput::bind(document.context_mut(), doc);
+        input
+            .services_mut()
+            .set_clipboard(Some(format!("{}😀", "a".repeat(119))));
+        input
+            .press(
+                document.context_mut(),
+                "v",
+                nana_ui_platform::InputModifiers {
+                    control: true,
+                    ..Default::default()
+                },
+                false,
+            )
             .unwrap();
         let expected = "a".repeat(119);
         assert_eq!(

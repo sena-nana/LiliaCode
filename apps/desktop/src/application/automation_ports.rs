@@ -7,7 +7,7 @@ use lilia_contracts::{
     TimelineProjectionCommand, TimelineProjectionEvent,
 };
 use lilia_storage::ProjectionApplyResult;
-use serde_json::{Value as JsonValue, json};
+use serde_json::{json, Value as JsonValue};
 
 use super::{
     AutomationAddTodoRequest, AutomationAgentActivation, AutomationAgentDispatch,
@@ -635,8 +635,8 @@ fn port_error(error: impl std::fmt::Display) -> AutomationPortError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use lilia_contracts::{ProductEntity, ProductTask, TaskId};
     use lilia_service::ServiceAuthority;
@@ -927,17 +927,15 @@ mod tests {
                 .status,
             AutomationRunStatus::WaitingUser
         );
-        assert!(
-            operations
-                .operate(
-                    AutomationOperationRequest::Cancel {
-                        workflow_id: "other".into(),
-                        run_id: started.run_id.clone()
-                    },
-                    &context
-                )
-                .is_err()
-        );
+        assert!(operations
+            .operate(
+                AutomationOperationRequest::Cancel {
+                    workflow_id: "other".into(),
+                    run_id: started.run_id.clone()
+                },
+                &context
+            )
+            .is_err());
         let wrong = operations
             .operate(
                 AutomationOperationRequest::Resume {

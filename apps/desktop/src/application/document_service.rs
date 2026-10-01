@@ -160,11 +160,9 @@ mod tests {
         assert_eq!(observed.buffer.text, "draft");
         assert!(observed.buffer.is_dirty());
         assert!(rx.try_recv().is_err());
-        assert!(
-            mounted
-                .replace_document_text(document.id, document.buffer.revision, "stale")
-                .is_err()
-        );
+        assert!(mounted
+            .replace_document_text(document.id, document.buffer.revision, "stale")
+            .is_err());
         assert!(mounted.close_document(document.id, false).is_err());
         assert!(rx.try_recv().is_err());
         let saved = mounted.save_document(document.id, revision).unwrap();

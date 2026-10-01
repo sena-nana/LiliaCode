@@ -6,9 +6,10 @@ use std::sync::Arc;
 use nana_ui::runtime::{
     AlignSpec, AppContext, Button, Chip, DocumentId, Dropdown, DropdownOption, Entity,
     FrameworkError, IconGlyph, JustifySpec, LengthSpec, NativeMarkdown, PositionSpec,
-    SemanticColorRole, Stack, Text, TextArea, TextChanged,
+    SemanticColorRole, Stack, Text, TextArea, TextChanged, DropdownEvent, DropdownSelection,
 };
-use nana_ui::{ButtonKind, ControlSize, DropdownEvent, DropdownSelection, Icon};
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+use nana_ui::{ButtonKind, ControlSize, Icon};
 use nana_ui_platform::WindowId;
 
 use crate::runtime_layout::{pill_button, token_chip};
@@ -33,7 +34,7 @@ pub enum ConversationAction {
         attachment_id: String,
     },
     CloseImage,
-    OpenImage(nana_ui::MarkdownImage),
+    OpenImage(nana_ui::runtime::MarkdownImage),
     SelectText {
         event_id: String,
         text: Option<String>,
@@ -223,57 +224,101 @@ impl TimelineContent {
             .collect()
     }
     pub fn mount(context: &mut AppContext, document: DocumentId) -> Result<Self, FrameworkError> {
-        let rail = context.create_detached_component(
-            document,
-            Stack::row(0.0)
-                .width(LengthSpec::Px(28.0))
-                .height(LengthSpec::Px(22.0))
-                .align(AlignSpec::Center)
-                .justify(JustifySpec::Center)
-                .surface(SemanticColorRole::Background),
-        )?;
-        let node = context
-            .create_detached_component(document, IconGlyph::new(Icon::Activity).size(13.0))?;
-        context.append_child(rail, node)?;
-        let rail_line = context.create_detached_component(
-            document,
-            Stack::column(0.0)
-                .surface(SemanticColorRole::BorderSoft)
-                .width(LengthSpec::Px(1.0))
-                .with_layout(|layout| {
-                    layout.position = PositionSpec::Absolute;
-                    layout.offset_left = Some(LengthSpec::Px(13.5));
-                    layout.offset_top = Some(LengthSpec::Px(0.0));
-                    layout.offset_bottom = Some(LengthSpec::Px(0.0));
-                }),
-        )?;
+        let (
+            _,
+            (
+                attachments,
+                body,
+                header,
+                preview,
+                rail,
+                rail_line,
+                node,
+                markdown,
+                title,
+                actions,
+            ),
+        ) = context.mount_view_detached(document, move || {
+            let attachments = entity_ref::<Stack>();
+            let body = entity_ref::<Stack>();
+            let header = entity_ref::<Stack>();
+            let preview = entity_ref::<Text>();
+            let rail = entity_ref::<Stack>();
+            let rail_line = entity_ref::<Stack>();
+            let node = entity_ref::<IconGlyph>();
+            let markdown = entity_ref::<NativeMarkdown>();
+            let title = entity_ref::<Text>();
+            let actions = entity_ref::<Stack>();
+            with_refs(
+                (
+                    widget(Stack::column(4.0)).entity_ref(attachments),
+                    widget(
+                        Stack::column(7.0)
+                            .grow(1.0)
+                            .shrink(1.0)
+                            .min_width(LengthSpec::Px(0.0)),
+                    )
+                    .entity_ref(body),
+                    widget(Stack::bar(10.0).min_width(LengthSpec::Px(0.0))).entity_ref(header),
+                    widget(Text::new("")).entity_ref(preview),
+                    widget(
+                        Stack::row(0.0)
+                            .width(LengthSpec::Px(28.0))
+                            .height(LengthSpec::Px(22.0))
+                            .align(AlignSpec::Center)
+                            .justify(JustifySpec::Center)
+                            .surface(SemanticColorRole::Background),
+                    )
+                    .entity_ref(rail)
+                    .children(widget(IconGlyph::new(Icon::Activity).size(13.0)).entity_ref(node)),
+                    widget(
+                        Stack::column(0.0)
+                            .surface(SemanticColorRole::BorderSoft)
+                            .width(LengthSpec::Px(1.0))
+                            .with_layout(|layout| {
+                                layout.position = PositionSpec::Absolute;
+                                layout.offset_left = Some(LengthSpec::Px(13.5));
+                                layout.offset_top = Some(LengthSpec::Px(0.0));
+                                layout.offset_bottom = Some(LengthSpec::Px(0.0));
+                            }),
+                    )
+                    .entity_ref(rail_line),
+                    widget(NativeMarkdown::parse("")).entity_ref(markdown),
+                    widget(Text::new("")).entity_ref(title),
+                    widget(Stack::row(6.0)).entity_ref(actions),
+                ),
+                (
+                    attachments,
+                    body,
+                    header,
+                    preview,
+                    rail,
+                    rail_line,
+                    node,
+                    markdown,
+                    title,
+                    actions,
+                ),
+            )
+        })?;
         Ok(Self {
-            attachments: context.create_detached_component(document, Stack::column(4.0))?,
+            attachments,
             attachment_buttons: HashMap::new(),
             attachment_event: String::new(),
             attachment_rows: HashMap::new(),
             attachment_thumbnails: HashMap::new(),
             images: Vec::new(),
-            body: context.create_detached_component(
-                document,
-                Stack::column(7.0)
-                    .grow(1.0)
-                    .shrink(1.0)
-                    .min_width(LengthSpec::Px(0.0)),
-            )?,
-            header: context.create_detached_component(
-                document,
-                Stack::bar(10.0).min_width(LengthSpec::Px(0.0)),
-            )?,
-            preview: context.create_detached_component(document, Text::new(""))?,
+            body,
+            header,
+            preview,
             rail,
             rail_line,
             node,
-            markdown: context.create_detached_component(document, NativeMarkdown::parse(""))?,
+            markdown,
             markdown_links_bound: false,
             selection_visible: false,
-            title: context.create_detached_component(document, Text::new(""))?,
-            actions: context.create_detached_component(document, Stack::row(6.0))?,
+            title,
+            actions,
             buttons: HashMap::new(),
             source: String::new(),
         })
@@ -485,8 +530,14 @@ impl TimelineContent {
                 })?;
                 button
             } else {
-                let button = context
-                    .create_detached_component(document, pill_button(label, ButtonKind::Subtle))?;
+                let button_label = label.to_owned();
+                let (_, button) = context.mount_view_detached(document, move || {
+                    let button = entity_ref::<Button>();
+                    with_refs(
+                        widget(pill_button(&button_label, ButtonKind::Subtle)).entity_ref(button),
+                        button,
+                    )
+                })?;
                 bind_activate(context, button, sink.clone(), intent(window, action))?;
                 self.buttons.insert(id.into(), button);
                 button
@@ -590,7 +641,10 @@ impl TimelineContent {
                 context.update_component(button, |button, _| *button = view)?;
                 button
             } else {
-                let button = context.create_detached_component(document, view)?;
+                let (_, button) = context.mount_view_detached(document, move || {
+                    let button = entity_ref::<Chip>();
+                    with_refs(widget(view).entity_ref(button), button)
+                })?;
                 bind_activate(
                     context,
                     button,
@@ -611,7 +665,10 @@ impl TimelineContent {
                 if let Some(row) = self.attachment_rows.get(&attachment.id).copied() {
                     row
                 } else {
-                    let row = context.create_detached_component(document, Stack::row(4.0))?;
+                    let (_, row) = context.mount_view_detached(document, || {
+                        let row = entity_ref::<Stack>();
+                        with_refs(widget(Stack::row(4.0)).entity_ref(row), row)
+                    })?;
                     self.attachment_rows.insert(attachment.id.clone(), row);
                     row
                 };
@@ -626,8 +683,13 @@ impl TimelineContent {
                 {
                     image
                 } else {
-                    let image =
-                        context.create_detached_component(document, NativeMarkdown::parse(""))?;
+                    let (_, image) = context.mount_view_detached(document, || {
+                        let image = entity_ref::<NativeMarkdown>();
+                        with_refs(
+                            widget(NativeMarkdown::parse("")).entity_ref(image),
+                            image,
+                        )
+                    })?;
                     let action = intent(
                         window,
                         ConversationAction::PreviewTimelineAttachment {
@@ -734,52 +796,49 @@ impl ConversationControlsHandles {
         sink: Sink,
         popup: bool,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::column(6.0))?;
-        let toolbar = context.create_detached_component(
-            document,
-            if popup {
-                Stack::column(6.0).shrink(1.0)
-            } else {
-                wrapping_controls_row(6.0)
-            },
-        )?;
-        let popup_tools_row =
-            context.create_detached_component(document, wrapping_controls_row(6.0))?;
-        let popup_model_row =
-            context.create_detached_component(document, wrapping_controls_row(6.0))?;
-        let popup_context_row =
-            context.create_detached_component(document, wrapping_controls_row(6.0))?;
-        let chips = context.create_detached_component(document, Stack::bar(4.0))?;
-        let completion = context.create_detached_component(document, Stack::column(3.0))?;
-        let workflow = context.create_detached_component(document, Stack::column(6.0))?;
-        let model = context.create_detached_component(
-            document,
-            Dropdown::single(Some("")).size(ControlSize::Small),
-        )?;
-        let reasoning = context.create_detached_component(
-            document,
-            Dropdown::single(Some("medium")).size(ControlSize::Small),
-        )?;
-        let tools = context.create_detached_component(
-            document,
+        macro_rules! mount_view {
+            ($kind:ty, $view:expr) => {{
+                let (_, entity) = context.mount_view_detached(document, || {
+                    let entity = entity_ref::<$kind>();
+                    with_refs(widget($view).entity_ref(entity), entity)
+                })?;
+                entity
+            }};
+        }
+        let root = mount_view!(Stack, Stack::column(6.0));
+        let toolbar_view = if popup {
+            Stack::column(6.0).shrink(1.0)
+        } else {
+            wrapping_controls_row(6.0)
+        };
+        let toolbar = mount_view!(Stack, toolbar_view);
+        let popup_tools_row = mount_view!(Stack, wrapping_controls_row(6.0));
+        let popup_model_row = mount_view!(Stack, wrapping_controls_row(6.0));
+        let popup_context_row = mount_view!(Stack, wrapping_controls_row(6.0));
+        let chips = mount_view!(Stack, Stack::bar(4.0));
+        let completion = mount_view!(Stack, Stack::column(3.0));
+        let workflow = mount_view!(Stack, Stack::column(6.0));
+        let model = mount_view!(Dropdown, Dropdown::single(Some("")).size(ControlSize::Small));
+        let reasoning =
+            mount_view!(Dropdown, Dropdown::single(Some("medium")).size(ControlSize::Small));
+        let tools = mount_view!(
+            Dropdown,
             Dropdown::single(None::<String>)
                 .placeholder("＋")
-                .size(ControlSize::Small),
-        )?;
-        let permission = context.create_detached_component(
-            document,
+                .size(ControlSize::Small)
+        );
+        let permission = mount_view!(
+            Dropdown,
             Dropdown::single(Some("ask"))
                 .size(ControlSize::Small)
                 .options([
                     DropdownOption::new("readonly", "只读"),
                     DropdownOption::new("ask", "需要确认"),
                     DropdownOption::new("full", "完全访问"),
-                ]),
-        )?;
-        let worktree = context.create_detached_component(
-            document,
-            Dropdown::single(Some("current")).size(ControlSize::Small),
-        )?;
+                ])
+        );
+        let worktree =
+            mount_view!(Dropdown, Dropdown::single(Some("current")).size(ControlSize::Small));
         for (field, width) in [
             (model, if popup { 150.0 } else { 204.0 }),
             (reasoning, 74.0),
@@ -812,16 +871,16 @@ impl ConversationControlsHandles {
                 emit(&tool_sink, intent(window_id, action));
             }
         })?;
-        let review_target = context.create_detached_component(
-            document,
+        let review_target = mount_view!(
+            Dropdown,
             Dropdown::single(Some("changes"))
                 .size(ControlSize::Small)
                 .options([
                     DropdownOption::new("changes", "未提交的改动"),
                     DropdownOption::new("branch", "与分支比较"),
                     DropdownOption::new("commit", "指定提交"),
-                ]),
-        )?;
+                ])
+        );
         for (field, map) in [
             (
                 model,
@@ -839,8 +898,7 @@ impl ConversationControlsHandles {
                 }
             })?;
         }
-        let review_value =
-            context.create_detached_component(document, TextArea::new("").height(36.0))?;
+        let review_value = mount_view!(TextArea, TextArea::new("").height(36.0));
         let field_sink = sink.clone();
         context.on(review_value, move |_, event: &TextChanged, _| {
             emit(
@@ -851,7 +909,7 @@ impl ConversationControlsHandles {
                 ),
             );
         })?;
-        let empty = context.create_detached_component(document, Text::new("没有匹配的对话"))?;
+        let empty = mount_view!(Text, Text::new("没有匹配的对话"));
         Ok(Self {
             root,
             toolbar,
@@ -918,7 +976,10 @@ impl ConversationControlsHandles {
             button
         } else {
             let view = token_chip(label, selected).disabled(disabled);
-            let button = context.create_detached_component(document, view)?;
+            let (_, button) = context.mount_view_detached(document, move || {
+                let button = entity_ref::<Chip>();
+                with_refs(widget(view).entity_ref(button), button)
+            })?;
             bind_activate(
                 context,
                 button,
@@ -1476,8 +1537,11 @@ mod tests {
             ("long", "一段需要换行的长消息。".repeat(40)),
             ("review", "Review the changes introduced by commit \"0123456789abcdef0123456789abcdef01234567\" compared with its parent. Inspect the actual diff and enough surrounding code to verify each issue. Do not modify files. Prioritize actionable correctness, regression, security, and missing-test findings; include severity, file and line, trigger, and impact. If no actionable issues are found, say so and describe relevant validation limits. Report the findings in this conversation.\n\nAdditional user input:\n验证审批与草稿恢复".to_owned()),
         ] {
-            let root = context
-                .create_detached_component(document_id, Stack::column(0.0))
+            let (_, root) = context
+                .mount_view_detached(document_id, || {
+                    let root = entity_ref::<Stack>();
+                    with_refs(widget(Stack::column(0.0)).entity_ref(root), root)
+                })
                 .unwrap();
             context.append_child(parent, root).unwrap();
             let mut content = TimelineContent::mount(context, document_id).unwrap();
@@ -1595,8 +1659,11 @@ mod tests {
         let parent = context
             .create_component(document_id, Stack::column(0.0))
             .unwrap();
-        let root = context
-            .create_detached_component(document_id, Stack::column(0.0))
+        let (_, root) = context
+            .mount_view_detached(document_id, || {
+                let root = entity_ref::<Stack>();
+                with_refs(widget(Stack::column(0.0)).entity_ref(root), root)
+            })
             .unwrap();
         context.append_child(parent, root).unwrap();
         let observed = Arc::new(Mutex::new(Vec::new()));
@@ -1763,7 +1830,7 @@ mod tests {
                 .sync(context, document_id, root, window, &row, &sink)
                 .unwrap();
             assert!(context.read(content.markdown, |markdown| markdown.blocks().iter().all(|block| {
-                !matches!(block, nana_ui::MarkdownBlock::Text { spans, .. } if spans.iter().any(|span| span.image_resource.is_some()))
+                !matches!(block, nana_ui::runtime::MarkdownBlock::Text { spans, .. } if spans.iter().any(|span| span.image_resource.is_some()))
             })).unwrap());
             let loaded = crate::markdown_images::load_markdown_image(concat!("data:image/png;base64,",
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")).unwrap();
@@ -1777,7 +1844,7 @@ mod tests {
                 .sync(context, document_id, root, window, &row, &sink)
                 .unwrap();
             assert!(context.read(content.markdown, |markdown| markdown.blocks().iter().any(|block| {
-                matches!(block, nana_ui::MarkdownBlock::Text { spans, .. } if spans.iter().any(|span| span.image_resource.as_ref().is_some_and(|image| image.width == 1 && image.height == 1)))
+                matches!(block, nana_ui::runtime::MarkdownBlock::Text { spans, .. } if spans.iter().any(|span| span.image_resource.as_ref().is_some_and(|image| image.width == 1 && image.height == 1)))
             })).unwrap());
             let thumbnail = content.attachment_thumbnails["capture"];
             context

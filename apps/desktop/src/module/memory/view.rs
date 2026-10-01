@@ -1,9 +1,10 @@
 use super::MemoryMessage;
-use crate::runtime_layout::reconcile_children;
+use crate::runtime_layout::{view_bar, view_fill_column, view_row, Bound};
+use nana_ui::runtime::view::{entity_ref, signal, text, widget, with_refs, EachExt, WhenExt};
 use nana_ui::runtime::{
     ActionMenu, ActionMenuItem, Activate, AppContext, Button, DocumentId, Entity, FormField,
     FrameworkError, MutationQueue, PopoverToggled, ScrollAxes, ScrollView, StableNodeId, Stack,
-    Switch, Text, TextArea, TextChanged, TextInput, ToggleChanged,
+    Switch, Text, TextArea, TextInput,
 };
 use nana_ui::{ButtonKind, PopoverPlacement};
 use std::collections::{HashMap, HashSet};
@@ -51,7 +52,6 @@ pub(crate) struct MemoryView {
     global: Entity<Switch>,
     baseline: Entity<Switch>,
     task_injection: Entity<Switch>,
-    scope: Entity<Button>,
     save: Entity<Button>,
     delete: Entity<Button>,
     reset: Entity<Button>,
@@ -59,7 +59,26 @@ pub(crate) struct MemoryView {
     task_items: HashMap<String, Entity<ActionMenuItem>>,
     list: Entity<Stack>,
     rows: HashMap<String, MemoryRow>,
-    sink: Sink,
+    title_text: Bound<String>,
+    body_text: Bound<String>,
+    tags_text: Bound<String>,
+    cooldown_text: Bound<String>,
+    error_text: Bound<String>,
+    show_error: Bound<bool>,
+    scope_label: Bound<String>,
+    enabled_on: Bound<bool>,
+    enabled_off: Bound<bool>,
+    global_on: Bound<bool>,
+    baseline_on: Bound<bool>,
+    baseline_off: Bound<bool>,
+    task_on: Bound<bool>,
+    task_off: Bound<bool>,
+    save_off: Bound<bool>,
+    delete_off: Bound<bool>,
+    reset_off: Bound<bool>,
+    menu_open: Bound<bool>,
+    cards: Bound<Vec<MemoryCard>>,
+    tasks: Bound<Vec<(String, String)>>,
     selected: Option<String>,
     project_id: Option<String>,
     suspended: bool,
@@ -99,162 +118,290 @@ impl MemoryView {
         document: DocumentId,
         sink: Sink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::fill_column(12.0))?;
-        let header = context.create_detached_component(document, Stack::bar(8.0))?;
-        let title = context.create_detached_component(document, Text::new("记忆"))?;
-        let create = button(
-            context,
-            document,
-            "新建",
-            ButtonKind::Primary,
-            MemoryMessage::New,
-            &sink,
-        )?;
-        context.append_child(header, title)?;
-        context.append_child(header, create)?;
-        context.append_child(root, header)?;
-        let error = context.create_detached_component(document, Text::new(""))?;
-        context.append_child(root, error)?;
-        let mut inputs = Vec::new();
-        for (label, height, message) in [
+        let title_text = Bound::new();
+        let body_text = Bound::new();
+        let tags_text = Bound::new();
+        let cooldown_text = Bound::new();
+        let error_text = Bound::new();
+        let show_error = Bound::new();
+        let scope_label = Bound::new();
+        let enabled_on = Bound::new();
+        let enabled_off = Bound::new();
+        let global_on = Bound::new();
+        let baseline_on = Bound::new();
+        let baseline_off = Bound::new();
+        let task_on = Bound::new();
+        let task_off = Bound::new();
+        let save_off = Bound::new();
+        let delete_off = Bound::new();
+        let reset_off = Bound::new();
+        let menu_open = Bound::new();
+        let cards: Bound<Vec<MemoryCard>> = Bound::new();
+        let tasks: Bound<Vec<(String, String)>> = Bound::new();
+        let title_slot = title_text.clone();
+        let body_slot = body_text.clone();
+        let tags_slot = tags_text.clone();
+        let cooldown_slot = cooldown_text.clone();
+        let error_slot = error_text.clone();
+        let show_error_slot = show_error.clone();
+        let scope_slot = scope_label.clone();
+        let enabled_on_slot = enabled_on.clone();
+        let enabled_off_slot = enabled_off.clone();
+        let global_on_slot = global_on.clone();
+        let baseline_on_slot = baseline_on.clone();
+        let baseline_off_slot = baseline_off.clone();
+        let task_on_slot = task_on.clone();
+        let task_off_slot = task_off.clone();
+        let save_off_slot = save_off.clone();
+        let delete_off_slot = delete_off.clone();
+        let reset_off_slot = reset_off.clone();
+        let menu_open_slot = menu_open.clone();
+        let cards_slot = cards.clone();
+        let tasks_slot = tasks.clone();
+        let (
+            _,
             (
-                "标题",
-                40.0,
-                MemoryMessage::TitleChanged as fn(String) -> MemoryMessage,
+                root,
+                error,
+                fields,
+                [create, _scope, save, delete, reset],
+                cooldown,
+                [enabled, global, baseline, task_injection],
+                task_menu,
+                scroll,
             ),
-            (
-                "正文",
-                144.0,
-                MemoryMessage::BodyReplaced as fn(String) -> MemoryMessage,
-            ),
-            (
-                "标签",
-                40.0,
-                MemoryMessage::TagsChanged as fn(String) -> MemoryMessage,
-            ),
-        ] {
-            let mut area = TextArea::new("").height(height);
-            if label == "正文" {
-                area = area.resize_vertical(true);
-            }
-            let input = context.create_detached_component(document, area)?;
-            let field = context.create_detached_component(
-                document,
-                FormField::new(label).control_child(input.stable_id()),
-            )?;
-            context.append_child(field, input)?;
-            context.append_child(root, field)?;
-            let sink = Arc::clone(&sink);
-            context.on(input, move |_, event: &TextChanged, _| {
-                sink(message(event.value.to_string()))
-            })?;
-            inputs.push(input);
-        }
-        let actions = context.create_detached_component(document, Stack::row(8.0))?;
-        let scope = button(
-            context,
-            document,
-            "项目",
-            ButtonKind::Subtle,
-            MemoryMessage::ToggleScope,
-            &sink,
-        )?;
-        let save = button(
-            context,
-            document,
-            "保存",
-            ButtonKind::Primary,
-            MemoryMessage::Save,
-            &sink,
-        )?;
-        let delete = button(
-            context,
-            document,
-            "删除",
-            ButtonKind::Danger,
-            MemoryMessage::Delete,
-            &sink,
-        )?;
-        let reset = button(
-            context,
-            document,
-            "重置冷却",
-            ButtonKind::Subtle,
-            MemoryMessage::ResetTaskCooldown,
-            &sink,
-        )?;
-        let task_menu = context.create_detached_component(
-            document,
-            ActionMenu::new()
-                .trigger("注入任务".to_owned())
-                .placement(PopoverPlacement::Bottom)
-                .open(false),
-        )?;
-        let menu_sink = Arc::clone(&sink);
-        context.on(task_menu, move |_, _: &PopoverToggled, _| {
-            menu_sink(MemoryMessage::ToggleTaskMenu)
+        ) = context.mount_view_detached(document, move || {
+            let title_text = title_slot.install(signal(String::new()));
+            let body_text = body_slot.install(signal(String::new()));
+            let tags_text = tags_slot.install(signal(String::new()));
+            let cooldown_text = cooldown_slot.install(signal(String::new()));
+            let error_text = error_slot.install(signal(String::new()));
+            let show_error = show_error_slot.install(signal(false));
+            let scope_label = scope_slot.install(signal(String::new()));
+            let enabled_on = enabled_on_slot.install(signal(true));
+            let enabled_off = enabled_off_slot.install(signal(false));
+            let global_on = global_on_slot.install(signal(true));
+            let baseline_on = baseline_on_slot.install(signal(true));
+            let baseline_off = baseline_off_slot.install(signal(false));
+            let task_on = task_on_slot.install(signal(false));
+            let task_off = task_off_slot.install(signal(true));
+            let save_off = save_off_slot.install(signal(false));
+            let delete_off = delete_off_slot.install(signal(false));
+            let reset_off = reset_off_slot.install(signal(false));
+            let menu_open = menu_open_slot.install(signal(false));
+            let cards = cards_slot.install(signal(Vec::new()));
+            let tasks = tasks_slot.install(signal(Vec::new()));
+            let root = entity_ref::<Stack>();
+            let error = entity_ref::<Text>();
+            let title = entity_ref::<TextArea>();
+            let body = entity_ref::<TextArea>();
+            let tags = entity_ref::<TextArea>();
+            let create = entity_ref::<Button>();
+            let scope = entity_ref::<Button>();
+            let save = entity_ref::<Button>();
+            let delete = entity_ref::<Button>();
+            let reset = entity_ref::<Button>();
+            let cooldown = entity_ref::<TextInput>();
+            let enabled = entity_ref::<Switch>();
+            let global = entity_ref::<Switch>();
+            let baseline = entity_ref::<Switch>();
+            let task_injection = entity_ref::<Switch>();
+            let task_menu = entity_ref::<ActionMenu>();
+            let scroll = entity_ref::<ScrollView>();
+            let new_sink = Arc::clone(&sink);
+            let scope_sink = Arc::clone(&sink);
+            let save_sink = Arc::clone(&sink);
+            let delete_sink = Arc::clone(&sink);
+            let reset_sink = Arc::clone(&sink);
+            let title_sink = Arc::clone(&sink);
+            let body_sink = Arc::clone(&sink);
+            let tags_sink = Arc::clone(&sink);
+            let cooldown_sink = Arc::clone(&sink);
+            let enabled_sink = Arc::clone(&sink);
+            let global_sink = Arc::clone(&sink);
+            let baseline_sink = Arc::clone(&sink);
+            let task_sink = Arc::clone(&sink);
+            let menu_sink = Arc::clone(&sink);
+            let card_sink = Arc::clone(&sink);
+            let item_sink = sink;
+            let page = view_fill_column(12.0).entity_ref(root).children((
+                view_bar(8.0).children((
+                    text("记忆"),
+                    widget(Button::new("新建").kind(ButtonKind::Primary))
+                        .entity_ref(create)
+                        .on_activate(move || new_sink(MemoryMessage::New)),
+                )),
+                text(error_text).entity_ref(error).visible(show_error),
+                field(
+                    "标题",
+                    widget(TextArea::new("").height(40.0))
+                        .entity_ref(title)
+                        .value(title_text)
+                        .on_input(move |event| {
+                            title_sink(MemoryMessage::TitleChanged(event.value.to_string()))
+                        }),
+                ),
+                field(
+                    "正文",
+                    widget(TextArea::new("").height(144.0).resize_vertical(true))
+                        .entity_ref(body)
+                        .value(body_text)
+                        .on_input(move |event| {
+                            body_sink(MemoryMessage::BodyReplaced(event.value.to_string()))
+                        }),
+                ),
+                field(
+                    "标签",
+                    widget(TextArea::new("").height(40.0))
+                        .entity_ref(tags)
+                        .value(tags_text)
+                        .on_input(move |event| {
+                            tags_sink(MemoryMessage::TagsChanged(event.value.to_string()))
+                        }),
+                ),
+                view_row(8.0).children((
+                    widget(Button::new("项目").kind(ButtonKind::Subtle))
+                        .entity_ref(scope)
+                        .label(scope_label)
+                        .on_activate(move || scope_sink(MemoryMessage::ToggleScope)),
+                    widget(Button::new("保存").kind(ButtonKind::Primary))
+                        .entity_ref(save)
+                        .disabled(save_off)
+                        .on_activate(move || save_sink(MemoryMessage::Save)),
+                    widget(Button::new("删除").kind(ButtonKind::Danger))
+                        .entity_ref(delete)
+                        .disabled(delete_off)
+                        .on_activate(move || delete_sink(MemoryMessage::Delete)),
+                    widget(Button::new("重置冷却").kind(ButtonKind::Subtle))
+                        .entity_ref(reset)
+                        .disabled(reset_off)
+                        .on_activate(move || reset_sink(MemoryMessage::ResetTaskCooldown)),
+                    widget(
+                        ActionMenu::new()
+                            .trigger("注入任务".to_owned())
+                            .placement(PopoverPlacement::Bottom)
+                            .open(false),
+                    )
+                    .entity_ref(task_menu)
+                    .bind(move |menu| menu.popover.open = menu_open.get())
+                    .on(move |_event: &PopoverToggled| menu_sink(MemoryMessage::ToggleTaskMenu))
+                    .children({
+                        let item_sink = Arc::clone(&item_sink);
+                        let tasks = tasks;
+                        menu_open.then_show(move || {
+                            let item_sink = Arc::clone(&item_sink);
+                            let tasks = tasks;
+                            tasks.each(
+                                |task| task.0.clone(),
+                                move |task| {
+                                    let id = task.0.clone();
+                                    let label_id = id.clone();
+                                    let tasks = tasks;
+                                    let sink = Arc::clone(&item_sink);
+                                    widget(ActionMenuItem::new(task.1.clone()))
+                                        .bind(move |item| {
+                                            if let Some(label) = tasks.with(|tasks| {
+                                                tasks
+                                                    .iter()
+                                                    .find(|(task_id, _)| task_id == &label_id)
+                                                    .map(|(_, label)| label.clone())
+                                            }) {
+                                                item.label = Arc::from(label);
+                                            }
+                                        })
+                                        .on(move |_event: &Activate| {
+                                            sink(MemoryMessage::SelectInjectionTask(id.clone()))
+                                        })
+                                },
+                            )
+                        })
+                    }),
+                )),
+                widget(Stack::bar(8.0).wrap(true)).children((
+                    widget(Switch::new("启用记忆", true))
+                        .entity_ref(enabled)
+                        .label("启用记忆")
+                        .checked(enabled_on)
+                        .disabled(enabled_off)
+                        .on_change(move |_| enabled_sink(MemoryMessage::ToggleEnabled)),
+                    widget(Switch::new("全局注入", true))
+                        .entity_ref(global)
+                        .label("全局注入")
+                        .checked(global_on)
+                        .on_change(move |_| global_sink(MemoryMessage::ToggleGlobal)),
+                    widget(Switch::new("基线注入", true))
+                        .entity_ref(baseline)
+                        .label("基线注入")
+                        .checked(baseline_on)
+                        .disabled(baseline_off)
+                        .on_change(move |_| baseline_sink(MemoryMessage::ToggleBaseline)),
+                    widget(Switch::new("为此会话注入记忆", true))
+                        .entity_ref(task_injection)
+                        .label("为此会话注入记忆")
+                        .checked(task_on)
+                        .disabled(task_off)
+                        .on_change(move |_| task_sink(MemoryMessage::ToggleTaskInjection)),
+                    field(
+                        "冷却轮数",
+                        widget(TextInput::new(""))
+                            .entity_ref(cooldown)
+                            .value(cooldown_text)
+                            .on_input(move |event| {
+                                cooldown_sink(MemoryMessage::CooldownChanged(
+                                    event.value.to_string(),
+                                ))
+                            }),
+                    ),
+                )),
+                widget(ScrollView::new(ScrollAxes::Vertical))
+                    .entity_ref(scroll)
+                    .children(
+                        cards
+                            .each(
+                                |card| card.id.clone(),
+                                move |card| {
+                                    let id = card.id.clone();
+                                    let label_id = id.clone();
+                                    let cards = cards;
+                                    let sink = Arc::clone(&card_sink);
+                                    widget(Button::new("").kind(ButtonKind::Subtle))
+                                        .label(move || card_label(&cards, &label_id))
+                                        .on_activate(move || {
+                                            sink(MemoryMessage::Select(id.clone()))
+                                        })
+                                },
+                            )
+                            .gap(6.0),
+                    ),
+            ));
+            with_refs(
+                page,
+                (
+                    root,
+                    error,
+                    [title, body, tags],
+                    [create, scope, save, delete, reset],
+                    cooldown,
+                    [enabled, global, baseline, task_injection],
+                    task_menu,
+                    scroll,
+                ),
+            )
         })?;
-        let cooldown = context.create_detached_component(document, TextInput::new(""))?;
-        let cooldown_field = context.create_detached_component(
-            document,
-            FormField::new("冷却轮数").control_child(cooldown.stable_id()),
-        )?;
-        context.append_child(cooldown_field, cooldown)?;
-        let cooldown_sink = Arc::clone(&sink);
-        context.on(cooldown, move |_, event: &TextChanged, _| {
-            cooldown_sink(MemoryMessage::CooldownChanged(event.value.to_string()))
-        })?;
-        let enabled = context.create_detached_component(document, Switch::new("启用记忆", true))?;
-        let enabled_sink = Arc::clone(&sink);
-        context.on(enabled, move |_, _: &ToggleChanged, _| {
-            enabled_sink(MemoryMessage::ToggleEnabled)
-        })?;
-        let global = context.create_detached_component(document, Switch::new("全局注入", true))?;
-        let global_sink = Arc::clone(&sink);
-        context.on(global, move |_, _: &ToggleChanged, _| {
-            global_sink(MemoryMessage::ToggleGlobal)
-        })?;
-        let baseline =
-            context.create_detached_component(document, Switch::new("基线注入", true))?;
-        let baseline_sink = Arc::clone(&sink);
-        context.on(baseline, move |_, _: &ToggleChanged, _| {
-            baseline_sink(MemoryMessage::ToggleBaseline)
-        })?;
-        let task_injection =
-            context.create_detached_component(document, Switch::new("为此会话注入记忆", true))?;
-        let task_sink = Arc::clone(&sink);
-        context.on(task_injection, move |_, _: &ToggleChanged, _| {
-            task_sink(MemoryMessage::ToggleTaskInjection)
-        })?;
-        for button in [scope, save, delete, reset] {
-            context.append_child(actions, button)?;
-        }
-        context.append_child(actions, task_menu)?;
-        context.append_child(root, actions)?;
-        let settings = context.create_detached_component(document, Stack::bar(8.0).wrap(true))?;
-        context.append_child(settings, enabled)?;
-        context.append_child(settings, global)?;
-        context.append_child(settings, baseline)?;
-        context.append_child(settings, task_injection)?;
-        context.append_child(settings, cooldown_field)?;
-        context.append_child(root, settings)?;
-        let scroll =
-            context.create_detached_component(document, ScrollView::new(ScrollAxes::Vertical))?;
-        let list = context.create_detached_component(document, Stack::column(6.0))?;
-        context.append_child(scroll, list)?;
-        context.append_child(root, scroll)?;
-        context.world_mut().register_focus_scope(root.stable_id())?;
+        let list = only_child(context, scroll.stable_id())?;
+        context
+            .compat_world_mut()
+            .register_focus_scope(root.stable_id())?;
         Ok(Self {
             root,
             error,
-            fields: inputs.try_into().ok().unwrap(),
+            fields,
             create,
             cooldown,
             enabled,
             global,
             baseline,
             task_injection,
-            scope,
             save,
             delete,
             reset,
@@ -262,7 +409,26 @@ impl MemoryView {
             task_items: HashMap::new(),
             list,
             rows: HashMap::new(),
-            sink,
+            title_text,
+            body_text,
+            tags_text,
+            cooldown_text,
+            error_text,
+            show_error,
+            scope_label,
+            enabled_on,
+            enabled_off,
+            global_on,
+            baseline_on,
+            baseline_off,
+            task_on,
+            task_off,
+            save_off,
+            delete_off,
+            reset_off,
+            menu_open,
+            cards,
+            tasks,
             selected: None,
             project_id: None,
             suspended: false,
@@ -273,154 +439,59 @@ impl MemoryView {
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
-        document: DocumentId,
+        _document: DocumentId,
         snapshot: &MemoryViewSnapshot,
     ) -> Result<(), FrameworkError> {
         let changed_selection = self.selected != snapshot.selected;
-        for (input, value) in
-            self.fields
-                .into_iter()
-                .zip([&snapshot.title, &snapshot.body, &snapshot.tags])
-        {
-            context.update_component(input, |input, _| {
-                if changed_selection || input.state.value != *value {
-                    input.state.replace_value(value.clone());
-                }
-            })?;
-        }
         self.selected = snapshot.selected.clone();
         self.project_id = snapshot.project_id.clone();
-        context.update_component(self.error, |text, _| {
-            *text = Text::new(snapshot.error.clone().unwrap_or_default())
-        })?;
-        let mut children = context
-            .world()
-            .node(self.root.stable_id())
-            .unwrap()
-            .children
-            .clone();
-        children.retain(|id| *id != self.error.stable_id());
-        if snapshot
-            .error
-            .as_ref()
-            .is_some_and(|error| !error.is_empty())
-        {
-            children.insert(1, self.error.stable_id());
-        }
-        reconcile_children(context, self.root.stable_id(), &children)?;
-        context.update_component(self.scope, |button, _| {
-            button.label = snapshot.scope_label.clone()
-        })?;
-        context.update_component(self.cooldown, |input, _| {
-            if changed_selection || input.state.value != snapshot.cooldown {
-                input.state.replace_value(snapshot.cooldown.clone());
+        self.title_text.set(snapshot.title.clone());
+        self.body_text.set(snapshot.body.clone());
+        self.tags_text.set(snapshot.tags.clone());
+        self.cooldown_text.set(snapshot.cooldown.clone());
+        self.error_text
+            .set(snapshot.error.clone().unwrap_or_default());
+        self.show_error.set(
+            snapshot
+                .error
+                .as_ref()
+                .is_some_and(|error| !error.is_empty()),
+        );
+        self.scope_label.set(snapshot.scope_label.clone());
+        self.enabled_on.set(snapshot.enabled);
+        self.enabled_off.set(snapshot.selected.is_none());
+        self.global_on.set(snapshot.global_enabled);
+        self.baseline_on.set(snapshot.baseline_enabled);
+        self.baseline_off.set(!snapshot.global_enabled);
+        self.task_on.set(snapshot.task_injection.unwrap_or(false));
+        self.task_off.set(snapshot.task_injection.is_none());
+        self.save_off
+            .set(snapshot.title.trim().is_empty() || snapshot.body.trim().is_empty());
+        self.delete_off.set(snapshot.selected.is_none());
+        self.reset_off.set(snapshot.task_injection.is_none());
+        self.menu_open.set(snapshot.task_menu_open);
+        self.cards.set(snapshot.cards.clone());
+        self.tasks.set(if snapshot.task_menu_open {
+            snapshot.tasks.clone()
+        } else {
+            Vec::new()
+        });
+        if changed_selection {
+            for (input, value) in self.fields.into_iter().zip([
+                snapshot.title.as_str(),
+                snapshot.body.as_str(),
+                snapshot.tags.as_str(),
+            ]) {
+                replace_area(context, input, value)?;
             }
-        })?;
-        context.update_component(self.enabled, |toggle, _| {
-            *toggle = Switch::new("启用记忆", snapshot.enabled);
-            toggle.disabled = snapshot.selected.is_none();
-        })?;
-        context.update_component(self.global, |toggle, _| {
-            *toggle = Switch::new("全局注入", snapshot.global_enabled);
-        })?;
-        context.update_component(self.baseline, |toggle, _| {
-            *toggle = Switch::new("基线注入", snapshot.baseline_enabled);
-            toggle.disabled = !snapshot.global_enabled;
-        })?;
-        context.update_component(self.task_injection, |toggle, _| {
-            *toggle = Switch::new("为此会话注入记忆", snapshot.task_injection.unwrap_or(false));
-            toggle.disabled = snapshot.task_injection.is_none();
-        })?;
-        context.update_component(self.reset, |button, _| {
-            button.disabled = snapshot.task_injection.is_none()
-        })?;
-        context.update_component(self.save, |button, _| {
-            button.disabled = snapshot.title.trim().is_empty() || snapshot.body.trim().is_empty()
-        })?;
-        context.update_component(self.delete, |button, _| {
-            button.disabled = snapshot.selected.is_none()
-        })?;
-        context.update_component(self.task_menu, |menu, _| {
-            *menu = ActionMenu::new()
-                .trigger("注入任务".to_owned())
-                .placement(PopoverPlacement::Bottom)
-                .open(snapshot.task_menu_open);
-        })?;
-        let mut menu_order = Vec::new();
-        if snapshot.task_menu_open {
-            for (id, label) in &snapshot.tasks {
-                let item = if let Some(item) = self.task_items.get(id).copied() {
-                    context.update_component(item, |item, _| {
-                        *item = ActionMenuItem::new(label.clone());
-                    })?;
-                    item
-                } else {
-                    let item = context
-                        .create_detached_component(document, ActionMenuItem::new(label.clone()))?;
-                    let sink = Arc::clone(&self.sink);
-                    let task_id = id.clone();
-                    context.on(item, move |_, _: &Activate, _| {
-                        sink(MemoryMessage::SelectInjectionTask(task_id.clone()))
-                    })?;
-                    self.task_items.insert(id.clone(), item);
-                    item
-                };
-                menu_order.push(item.stable_id());
-            }
+            replace_input(context, self.cooldown, &snapshot.cooldown)?;
         }
-        let keep_tasks = snapshot
-            .tasks
-            .iter()
-            .map(|(id, _)| id.as_str())
-            .collect::<HashSet<_>>();
-        let stale_tasks = self
-            .task_items
-            .keys()
-            .filter(|id| !snapshot.task_menu_open || !keep_tasks.contains(id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in stale_tasks {
-            if let Some(item) = self.task_items.remove(&id) {
-                context.remove_view(item)?;
-            }
-        }
-        reconcile_children(context, self.task_menu.stable_id(), &menu_order)?;
-        let keep = snapshot
-            .cards
-            .iter()
-            .map(|card| card.id.as_str())
-            .collect::<HashSet<_>>();
-        let stale = self
-            .rows
-            .keys()
-            .filter(|id| !keep.contains(id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in stale {
-            context.remove_view(self.rows.remove(&id).unwrap().root)?;
-        }
-        let mut order = Vec::new();
-        for card in &snapshot.cards {
-            if !self.rows.contains_key(&card.id) {
-                let root = context.create_detached_component(
-                    document,
-                    Button::new(format!("{} · {}", card.title, card.subtitle))
-                        .kind(ButtonKind::Subtle),
-                )?;
-                let sink = Arc::clone(&self.sink);
-                let id = card.id.clone();
-                context.on(root, move |_, _: &Activate, _| {
-                    sink(MemoryMessage::Select(id.clone()))
-                })?;
-                self.rows.insert(card.id.clone(), MemoryRow { root });
-            }
-            let row = &self.rows[&card.id];
-            context.update_component(row.root, |button, _| {
-                button.label = format!("{} · {}", card.title, card.subtitle);
-            })?;
-            order.push(row.root.stable_id());
-        }
-        reconcile_children(context, self.list.stable_id(), &order)?;
+        context.flush_reactive()?;
+        self.rows = zip_buttons(context, self.list, &snapshot.cards, |card| &card.id)
+            .into_iter()
+            .map(|(id, root)| (id, MemoryRow { root }))
+            .collect();
+        self.task_items = zip_menu_items(context, self.task_menu, &snapshot.tasks);
         self.restore_focus |= self.suspended;
         self.suspended = false;
         Ok(())
@@ -458,24 +529,122 @@ impl MemoryView {
     }
 }
 
-fn button(
-    context: &mut AppContext,
-    document: DocumentId,
+fn field(
     label: &str,
-    kind: ButtonKind,
-    message: MemoryMessage,
-    sink: &Sink,
-) -> Result<Entity<Button>, FrameworkError> {
-    let button = context.create_detached_component(document, Button::new(label).kind(kind))?;
-    let sink = Arc::clone(sink);
-    context.on(button, move |_, _: &Activate, _| sink(message.clone()))?;
-    Ok(button)
+    control: impl nana_ui::runtime::view::IntoView,
+) -> impl nana_ui::runtime::view::IntoView {
+    widget(FormField::new(label)).child_slot(control, |field, id| field.control_child(id))
+}
+
+fn card_label(cards: &nana_ui::runtime::view::Signal<Vec<MemoryCard>>, id: &str) -> String {
+    cards.with(|cards| {
+        cards
+            .iter()
+            .find(|card| card.id == id)
+            .map(|card| format!("{} · {}", card.title, card.subtitle))
+            .unwrap_or_default()
+    })
+}
+
+fn replace_area(
+    context: &mut AppContext,
+    input: Entity<TextArea>,
+    value: &str,
+) -> Result<(), FrameworkError> {
+    context.update_component(input, |input, _| {
+        input.state.replace_value(value.to_owned());
+    })
+}
+
+fn replace_input(
+    context: &mut AppContext,
+    input: Entity<TextInput>,
+    value: &str,
+) -> Result<(), FrameworkError> {
+    context.update_component(input, |input, _| {
+        input.state.replace_value(value.to_owned());
+    })
+}
+
+fn only_child(context: &AppContext, parent: StableNodeId) -> Result<Entity<Stack>, FrameworkError> {
+    let id = context
+        .world()
+        .node(parent)
+        .and_then(|node| node.children.first().copied())
+        .ok_or(FrameworkError::InvalidInput)?;
+    Ok(Entity::from_stable_id(id))
+}
+
+fn zip_buttons<T>(
+    context: &AppContext,
+    list: Entity<Stack>,
+    items: &[T],
+    id_of: impl Fn(&T) -> &str,
+) -> HashMap<String, Entity<Button>> {
+    let children = context
+        .world()
+        .node(list.stable_id())
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut rows = HashMap::new();
+    let mut cursor = children.into_iter();
+    let mut seen = HashSet::new();
+    for item in items {
+        let id = id_of(item);
+        if !seen.insert(id.to_owned()) {
+            continue;
+        }
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        rows.insert(id.to_owned(), Entity::from_stable_id(child));
+    }
+    rows
+}
+
+fn zip_menu_items(
+    context: &AppContext,
+    menu: Entity<ActionMenu>,
+    tasks: &[(String, String)],
+) -> HashMap<String, Entity<ActionMenuItem>> {
+    let Some(branch) = context
+        .world()
+        .node(menu.stable_id())
+        .and_then(|node| node.children.first().copied())
+    else {
+        return HashMap::new();
+    };
+    let Some(list) = context
+        .world()
+        .node(branch)
+        .and_then(|node| node.children.first().copied())
+    else {
+        return HashMap::new();
+    };
+    let children = context
+        .world()
+        .node(list)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut items = HashMap::new();
+    let mut cursor = children.into_iter();
+    let mut seen = HashSet::new();
+    for (id, _) in tasks {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        items.insert(id.clone(), Entity::from_stable_id(child));
+    }
+    items
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nana_ui::runtime::TextSelection;
+    use nana_ui::runtime::{TextSelection, ToggleChanged};
     use std::sync::Mutex;
 
     #[test]

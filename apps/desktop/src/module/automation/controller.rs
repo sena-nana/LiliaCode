@@ -1,4 +1,4 @@
-use super::editor::{AutomationNodeInspectorDraft, automation_node_config_fields};
+use super::editor::{automation_node_config_fields, AutomationNodeInspectorDraft};
 use super::graph::automation_graph_model;
 use crate::desktop::format_civil_date;
 use crate::ui_module::{UiModule, UiModuleContext, UiModuleOutcome};
@@ -9,11 +9,10 @@ use lilia_feature_automation::{
     DesktopAutomationService,
 };
 use lilia_kernel::{JobEvent, JobRequest, JobState, Jobs};
-use nana_ui::{
-    GraphCanvasEvent, GraphEndpoint, GraphModel, GraphPoint, GraphSelection, GraphViewport,
-};
+use nana_ui::runtime::GraphCanvasEvent;
+use nana_ui::{GraphEndpoint, GraphModel, GraphPoint, GraphSelection, GraphViewport};
 use nana_ui_platform::WindowId;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(crate) enum AutomationModuleMessage {
     Refresh,
@@ -342,7 +341,8 @@ impl AutomationController {
 
     fn name_is_dirty(&self) -> bool {
         match (
-            self.selected_automation_workflow().map(|workflow| &workflow.name),
+            self.selected_automation_workflow()
+                .map(|workflow| &workflow.name),
             self.loaded_name.as_ref(),
         ) {
             (Some(name), Some(loaded)) => name != loaded,
@@ -363,9 +363,9 @@ impl AutomationController {
     }
 
     fn capture_loaded_workflow(&mut self) {
-        let loaded = self.selected_automation_workflow().map(|workflow| {
-            (workflow.name.clone(), workflow.updated_at)
-        });
+        let loaded = self
+            .selected_automation_workflow()
+            .map(|workflow| (workflow.name.clone(), workflow.updated_at));
         if let Some((name, updated_at)) = loaded {
             self.loaded_name = Some(name);
             self.loaded_updated_at = Some(updated_at);
@@ -465,9 +465,7 @@ impl AutomationController {
                     self.selection = None;
                     self.editor = AutomationNodeInspectorDraft::default();
                 }
-                self.rebuild_automation_graph(
-                    selection_changed || self.graph.nodes().is_empty(),
-                );
+                self.rebuild_automation_graph(selection_changed || self.graph.nodes().is_empty());
                 if selection_changed {
                     self.refresh_automation_node_inspector();
                     self.capture_loaded();
@@ -1531,10 +1529,7 @@ mod tests {
         );
         assert_eq!(first.editor.title, "Still typing");
         first.apply_action(conflicted, AutomationAction::Save, None, None);
-        assert_eq!(
-            first.error.as_deref(),
-            Some("自动化已更新，请确认后重试。")
-        );
+        assert_eq!(first.error.as_deref(), Some("自动化已更新，请确认后重试。"));
         assert_eq!(
             first.selected_automation_node().unwrap().title,
             "Other window"
@@ -1576,12 +1571,10 @@ mod tests {
             .cloned();
         controller.editor.config = "{".into();
         controller.persist_selected_automation_draft();
-        assert!(
-            controller
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("JSON"))
-        );
+        assert!(controller
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("JSON")));
         assert_eq!(
             controller
                 .selected_automation_node()
@@ -1592,17 +1585,12 @@ mod tests {
         controller.editor.config = r#"{"prompt":"应被拒绝"}"#.into();
         let target = controller.snapshot(1180.0).target.unwrap();
         controller.apply_action(target, AutomationAction::Publish, None, None);
-        assert_eq!(
-            controller.error.as_deref(),
-            Some("节点名称不能为空。")
-        );
-        assert!(
-            controller
-                .selected_automation_workflow()
-                .unwrap()
-                .published_version_id
-                .is_none()
-        );
+        assert_eq!(controller.error.as_deref(), Some("节点名称不能为空。"));
+        assert!(controller
+            .selected_automation_workflow()
+            .unwrap()
+            .published_version_id
+            .is_none());
         assert_eq!(
             controller
                 .selected_automation_node()
@@ -1683,7 +1671,10 @@ mod tests {
         controller.rename("Stolen".into());
         service.delete_workflow(&first_id).unwrap();
         controller.refresh_automations();
-        assert_ne!(controller.selected_workflow_id.as_deref(), Some(first_id.as_str()));
+        assert_ne!(
+            controller.selected_workflow_id.as_deref(),
+            Some(first_id.as_str())
+        );
         assert_eq!(
             controller.selected_automation_workflow().unwrap().name,
             kept_name
@@ -1724,11 +1715,9 @@ mod tests {
         controller.refresh_automation_runs();
         assert_eq!(controller.selected_run_id.as_deref(), Some("run-waiting"));
         assert_eq!(controller.response, "确认草稿");
-        assert!(
-            controller
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("运行历史"))
-        );
+        assert!(controller
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("运行历史")));
     }
 }

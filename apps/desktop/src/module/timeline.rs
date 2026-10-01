@@ -59,9 +59,9 @@ impl TimelineModule {
             let item = &session.timeline[index];
             if item.kind == "turn_state"
                 && item.turn_id.is_some()
-                && session.timeline[index + 1..].iter().any(|later| {
-                    later.kind == "turn_state" && later.turn_id == item.turn_id
-                })
+                && session.timeline[index + 1..]
+                    .iter()
+                    .any(|later| later.kind == "turn_state" && later.turn_id == item.turn_id)
             {
                 index += 1;
                 continue;
@@ -373,9 +373,7 @@ mod tests {
         assert_eq!(collapsed[0].markdown, "执行过程 · 2 项");
         assert_eq!(collapsed[1].id, "reply");
         let mut expanded = TimelineModule::default();
-        expanded
-            .toggled_events
-            .insert("process-group:read".into());
+        expanded.toggled_events.insert("process-group:read".into());
         let rows = expanded.rows(&session);
         assert_eq!(
             rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
@@ -421,10 +419,8 @@ mod tests {
         timeline.remember_reading_position(task_a.clone(), reread, None);
         assert_eq!(timeline.reading_position(&task_a), Some(reread));
         assert_eq!(timeline.reading_position(&task_b), Some(b));
-        assert!(
-            TimelineModule::default()
-                .reading_position(&task_a)
-                .is_none()
-        );
+        assert!(TimelineModule::default()
+            .reading_position(&task_a)
+            .is_none());
     }
 }

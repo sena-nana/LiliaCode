@@ -48,10 +48,7 @@ mod tests {
         theme: ThemeMode,
     ) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut shaper = NanaTextShaper::default();
-        document
-            .context_mut()
-            .set_theme(theme)
-            .expect("theme");
+        document.context_mut().set_theme(theme).expect("theme");
         document.flush(
             LayoutViewport::new(WIDTH as f32, HEIGHT as f32),
             &mut shaper,
@@ -67,13 +64,7 @@ mod tests {
             .color(SemanticColorRole::Background);
         let clear = [color.r, color.g, color.b, color.a];
         let size = Size::new(WIDTH, HEIGHT);
-        let pixels = gpu.paint(
-            document.scene(),
-            size,
-            clear,
-            None,
-            Some(&renderers),
-        )?;
+        let pixels = gpu.paint(document.scene(), size, clear, None, Some(&renderers))?;
         let colors = unique_colors(&pixels);
         assert!(
             colors > 8,
@@ -134,11 +125,7 @@ mod tests {
             inspector_panel: inspector.into(),
             include_inbox: false,
             event_kinds: vec!["task_created".into()],
-            projects: vec![(
-                "native-agent-debug-project".into(),
-                "验收项目".into(),
-                true,
-            )],
+            projects: vec![("native-agent-debug-project".into(), "验收项目".into(), true)],
             ..Default::default()
         }
     }
@@ -187,8 +174,8 @@ mod tests {
             .context_mut()
             .create_component(document_id, Stack::fill_column(16.0).padding(16.0))
             .unwrap();
-        let mut memory = MemoryView::mount(document.context_mut(), document_id, Arc::new(|_| {}))
-            .unwrap();
+        let mut memory =
+            MemoryView::mount(document.context_mut(), document_id, Arc::new(|_| {})).unwrap();
         document
             .context_mut()
             .append_child(host, memory.root)

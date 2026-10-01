@@ -1,16 +1,20 @@
 use crate::runtime_compat::HostedWindowId;
-use crate::runtime_layout::reconcile_children;
-use crate::runtime_shell::{bind_activate, emit, IntentSink, ShellIntent};
+use crate::runtime_layout::{view_column, view_fill_row, Bound};
+use crate::runtime_shell::{emit, IntentSink, ShellIntent};
+use nana_ui::runtime::view::{
+    empty_state, entity_ref, signal, status_badge, switch, text_input, widget, with_refs, EachExt,
+    EntityRef, Signal,
+};
+use nana_ui::runtime::GraphCanvasEvent;
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, EmptyState, Entity, FormField, FrameworkError,
-    GraphCanvas, ScrollAxes, ScrollView, SearchDropdown, SearchDropdownEvent, SearchDropdownOption,
-    SidebarFooter, SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowState, SidebarSection,
-    StableNodeId, Stack, StatusBadge, Switch, TextArea, TextChanged, TextInput,
-    ToggleChanged, ValidationMessage, View,
+    GraphCanvas, LengthSpec, NodeStyle, ScrollAxes, ScrollView, SearchDropdown,
+    SearchDropdownEvent, SearchDropdownOption, SidebarFooter, SidebarFooterButton, SidebarFrame,
+    SidebarRow, SidebarRowState, SidebarSection, StableNodeId, Stack, StatusBadge, Switch,
+    TextArea, TextChanged, TextInput, ValidationMessage, View,
 };
 use nana_ui::{
-    ButtonKind, GraphCanvasEvent, GraphModel, GraphSelection, GraphViewport, Icon, StatusTone,
-    ValidationIntent,
+    ButtonKind, GraphModel, GraphSelection, GraphViewport, Icon, StatusTone, ValidationIntent,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -134,26 +138,14 @@ impl Default for AutomationViewSnapshot {
         }
     }
 }
-fn bind_action<V: View>(
-    context: &mut AppContext,
-    control: Entity<V>,
-    sink: IntentSink,
-    target: Arc<Mutex<Option<AutomationTarget>>>,
-    action: AutomationAction,
-) -> Result<(), FrameworkError> {
-    context.on(control, move |_, _: &Activate, _| {
-        let selected = target.lock().unwrap().clone();
-        if let Some(target) = selected {
-            emit(
-                &sink,
-                ShellIntent::Automation {
-                    target,
-                    action: action.clone(),
-                },
-            );
-        }
-    })
+
+#[derive(Clone)]
+struct CanvasState {
+    model: GraphModel,
+    viewport: GraphViewport,
+    selection: Option<GraphSelection>,
 }
+
 pub(crate) struct AutomationView {
     pub(crate) page: Entity<Stack>,
     pub(crate) sidebar: Entity<SidebarFrame>,
@@ -186,12 +178,44 @@ pub(crate) struct AutomationView {
     inspector: Entity<SearchDropdown>,
     scope_panel: Entity<Stack>,
     inbox: Entity<Switch>,
+    project_list: Entity<Stack>,
     project_toggles: HashMap<String, Entity<Switch>>,
     event_toggles: HashMap<String, Entity<Switch>>,
     run_target: Arc<Mutex<Option<(AutomationTarget, String, Option<String>, bool)>>>,
     pub(crate) rows: HashMap<String, Entity<SidebarRow>>,
     target: Arc<Mutex<Option<AutomationTarget>>>,
-    sink: IntentSink,
+    workflow_rows: Bound<Vec<AutomationRow>>,
+    project_rows: Bound<Vec<(String, String, bool)>>,
+    runs: Bound<Vec<AutomationRunView>>,
+    event_kinds: Bound<Vec<String>>,
+    show_error: Bound<bool>,
+    error_text: Bound<String>,
+    show_empty: Bound<bool>,
+    show_workflow: Bound<bool>,
+    show_scope: Bound<bool>,
+    show_canvas: Bound<bool>,
+    name_text: Bound<String>,
+    status_label: Bound<Arc<str>>,
+    status_tone: Bound<StatusTone>,
+    run_disabled: Bound<bool>,
+    toggle_label: Bound<String>,
+    inspector_panel: Bound<String>,
+    show_picker: Bound<bool>,
+    show_detail: Bound<bool>,
+    detail_title: Bound<Arc<str>>,
+    detail_message: Bound<Option<Arc<str>>>,
+    show_response: Bound<bool>,
+    response_text: Bound<String>,
+    show_resume: Bound<bool>,
+    show_cancel: Bound<bool>,
+    show_actions: Bound<bool>,
+    resume_disabled: Bound<bool>,
+    cancel_disabled: Bound<bool>,
+    inbox_checked: Bound<bool>,
+    selected_run: Bound<Option<String>>,
+    canvas_state: Bound<CanvasState>,
+    name_workflow: Option<String>,
+    response_run: Option<String>,
 }
 impl AutomationView {
     pub(crate) fn debug_nodes(&self) -> Vec<(String, StableNodeId)> {
@@ -231,7 +255,13 @@ impl AutomationView {
         context
             .world()
             .node(self.body.stable_id())
-            .is_some_and(|body| body.children.contains(&self.canvas.stable_id()))
+            .is_some_and(|body| {
+                body.children.contains(&self.canvas.stable_id())
+                    && !context
+                        .world()
+                        .node_style(self.canvas.stable_id())
+                        .is_some_and(|style| style.layout.hidden)
+            })
     }
 
     pub(crate) fn mount(
@@ -241,306 +271,539 @@ impl AutomationView {
         visible: bool,
         sink: IntentSink,
     ) -> Result<Self, FrameworkError> {
-        let target = Arc::new(Mutex::new(snapshot.target.clone()));
-        let page =
-            context.create_detached_component(document, Stack::fill_column(12.0).padding(16.0))?;
-        let content_scroll = context.create_detached_component(
-            document,
-            ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
-        )?;
-        let body = context.create_detached_component(document, Stack::fill_row(16.0))?;
         let editor =
             super::editor_view::NodeEditorView::mount(context, document, Arc::clone(&sink))?;
-        let toolbar = context.create_detached_component(document, Stack::bar(8.0).wrap(true))?;
-        let node_tools = context.create_detached_component(document, Stack::bar(8.0).wrap(true))?;
-        let name =
-            context.create_detached_component(document, TextInput::new(snapshot.name.clone()))?;
-        let name_field = context.create_detached_component(
-            document,
-            FormField::new("工作流名称").control_child(name.stable_id()),
-        )?;
-        context.append_child(name_field, name)?;
-        let binding = Arc::clone(&target);
-        let callback = Arc::clone(&sink);
-        context.on(name, move |_, event: &TextChanged, _| {
-            let selected = binding.lock().unwrap().clone();
-            if let Some(target) = selected {
-                emit(
-                    &callback,
-                    ShellIntent::Automation {
-                        target,
-                        action: AutomationAction::Rename(event.value.to_string()),
+        let target = Arc::new(Mutex::new(None));
+        let run_target = Arc::new(Mutex::new(None));
+        let workflow_rows: Bound<Vec<AutomationRow>> = Bound::new();
+        let project_rows: Bound<Vec<(String, String, bool)>> = Bound::new();
+        let runs: Bound<Vec<AutomationRunView>> = Bound::new();
+        let event_kinds: Bound<Vec<String>> = Bound::new();
+        let show_error = Bound::new();
+        let error_text = Bound::new();
+        let show_empty = Bound::new();
+        let show_workflow = Bound::new();
+        let show_scope = Bound::new();
+        let show_canvas = Bound::new();
+        let name_text = Bound::new();
+        let status_label = Bound::new();
+        let status_tone = Bound::new();
+        let run_disabled = Bound::new();
+        let toggle_label = Bound::new();
+        let inspector_panel = Bound::new();
+        let show_picker = Bound::new();
+        let show_detail = Bound::new();
+        let detail_title = Bound::new();
+        let detail_message = Bound::new();
+        let show_response = Bound::new();
+        let response_text = Bound::new();
+        let show_resume = Bound::new();
+        let show_cancel = Bound::new();
+        let show_actions = Bound::new();
+        let resume_disabled = Bound::new();
+        let cancel_disabled = Bound::new();
+        let inbox_checked = Bound::new();
+        let selected_run = Bound::new();
+        let canvas_state = Bound::new();
+        let rows_slot = workflow_rows.clone();
+        let projects_slot = project_rows.clone();
+        let runs_slot = runs.clone();
+        let kinds_slot = event_kinds.clone();
+        let show_error_slot = show_error.clone();
+        let error_text_slot = error_text.clone();
+        let show_empty_slot = show_empty.clone();
+        let show_workflow_slot = show_workflow.clone();
+        let show_scope_slot = show_scope.clone();
+        let show_canvas_slot = show_canvas.clone();
+        let name_text_slot = name_text.clone();
+        let status_label_slot = status_label.clone();
+        let status_tone_slot = status_tone.clone();
+        let run_disabled_slot = run_disabled.clone();
+        let toggle_label_slot = toggle_label.clone();
+        let inspector_panel_slot = inspector_panel.clone();
+        let show_picker_slot = show_picker.clone();
+        let show_detail_slot = show_detail.clone();
+        let detail_title_slot = detail_title.clone();
+        let detail_message_slot = detail_message.clone();
+        let show_response_slot = show_response.clone();
+        let response_text_slot = response_text.clone();
+        let show_resume_slot = show_resume.clone();
+        let show_cancel_slot = show_cancel.clone();
+        let show_actions_slot = show_actions.clone();
+        let resume_disabled_slot = resume_disabled.clone();
+        let cancel_disabled_slot = cancel_disabled.clone();
+        let inbox_checked_slot = inbox_checked.clone();
+        let selected_run_slot = selected_run.clone();
+        let canvas_state_slot = canvas_state.clone();
+        let stored_target = Arc::clone(&target);
+        let stored_run_target = Arc::clone(&run_target);
+        let mounted = context.mount_view_detached(document, move || {
+            let rows = rows_slot.install(signal(Vec::new()));
+            let projects = projects_slot.install(signal(Vec::new()));
+            let runs = runs_slot.install(signal(Vec::new()));
+            let event_kinds = kinds_slot.install(signal(Vec::new()));
+            let show_error = show_error_slot.install(signal(false));
+            let error_text = error_text_slot.install(signal(String::new()));
+            let show_empty = show_empty_slot.install(signal(false));
+            let show_workflow = show_workflow_slot.install(signal(false));
+            let show_scope = show_scope_slot.install(signal(false));
+            let show_canvas = show_canvas_slot.install(signal(true));
+            let name_text = name_text_slot.install(signal(String::new()));
+            let status_label = status_label_slot.install(signal(Arc::<str>::from("")));
+            let status_tone = status_tone_slot.install(signal(StatusTone::Neutral));
+            let run_disabled = run_disabled_slot.install(signal(true));
+            let toggle_label = toggle_label_slot.install(signal(String::new()));
+            let inspector_panel = inspector_panel_slot.install(signal(String::new()));
+            let show_picker = show_picker_slot.install(signal(false));
+            let show_detail = show_detail_slot.install(signal(false));
+            let detail_title = detail_title_slot.install(signal(Arc::<str>::from("")));
+            let detail_message = detail_message_slot.install(signal(None));
+            let show_response = show_response_slot.install(signal(false));
+            let response_text = response_text_slot.install(signal(String::new()));
+            let show_resume = show_resume_slot.install(signal(false));
+            let show_cancel = show_cancel_slot.install(signal(false));
+            let show_actions = show_actions_slot.install(signal(false));
+            let resume_disabled = resume_disabled_slot.install(signal(false));
+            let cancel_disabled = cancel_disabled_slot.install(signal(false));
+            let inbox_checked = inbox_checked_slot.install(signal(false));
+            let selected_run = selected_run_slot.install(signal(None));
+            let canvas_state = canvas_state_slot.install(signal(CanvasState {
+                model: GraphModel::empty(),
+                viewport: GraphViewport::default(),
+                selection: None,
+            }));
+            let page = entity_ref::<Stack>();
+            let sidebar = entity_ref::<SidebarFrame>();
+            let canvas = entity_ref::<GraphCanvas>();
+            let body = entity_ref::<Stack>();
+            let section = entity_ref::<SidebarSection>();
+            let empty = entity_ref::<EmptyState>();
+            let toolbar = entity_ref::<Stack>();
+            let node_tools = entity_ref::<Stack>();
+            let name = entity_ref::<TextInput>();
+            let name_field = entity_ref::<FormField>();
+            let status = entity_ref::<StatusBadge>();
+            let error = entity_ref::<ValidationMessage>();
+            let publish = entity_ref::<Button>();
+            let run = entity_ref::<Button>();
+            let toggle = entity_ref::<Button>();
+            let add_human = entity_ref::<Button>();
+            let create = entity_ref::<SidebarFooterButton>();
+            let back = entity_ref::<SidebarRow>();
+            let content_scroll = entity_ref::<ScrollView>();
+            let run_panel = entity_ref::<Stack>();
+            let run_picker = entity_ref::<SearchDropdown>();
+            let run_detail = entity_ref::<EmptyState>();
+            let response = entity_ref::<TextArea>();
+            let run_actions = entity_ref::<Stack>();
+            let resume = entity_ref::<Button>();
+            let cancel = entity_ref::<Button>();
+            let inspector = entity_ref::<SearchDropdown>();
+            let scope_panel = entity_ref::<Stack>();
+            let inbox = entity_ref::<Switch>();
+            let mut event_refs = Vec::new();
+            let mut event_views = Vec::new();
+            for (value, label) in EVENT_KIND_OPTIONS {
+                let toggle_ref = entity_ref();
+                event_refs.push(toggle_ref);
+                event_views.push(event_switch(
+                    toggle_ref,
+                    value,
+                    label,
+                    event_kinds,
+                    &target,
+                    &sink,
+                ));
+            }
+            let name_target = Arc::clone(&target);
+            let name_sink = Arc::clone(&sink);
+            let name_control = widget(FormField::new("工作流名称"))
+                .entity_ref(name_field)
+                .visible(show_workflow)
+                .control(text_input().entity_ref(name).value(name_text).on_input(
+                    move |event: &TextChanged| {
+                        emit_automation(
+                            &name_sink,
+                            &name_target,
+                            AutomationAction::Rename(event.value.to_string()),
+                        );
                     },
-                );
-            }
-        })?;
-        let save = context.create_detached_component(
-            document,
-            Button::new("保存草稿").kind(ButtonKind::Subtle),
-        )?;
-        let publish = context.create_detached_component(
-            document,
-            Button::new("保存并发布").kind(ButtonKind::Primary),
-        )?;
-        let run = context.create_detached_component(
-            document,
-            Button::new("运行已发布版本").kind(ButtonKind::Primary),
-        )?;
-        let toggle = context
-            .create_detached_component(document, Button::new("启用").kind(ButtonKind::Subtle))?;
-        for (button, action) in [
-            (save, AutomationAction::Save),
-            (publish, AutomationAction::Publish),
-            (run, AutomationAction::Run),
-            (toggle, AutomationAction::ToggleEnabled),
-        ] {
-            bind_action(
-                context,
-                button,
-                Arc::clone(&sink),
-                Arc::clone(&target),
-                action,
-            )?;
-            context.append_child(toolbar, button)?;
-        }
-        let inspector = context.create_detached_component(
-            document,
-            SearchDropdown::new(Some(snapshot.inspector_panel.clone())).placeholder("检查器"),
-        )?;
-        let binding = Arc::clone(&target);
-        let callback = Arc::clone(&sink);
-        context.on(inspector, move |_, event: &SearchDropdownEvent, _| {
-            if let SearchDropdownEvent::Select(panel) = event {
-                if let Some(target) = binding.lock().unwrap().clone() {
-                    emit(
-                        &callback,
-                        ShellIntent::Automation {
-                            target,
-                            action: AutomationAction::SetInspector(panel.to_string()),
-                        },
+                ));
+            let graph_target = Arc::clone(&target);
+            let graph_sink = Arc::clone(&sink);
+            let canvas_view = widget(GraphCanvas::new("automations", GraphModel::empty()))
+                .entity_ref(canvas)
+                .bind(move |canvas| {
+                    canvas_state.with(|state| {
+                        canvas.model = state.model.clone();
+                        canvas.viewport = state.viewport;
+                        canvas.selection = state.selection.clone();
+                    });
+                    set_hidden(&mut canvas.style, !show_canvas.get());
+                })
+                .on(move |event: &GraphCanvasEvent| {
+                    emit_automation(
+                        &graph_sink,
+                        &graph_target,
+                        AutomationAction::Graph(event.clone()),
                     );
-                }
-            }
-        })?;
-        context.append_child(toolbar, inspector)?;
-        let mut add_human = None;
-        for (kind, label) in [
-            ("agent", "添加 Agent"),
-            ("tool", "添加工具"),
-            ("logic", "添加条件"),
-            ("human", "添加人工确认"),
-        ] {
-            let button = context
-                .create_detached_component(document, Button::new(label).kind(ButtonKind::Subtle))?;
-            bind_action(
-                context,
-                button,
-                Arc::clone(&sink),
-                Arc::clone(&target),
-                AutomationAction::AddNode(kind.into()),
-            )?;
-            context.append_child(node_tools, button)?;
-            if kind == "human" {
-                add_human = Some(button);
-            }
-        }
-        let add_human = add_human.expect("human node tool");
-        let status = context.create_detached_component(
-            document,
-            StatusBadge::new("", StatusTone::Neutral),
-        )?;
-        let error = context.create_detached_component(
-            document,
-            ValidationMessage::new("", ValidationIntent::Danger),
-        )?;
-        let canvas = context.create_detached_component(
-            document,
-            GraphCanvas::new("automations", snapshot.graph.clone())
-                .viewport(snapshot.viewport)
-                .selection(snapshot.selection.clone()),
-        )?;
-        let binding = Arc::clone(&target);
-        let callback = Arc::clone(&sink);
-        context.on(canvas, move |_, event: &GraphCanvasEvent, _| {
-            let selected = binding.lock().unwrap().clone();
-            if let Some(target) = selected {
-                emit(
-                    &callback,
-                    ShellIntent::Automation {
-                        target,
-                        action: AutomationAction::Graph(event.clone()),
-                    },
-                );
-            }
-        })?;
-        let empty = context.create_detached_component(
-            document,
-            EmptyState::new("还没有自动化")
-                .message("新建工作流，添加步骤后保存并发布。")
-                .icon(Icon::Nodes),
-        )?;
-        let run_panel = context.create_detached_component(document, Stack::column(8.0))?;
-        let run_picker = context.create_detached_component(
-            document,
-            SearchDropdown::new(None::<String>).placeholder("运行记录"),
-        )?;
-        let binding = Arc::clone(&target);
-        let callback = Arc::clone(&sink);
-        context.on(run_picker, move |_, event: &SearchDropdownEvent, _| {
-            if let SearchDropdownEvent::Select(id) = event {
-                if let Some(target) = binding.lock().unwrap().clone() {
-                    emit(
-                        &callback,
-                        ShellIntent::Automation {
-                            target,
-                            action: AutomationAction::SelectRun(id.to_string()),
-                        },
-                    );
-                }
-            }
-        })?;
-        let run_detail = context.create_detached_component(
-            document,
-            EmptyState::new("尚无运行记录").compact(true),
-        )?;
-        let response = context.create_detached_component(
-            document,
-            TextArea::new("")
-                .placeholder("补充说明（可选）")
-                .height(72.0),
-        )?;
-        let run_actions =
-            context.create_detached_component(document, Stack::bar(8.0).wrap(true))?;
-        let resume = context.create_detached_component(
-            document,
-            Button::new("确认并继续").kind(ButtonKind::Primary),
-        )?;
-        let cancel = context.create_detached_component(
-            document,
-            Button::new("取消运行").kind(ButtonKind::Subtle),
-        )?;
-        let run_target = Arc::new(Mutex::new(
-            None::<(AutomationTarget, String, Option<String>, bool)>,
-        ));
-        for (button, is_resume) in [(resume, true), (cancel, false)] {
-            let binding = Arc::clone(&run_target);
-            let callback = Arc::clone(&sink);
-            context.on(button, move |_, _: &Activate, _| {
-                if let Some((target, run_id, waiting, cancellable)) =
-                    binding.lock().unwrap().clone()
+                });
+            let response_target = Arc::clone(&run_target);
+            let response_sink = Arc::clone(&sink);
+            let response_view = widget(
+                TextArea::new("")
+                    .placeholder("补充说明（可选）")
+                    .height(72.0),
+            )
+            .entity_ref(response)
+            .visible(show_response)
+            .value(response_text)
+            .on_input(move |event: &TextChanged| {
+                if let Some((target, run_id, Some(node_id), _)) =
+                    response_target.lock().unwrap().clone()
                 {
-                    if (is_resume && waiting.is_some()) || (!is_resume && cancellable) {
-                        let action = if is_resume {
-                            AutomationAction::Resume {
-                                run_id,
-                                node_id: waiting.unwrap(),
-                            }
-                        } else {
-                            AutomationAction::Cancel { run_id }
-                        };
-                        emit(&callback, ShellIntent::Automation { target, action });
-                    }
-                }
-            })?;
-        }
-        let binding = Arc::clone(&run_target);
-        let callback = Arc::clone(&sink);
-        context.on(response, move |_, event: &TextChanged, _| {
-            if let Some((target, run_id, Some(node_id), _)) = binding.lock().unwrap().clone() {
-                emit(
-                    &callback,
-                    ShellIntent::Automation {
-                        target,
-                        action: AutomationAction::Respond {
-                            run_id,
-                            node_id,
-                            value: event.value.to_string(),
-                        },
-                    },
-                );
-            }
-        })?;
-        let scope_panel = context.create_detached_component(document, Stack::column(8.0))?;
-        let inbox = context.create_detached_component(
-            document,
-            Switch::new("包括收件箱", snapshot.include_inbox),
-        )?;
-        let binding = Arc::clone(&target);
-        let callback = Arc::clone(&sink);
-        context.on(inbox, move |_, _: &ToggleChanged, _| {
-            if let Some(target) = binding.lock().unwrap().clone() {
-                emit(
-                    &callback,
-                    ShellIntent::Automation {
-                        target,
-                        action: AutomationAction::ToggleInbox,
-                    },
-                );
-            }
-        })?;
-        let mut event_toggles = HashMap::new();
-        for (value, label) in EVENT_KIND_OPTIONS {
-            let toggle = context.create_detached_component(document, Switch::new(*label, false))?;
-            let binding = Arc::clone(&target);
-            let callback = Arc::clone(&sink);
-            let field_value = (*value).to_owned();
-            context.on(toggle, move |_, _: &ToggleChanged, _| {
-                if let Some(target) = binding.lock().unwrap().clone() {
                     emit(
-                        &callback,
+                        &response_sink,
                         ShellIntent::Automation {
                             target,
-                            action: AutomationAction::ToggleScope {
-                                field: "event-kind".into(),
-                                value: field_value.clone(),
+                            action: AutomationAction::Respond {
+                                run_id,
+                                node_id,
+                                value: event.value.to_string(),
                             },
                         },
                     );
                 }
-            })?;
+            });
+            let resume_target = Arc::clone(&run_target);
+            let resume_sink = Arc::clone(&sink);
+            let cancel_target = Arc::clone(&run_target);
+            let cancel_sink = Arc::clone(&sink);
+            let picker_target = Arc::clone(&target);
+            let picker_sink = Arc::clone(&sink);
+            let inspector_target = Arc::clone(&target);
+            let inspector_sink = Arc::clone(&sink);
+            let inbox_target = Arc::clone(&target);
+            let inbox_sink = Arc::clone(&sink);
+            let back_sink = Arc::clone(&sink);
+            let refresh_sink = Arc::clone(&sink);
+            let create_sink = Arc::clone(&sink);
+            let listed = rows;
+            let page_view = widget(Stack::fill_column(12.0).padding(16.0))
+                .entity_ref(page)
+                .children(
+                    widget(
+                        ScrollView::new(ScrollAxes::Vertical)
+                            .style(Stack::fill_column(0.0).node_style()),
+                    )
+                    .entity_ref(content_scroll)
+                    .children((
+                        widget(ValidationMessage::new("", ValidationIntent::Danger))
+                            .entity_ref(error)
+                            .visible(show_error)
+                            .bind(move |message| {
+                                error_text.with(|text| message.message = Arc::from(text.as_str()));
+                            }),
+                        empty_state("还没有自动化")
+                            .message("新建工作流，添加步骤后保存并发布。")
+                            .icon(Icon::Nodes)
+                            .entity_ref(empty)
+                            .visible(show_empty),
+                        name_control,
+                        status_badge(status_label)
+                            .tone(status_tone)
+                            .entity_ref(status)
+                            .visible(show_workflow),
+                        widget(Stack::bar(8.0).wrap(true))
+                            .entity_ref(toolbar)
+                            .visible(show_workflow)
+                            .children((
+                                action_button(
+                                    "保存草稿",
+                                    ButtonKind::Subtle,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::Save,
+                                ),
+                                action_button(
+                                    "保存并发布",
+                                    ButtonKind::Primary,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::Publish,
+                                )
+                                .entity_ref(publish),
+                                action_button(
+                                    "运行已发布版本",
+                                    ButtonKind::Primary,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::Run,
+                                )
+                                .entity_ref(run)
+                                .disabled(run_disabled),
+                                action_button(
+                                    "启用",
+                                    ButtonKind::Subtle,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::ToggleEnabled,
+                                )
+                                .entity_ref(toggle)
+                                .label(toggle_label),
+                                widget(SearchDropdown::new(None::<String>).placeholder("检查器"))
+                                    .entity_ref(inspector)
+                                    .bind(move |picker| {
+                                        picker.options = INSPECTOR_PANELS
+                                            .iter()
+                                            .map(|(value, label)| {
+                                                SearchDropdownOption::new(*value, *label)
+                                            })
+                                            .collect();
+                                        picker.value = Some(
+                                            inspector_panel.with(|panel| Arc::from(panel.as_str())),
+                                        );
+                                    })
+                                    .on(move |event: &SearchDropdownEvent| {
+                                        if let SearchDropdownEvent::Select(panel) = event {
+                                            emit_automation(
+                                                &inspector_sink,
+                                                &inspector_target,
+                                                AutomationAction::SetInspector(panel.to_string()),
+                                            );
+                                        }
+                                    }),
+                            )),
+                        widget(Stack::bar(8.0).wrap(true))
+                            .entity_ref(node_tools)
+                            .visible(show_workflow)
+                            .children((
+                                action_button(
+                                    "添加 Agent",
+                                    ButtonKind::Subtle,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::AddNode("agent".into()),
+                                ),
+                                action_button(
+                                    "添加工具",
+                                    ButtonKind::Subtle,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::AddNode("tool".into()),
+                                ),
+                                action_button(
+                                    "添加条件",
+                                    ButtonKind::Subtle,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::AddNode("logic".into()),
+                                ),
+                                action_button(
+                                    "添加人工确认",
+                                    ButtonKind::Subtle,
+                                    &target,
+                                    &sink,
+                                    AutomationAction::AddNode("human".into()),
+                                )
+                                .entity_ref(add_human),
+                            )),
+                        view_fill_row(16.0)
+                            .entity_ref(body)
+                            .visible(show_workflow)
+                            .children(canvas_view),
+                        view_column(8.0)
+                            .entity_ref(run_panel)
+                            .visible(show_workflow)
+                            .children((
+                                widget(SearchDropdown::new(None::<String>).placeholder("运行记录"))
+                                    .entity_ref(run_picker)
+                                    .bind(move |picker| {
+                                        set_hidden(&mut picker.style, !show_picker.get());
+                                        picker.options = runs.with(|runs| {
+                                            runs.iter()
+                                                .map(|run| {
+                                                    SearchDropdownOption::new(
+                                                        run.id.clone(),
+                                                        run.label.clone(),
+                                                    )
+                                                })
+                                                .collect()
+                                        });
+                                        picker.value = runs.with(|runs| {
+                                            let selected = selected_run.get();
+                                            runs.iter()
+                                                .find(|run| {
+                                                    selected.as_deref() == Some(run.id.as_str())
+                                                })
+                                                .map(|run| Arc::from(run.id.as_str()))
+                                        });
+                                    })
+                                    .on(move |event: &SearchDropdownEvent| {
+                                        if let SearchDropdownEvent::Select(id) = event {
+                                            emit_automation(
+                                                &picker_sink,
+                                                &picker_target,
+                                                AutomationAction::SelectRun(id.to_string()),
+                                            );
+                                        }
+                                    }),
+                                empty_state(detail_title)
+                                    .message(detail_message)
+                                    .compact(true)
+                                    .entity_ref(run_detail)
+                                    .visible(show_detail),
+                                response_view,
+                                widget(Stack::bar(8.0).wrap(true))
+                                    .entity_ref(run_actions)
+                                    .visible(show_actions)
+                                    .children((
+                                        widget(Button::new("确认并继续").kind(ButtonKind::Primary))
+                                            .entity_ref(resume)
+                                            .disabled(resume_disabled)
+                                            .visible(show_resume)
+                                            .on_activate(move || {
+                                                emit_run_action(&resume_sink, &resume_target, true);
+                                            }),
+                                        widget(Button::new("取消运行").kind(ButtonKind::Subtle))
+                                            .entity_ref(cancel)
+                                            .disabled(cancel_disabled)
+                                            .visible(show_cancel)
+                                            .on_activate(move || {
+                                                emit_run_action(
+                                                    &cancel_sink,
+                                                    &cancel_target,
+                                                    false,
+                                                );
+                                            }),
+                                    )),
+                            )),
+                        view_column(8.0)
+                            .entity_ref(scope_panel)
+                            .visible(show_scope)
+                            .children((
+                                switch("包括收件箱")
+                                    .entity_ref(inbox)
+                                    .checked(inbox_checked)
+                                    .on_change(move |_| {
+                                        emit_automation(
+                                            &inbox_sink,
+                                            &inbox_target,
+                                            AutomationAction::ToggleInbox,
+                                        );
+                                    }),
+                                {
+                                    let project_target = Arc::clone(&target);
+                                    let project_sink = Arc::clone(&sink);
+                                    let project_items = projects;
+                                    projects
+                                        .each(
+                                            |project| project.0.clone(),
+                                            move |project| {
+                                                project_switch(
+                                                    project,
+                                                    project_items,
+                                                    Arc::clone(&project_target),
+                                                    Arc::clone(&project_sink),
+                                                )
+                                            },
+                                        )
+                                        .gap(8.0)
+                                        .visible(move || projects.with(|items| !items.is_empty()))
+                                },
+                                view_column(8.0).children(event_views),
+                            )),
+                    )),
+                );
+            let sidebar_view = widget(SidebarFrame::new())
+                .entity_ref(sidebar)
+                .top(
+                    widget(SidebarRow::new("返回"))
+                        .entity_ref(back)
+                        .on(move |_: &Activate| emit(&back_sink, ShellIntent::CloseAutomations)),
+                )
+                .body(
+                    widget(SidebarSection::new("自动化"))
+                        .entity_ref(section)
+                        .bind(move |section| {
+                            section.count = Some(listed.with(|rows| rows.len()));
+                        })
+                        .children({
+                            let row_sink = Arc::clone(&sink);
+                            let row_items = rows;
+                            rows.each(
+                                |row| row.id.clone(),
+                                move |row| workflow_row(row, row_items, Arc::clone(&row_sink)),
+                            )
+                            .gap(4.0)
+                        }),
+                )
+                .footer(
+                    widget(SidebarFooter::new()).children((
+                        widget(SidebarFooterButton::new("刷新", Icon::Activity)).on(
+                            move |_: &Activate| {
+                                emit(&refresh_sink, ShellIntent::RefreshAutomations)
+                            },
+                        ),
+                        widget(SidebarFooterButton::new("新建", Icon::Add))
+                            .entity_ref(create)
+                            .on(move |_: &Activate| {
+                                emit(&create_sink, ShellIntent::CreateAutomation)
+                            }),
+                    )),
+                );
+            with_refs(
+                (page_view, sidebar_view),
+                (
+                    (
+                        page, sidebar, canvas, body, section, empty, toolbar, node_tools,
+                    ),
+                    (
+                        name, name_field, status, error, publish, run, toggle, add_human,
+                    ),
+                    (
+                        create,
+                        back,
+                        content_scroll,
+                        run_panel,
+                        run_picker,
+                        run_detail,
+                        response,
+                        run_actions,
+                    ),
+                    (resume, cancel, inspector, scope_panel, inbox),
+                    event_refs,
+                ),
+            )
+        })?;
+        let (
+            _,
+            (
+                (page, sidebar, canvas, body, section, empty, toolbar, node_tools),
+                (name, name_field, status, error, publish, run, toggle, add_human),
+                (
+                    create,
+                    back,
+                    content_scroll,
+                    run_panel,
+                    run_picker,
+                    run_detail,
+                    response,
+                    run_actions,
+                ),
+                (resume, cancel, inspector, scope_panel, inbox),
+                event_switches,
+            ),
+        ) = mounted;
+        let port = context
+            .read(section, |section| section.body)?
+            .ok_or(FrameworkError::InvalidInput)?;
+        let list = only_child(context, port)?;
+        let project_list = child_at(context, scope_panel.stable_id(), 1)?;
+        let mut event_toggles = HashMap::new();
+        for ((value, _), toggle) in EVENT_KIND_OPTIONS.iter().zip(event_switches) {
             event_toggles.insert((*value).to_owned(), toggle);
         }
-        let back = context.create_detached_component(document, SidebarRow::new("返回"))?;
-        bind_activate(
-            context,
-            back,
-            Arc::clone(&sink),
-            ShellIntent::CloseAutomations,
-        )?;
-        let list = context.create_detached_component(document, Stack::column(4.0))?;
-        let scroll =
-            context.create_detached_component(document, SidebarFrame::vertical_body_scroll())?;
-        let section = context.create_detached_component(
-            document,
-            SidebarSection::new("自动化").count(snapshot.rows.len()),
-        )?;
-        context.append_child(section, list)?;
-        context.append_child(scroll, section)?;
-        let footer = context.create_detached_component(document, SidebarFooter::new())?;
-        let mut create = None;
-        for (label, icon, intent) in [
-            ("刷新", Icon::Activity, ShellIntent::RefreshAutomations),
-            ("新建", Icon::Add, ShellIntent::CreateAutomation),
-        ] {
-            let button = context
-                .create_detached_component(document, SidebarFooterButton::new(label, icon))?;
-            bind_activate(context, button, Arc::clone(&sink), intent)?;
-            context.append_child(footer, button)?;
-            if label == "新建" {
-                create = Some(button);
-            }
-        }
-        let create = create.expect("create automation");
-        let sidebar = context.create_detached_component(
-            document,
-            SidebarFrame::new()
-                .top(back.stable_id())
-                .body(scroll.stable_id())
-                .footer(footer.stable_id()),
-        )?;
-        context.append_child(sidebar, back)?;
-        context.append_child(sidebar, scroll)?;
-        context.append_child(sidebar, footer)?;
         let mut view = Self {
             page,
             sidebar,
@@ -573,16 +836,49 @@ impl AutomationView {
             inspector,
             scope_panel,
             inbox,
+            project_list,
             project_toggles: HashMap::new(),
             event_toggles,
-            run_target,
+            run_target: stored_run_target,
             rows: HashMap::new(),
-            target,
-            sink,
+            target: stored_target,
+            workflow_rows,
+            project_rows,
+            runs,
+            event_kinds,
+            show_error,
+            error_text,
+            show_empty,
+            show_workflow,
+            show_scope,
+            show_canvas,
+            name_text,
+            status_label,
+            status_tone,
+            run_disabled,
+            toggle_label,
+            inspector_panel,
+            show_picker,
+            show_detail,
+            detail_title,
+            detail_message,
+            show_response,
+            response_text,
+            show_resume,
+            show_cancel,
+            show_actions,
+            resume_disabled,
+            cancel_disabled,
+            inbox_checked,
+            selected_run,
+            canvas_state,
+            name_workflow: None,
+            response_run: None,
         };
         view.sync(context, document, snapshot, visible)?;
         Ok(view)
     }
+
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
@@ -618,261 +914,349 @@ impl AutomationView {
             None
         };
         if !visible {
-            context.update_component(self.run_picker, |picker, _| picker.close())?;
-            context.update_component(self.inspector, |picker, _| picker.close())?;
+            context.update_component(self.run_picker, |picker, _| {
+                picker.close();
+            })?;
+            context.update_component(self.inspector, |picker, _| {
+                picker.close();
+            })?;
             return Ok(());
         }
         context.update_component(self.editor.root, |root, _| {
-            *root = if snapshot.compact {
-                Stack::fill_column(8.0)
-            } else {
-                Stack::fill_column(8.0)
-                    .width(nana_ui::runtime::LengthSpec::Px(320.0))
-                    .grow(0.0)
-                    .shrink(0.0)
-            };
+            *root = editor_frame(snapshot.compact, snapshot.editor.is_none());
         })?;
-        let body = if snapshot.editor.is_some() {
-            if snapshot.compact {
-                vec![self.editor.root.stable_id()]
-            } else {
-                vec![self.canvas.stable_id(), self.editor.root.stable_id()]
-            }
-        } else {
-            vec![self.canvas.stable_id()]
-        };
-        reconcile_children(context, self.body.stable_id(), &body)?;
-        context.update_component(self.inspector, |picker, _| {
-            picker.options = INSPECTOR_PANELS
-                .iter()
-                .map(|(value, label)| SearchDropdownOption::new(*value, *label))
-                .collect();
-            picker.value = Some(Arc::from(snapshot.inspector_panel.as_str()));
-        })?;
-        context.update_component(self.run_picker, |picker, _| {
-            picker.options = snapshot
-                .runs
-                .iter()
-                .map(|run| SearchDropdownOption::new(run.id.clone(), run.label.clone()))
-                .collect();
-            picker.value = selected_run.map(|run| Arc::from(run.id.as_str()));
-        })?;
-        context.update_component(self.run_detail, |empty, _| {
-            *empty = if let Some(run) = selected_run {
-                let detail = [run.error.as_deref(), run.prompt.as_deref()]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                EmptyState::new("运行详情").message(detail).compact(true)
-            } else {
-                EmptyState::new("尚无运行记录").compact(true)
-            };
-        })?;
-        context.update_component(self.response, |field, _| {
-            if field.state.value != snapshot.response {
-                field.state.replace_value(snapshot.response.clone());
-            }
-        })?;
+        let workflow_id = snapshot
+            .target
+            .as_ref()
+            .map(|target| target.workflow_id.clone());
+        if self.name_workflow != workflow_id {
+            replace_input(context, self.name, &snapshot.name)?;
+            self.name_workflow = workflow_id;
+        }
+        let run_id = selected_run.map(|run| run.id.clone());
+        if self.response_run != run_id {
+            replace_area(context, self.response, &snapshot.response)?;
+            self.response_run = run_id;
+        }
+        let (label, tone) = workflow_status(snapshot);
+        let (title, message) = run_detail_copy(selected_run);
         let waiting = selected_run.is_some_and(|run| run.waiting_node.is_some());
         let cancellable = selected_run.is_some_and(|run| run.can_cancel);
-        context.update_component(self.resume, |button, _| {
-            button.disabled = snapshot.operation_pending
-        })?;
-        context.update_component(self.cancel, |button, _| {
-            button.disabled = snapshot.cancel_pending
-        })?;
-        let mut actions = Vec::new();
-        if waiting {
-            actions.push(self.resume.stable_id());
-        }
-        if cancellable {
-            actions.push(self.cancel.stable_id());
-        }
-        reconcile_children(context, self.run_actions.stable_id(), &actions)?;
-        let mut children = if snapshot.runs.is_empty() {
-            Vec::new()
-        } else {
-            vec![self.run_picker.stable_id()]
-        };
-        if selected_run.is_none_or(|run| run.error.is_some() || run.prompt.is_some()) {
-            children.push(self.run_detail.stable_id());
-        }
-        if waiting {
-            children.push(self.response.stable_id());
-        }
-        if !actions.is_empty() {
-            children.push(self.run_actions.stable_id());
-        }
-        reconcile_children(context, self.run_panel.stable_id(), &children)?;
-        context.update_component(self.inbox, |toggle, _| {
-            *toggle = Switch::new("包括收件箱", snapshot.include_inbox);
-        })?;
-        for (value, label) in EVENT_KIND_OPTIONS {
-            if let Some(toggle) = self.event_toggles.get(*value).copied() {
-                context.update_component(toggle, |view, _| {
-                    *view = Switch::new(
-                        *label,
-                        snapshot.event_kinds.iter().any(|kind| kind == value),
-                    )
-                })?;
-            }
-        }
-        let mut scope_keep = HashSet::new();
-        let mut scope_order = vec![self.inbox.stable_id()];
-        for (id, label, checked) in &snapshot.projects {
-            scope_keep.insert(id.clone());
-            let toggle = if let Some(toggle) = self.project_toggles.get(id).copied() {
-                context.update_component(toggle, |view, _| {
-                    *view = Switch::new(label.clone(), *checked)
-                })?;
-                toggle
-            } else {
-                let toggle = context
-                    .create_detached_component(document, Switch::new(label.clone(), *checked))?;
-                let binding = Arc::clone(&self.target);
-                let callback = Arc::clone(&self.sink);
-                let value = id.clone();
-                context.on(toggle, move |_, _: &ToggleChanged, _| {
-                    if let Some(target) = binding.lock().unwrap().clone() {
-                        emit(
-                            &callback,
-                            ShellIntent::Automation {
-                                target,
-                                action: AutomationAction::ToggleScope {
-                                    field: "project".into(),
-                                    value: value.clone(),
-                                },
-                            },
-                        );
-                    }
-                })?;
-                self.project_toggles.insert(id.clone(), toggle);
-                toggle
-            };
-            scope_order.push(toggle.stable_id());
-        }
-        let stale_projects: Vec<_> = self
-            .project_toggles
-            .keys()
-            .filter(|id| !scope_keep.contains(*id))
-            .cloned()
-            .collect();
-        for id in stale_projects {
-            if let Some(toggle) = self.project_toggles.remove(&id) {
-                context.remove_view(toggle)?;
-            }
-        }
-        for (value, _) in EVENT_KIND_OPTIONS {
-            if let Some(toggle) = self.event_toggles.get(*value) {
-                scope_order.push(toggle.stable_id());
-            }
-        }
-        reconcile_children(context, self.scope_panel.stable_id(), &scope_order)?;
-        context.update_component(self.canvas, |canvas, _| {
-            canvas.model = snapshot.graph.clone();
-            canvas.viewport = snapshot.viewport;
-            canvas.selection = snapshot.selection.clone();
-        })?;
-        context.update_component(self.name, |field, _| {
-            if field.state.value != snapshot.name {
-                field.state.replace_value(snapshot.name.clone());
-            }
-        })?;
-        context.update_component(self.section, |section, _| {
-            *section = SidebarSection::new("自动化").count(snapshot.rows.len())
-        })?;
-        context.update_component(self.run, |button, _| {
-            button.disabled = !snapshot.published
+        self.workflow_rows.set(snapshot.rows.clone());
+        self.project_rows.set(snapshot.projects.clone());
+        self.runs.set(snapshot.runs.clone());
+        self.event_kinds.set(snapshot.event_kinds.clone());
+        self.show_error.set(snapshot.error.is_some());
+        self.error_text
+            .set(snapshot.error.clone().unwrap_or_default());
+        self.show_empty.set(snapshot.target.is_none());
+        self.show_workflow.set(snapshot.target.is_some());
+        self.show_scope
+            .set(snapshot.target.is_some() && snapshot.inspector_panel == "scope");
+        self.show_canvas
+            .set(!(snapshot.editor.is_some() && snapshot.compact));
+        self.name_text.set(snapshot.name.clone());
+        self.status_label.set(label);
+        self.status_tone.set(tone);
+        self.run_disabled.set(
+            !snapshot.published
                 || snapshot.operation_pending
-                || snapshot.runs.iter().any(|run| run.can_cancel)
-        })?;
-        context.update_component(self.toggle, |button, _| {
-            *button =
-                Button::new(if snapshot.enabled { "停用" } else { "启用" }).kind(ButtonKind::Subtle)
-        })?;
-        context.update_component(self.status, |badge, _| {
-            *badge = if snapshot.operation_pending {
-                StatusBadge::new("正在处理…", StatusTone::Info)
-            } else if snapshot.published {
-                if snapshot.enabled {
-                    StatusBadge::new("已发布 · 已启用", StatusTone::Success)
-                } else {
-                    StatusBadge::new("已发布 · 已停用", StatusTone::Warning)
+                || snapshot.runs.iter().any(|run| run.can_cancel),
+        );
+        self.toggle_label
+            .set(if snapshot.enabled { "停用" } else { "启用" }.to_owned());
+        self.inspector_panel.set(snapshot.inspector_panel.clone());
+        self.show_picker.set(!snapshot.runs.is_empty());
+        self.show_detail
+            .set(selected_run.is_none_or(|run| run.error.is_some() || run.prompt.is_some()));
+        self.detail_title.set(title);
+        self.detail_message.set(message);
+        self.show_response.set(waiting);
+        self.response_text.set(snapshot.response.clone());
+        self.show_resume.set(waiting);
+        self.show_cancel.set(cancellable);
+        self.show_actions.set(waiting || cancellable);
+        self.resume_disabled.set(snapshot.operation_pending);
+        self.cancel_disabled.set(snapshot.cancel_pending);
+        self.inbox_checked.set(snapshot.include_inbox);
+        self.selected_run
+            .set(selected_run.map(|run| run.id.clone()));
+        self.canvas_state.set(CanvasState {
+            model: snapshot.graph.clone(),
+            viewport: snapshot.viewport,
+            selection: snapshot.selection.clone(),
+        });
+        context.flush_reactive()?;
+        self.rows = zip_entities(context, self.list, &snapshot.rows, |row| &row.id);
+        self.project_toggles =
+            zip_entities(context, self.project_list, &snapshot.projects, |project| {
+                &project.0
+            });
+        self.ensure_editor(context)
+    }
+
+    fn ensure_editor(&self, context: &mut AppContext) -> Result<(), FrameworkError> {
+        let present = context
+            .world()
+            .node(self.body.stable_id())
+            .is_some_and(|body| body.children.contains(&self.editor.root.stable_id()));
+        if !present {
+            context.append_child(self.body, self.editor.root)?;
+        }
+        Ok(())
+    }
+}
+
+fn emit_automation(
+    sink: &IntentSink,
+    target: &Mutex<Option<AutomationTarget>>,
+    action: AutomationAction,
+) {
+    if let Some(target) = target.lock().unwrap().clone() {
+        emit(sink, ShellIntent::Automation { target, action });
+    }
+}
+
+fn emit_run_action(
+    sink: &IntentSink,
+    run_target: &Mutex<Option<(AutomationTarget, String, Option<String>, bool)>>,
+    resume: bool,
+) {
+    if let Some((target, run_id, waiting, cancellable)) = run_target.lock().unwrap().clone() {
+        if (resume && waiting.is_some()) || (!resume && cancellable) {
+            let action = if resume {
+                AutomationAction::Resume {
+                    run_id,
+                    node_id: waiting.unwrap(),
                 }
             } else {
-                StatusBadge::new("草稿 · 发布后可运行", StatusTone::Neutral)
+                AutomationAction::Cancel { run_id }
             };
-        })?;
-        context.update_component(self.error, |message, _| {
-            *message = ValidationMessage::new(
-                snapshot.error.clone().unwrap_or_default(),
-                ValidationIntent::Danger,
-            )
-        })?;
-        let mut keep = HashSet::new();
-        let mut order = Vec::new();
-        for row in &snapshot.rows {
-            keep.insert(row.id.clone());
-            let item = SidebarRow::new(row.label.clone()).state(if row.selected {
+            emit(sink, ShellIntent::Automation { target, action });
+        }
+    }
+}
+
+fn action_button(
+    label: &str,
+    kind: ButtonKind,
+    target: &Arc<Mutex<Option<AutomationTarget>>>,
+    sink: &IntentSink,
+    action: AutomationAction,
+) -> nana_ui::runtime::view::El<Button> {
+    let target = Arc::clone(target);
+    let sink = Arc::clone(sink);
+    widget(Button::new(label).kind(kind)).on_activate(move || {
+        emit_automation(&sink, &target, action.clone());
+    })
+}
+
+fn event_switch(
+    toggle_ref: EntityRef<Switch>,
+    value: &str,
+    label: &str,
+    kinds: Signal<Vec<String>>,
+    target: &Arc<Mutex<Option<AutomationTarget>>>,
+    sink: &IntentSink,
+) -> nana_ui::runtime::view::El<Switch> {
+    let checked_value = value.to_owned();
+    let action_value = value.to_owned();
+    let target = Arc::clone(target);
+    let sink = Arc::clone(sink);
+    switch(label.to_owned())
+        .entity_ref(toggle_ref)
+        .checked(move || {
+            let value = checked_value.clone();
+            kinds.with(|kinds| kinds.iter().any(|kind| kind == &value))
+        })
+        .on_change(move |_| {
+            emit_automation(
+                &sink,
+                &target,
+                AutomationAction::ToggleScope {
+                    field: "event-kind".into(),
+                    value: action_value.clone(),
+                },
+            );
+        })
+}
+
+fn project_switch(
+    project: (String, String, bool),
+    projects: Signal<Vec<(String, String, bool)>>,
+    target: Arc<Mutex<Option<AutomationTarget>>>,
+    sink: IntentSink,
+) -> nana_ui::runtime::view::El<Switch> {
+    let id = project.0;
+    let label_id = id.clone();
+    let checked_id = id.clone();
+    switch(move || {
+        let id = label_id.clone();
+        projects.with(|projects| {
+            projects
+                .iter()
+                .find(|item| item.0 == id)
+                .map(|item| item.1.clone())
+                .unwrap_or_default()
+        })
+    })
+    .checked(move || {
+        let id = checked_id.clone();
+        projects.with(|projects| {
+            projects
+                .iter()
+                .find(|item| item.0 == id)
+                .is_some_and(|item| item.2)
+        })
+    })
+    .on_change(move |_| {
+        emit_automation(
+            &sink,
+            &target,
+            AutomationAction::ToggleScope {
+                field: "project".into(),
+                value: id.clone(),
+            },
+        );
+    })
+}
+
+fn workflow_row(
+    row: AutomationRow,
+    rows: Signal<Vec<AutomationRow>>,
+    sink: IntentSink,
+) -> nana_ui::runtime::view::El<SidebarRow> {
+    let id = row.id;
+    let label_id = id.clone();
+    widget(SidebarRow::new(""))
+        .bind(move |item| {
+            let id = label_id.clone();
+            let (label, selected) = rows.with(|rows| {
+                rows.iter()
+                    .find(|row| row.id == id)
+                    .map(|row| (row.label.clone(), row.selected))
+                    .unwrap_or_default()
+            });
+            item.label = Arc::from(label);
+            item.state = if selected {
                 SidebarRowState::Active
             } else {
                 SidebarRowState::Idle
-            });
-            let control = if let Some(control) = self.rows.get(&row.id).copied() {
-                context.update_component(control, |view, _| *view = item)?;
-                control
-            } else {
-                let control = context.create_detached_component(document, item)?;
-                bind_activate(
-                    context,
-                    control,
-                    Arc::clone(&self.sink),
-                    ShellIntent::SelectAutomation(row.id.clone()),
-                )?;
-                self.rows.insert(row.id.clone(), control);
-                control
             };
-            order.push(control.stable_id());
-        }
-        let stale: Vec<_> = self
-            .rows
-            .keys()
-            .filter(|id| !keep.contains(*id))
-            .cloned()
-            .collect();
-        for id in stale {
-            if let Some(row) = self.rows.remove(&id) {
-                context.remove_view(row)?;
-            }
-        }
-        reconcile_children(context, self.list.stable_id(), &order)?;
-        let mut page = if snapshot.target.is_some() {
-            let mut page = vec![
-                self.name_field.stable_id(),
-                self.status.stable_id(),
-                self.toolbar.stable_id(),
-                self.node_tools.stable_id(),
-                self.body.stable_id(),
-                self.run_panel.stable_id(),
-            ];
-            if snapshot.inspector_panel == "scope" {
-                page.push(self.scope_panel.stable_id());
-            }
-            page
+        })
+        .on(move |_: &Activate| emit(&sink, ShellIntent::SelectAutomation(id.clone())))
+}
+
+fn workflow_status(snapshot: &AutomationViewSnapshot) -> (Arc<str>, StatusTone) {
+    if snapshot.operation_pending {
+        (Arc::from("正在处理…"), StatusTone::Info)
+    } else if snapshot.published {
+        if snapshot.enabled {
+            (Arc::from("已发布 · 已启用"), StatusTone::Success)
         } else {
-            vec![self.empty.stable_id()]
-        };
-        if snapshot.error.is_some() {
-            page.insert(0, self.error.stable_id());
+            (Arc::from("已发布 · 已停用"), StatusTone::Warning)
         }
-        reconcile_children(context, self.content_scroll.stable_id(), &page)?;
-        reconcile_children(
-            context,
-            self.page.stable_id(),
-            &[self.content_scroll.stable_id()],
-        )
+    } else {
+        (Arc::from("草稿 · 发布后可运行"), StatusTone::Neutral)
     }
+}
+
+fn run_detail_copy(run: Option<&AutomationRunView>) -> (Arc<str>, Option<Arc<str>>) {
+    if let Some(run) = run {
+        let detail = [run.error.as_deref(), run.prompt.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n");
+        (Arc::from("运行详情"), Some(Arc::from(detail)))
+    } else {
+        (Arc::from("尚无运行记录"), None)
+    }
+}
+
+fn editor_frame(compact: bool, hidden: bool) -> Stack {
+    let stack = if compact {
+        Stack::fill_column(8.0)
+    } else {
+        Stack::fill_column(8.0)
+            .width(LengthSpec::Px(320.0))
+            .grow(0.0)
+            .shrink(0.0)
+    };
+    stack.with_layout(|layout| layout.hidden = hidden)
+}
+
+fn set_hidden(style: &mut NodeStyle, hidden: bool) {
+    if style.layout.hidden != hidden {
+        Arc::make_mut(&mut style.layout).hidden = hidden;
+    }
+}
+
+fn replace_area(
+    context: &mut AppContext,
+    input: Entity<TextArea>,
+    value: &str,
+) -> Result<(), FrameworkError> {
+    context.update_component(input, |input, _| {
+        input.state.replace_value(value.to_owned());
+    })
+}
+
+fn replace_input(
+    context: &mut AppContext,
+    input: Entity<TextInput>,
+    value: &str,
+) -> Result<(), FrameworkError> {
+    context.update_component(input, |input, _| {
+        input.state.replace_value(value.to_owned());
+    })
+}
+
+fn only_child<C: View>(
+    context: &AppContext,
+    parent: StableNodeId,
+) -> Result<Entity<C>, FrameworkError> {
+    child_at(context, parent, 0)
+}
+
+fn child_at<C: View>(
+    context: &AppContext,
+    parent: StableNodeId,
+    index: usize,
+) -> Result<Entity<C>, FrameworkError> {
+    let id = context
+        .world()
+        .node(parent)
+        .and_then(|node| node.children.get(index).copied())
+        .ok_or(FrameworkError::InvalidInput)?;
+    Ok(Entity::from_stable_id(id))
+}
+
+fn zip_entities<C: View, T>(
+    context: &AppContext,
+    list: Entity<Stack>,
+    items: &[T],
+    id_of: impl Fn(&T) -> &str,
+) -> HashMap<String, Entity<C>> {
+    let children = context
+        .world()
+        .node(list.stable_id())
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut rows = HashMap::new();
+    let mut cursor = children.into_iter();
+    let mut seen = HashSet::new();
+    for item in items {
+        let id = id_of(item);
+        if !seen.insert(id.to_owned()) {
+            continue;
+        }
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        rows.insert(id.to_owned(), Entity::from_stable_id(child));
+    }
+    rows
 }
 
 #[cfg(test)]
@@ -955,6 +1339,7 @@ mod tests {
                 .unwrap(),
             "已检查"
         );
+        assert!(!is_hidden(&context, view.response));
         state.runs[0].prompt = None;
         state.runs[0].waiting_node = None;
         state.runs[0].can_cancel = false;
@@ -964,12 +1349,9 @@ mod tests {
                 .update_component(button, |_, cx| cx.emit(Activate))
                 .unwrap();
         }
-        assert!(!context
-            .world()
-            .node(view.run_panel.stable_id())
-            .unwrap()
-            .children
-            .contains(&view.response.stable_id()));
+        assert!(is_hidden(&context, view.response));
+        assert!(is_hidden(&context, view.run_actions));
+        assert!(is_hidden(&context, view.run_detail));
         state.runs[0].prompt = Some("继续？".into());
         state.runs[0].waiting_node = Some("approval-b".into());
         state.runs[0].can_cancel = true;
@@ -1079,19 +1461,33 @@ mod tests {
             .node(view.content_scroll.stable_id())
             .unwrap()
             .children;
-        assert_eq!(children, &[view.error.stable_id(), view.empty.stable_id()]);
+        assert!(children.contains(&view.error.stable_id()));
+        assert!(children.contains(&view.empty.stable_id()));
+        assert!(children.contains(&view.body.stable_id()));
+        assert!(!is_hidden(&context, view.error));
+        assert!(!is_hidden(&context, view.empty));
+        assert!(is_hidden(&context, view.name_field));
+        assert!(is_hidden(&context, view.status));
+        assert!(is_hidden(&context, view.toolbar));
+        assert!(is_hidden(&context, view.node_tools));
+        assert!(is_hidden(&context, view.body));
+        assert!(is_hidden(&context, view.run_panel));
+        assert!(is_hidden(&context, view.scope_panel));
         view.sync(&mut context, document, &snapshot("restored"), true)
             .unwrap();
         assert_eq!(
             context.read(view.section, |section| section.count).unwrap(),
             Some(1)
         );
+        assert!(!is_hidden(&context, view.body));
+        assert!(is_hidden(&context, view.empty));
         assert!(context
             .world()
-            .node(view.content_scroll.stable_id())
+            .node(view.body.stable_id())
             .unwrap()
             .children
-            .contains(&view.body.stable_id()));
+            .contains(&view.canvas.stable_id()));
+        assert!(!is_hidden(&context, view.canvas));
     }
     #[test]
     fn graph_and_name_edits_carry_the_view_target_and_unpublished_workflows_disable_run() {
@@ -1134,5 +1530,40 @@ mod tests {
         assert!(
             matches!(&events[1], ShellIntent::Automation { action: AutomationAction::Rename(value), .. } if value == "renamed")
         );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn compact_editor_hides_the_canvas_without_dropping_it() {
+        let mut context = AppContext::new();
+        let document = DocumentId::new(336).unwrap();
+        let mut state = snapshot("workflow");
+        state.compact = true;
+        state.editor = Some(super::super::editor::NodeEditorSnapshot {
+            node_id: "node".into(),
+            title: "节点".into(),
+            fields: Vec::new(),
+        });
+        let mut view =
+            AutomationView::mount(&mut context, document, &state, true, Arc::new(|_| {})).unwrap();
+        assert!(context
+            .world()
+            .node(view.body.stable_id())
+            .unwrap()
+            .children
+            .contains(&view.canvas.stable_id()));
+        assert!(is_hidden(&context, view.canvas));
+        assert!(!view.graph_is_mounted(&context));
+        state.compact = false;
+        view.sync(&mut context, document, &state, true).unwrap();
+        assert!(!is_hidden(&context, view.canvas));
+        assert!(view.graph_is_mounted(&context));
+    }
+
+    fn is_hidden<V: View>(context: &AppContext, entity: Entity<V>) -> bool {
+        context
+            .world()
+            .node_style(entity.stable_id())
+            .is_some_and(|style| style.layout.hidden)
     }
 }

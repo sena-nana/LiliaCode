@@ -3,6 +3,7 @@ use crate::runtime_layout::reconcile_children;
 use crate::runtime_shell::{
     ShellIntent, ShellPaneLayout, ShellPaneRow, ShellPaneTarget, WorkspacePaneView,
 };
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     AppContext, DocumentId, Entity, FrameworkError, MutationQueue, SplitPane, StableNodeId, Stack,
 };
@@ -38,49 +39,76 @@ impl CompactWorkbench {
         document: DocumentId,
         conversation: StableNodeId,
     ) -> Result<Self, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         use nana_ui::runtime::{Activate, Button};
-        let root = context.create_detached_component(document, Stack::fill_column(0.0))?;
-        let header = context.create_detached_component(document, Stack::row(4.0).padding(8.0))?;
-        let body = context.create_detached_component(document, Stack::fill_column(0.0))?;
-        let resources = context.create_detached_component(document, Stack::fill_column(0.0))?;
-        let choice = context.create_detached_component(document, Button::new("切换到工作区"))?;
-        let view = Self {
+        let selected = Arc::new(Mutex::new(CompactSurface::default()));
+        let selected_for_choice = Arc::clone(&selected);
+        let (_, (root, header, body, resources, choice)) =
+            context.mount_view_detached(document, move || {
+                let root = entity_ref();
+                let header = entity_ref();
+                let body = entity_ref();
+                let resources = entity_ref();
+                let choice = entity_ref();
+                let selected = Arc::clone(&selected_for_choice);
+                let pages = (
+                    widget(Stack::fill_column(0.0)).entity_ref(root).children((
+                        widget(Stack::row(4.0).padding(8.0))
+                            .entity_ref(header)
+                            .children(
+                                widget(Button::new("切换到工作区"))
+                                    .entity_ref(choice)
+                                    .label("切换到工作区")
+                                    .on_cx(move |button, _: &Activate, cx| {
+                                        let mut selected = selected.lock().unwrap();
+                                        *selected = match *selected {
+                                            CompactSurface::Conversation => {
+                                                CompactSurface::Resources
+                                            }
+                                            CompactSurface::Resources => {
+                                                CompactSurface::Conversation
+                                            }
+                                        };
+                                        let resources =
+                                            resources.get().expect("workspace list").stable_id();
+                                        let body = body.get().expect("workspace body").stable_id();
+                                        let (show, hide) = match *selected {
+                                            CompactSurface::Conversation => {
+                                                (conversation, resources)
+                                            }
+                                            CompactSurface::Resources => (resources, conversation),
+                                        };
+                                        button.label = match *selected {
+                                            CompactSurface::Conversation => "切换到工作区",
+                                            CompactSurface::Resources => "返回对话",
+                                        }
+                                        .to_owned();
+                                        cx.mutations().park_subtree(hide);
+                                        cx.mutations().insert(body, show, None);
+                                        cx.mutations().restore_focus_within(show);
+                                    }),
+                            ),
+                        widget(Stack::fill_column(0.0)).entity_ref(body),
+                    )),
+                    widget(Stack::fill_column(0.0)).entity_ref(resources),
+                );
+                with_refs(pages, (root, header, body, resources, choice))
+            })?;
+        context
+            .compat_world_mut()
+            .register_focus_scope(conversation)?;
+        context
+            .compat_world_mut()
+            .register_focus_scope(resources.stable_id())?;
+        Ok(Self {
             root,
             header,
             body,
             resources,
             conversation,
             choice,
-            selected: Arc::new(Mutex::new(CompactSurface::default())),
-        };
-        context.world_mut().register_focus_scope(conversation)?;
-        context
-            .world_mut()
-            .register_focus_scope(resources.stable_id())?;
-        let selected = Arc::clone(&view.selected);
-        context.on(choice, move |button, _: &Activate, cx| {
-            let mut selected = selected.lock().unwrap();
-            *selected = match *selected {
-                CompactSurface::Conversation => CompactSurface::Resources,
-                CompactSurface::Resources => CompactSurface::Conversation,
-            };
-            let (show, hide) = match *selected {
-                CompactSurface::Conversation => (conversation, resources.stable_id()),
-                CompactSurface::Resources => (resources.stable_id(), conversation),
-            };
-            button.label = match *selected {
-                CompactSurface::Conversation => "切换到工作区",
-                CompactSurface::Resources => "返回对话",
-            }
-            .to_owned();
-            cx.mutations().park_subtree(hide);
-            cx.mutations().insert(body.stable_id(), show, None);
-            cx.mutations().restore_focus_within(show);
-        })?;
-        context.append_child(header, choice)?;
-        context.append_child(root, header)?;
-        context.append_child(root, body)?;
-        Ok(view)
+            selected,
+        })
     }
 
     pub(crate) fn sync(
@@ -103,10 +131,10 @@ impl CompactWorkbench {
         reconcile_children(context, self.root.stable_id(), &children)?;
         reconcile_children(context, self.resources.stable_id(), resources)?;
         context
-            .world_mut()
+            .compat_world_mut()
             .register_focus_scope(self.conversation)?;
         context
-            .world_mut()
+            .compat_world_mut()
             .register_focus_scope(self.resources.stable_id())?;
         context.update_component(self.choice, |button, _| {
             button.disabled = resources.is_empty();
@@ -192,10 +220,23 @@ impl WorkspaceView {
         window: HostedWindowId,
         sink: IntentSink,
     ) -> Result<Self, FrameworkError> {
+        let (_, (root, main, bottom)) = context.mount_view_detached(document, || {
+            let root = entity_ref::<Stack>();
+            let main = entity_ref::<Stack>();
+            let bottom = entity_ref::<Stack>();
+            with_refs(
+                (
+                    widget(Stack::fill_column(0.0)).entity_ref(root),
+                    widget(Stack::fill_column(0.0)).entity_ref(main),
+                    widget(Stack::fill_column(0.0)).entity_ref(bottom),
+                ),
+                (root, main, bottom),
+            )
+        })?;
         Ok(Self {
-            root: context.create_detached_component(document, Stack::fill_column(0.0))?,
-            main: context.create_detached_component(document, Stack::fill_column(0.0))?,
-            bottom: context.create_detached_component(document, Stack::fill_column(0.0))?,
+            root,
+            main,
+            bottom,
             bottom_visible: false,
             compact: None,
             reveal_resources: false,
@@ -427,16 +468,20 @@ impl WorkspaceView {
                 let b = self.sync_layout(context, document, second, second_size, keep)?;
                 let desired = extent * ratio;
                 if !self.splits.contains_key(&key) {
-                    let handle = context.create_detached_component(document, Stack::bar(0.0))?;
-                    let view = context.create_detached_component(
-                        document,
-                        SplitPane::from_model(
-                            &SplitPaneModel::new(axis, desired, 0.0, 10_000.0),
-                            a,
-                            b,
-                        )
-                        .handle(handle.stable_id()),
-                    )?;
+                    let (_, handle) = context.mount_view_detached(document, || {
+                        let handle = entity_ref::<Stack>();
+                        with_refs(widget(Stack::bar(0.0)).entity_ref(handle), handle)
+                    })?;
+                    let split_view = SplitPane::from_model(
+                        &SplitPaneModel::new(axis, desired, 0.0, 10_000.0),
+                        a,
+                        b,
+                    )
+                    .handle(handle.stable_id());
+                    let (_, view) = context.mount_view_detached(document, move || {
+                        let view = entity_ref::<SplitPane>();
+                        with_refs(widget(split_view).entity_ref(view), view)
+                    })?;
                     self.splits.insert(
                         key.clone(),
                         WorkspaceSplit {
@@ -481,11 +526,23 @@ mod tests {
         let host = context
             .create_component(document, Stack::fill_column(0.0))
             .unwrap();
-        let conversation = context
-            .create_detached_component(document, TextArea::new("draft"))
+        let (_, conversation) = context
+            .mount_view_detached(document, || {
+                let conversation = entity_ref::<TextArea>();
+                with_refs(
+                    widget(TextArea::new("draft")).entity_ref(conversation),
+                    conversation,
+                )
+            })
             .unwrap();
-        let editor = context
-            .create_detached_component(document, TextArea::new("unsaved document"))
+        let (_, editor) = context
+            .mount_view_detached(document, || {
+                let editor = entity_ref::<TextArea>();
+                with_refs(
+                    widget(TextArea::new("unsaved document")).entity_ref(editor),
+                    editor,
+                )
+            })
             .unwrap();
         context
             .update_component(editor, |editor, _| {
@@ -673,8 +730,14 @@ mod tests {
             .create_component(document, Stack::fill_column(0.0))
             .unwrap();
         context.append_child(host, view.root).unwrap();
-        let conversation = context
-            .create_detached_component(document, TextArea::new("conversation"))
+        let (_, conversation) = context
+            .mount_view_detached(document, || {
+                let conversation = entity_ref::<TextArea>();
+                with_refs(
+                    widget(TextArea::new("conversation")).entity_ref(conversation),
+                    conversation,
+                )
+            })
             .unwrap();
         let panes = [
             document_pane("left", "a", "alpha"),
@@ -791,8 +854,14 @@ mod tests {
             .create_component(document, Stack::fill_column(0.0))
             .unwrap();
         context.append_child(host, view.root).unwrap();
-        let composer = context
-            .create_detached_component(document, TextArea::new("draft"))
+        let (_, composer) = context
+            .mount_view_detached(document, || {
+                let composer = entity_ref::<TextArea>();
+                with_refs(
+                    widget(TextArea::new("draft")).entity_ref(composer),
+                    composer,
+                )
+            })
             .unwrap();
         let mut pane = document_pane("task", "task-item", "");
         pane.items[0].kind = crate::application::TASK_WORKSPACE_ITEM_KIND.into();

@@ -1,11 +1,15 @@
 use super::ArchitectureMessage;
-use crate::runtime_layout::reconcile_children;
+use crate::runtime_layout::{view_bar, view_column, view_fill_column, Bound};
+use nana_ui::runtime::view::{entity_ref, signal, text, widget, with_refs, EachExt};
+#[cfg(test)]
+use nana_ui::runtime::Activate;
+use nana_ui::runtime::GraphCanvasEvent;
 use nana_ui::runtime::{
-    Activate, AppContext, Button, DocumentId, Entity, FrameworkError, GraphCanvas, MutationQueue,
-    ScrollAxes, ScrollView, Stack, Text,
+    AppContext, Button, DocumentId, Entity, FrameworkError, GraphCanvas, MutationQueue, ScrollAxes,
+    ScrollView, Stack, Text,
 };
-use nana_ui::{ButtonKind, GraphCanvasEvent, GraphModel, GraphSelection, GraphViewport};
-use std::{collections::HashMap, sync::Arc};
+use nana_ui::{ButtonKind, GraphModel, GraphPoint, GraphSelection, GraphViewport};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArchitectureViewSnapshot {
@@ -27,6 +31,23 @@ pub struct ArchitectureRecord {
 
 type Sink = Arc<dyn Fn(ArchitectureMessage) + Send + Sync>;
 
+#[derive(Clone)]
+struct CanvasState {
+    model: GraphModel,
+    viewport: GraphViewport,
+    selection: Option<GraphSelection>,
+}
+
+impl Default for CanvasState {
+    fn default() -> Self {
+        Self {
+            model: GraphModel::empty(),
+            viewport: GraphViewport::new(GraphPoint::new(0.0, 0.0), 1.0),
+            selection: None,
+        }
+    }
+}
+
 pub(crate) struct ArchitectureView {
     pub(crate) root: Entity<Stack>,
     pub(crate) inspector: Entity<Stack>,
@@ -34,8 +55,13 @@ pub(crate) struct ArchitectureView {
     summary: Entity<Text>,
     detail: Entity<Text>,
     history: Entity<Stack>,
-    records: HashMap<String, Entity<Text>>,
     rollback: Entity<Button>,
+    summary_text: Bound<String>,
+    show_summary: Bound<bool>,
+    detail_text: Bound<String>,
+    rollback_disabled: Bound<bool>,
+    canvas_state: Bound<CanvasState>,
+    records: Bound<Vec<ArchitectureRecord>>,
     project_id: Option<String>,
     suspended: bool,
     restore_focus: bool,
@@ -47,44 +73,89 @@ impl ArchitectureView {
         document: DocumentId,
         sink: Sink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::fill_column(12.0))?;
-        let toolbar = context.create_detached_component(document, Stack::bar(8.0))?;
-        let title = context.create_detached_component(document, Text::new("架构"))?;
-        context.append_child(toolbar, title)?;
-        let refresh = context
-            .create_detached_component(document, Button::new("刷新").kind(ButtonKind::Subtle))?;
-        let refresh_sink = Arc::clone(&sink);
-        context.on(refresh, move |_, _: &Activate, _| {
-            refresh_sink(ArchitectureMessage::Refresh)
-        })?;
-        let rollback = context
-            .create_detached_component(document, Button::new("回滚").kind(ButtonKind::Subtle))?;
-        let rollback_sink = Arc::clone(&sink);
-        context.on(rollback, move |_, _: &Activate, _| {
-            rollback_sink(ArchitectureMessage::Rollback)
-        })?;
-        context.append_child(toolbar, refresh)?;
-        context.append_child(toolbar, rollback)?;
-        context.append_child(root, toolbar)?;
-        let summary = context.create_detached_component(document, Text::new(""))?;
-        context.append_child(root, summary)?;
-        let canvas = context.create_detached_component(
-            document,
-            GraphCanvas::new("architecture", GraphModel::empty()),
-        )?;
-        context.on(canvas, move |_, event: &GraphCanvasEvent, _| {
-            sink(ArchitectureMessage::Graph(event.clone()))
-        })?;
-        context.append_child(root, canvas)?;
-        let inspector = context.create_detached_component(document, Stack::fill_column(12.0))?;
-        let detail = context.create_detached_component(document, Text::new(""))?;
-        context.append_child(inspector, detail)?;
-        let scroll =
-            context.create_detached_component(document, ScrollView::new(ScrollAxes::Vertical))?;
-        let history = context.create_detached_component(document, Stack::column(8.0))?;
-        context.append_child(scroll, history)?;
-        context.append_child(inspector, scroll)?;
-        context.world_mut().register_focus_scope(root.stable_id())?;
+        let summary_text = Bound::new();
+        let show_summary = Bound::new();
+        let detail_text = Bound::new();
+        let rollback_disabled = Bound::new();
+        let canvas_state = Bound::new();
+        let records: Bound<Vec<ArchitectureRecord>> = Bound::new();
+        let summary_slot = summary_text.clone();
+        let show_slot = show_summary.clone();
+        let detail_slot = detail_text.clone();
+        let rollback_slot = rollback_disabled.clone();
+        let canvas_slot = canvas_state.clone();
+        let records_slot = records.clone();
+        let (_, (root, inspector, canvas, summary, detail, history, rollback)) = context
+            .mount_view_detached(document, move || {
+                let summary_text = summary_slot.install(signal(String::new()));
+                let show_summary = show_slot.install(signal(false));
+                let detail_text = detail_slot.install(signal(String::new()));
+                let rollback_disabled = rollback_slot.install(signal(true));
+                let canvas_state = canvas_slot.install(signal(CanvasState::default()));
+                let records = records_slot.install(signal(Vec::new()));
+                let root = entity_ref::<Stack>();
+                let inspector = entity_ref::<Stack>();
+                let canvas = entity_ref::<GraphCanvas>();
+                let summary = entity_ref::<Text>();
+                let detail = entity_ref::<Text>();
+                let history = entity_ref::<Stack>();
+                let rollback = entity_ref::<Button>();
+                let refresh_sink = Arc::clone(&sink);
+                let rollback_sink = Arc::clone(&sink);
+                let graph_sink = sink;
+                let page = view_fill_column(12.0).entity_ref(root).children((
+                    view_bar(8.0).children((
+                        text("架构"),
+                        widget(Button::new("刷新").kind(ButtonKind::Subtle))
+                            .on_activate(move || refresh_sink(ArchitectureMessage::Refresh)),
+                        widget(Button::new("回滚").kind(ButtonKind::Subtle))
+                            .entity_ref(rollback)
+                            .disabled(rollback_disabled)
+                            .on_activate(move || rollback_sink(ArchitectureMessage::Rollback)),
+                    )),
+                    text(summary_text).entity_ref(summary).visible(show_summary),
+                    widget(GraphCanvas::new("architecture", GraphModel::empty()))
+                        .entity_ref(canvas)
+                        .bind(move |canvas| {
+                            canvas_state.with(|state| {
+                                canvas.model = state.model.clone();
+                                canvas.viewport = state.viewport;
+                                canvas.selection = state.selection.clone();
+                            });
+                        })
+                        .on(move |event: &GraphCanvasEvent| {
+                            graph_sink(ArchitectureMessage::Graph(event.clone()))
+                        }),
+                ));
+                let inspector_view = view_fill_column(12.0).entity_ref(inspector).children((
+                    text(detail_text).entity_ref(detail),
+                    widget(ScrollView::new(ScrollAxes::Vertical)).children(
+                        view_column(0.0).entity_ref(history).children(records.each(
+                            |record| record.id.clone(),
+                            move |record| {
+                                let id = record.id.clone();
+                                let records = records;
+                                text(move || {
+                                    records.with(|records| {
+                                        records
+                                            .iter()
+                                            .find(|record| record.id == id)
+                                            .map(record_label)
+                                            .unwrap_or_default()
+                                    })
+                                })
+                            },
+                        )),
+                    ),
+                ));
+                with_refs(
+                    (page, inspector_view),
+                    (root, inspector, canvas, summary, detail, history, rollback),
+                )
+            })?;
+        context
+            .compat_world_mut()
+            .register_focus_scope(root.stable_id())?;
         Ok(Self {
             root,
             inspector,
@@ -92,8 +163,13 @@ impl ArchitectureView {
             summary,
             detail,
             history,
-            records: HashMap::new(),
             rollback,
+            summary_text,
+            show_summary,
+            detail_text,
+            rollback_disabled,
+            canvas_state,
+            records,
             project_id: None,
             suspended: false,
             restore_focus: false,
@@ -107,63 +183,23 @@ impl ArchitectureView {
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
-        document: DocumentId,
+        _document: DocumentId,
         snapshot: &ArchitectureViewSnapshot,
     ) -> Result<(), FrameworkError> {
         self.project_id = snapshot.project_id.clone();
-        context.update_component(self.canvas, |canvas, _| {
-            canvas.model = snapshot.graph.clone();
-            canvas.viewport = snapshot.viewport;
-            canvas.selection = snapshot.selection.clone();
-        })?;
-        context.update_component(self.rollback, |button, _| {
-            button.disabled = !snapshot.can_rollback
-        })?;
-        context.update_component(self.summary, |text, _| *text = Text::new(&snapshot.summary))?;
-        let mut children = context
-            .world()
-            .node(self.root.stable_id())
-            .unwrap()
-            .children
-            .clone();
-        children.retain(|id| *id != self.summary.stable_id());
-        if !snapshot.summary.is_empty() {
-            children.insert(1, self.summary.stable_id());
-        }
-        reconcile_children(context, self.root.stable_id(), &children)?;
-        context.update_component(self.detail, |text, _| {
-            *text = Text::new(selection_description(snapshot))
-        })?;
-        let stale = self
-            .records
-            .keys()
-            .filter(|id| !snapshot.records.iter().any(|record| &record.id == *id))
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in stale {
-            context.remove_view(self.records.remove(&id).unwrap())?;
-        }
-        let mut order = Vec::new();
-        for record in &snapshot.records {
-            let label = if record.status.is_empty() {
-                record.title.clone()
-            } else {
-                format!("{} · {}", record.title, record.status)
-            };
-            let row = if let Some(row) = self.records.get(&record.id).copied() {
-                context.update_component(row, |text, _| *text = Text::new(&label))?;
-                row
-            } else {
-                let row = context.create_detached_component(document, Text::new(label))?;
-                self.records.insert(record.id.clone(), row);
-                row
-            };
-            order.push(row.stable_id());
-        }
-        reconcile_children(context, self.history.stable_id(), &order)?;
+        self.canvas_state.set(CanvasState {
+            model: snapshot.graph.clone(),
+            viewport: snapshot.viewport,
+            selection: snapshot.selection.clone(),
+        });
+        self.rollback_disabled.set(!snapshot.can_rollback);
+        self.summary_text.set(snapshot.summary.clone());
+        self.show_summary.set(!snapshot.summary.is_empty());
+        self.detail_text.set(selection_description(snapshot));
+        self.records.set(snapshot.records.clone());
         self.restore_focus |= self.suspended;
         self.suspended = false;
-        Ok(())
+        context.flush_reactive()
     }
 
     pub(crate) fn suspend(&mut self, context: &mut AppContext) -> Result<(), FrameworkError> {
@@ -191,6 +227,14 @@ impl ArchitectureView {
             context.remove_view(self.summary)?;
         }
         Ok(())
+    }
+}
+
+fn record_label(record: &ArchitectureRecord) -> String {
+    if record.status.is_empty() {
+        record.title.clone()
+    } else {
+        format!("{} · {}", record.title, record.status)
     }
 }
 
@@ -233,6 +277,11 @@ mod tests {
     use super::*;
     use nana_ui::{GraphNode, GraphPoint, GraphSize};
     use std::sync::Mutex;
+
+    fn history_row(context: &AppContext, history: Entity<Stack>) -> Entity<Text> {
+        let list = context.world().node(history.stable_id()).unwrap().children[0];
+        Entity::from_stable_id(context.world().node(list).unwrap().children[0])
+    }
 
     fn snapshot() -> ArchitectureViewSnapshot {
         ArchitectureViewSnapshot {
@@ -283,12 +332,10 @@ mod tests {
                 .unwrap(),
             "Service"
         );
-        assert!(
-            context
-                .read(view.rollback, |button| button.disabled)
-                .unwrap()
-        );
-        let row = view.records["change"];
+        assert!(context
+            .read(view.rollback, |button| button.disabled)
+            .unwrap());
+        let row = history_row(&context, view.history);
         let event =
             GraphCanvasEvent::ViewportChanged(GraphViewport::new(GraphPoint::new(45.0, 60.0), 1.5));
         context
@@ -301,7 +348,7 @@ mod tests {
         snapshot.can_rollback = true;
         snapshot.selection = None;
         view.sync(&mut context, document, &snapshot).unwrap();
-        assert_eq!(view.records["change"], row);
+        assert_eq!(history_row(&context, view.history), row);
         assert_eq!(
             context.read(row, |text| text.value.clone()).unwrap(),
             "Update · Rolled back"
@@ -378,7 +425,7 @@ mod tests {
             view.canvas.stable_id(),
             view.summary.stable_id(),
             view.history.stable_id(),
-            view.records["change"].stable_id(),
+            history_row(context, view.history).stable_id(),
         ];
         view.suspend(context).unwrap();
         view.dispose(context).unwrap();

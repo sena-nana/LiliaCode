@@ -7,7 +7,8 @@ use lilia_contracts::{
     PendingProjectionStatus, TimelineProjectionCursor, TimelineProjectionEvent,
     TimelineProjectionPage,
 };
-use nana_ui::{MarkdownBlock, NativeMarkdown, VirtualListLayout};
+use nana_ui::runtime::{MarkdownBlock, NativeMarkdown};
+use nana_ui::VirtualListLayout;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]

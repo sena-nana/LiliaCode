@@ -9,7 +9,7 @@ use crate::application::{
     DocumentId, DocumentSnapshot, WorkspaceItem, WorkspaceItemId, WorkspaceItemResolve,
 };
 use crate::document_editor::{
-    DocumentEditorViewState, document_editor_cursor_offset, select_document_editor_offsets,
+    document_editor_cursor_offset, select_document_editor_offsets, DocumentEditorViewState,
 };
 use crate::runtime_compat::HostedWindowId;
 use crate::runtime_shell::{ShellDiagnosticRow, ShellDocumentSnapshot};

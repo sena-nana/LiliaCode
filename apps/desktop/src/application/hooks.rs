@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use lilia_contracts::TaskId;
 use lilia_feature_hooks::{
-    HookExecutionDecision, bump_hook_revision, ensure_hook_revision, execute_hook_command,
-    hook_execution_error, hook_fingerprint, hook_handler_update, hook_handler_view, hook_io_error,
-    hook_matches, hook_source_view, invalid_hook_input,
+    bump_hook_revision, ensure_hook_revision, execute_hook_command, hook_execution_error,
+    hook_fingerprint, hook_handler_update, hook_handler_view, hook_io_error, hook_matches,
+    hook_source_view, invalid_hook_input, HookExecutionDecision,
 };
 use lilia_storage::AgentkitHooksDocument;
 use serde_json::json;
@@ -598,11 +598,9 @@ mod tests {
             .unwrap();
         assert_eq!(rx.try_recv().unwrap().source, created);
         assert!(rx.try_recv().is_err());
-        assert!(
-            service
-                .set_hook_source_enabled(DesktopHookScope::User, None, 0, true)
-                .is_err()
-        );
+        assert!(service
+            .set_hook_source_enabled(DesktopHookScope::User, None, 0, true)
+            .is_err());
         assert!(rx.try_recv().is_err());
         assert_eq!(
             application
@@ -667,18 +665,16 @@ mod tests {
             .unwrap();
         assert_eq!(updated.source.revision, 2);
         assert_eq!(updated.handlers.len(), 1);
-        assert!(
-            application
-                .update_hook_source(
-                    DesktopHookScope::Project,
-                    project.to_str(),
-                    DesktopHookDocumentUpdate {
-                        expected_revision: 1,
-                        handlers: Vec::new(),
-                    },
-                )
-                .is_err()
-        );
+        assert!(application
+            .update_hook_source(
+                DesktopHookScope::Project,
+                project.to_str(),
+                DesktopHookDocumentUpdate {
+                    expected_revision: 1,
+                    handlers: Vec::new(),
+                },
+            )
+            .is_err());
 
         let enabled = application
             .set_hook_source_enabled(DesktopHookScope::Project, project.to_str(), 2, true)

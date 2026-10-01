@@ -684,7 +684,7 @@ pub enum ShellIntent {
     SelectRoadmapMilestone(String),
     RefreshArchitecture,
     RollbackArchitecture,
-    ArchitectureGraph(nana_ui::GraphCanvasEvent),
+    ArchitectureGraph(nana_ui::runtime::GraphCanvasEvent),
     RespondApproval {
         request_id: String,
         approved: bool,
@@ -1061,10 +1061,7 @@ pub(crate) struct WorkspacePaneView {
     discard: Entity<Button>,
     interrupt: Entity<Button>,
     chrome: Entity<PaneChrome>,
-    tabs: Entity<Tabs>,
     content: Entity<Stack>,
-    heading: Entity<Text>,
-    status: Entity<Text>,
     editor: Entity<TextArea>,
     search: EditorSearchView,
     log: Entity<nana_ui::runtime::TerminalView>,
@@ -1072,6 +1069,22 @@ pub(crate) struct WorkspacePaneView {
     pub(crate) browser: crate::browser_workbench::BrowserView,
     tree: Entity<TreeView>,
     actions: Entity<Stack>,
+    tabs_state: crate::runtime_layout::Bound<(String, Vec<TabOption>)>,
+    heading_text: crate::runtime_layout::Bound<String>,
+    status_text: crate::runtime_layout::Bound<String>,
+    show_heading: crate::runtime_layout::Bound<bool>,
+    show_status: crate::runtime_layout::Bound<bool>,
+    show_search: crate::runtime_layout::Bound<bool>,
+    show_editor: crate::runtime_layout::Bound<bool>,
+    show_tree: crate::runtime_layout::Bound<bool>,
+    show_log: crate::runtime_layout::Bound<bool>,
+    show_browser: crate::runtime_layout::Bound<bool>,
+    show_actions: crate::runtime_layout::Bound<bool>,
+    show_document_actions: crate::runtime_layout::Bound<bool>,
+    show_interrupt: crate::runtime_layout::Bound<bool>,
+    save_label: crate::runtime_layout::Bound<String>,
+    discard_label: crate::runtime_layout::Bound<String>,
+    hosted_conversation: Option<StableNodeId>,
 }
 
 impl WorkspacePaneView {
@@ -1113,12 +1126,7 @@ impl WorkspacePaneView {
         conversation: Option<StableNodeId>,
     ) -> Result<(), FrameworkError> {
         let (selected, options) = pane_tab_options_for(pane);
-        context.update_component(self.tabs, |tabs, _| {
-            *tabs = Tabs::new(selected)
-                .options(options)
-                .strip_id(workspace_strip_id(window_id, &pane.id))
-                .fill(true);
-        })?;
+        self.tabs_state.set((selected, options));
         let kind = pane
             .items
             .iter()
@@ -1150,14 +1158,13 @@ impl WorkspacePaneView {
             ),
             _ => Default::default(),
         };
-        let show_heading = !title.is_empty() && kind == Some("project-files");
-        let show_status = !status.is_empty();
-        context.update_component(self.heading, |text, _| {
-            *text = Text::new(title);
-        })?;
-        context.update_component(self.status, |text, _| {
-            *text = Text::new(status);
-        })?;
+        let conversation_open = conversation.is_some();
+        self.heading_text.set(title.clone());
+        self.status_text.set(status.clone());
+        self.show_heading
+            .set(!conversation_open && !title.is_empty() && kind == Some("project-files"));
+        self.show_status
+            .set(!conversation_open && !status.is_empty());
         if let Some(document) = document {
             context.update_component(self.editor, |editor_view, _| {
                 if editor_view.state.value != document.text {
@@ -1185,6 +1192,11 @@ impl WorkspacePaneView {
             })?;
             context.sync_terminal_screen(self.log, terminal.screen.clone())?;
         }
+        context.update_component(self.tree, |tree, _| {
+            *tree = files
+                .map(|files| files.tree.clone())
+                .unwrap_or_else(|| TreeView::new(Vec::new()));
+        })?;
         if let Some(browser) = &pane.browser {
             self.browser.sync(
                 context,
@@ -1196,66 +1208,73 @@ impl WorkspacePaneView {
                 browser,
             )?;
         }
-        let mut actions = Vec::new();
+        let document_actions =
+            document.is_some_and(|document| document.dirty && !document.read_only);
         if let Some(document) = document.filter(|document| document.dirty && !document.read_only) {
-            context.update_component(self.save, |button, _| {
-                *button = extra_button(
-                    if document.conflicted {
-                        "保留并保存"
-                    } else {
-                        "保存"
-                    },
-                    ButtonKind::Primary,
-                );
-            })?;
-            context.update_component(self.discard, |button, _| {
-                *button = extra_button(
-                    if document.conflicted {
-                        "重新载入"
-                    } else {
-                        "放弃"
-                    },
-                    ButtonKind::Subtle,
-                );
-            })?;
-            actions.extend([self.save.stable_id(), self.discard.stable_id()]);
-        } else if terminal.is_some_and(|terminal| terminal.running) {
-            actions.push(self.interrupt.stable_id());
-        }
-        reconcile_children(context, self.actions.stable_id(), &actions)?;
-        let mut order = Vec::new();
-        if show_heading {
-            order.push(self.heading.stable_id());
-        }
-        if show_status {
-            order.push(self.status.stable_id());
-        }
-        match kind {
-            Some("document-editor") => {
-                if document.is_some() {
-                    order.push(self.search.root.stable_id());
+            self.save_label.set(
+                if document.conflicted {
+                    "保留并保存"
+                } else {
+                    "保存"
                 }
-                order.push(self.editor.stable_id());
-                order.push(self.actions.stable_id());
+                .to_owned(),
+            );
+            self.discard_label.set(
+                if document.conflicted {
+                    "重新载入"
+                } else {
+                    "放弃"
+                }
+                .to_owned(),
+            );
+        }
+        let running = terminal.is_some_and(|terminal| terminal.running);
+        self.show_document_actions
+            .set(!conversation_open && document_actions);
+        self.show_interrupt
+            .set(!conversation_open && !document_actions && running);
+        self.show_actions.set(
+            !conversation_open
+                && matches!(kind, Some("document-editor" | "project-files" | "terminal")),
+        );
+        self.show_search
+            .set(!conversation_open && kind == Some("document-editor") && document.is_some());
+        self.show_editor
+            .set(!conversation_open && kind == Some("document-editor"));
+        self.show_tree
+            .set(!conversation_open && kind == Some("project-files"));
+        self.show_log
+            .set(!conversation_open && kind == Some("terminal"));
+        self.show_browser
+            .set(!conversation_open && kind == Some("task-browser"));
+        self.host_conversation(context, conversation)?;
+        context.flush_reactive()?;
+        Ok(())
+    }
+
+    fn host_conversation(
+        &mut self,
+        context: &mut AppContext,
+        conversation: Option<StableNodeId>,
+    ) -> Result<(), FrameworkError> {
+        if self.hosted_conversation == conversation {
+            return Ok(());
+        }
+        if let Some(previous) = self.hosted_conversation.take() {
+            if context.world().node(previous).and_then(|node| node.parent)
+                == Some(self.content.stable_id())
+            {
+                let mut mutations = nana_ui::runtime::MutationQueue::new();
+                mutations.park_subtree(previous);
+                context.commit_mutations(mutations)?;
             }
-            Some("project-files") => {
-                order.push(self.tree.stable_id());
-                order.push(self.actions.stable_id());
-            }
-            Some("task-browser") => {
-                order.push(self.browser.root.stable_id());
-            }
-            Some("terminal") => {
-                order.push(self.log.stable_id());
-                order.push(self.actions.stable_id());
-            }
-            _ => {}
         }
         if let Some(conversation) = conversation {
-            order = vec![conversation];
+            let mut mutations = nana_ui::runtime::MutationQueue::new();
+            mutations.insert(self.content.stable_id(), conversation, None);
+            context.commit_mutations(mutations)?;
+            self.hosted_conversation = Some(conversation);
         }
-        reconcile_children(context, self.content.stable_id(), &order)?;
-        assemble_workspace_chrome(context, self.chrome)?;
         Ok(())
     }
 
@@ -1267,12 +1286,12 @@ impl WorkspacePaneView {
                 }
             };
         }
+        self.browser.dispose(context)?;
         remove!(self.chrome);
         remove!(self.search.panel);
         remove!(self.search.root);
         remove!(self.editor);
         remove!(self.log);
-        self.browser.dispose(context)?;
         remove!(self.tree);
         remove!(self.actions);
         remove!(self.save);
@@ -1370,49 +1389,6 @@ fn bind_document_input(
     })
 }
 
-#[derive(Clone, Copy)]
-enum PaneAction {
-    Save,
-    Discard,
-    Interrupt,
-}
-
-fn pane_bound_action(
-    context: &mut AppContext,
-    document_id: DocumentId,
-    sink: &IntentSink,
-    bindings: &Arc<Mutex<PaneInputBindings>>,
-    label: &str,
-    action: PaneAction,
-) -> Result<Entity<Button>, FrameworkError> {
-    let kind = match action {
-        PaneAction::Save => ButtonKind::Primary,
-        PaneAction::Discard => ButtonKind::Subtle,
-        PaneAction::Interrupt => ButtonKind::Danger,
-    };
-    let button = context.create_detached_component(document_id, extra_button(label, kind))?;
-    let sink = Arc::clone(sink);
-    let bindings = Arc::clone(bindings);
-    context.on(button, move |_, _: &Activate, _| {
-        let bindings = bindings.lock().unwrap().clone();
-        let intent = match action {
-            PaneAction::Save => bindings
-                .document
-                .map(|(target, _, _)| ShellIntent::SaveDocument(target)),
-            PaneAction::Discard => bindings
-                .document
-                .map(|(target, _, _)| ShellIntent::DiscardDocument(target)),
-            PaneAction::Interrupt => bindings
-                .terminal
-                .map(|(target, session_id)| ShellIntent::TerminalInterrupt { target, session_id }),
-        };
-        if let Some(intent) = intent {
-            emit(&sink, intent);
-        }
-    })?;
-    Ok(button)
-}
-
 fn mount_workspace_pane_view(
     context: &mut AppContext,
     document_id: DocumentId,
@@ -1468,6 +1444,13 @@ fn workspace_strip_id(window: HostedWindowId, pane: &str) -> String {
     }
 }
 
+fn reveal(style: &mut NodeStyle, shown: bool) {
+    let hidden = !shown;
+    if style.layout.hidden != hidden {
+        Arc::make_mut(&mut style.layout).hidden = hidden;
+    }
+}
+
 fn mount_workspace_pane_view_in(
     context: &mut AppContext,
     document_id: DocumentId,
@@ -1475,6 +1458,8 @@ fn mount_workspace_pane_view_in(
     pane_id: &str,
     sink: &IntentSink,
 ) -> Result<WorkspacePaneView, FrameworkError> {
+    use nana_ui::runtime::view::{entity_ref, signal, widget, with_refs, EntityRef, Signal};
+    use nana_ui::runtime::{TerminalEvent, TerminalScreen, TerminalView};
     let chrome_sink: IntentSink = {
         let sink = Arc::clone(sink);
         let pane_id = pane_id.to_owned();
@@ -1489,133 +1474,329 @@ fn mount_workspace_pane_view_in(
             )
         })
     };
-    let header = context.create_detached_component(document_id, Stack::bar(6.0))?;
-    let (selected, options) = (String::new(), Vec::new());
-    let tabs = context.create_detached_component(
-        document_id,
-        Tabs::new(selected)
-            .options(options)
-            .strip_id(workspace_strip_id(window_id, pane_id))
-            .fill(true),
-    )?;
-    let pane_id_owned = pane_id.to_owned();
-    let tab_sink = Arc::clone(&chrome_sink);
-    context.on(tabs, move |_, event: &TabsEvent, _| {
-        emit(&tab_sink, workspace_tabs_intent_for(&pane_id_owned, event));
-    })?;
-    let split_h = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("左右分栏", Icon::Sidebar),
-    )?;
-    let split_v = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("上下分栏", Icon::Workspace),
-    )?;
-    bind_activate(
-        context,
-        split_h,
-        Arc::clone(&chrome_sink),
-        ShellIntent::SplitWorkspaceHorizontal,
-    )?;
-    bind_activate(
-        context,
-        split_v,
-        Arc::clone(&chrome_sink),
-        ShellIntent::SplitWorkspaceVertical,
-    )?;
-    let move_window = context.create_detached_component(
-        document_id,
-        workspace_chrome_button(
-            if window_id == HostedWindowId::PRIMARY {
-                "移至新窗口"
-            } else {
-                "移回主窗口"
-            },
-            Icon::Restore,
-        ),
-    )?;
-    let move_next = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("移至下一窗格", Icon::ArrowRight),
-    )?;
-    bind_activate(
-        context,
-        move_window,
-        Arc::clone(&chrome_sink),
-        ShellIntent::MovePaneToWindow,
-    )?;
-    bind_activate(
-        context,
-        move_next,
-        Arc::clone(&chrome_sink),
-        ShellIntent::MovePaneToNext,
-    )?;
-    let body = context.create_detached_component(document_id, Stack::fill_column(0.0))?;
-    let chrome = context.create_detached_component(
-        document_id,
-        PaneChrome::new()
-            .header(header.stable_id())
-            .tabs(tabs.stable_id())
-            .body(body.stable_id())
-            .actions([
-                PaneChromeAction::new(PaneChromeActionKind::SplitHorizontal, "左右分栏")
-                    .target(split_h.stable_id()),
-                PaneChromeAction::new(PaneChromeActionKind::SplitVertical, "上下分栏")
-                    .target(split_v.stable_id()),
-                PaneChromeAction::new(
-                    PaneChromeActionKind::MoveToWindow,
-                    if window_id == HostedWindowId::PRIMARY {
-                        "移至新窗口"
-                    } else {
-                        "移回主窗口"
-                    },
-                )
-                .target(move_window.stable_id()),
-                PaneChromeAction::new(PaneChromeActionKind::MoveToNextPane, "移至下一窗格")
-                    .target(move_next.stable_id()),
-            ]),
-    )?;
-    assemble_workspace_chrome(context, chrome)?;
-    let content =
-        context.create_detached_component(document_id, Stack::fill_column(12.0).padding(16.0))?;
-    let heading = context.create_detached_component(document_id, Text::new(String::new()))?;
-    let status = context.create_detached_component(document_id, Text::new(String::new()))?;
-    let editor = context
-        .create_detached_component(document_id, fill_workspace_editor(String::new(), None))?;
     let bindings = Arc::new(Mutex::new(PaneInputBindings::default()));
-    bind_document_input(context, editor, sink, &bindings)?;
-    let search = EditorSearchView::mount(context, document_id, editor, &bindings, sink)?;
-    let log = mount_terminal(context, document_id, sink, &bindings)?;
     let browser = crate::browser_workbench::BrowserView::mount(context, document_id, sink)?;
-    let tree = context.create_detached_component(document_id, TreeView::new(Vec::new()))?;
-    let actions = context.create_detached_component(document_id, Stack::row(8.0))?;
-    let save = pane_bound_action(
-        context,
-        document_id,
-        sink,
-        &bindings,
-        "保存",
-        PaneAction::Save,
-    )?;
-    let discard = pane_bound_action(
-        context,
-        document_id,
-        sink,
-        &bindings,
-        "放弃",
-        PaneAction::Discard,
-    )?;
-    let interrupt = pane_bound_action(
-        context,
-        document_id,
-        sink,
-        &bindings,
-        "停止",
-        PaneAction::Interrupt,
-    )?;
-    context.append_child(content, heading)?;
-    context.append_child(content, status)?;
-    context.append_child(body, content)?;
+    let tabs_state = crate::runtime_layout::Bound::new();
+    let heading_text = crate::runtime_layout::Bound::new();
+    let status_text = crate::runtime_layout::Bound::new();
+    let show_heading = crate::runtime_layout::Bound::new();
+    let show_status = crate::runtime_layout::Bound::new();
+    let show_search = crate::runtime_layout::Bound::new();
+    let show_editor = crate::runtime_layout::Bound::new();
+    let show_tree = crate::runtime_layout::Bound::new();
+    let show_log = crate::runtime_layout::Bound::new();
+    let show_browser = crate::runtime_layout::Bound::new();
+    let show_actions = crate::runtime_layout::Bound::new();
+    let show_document_actions = crate::runtime_layout::Bound::new();
+    let show_interrupt = crate::runtime_layout::Bound::new();
+    let save_label = crate::runtime_layout::Bound::new();
+    let discard_label = crate::runtime_layout::Bound::new();
+    let tabs_slot = tabs_state.clone();
+    let heading_slot = heading_text.clone();
+    let status_slot = status_text.clone();
+    let show_heading_slot = show_heading.clone();
+    let show_status_slot = show_status.clone();
+    let show_search_slot = show_search.clone();
+    let show_editor_slot = show_editor.clone();
+    let show_tree_slot = show_tree.clone();
+    let show_log_slot = show_log.clone();
+    let show_browser_slot = show_browser.clone();
+    let show_actions_slot = show_actions.clone();
+    let show_document_actions_slot = show_document_actions.clone();
+    let show_interrupt_slot = show_interrupt.clone();
+    let save_label_slot = save_label.clone();
+    let discard_label_slot = discard_label.clone();
+    let view_bindings = Arc::clone(&bindings);
+    let view_sink = Arc::clone(sink);
+    let pane_key = pane_id.to_owned();
+    let strip = workspace_strip_id(window_id, pane_id);
+    let move_label = if window_id == HostedWindowId::PRIMARY {
+        "移至新窗口"
+    } else {
+        "移回主窗口"
+    };
+    let (
+        _,
+        (
+            (chrome, _tabs, content, _heading),
+            (_status, editor, log, tree),
+            (actions, search_host, browser_host),
+            (save, discard, interrupt),
+            [split_h, split_v, move_window, move_next],
+        ),
+    ) = context.mount_view_detached(document_id, move || {
+        let tabs_state = tabs_slot.install(signal((String::new(), Vec::new())));
+        let heading_text = heading_slot.install(signal(String::new()));
+        let status_text = status_slot.install(signal(String::new()));
+        let show_heading = show_heading_slot.install(signal(false));
+        let show_status = show_status_slot.install(signal(false));
+        let show_search = show_search_slot.install(signal(false));
+        let show_editor = show_editor_slot.install(signal(false));
+        let show_tree = show_tree_slot.install(signal(false));
+        let show_log = show_log_slot.install(signal(false));
+        let show_browser = show_browser_slot.install(signal(false));
+        let show_actions = show_actions_slot.install(signal(false));
+        let show_document_actions = show_document_actions_slot.install(signal(false));
+        let show_interrupt = show_interrupt_slot.install(signal(false));
+        let save_label = save_label_slot.install(signal("保存".to_owned()));
+        let discard_label = discard_label_slot.install(signal("放弃".to_owned()));
+        let chrome = entity_ref();
+        let tabs = entity_ref();
+        let content = entity_ref();
+        let heading = entity_ref();
+        let status = entity_ref();
+        let editor = entity_ref();
+        let log = entity_ref();
+        let tree = entity_ref();
+        let actions = entity_ref();
+        let search_host = entity_ref();
+        let browser_host = entity_ref();
+        let save = entity_ref();
+        let discard = entity_ref();
+        let interrupt = entity_ref();
+        let split_h = entity_ref();
+        let split_v = entity_ref();
+        let move_window = entity_ref();
+        let move_next = entity_ref();
+        let strip = strip.clone();
+        let tab_sink = Arc::clone(&chrome_sink);
+        let pane_key = pane_key.clone();
+        let icon_action = |label: &'static str,
+                           icon: Icon,
+                           slot: EntityRef<IconButton>,
+                           intent: ShellIntent,
+                           sink: IntentSink| {
+            widget(workspace_chrome_button(label, icon))
+                .entity_ref(slot)
+                .on_activate(move || emit(&sink, intent.clone()))
+        };
+        let document_action = |label: Signal<String>,
+                               shown: Signal<bool>,
+                               kind: ButtonKind,
+                               slot: EntityRef<Button>,
+                               intent: fn(PaneInputBindings) -> Option<ShellIntent>,
+                               bindings: Arc<Mutex<PaneInputBindings>>,
+                               sink: IntentSink| {
+            widget(extra_button("", kind))
+                .entity_ref(slot)
+                .label(label)
+                .visible(shown)
+                .on_activate(move || {
+                    if let Some(intent) = intent(bindings.lock().unwrap().clone()) {
+                        emit(&sink, intent);
+                    }
+                })
+        };
+        let editor_bindings = Arc::clone(&view_bindings);
+        let editor_sink = view_sink.clone();
+        let terminal_bindings = Arc::clone(&view_bindings);
+        let terminal_sink = view_sink.clone();
+        let tree_sink = view_sink.clone();
+        let view = widget(PaneChrome::new())
+            .entity_ref(chrome)
+            .tabs(
+                widget(Tabs::new(String::new()).fill(true).strip_id(strip.clone()))
+                    .entity_ref(tabs)
+                    .bind(move |tabs| {
+                        let (selected, options) = tabs_state.get();
+                        *tabs = Tabs::new(selected)
+                            .options(options)
+                            .strip_id(strip.clone())
+                            .fill(true);
+                    })
+                    .on(move |event: &TabsEvent| {
+                        emit(&tab_sink, workspace_tabs_intent_for(&pane_key, event));
+                    }),
+            )
+            .action(
+                PaneChromeAction::new(PaneChromeActionKind::SplitHorizontal, "左右分栏")
+                    .icon(Icon::Sidebar),
+                icon_action(
+                    "左右分栏",
+                    Icon::Sidebar,
+                    split_h,
+                    ShellIntent::SplitWorkspaceHorizontal,
+                    Arc::clone(&chrome_sink),
+                ),
+            )
+            .action(
+                PaneChromeAction::new(PaneChromeActionKind::SplitVertical, "上下分栏")
+                    .icon(Icon::Workspace),
+                icon_action(
+                    "上下分栏",
+                    Icon::Workspace,
+                    split_v,
+                    ShellIntent::SplitWorkspaceVertical,
+                    Arc::clone(&chrome_sink),
+                ),
+            )
+            .action(
+                PaneChromeAction::new(PaneChromeActionKind::MoveToWindow, move_label)
+                    .icon(Icon::Restore),
+                icon_action(
+                    move_label,
+                    Icon::Restore,
+                    move_window,
+                    ShellIntent::MovePaneToWindow,
+                    Arc::clone(&chrome_sink),
+                ),
+            )
+            .action(
+                PaneChromeAction::new(PaneChromeActionKind::MoveToNextPane, "移至下一窗格")
+                    .icon(Icon::ArrowRight),
+                icon_action(
+                    "移至下一窗格",
+                    Icon::ArrowRight,
+                    move_next,
+                    ShellIntent::MovePaneToNext,
+                    chrome_sink.clone(),
+                ),
+            )
+            .body(
+                widget(Stack::fill_column(0.0)).children(
+                    widget(Stack::fill_column(12.0).padding(16.0))
+                        .entity_ref(content)
+                        .children((
+                            widget(Text::new(String::new()))
+                                .entity_ref(heading)
+                                .value(heading_text)
+                                .visible(show_heading),
+                            widget(Text::new(String::new()))
+                                .entity_ref(status)
+                                .value(status_text)
+                                .visible(show_status),
+                            widget(Stack::column(0.0))
+                                .entity_ref(search_host)
+                                .visible(show_search),
+                            widget(fill_workspace_editor(String::new(), None))
+                                .entity_ref(editor)
+                                .visible(show_editor)
+                                .on_cx(move |editor, event: &TextChanged, _| {
+                                    editor.diagnostics = Arc::from([]);
+                                    if let Some(intent) = editor_bindings
+                                        .lock()
+                                        .unwrap()
+                                        .edit(event.value.to_string())
+                                    {
+                                        emit(&editor_sink, intent);
+                                    }
+                                }),
+                            widget(TreeView::new(Vec::new()))
+                                .entity_ref(tree)
+                                .bind(move |tree| {
+                                    reveal(&mut tree.style, show_tree.get());
+                                })
+                                .on(move |event: &TreeViewEvent<Arc<str>>| match event {
+                                    TreeViewEvent::Toggle(path) => {
+                                        emit(
+                                            &tree_sink,
+                                            ShellIntent::ToggleProjectFile(path.to_string()),
+                                        );
+                                    }
+                                    TreeViewEvent::Select(path) => {
+                                        emit(
+                                            &tree_sink,
+                                            ShellIntent::OpenProjectFile(path.to_string()),
+                                        );
+                                    }
+                                }),
+                            widget(TerminalView::new(TerminalScreen::blank(1, 1)))
+                                .entity_ref(log)
+                                .bind(move |view| reveal(&mut view.style, show_log.get()))
+                                .on(move |event: &TerminalEvent| {
+                                    let Some((target, session_id)) =
+                                        terminal_bindings.lock().unwrap().terminal.clone()
+                                    else {
+                                        return;
+                                    };
+                                    match event {
+                                        TerminalEvent::Input(bytes) => emit(
+                                            &terminal_sink,
+                                            ShellIntent::TerminalWrite {
+                                                target,
+                                                session_id,
+                                                bytes: bytes.clone(),
+                                            },
+                                        ),
+                                        TerminalEvent::Resize { columns, rows } => emit(
+                                            &terminal_sink,
+                                            ShellIntent::TerminalResize {
+                                                target,
+                                                session_id,
+                                                columns: *columns,
+                                                rows: *rows,
+                                            },
+                                        ),
+                                        TerminalEvent::SelectionChanged(_) => {}
+                                    }
+                                }),
+                            widget(Stack::fill_column(0.0))
+                                .entity_ref(browser_host)
+                                .visible(show_browser),
+                            widget(Stack::row(8.0))
+                                .entity_ref(actions)
+                                .visible(show_actions)
+                                .children((
+                                    document_action(
+                                        save_label,
+                                        show_document_actions,
+                                        ButtonKind::Primary,
+                                        save,
+                                        |bindings| {
+                                            bindings.document.map(|(target, _, _)| {
+                                                ShellIntent::SaveDocument(target)
+                                            })
+                                        },
+                                        Arc::clone(&view_bindings),
+                                        view_sink.clone(),
+                                    ),
+                                    document_action(
+                                        discard_label,
+                                        show_document_actions,
+                                        ButtonKind::Subtle,
+                                        discard,
+                                        |bindings| {
+                                            bindings.document.map(|(target, _, _)| {
+                                                ShellIntent::DiscardDocument(target)
+                                            })
+                                        },
+                                        Arc::clone(&view_bindings),
+                                        view_sink.clone(),
+                                    ),
+                                    document_action(
+                                        signal("停止".to_owned()),
+                                        show_interrupt,
+                                        ButtonKind::Danger,
+                                        interrupt,
+                                        |bindings| {
+                                            bindings.terminal.map(|(target, session_id)| {
+                                                ShellIntent::TerminalInterrupt {
+                                                    target,
+                                                    session_id,
+                                                }
+                                            })
+                                        },
+                                        Arc::clone(&view_bindings),
+                                        view_sink.clone(),
+                                    ),
+                                )),
+                        )),
+                ),
+            );
+        with_refs(
+            view,
+            (
+                (chrome, tabs, content, heading),
+                (status, editor, log, tree),
+                (actions, search_host, browser_host),
+                (save, discard, interrupt),
+                [split_h, split_v, move_window, move_next],
+            ),
+        )
+    })?;
+    let search = EditorSearchView::mount(context, document_id, editor, &bindings, sink)?;
+    context.append_child(search_host, search.root)?;
+    context.append_child(browser_host, browser.root)?;
     Ok(WorkspacePaneView {
         bindings,
         chrome_actions: [split_h, split_v, move_window, move_next],
@@ -1623,10 +1804,7 @@ fn mount_workspace_pane_view_in(
         discard,
         interrupt,
         chrome,
-        tabs,
         content,
-        heading,
-        status,
         editor,
         search,
         log,
@@ -1634,6 +1812,22 @@ fn mount_workspace_pane_view_in(
         browser,
         tree,
         actions,
+        tabs_state,
+        heading_text,
+        status_text,
+        show_heading,
+        show_status,
+        show_search,
+        show_editor,
+        show_tree,
+        show_log,
+        show_browser,
+        show_actions,
+        show_document_actions,
+        show_interrupt,
+        save_label,
+        discard_label,
+        hosted_conversation: None,
     })
 }
 
@@ -1784,6 +1978,28 @@ struct EditorSearchView {
     replacement: Entity<TextInput>,
     feedback: Entity<Text>,
     draft: Arc<Mutex<EditorSearchDraft>>,
+    replacement_off: crate::runtime_layout::Bound<bool>,
+    query_value: crate::runtime_layout::Bound<String>,
+    replacement_value: crate::runtime_layout::Bound<String>,
+}
+
+fn workspace_search_input(placeholder: &str) -> TextInput {
+    let mut input = TextInput::new(String::new()).placeholder(placeholder.to_owned());
+    let layout = Arc::make_mut(&mut input.style.layout);
+    layout.flex_grow = Some(1.0);
+    layout.flex_shrink = Some(1.0);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    input
+}
+
+fn search_toggle_label(draft: &EditorSearchDraft) -> &'static str {
+    if draft.expanded {
+        "收起查找"
+    } else if draft.read_only {
+        "查找"
+    } else {
+        "查找替换"
+    }
 }
 
 impl EditorSearchView {
@@ -1794,111 +2010,193 @@ impl EditorSearchView {
         bindings: &Arc<Mutex<PaneInputBindings>>,
         sink: &IntentSink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::column(4.0))?;
-        let header = context.create_detached_component(document, Stack::row(0.0))?;
-        let toggle = context
-            .create_detached_component(document, extra_button("查找替换", ButtonKind::Text))?;
-        let panel = context.create_detached_component(document, Stack::column(4.0))?;
-        context.append_child(header, toggle)?;
-        context.append_child(root, header)?;
-        let find_row = context.create_detached_component(document, Stack::bar(4.0))?;
-        let replace_row = context.create_detached_component(document, Stack::bar(4.0))?;
-        let input = |placeholder: &str| {
-            let mut input = TextInput::new(String::new()).placeholder(placeholder.to_owned());
-            let layout = Arc::make_mut(&mut input.style.layout);
-            layout.flex_grow = Some(1.0);
-            layout.flex_shrink = Some(1.0);
-            layout.min_width = Some(LengthSpec::Px(0.0));
-            input
-        };
-        let query = context.create_detached_component(document, input("查找"))?;
-        let replacement = context.create_detached_component(document, input("替换为"))?;
-        let feedback = context.create_detached_component(document, Text::new(String::new()))?;
+        use nana_ui::runtime::view::{entity_ref, signal, widget, with_refs};
         let draft = Arc::new(Mutex::new(EditorSearchDraft::default()));
+        let replacement_off = crate::runtime_layout::Bound::new();
+        let query_value = crate::runtime_layout::Bound::new();
+        let replacement_value = crate::runtime_layout::Bound::new();
+        let off_slot = replacement_off.clone();
+        let query_slot = query_value.clone();
+        let replacement_slot = replacement_value.clone();
         let toggle_draft = Arc::clone(&draft);
-        context.on(toggle, move |button, _: &Activate, cx| {
-            let mut draft = toggle_draft.lock().unwrap();
-            draft.expanded = !draft.expanded;
-            *button = extra_button(
-                if draft.expanded {
-                    "收起查找"
-                } else if draft.read_only {
-                    "查找"
-                } else {
-                    "查找替换"
-                },
-                ButtonKind::Text,
-            );
-            if draft.expanded {
-                cx.mutations()
-                    .insert(root.stable_id(), panel.stable_id(), None);
-                cx.mutations()
-                    .request_focus(document, Some(query.stable_id()));
-            } else {
-                cx.mutations().park_subtree(panel.stable_id());
-                cx.mutations()
-                    .request_focus(document, Some(editor.stable_id()));
-            }
-        })?;
         let find_draft = Arc::clone(&draft);
-        context.on(query, move |_, event: &TextChanged, _| {
-            find_draft.lock().unwrap().query = event.value.to_string();
-        })?;
         let replace_draft = Arc::clone(&draft);
-        context.on(replacement, move |_, event: &TextChanged, _| {
-            replace_draft.lock().unwrap().replacement = event.value.to_string();
+        let search_bindings = Arc::clone(bindings);
+        let search_sink = Arc::clone(sink);
+        let (
+            _,
+            (
+                root,
+                panel,
+                toggle,
+                query,
+                replacement,
+                feedback,
+                [_previous, _next, replace, replace_all],
+            ),
+        ) = context.mount_view_detached(document, move || {
+            let replacement_off = off_slot.install(signal(false));
+            let query_value = query_slot.install(signal(String::new()));
+            let replacement_value = replacement_slot.install(signal(String::new()));
+            let root = entity_ref();
+            let panel = entity_ref();
+            let toggle = entity_ref();
+            let query = entity_ref();
+            let replacement = entity_ref();
+            let feedback = entity_ref();
+            let previous = entity_ref();
+            let next = entity_ref();
+            let replace = entity_ref();
+            let replace_all = entity_ref();
+            let search_button =
+                |label: &'static str,
+                 slot: nana_ui::runtime::view::EntityRef<Button>,
+                 action: DocumentSearchAction,
+                 bindings: Arc<Mutex<PaneInputBindings>>,
+                 draft: Arc<Mutex<EditorSearchDraft>>,
+                 sink: IntentSink,
+                 disabled: Option<nana_ui::runtime::view::Signal<bool>>| {
+                    let feedback = feedback;
+                    let mut button = widget(extra_button(label, ButtonKind::Subtle))
+                        .entity_ref(slot)
+                        .label(label)
+                        .on_activate(move || {
+                            let target = bindings
+                                .lock()
+                                .unwrap()
+                                .document
+                                .as_ref()
+                                .map(|(target, _, _)| target.clone());
+                            let draft = draft.lock().unwrap();
+                            let Some(feedback) = feedback.get() else {
+                                return;
+                            };
+                            if let Some(target) = target.filter(|target| {
+                                draft.item.as_deref() == Some(target.item_id.as_str())
+                            }) {
+                                emit(
+                                    &sink,
+                                    ShellIntent::SearchDocument {
+                                        target,
+                                        editor: editor.stable_id(),
+                                        feedback: feedback.stable_id(),
+                                        query: draft.query.clone(),
+                                        replacement: draft.replacement.clone(),
+                                        action,
+                                    },
+                                );
+                            }
+                        });
+                    if let Some(disabled) = disabled {
+                        button = button.disabled(disabled);
+                    }
+                    button
+                };
+            let pages = (
+                widget(Stack::column(4.0)).entity_ref(root).children(
+                    widget(Stack::row(0.0)).children(
+                        widget(extra_button("查找替换", ButtonKind::Text))
+                            .entity_ref(toggle)
+                            .label("查找替换")
+                            .on_cx(move |button, _: &Activate, cx| {
+                                let mut draft = toggle_draft.lock().unwrap();
+                                draft.expanded = !draft.expanded;
+                                *button =
+                                    extra_button(search_toggle_label(&draft), ButtonKind::Text);
+                                let root = root.get().expect("search root").stable_id();
+                                let panel = panel.get().expect("search panel").stable_id();
+                                if draft.expanded {
+                                    cx.mutations().insert(root, panel, None);
+                                    cx.mutations().request_focus(
+                                        document,
+                                        Some(query.get().expect("search query").stable_id()),
+                                    );
+                                } else {
+                                    cx.mutations().park_subtree(panel);
+                                    cx.mutations()
+                                        .request_focus(document, Some(editor.stable_id()));
+                                }
+                            }),
+                    ),
+                ),
+                widget(Stack::column(4.0)).entity_ref(panel).children((
+                    widget(Stack::bar(4.0)).children((
+                        widget(workspace_search_input("查找"))
+                            .entity_ref(query)
+                            .value(query_value)
+                            .on_input({
+                                let draft = Arc::clone(&find_draft);
+                                move |event: &TextChanged| {
+                                    draft.lock().unwrap().query = event.value.to_string();
+                                }
+                            }),
+                        search_button(
+                            "上一处",
+                            previous,
+                            DocumentSearchAction::Previous,
+                            Arc::clone(&search_bindings),
+                            Arc::clone(&find_draft),
+                            search_sink.clone(),
+                            None,
+                        ),
+                        search_button(
+                            "下一处",
+                            next,
+                            DocumentSearchAction::Next,
+                            Arc::clone(&search_bindings),
+                            Arc::clone(&find_draft),
+                            search_sink.clone(),
+                            None,
+                        ),
+                    )),
+                    widget(Stack::bar(4.0)).children((
+                        widget(workspace_search_input("替换为"))
+                            .entity_ref(replacement)
+                            .value(replacement_value)
+                            .disabled(replacement_off)
+                            .on_input({
+                                let draft = Arc::clone(&replace_draft);
+                                move |event: &TextChanged| {
+                                    draft.lock().unwrap().replacement = event.value.to_string();
+                                }
+                            }),
+                        search_button(
+                            "替换",
+                            replace,
+                            DocumentSearchAction::Replace,
+                            Arc::clone(&search_bindings),
+                            Arc::clone(&replace_draft),
+                            search_sink.clone(),
+                            Some(replacement_off),
+                        ),
+                        search_button(
+                            "全部替换",
+                            replace_all,
+                            DocumentSearchAction::ReplaceAll,
+                            Arc::clone(&search_bindings),
+                            replace_draft.clone(),
+                            search_sink.clone(),
+                            Some(replacement_off),
+                        ),
+                    )),
+                    widget(Text::new(String::new())).entity_ref(feedback),
+                )),
+            );
+            with_refs(
+                pages,
+                (
+                    root,
+                    panel,
+                    toggle,
+                    query,
+                    replacement,
+                    feedback,
+                    [previous, next, replace, replace_all],
+                ),
+            )
         })?;
-        context.append_child(find_row, query)?;
-        context.append_child(replace_row, replacement)?;
-        let mut replace_actions = Vec::new();
-        for (row, label, action) in [
-            (find_row, "上一处", DocumentSearchAction::Previous),
-            (find_row, "下一处", DocumentSearchAction::Next),
-            (replace_row, "替换", DocumentSearchAction::Replace),
-            (replace_row, "全部替换", DocumentSearchAction::ReplaceAll),
-        ] {
-            let button = context
-                .create_detached_component(document, extra_button(label, ButtonKind::Subtle))?;
-            if matches!(
-                action,
-                DocumentSearchAction::Replace | DocumentSearchAction::ReplaceAll
-            ) {
-                replace_actions.push(button);
-            }
-            let bindings = Arc::clone(bindings);
-            let draft = Arc::clone(&draft);
-            let sink = Arc::clone(sink);
-            context.on(button, move |_, _: &Activate, _| {
-                let target = bindings
-                    .lock()
-                    .unwrap()
-                    .document
-                    .as_ref()
-                    .map(|(target, _, _)| target.clone());
-                let draft = draft.lock().unwrap();
-                if let Some(target) =
-                    target.filter(|target| draft.item.as_deref() == Some(target.item_id.as_str()))
-                {
-                    emit(
-                        &sink,
-                        ShellIntent::SearchDocument {
-                            target,
-                            editor: editor.stable_id(),
-                            feedback: feedback.stable_id(),
-                            query: draft.query.clone(),
-                            replacement: draft.replacement.clone(),
-                            action,
-                        },
-                    );
-                }
-            })?;
-            context.append_child(row, button)?;
-        }
-        context.append_child(panel, find_row)?;
-        context.append_child(panel, replace_row)?;
-        context.append_child(panel, feedback)?;
         Ok(Self {
-            replace_actions,
+            replace_actions: vec![replace, replace_all],
             root,
             panel,
             toggle,
@@ -1906,6 +2204,9 @@ impl EditorSearchView {
             replacement,
             feedback,
             draft,
+            replacement_off,
+            query_value,
+            replacement_value,
         })
     }
 
@@ -1916,26 +2217,13 @@ impl EditorSearchView {
     ) -> Result<(), FrameworkError> {
         let mut draft = self.draft.lock().unwrap();
         draft.read_only = read_only;
-        let label = if draft.expanded {
-            "收起查找"
-        } else if read_only {
-            "查找"
-        } else {
-            "查找替换"
-        };
+        let label = search_toggle_label(&draft);
         drop(draft);
+        self.replacement_off.set(read_only);
         context.update_component(self.toggle, |button, _| {
             *button = extra_button(label, ButtonKind::Text);
         })?;
-        context.update_component(self.replacement, |input, _| {
-            input.disabled = read_only;
-        })?;
-        for button in &self.replace_actions {
-            context.update_component(*button, |button, _| {
-                button.disabled = read_only;
-            })?;
-        }
-        Ok(())
+        context.flush_reactive()
     }
 
     fn sync(&self, context: &mut AppContext, item: Option<&str>) -> Result<(), FrameworkError> {
@@ -1948,19 +2236,17 @@ impl EditorSearchView {
             ..Default::default()
         };
         drop(draft);
+        self.query_value.set(String::new());
+        self.replacement_value.set(String::new());
+        self.replacement_off.set(false);
         context.update_component(self.toggle, |button, cx| {
             *button = extra_button("查找替换", ButtonKind::Text);
             cx.mutations().park_subtree(self.panel.stable_id());
         })?;
-        context.update_component(self.query, |input, _| {
-            input.state.replace_value(String::new());
-        })?;
-        context.update_component(self.replacement, |input, _| {
-            input.state.replace_value(String::new());
-        })?;
         context.update_component(self.feedback, |text, _| {
             *text = Text::new(String::new());
-        })
+        })?;
+        context.flush_reactive()
     }
 }
 
@@ -2011,35 +2297,43 @@ fn mount_terminal(
     sink: &IntentSink,
     bindings: &Arc<Mutex<PaneInputBindings>>,
 ) -> Result<Entity<nana_ui::runtime::TerminalView>, FrameworkError> {
+    use nana_ui::runtime::view::{entity_ref, widget, with_refs};
     use nana_ui::runtime::{TerminalEvent, TerminalScreen, TerminalView};
-    let terminal = context
-        .create_detached_component(document_id, TerminalView::new(TerminalScreen::blank(1, 1)))?;
     let bindings = Arc::clone(bindings);
     let sink = Arc::clone(sink);
-    context.on(terminal, move |_, event: &TerminalEvent, _| {
-        let Some((target, session_id)) = bindings.lock().unwrap().terminal.clone() else {
-            return;
-        };
-        match event {
-            TerminalEvent::Input(bytes) => emit(
-                &sink,
-                ShellIntent::TerminalWrite {
-                    target,
-                    session_id,
-                    bytes: bytes.clone(),
-                },
-            ),
-            TerminalEvent::Resize { columns, rows } => emit(
-                &sink,
-                ShellIntent::TerminalResize {
-                    target,
-                    session_id,
-                    columns: *columns,
-                    rows: *rows,
-                },
-            ),
-            TerminalEvent::SelectionChanged(_) => {}
-        }
+    let (_, terminal) = context.mount_view_detached(document_id, move || {
+        let terminal = entity_ref::<TerminalView>();
+        with_refs(
+            widget(TerminalView::new(TerminalScreen::blank(1, 1)))
+                .entity_ref(terminal)
+                .on(move |event: &TerminalEvent| {
+                    let Some((target, session_id)) = bindings.lock().unwrap().terminal.clone()
+                    else {
+                        return;
+                    };
+                    match event {
+                        TerminalEvent::Input(bytes) => emit(
+                            &sink,
+                            ShellIntent::TerminalWrite {
+                                target,
+                                session_id,
+                                bytes: bytes.clone(),
+                            },
+                        ),
+                        TerminalEvent::Resize { columns, rows } => emit(
+                            &sink,
+                            ShellIntent::TerminalResize {
+                                target,
+                                session_id,
+                                columns: *columns,
+                                rows: *rows,
+                            },
+                        ),
+                        TerminalEvent::SelectionChanged(_) => {}
+                    }
+                }),
+            terminal,
+        )
     })?;
     Ok(terminal)
 }
@@ -2265,20 +2559,28 @@ pub fn mount_primary_shell(
     let context = document.context_mut();
     let _ = context.set_theme(snapshot.theme);
 
-    let title_leading = context.create_detached_component(document_id, Stack::row(0.0))?;
-    let sidebar_toggle = context.create_detached_component(
-        document_id,
-        sidebar_toggle_button(snapshot.sidebar_collapsed),
-    )?;
-    context.append_child(title_leading, sidebar_toggle)?;
-    bind_activate(
-        context,
-        sidebar_toggle,
-        Arc::clone(&sink),
-        ShellIntent::ToggleSidebar,
-    )?;
+    use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 
-    let title_breadcrumb = context.create_detached_component(document_id, Breadcrumb::new())?;
+    let sidebar_collapsed = snapshot.sidebar_collapsed;
+    let toggle_sink = Arc::clone(&sink);
+    let (_, (title_leading, sidebar_toggle)) =
+        context.mount_view_detached(document_id, move || {
+            let leading = entity_ref::<Stack>();
+            let toggle = entity_ref::<IconButton>();
+            with_refs(
+                widget(Stack::row(0.0)).entity_ref(leading).children(
+                    widget(sidebar_toggle_button(sidebar_collapsed))
+                        .entity_ref(toggle)
+                        .on_activate(move || emit(&toggle_sink, ShellIntent::ToggleSidebar)),
+                ),
+                (leading, toggle),
+            )
+        })?;
+
+    let (_, title_breadcrumb) = context.mount_view_detached(document_id, || {
+        let breadcrumb = entity_ref::<Breadcrumb>();
+        with_refs(widget(Breadcrumb::new()).entity_ref(breadcrumb), breadcrumb)
+    })?;
     context.set_breadcrumb_items(
         title_breadcrumb,
         breadcrumb_items(&snapshot.title_parent, &snapshot.title_context),
@@ -2286,61 +2588,107 @@ pub fn mount_primary_shell(
     // The reference chrome keeps window controls alone on the trailing edge; the
     // command palette and inspector already live in the titlebar more menu, which
     // now hangs off the sidebar footer.
-    let title_trailing = context.create_detached_component(document_id, Stack::row(6.0))?;
-    if WindowChrome::platform_default().uses_custom_controls() {
-        let minimize = context.create_detached_component(
-            document_id,
-            window_control(Icon::Minimize, "最小化", ButtonKind::Text),
-        )?;
-        let maximize = context.create_detached_component(
-            document_id,
-            window_control(Icon::Maximize, "最大化", ButtonKind::Text),
-        )?;
-        let close = context.create_detached_component(
-            document_id,
-            window_control(Icon::Close, "关闭", ButtonKind::Text),
-        )?;
+    let custom_controls = WindowChrome::platform_default().uses_custom_controls();
+    let (_, title_trailing) = context.mount_view_detached(document_id, || {
+        let trailing = entity_ref::<Stack>();
+        with_refs(widget(Stack::row(6.0)).entity_ref(trailing), trailing)
+    })?;
+    if custom_controls {
+        let (minimize_sink, maximize_sink, close_sink) =
+            (Arc::clone(&sink), Arc::clone(&sink), Arc::clone(&sink));
+        let (_, minimize) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<IconButton>();
+            with_refs(
+                widget(window_control(Icon::Minimize, "最小化", ButtonKind::Text))
+                    .entity_ref(button)
+                    .on_activate(move || {
+                        emit(
+                            &minimize_sink,
+                            ShellIntent::WindowChrome(WindowChromeEvent::Action(
+                                WindowChromeAction::Minimize,
+                            )),
+                        )
+                    }),
+                button,
+            )
+        })?;
+        let (_, maximize) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<IconButton>();
+            with_refs(
+                widget(window_control(Icon::Maximize, "最大化", ButtonKind::Text))
+                    .entity_ref(button)
+                    .on_activate(move || {
+                        emit(
+                            &maximize_sink,
+                            ShellIntent::WindowChrome(WindowChromeEvent::Action(
+                                WindowChromeAction::ToggleMaximize,
+                            )),
+                        )
+                    }),
+                button,
+            )
+        })?;
+        let (_, close) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<IconButton>();
+            with_refs(
+                widget(window_control(Icon::Close, "关闭", ButtonKind::Text))
+                    .entity_ref(button)
+                    .on_activate(move || {
+                        emit(
+                            &close_sink,
+                            ShellIntent::WindowChrome(WindowChromeEvent::Action(
+                                WindowChromeAction::Close,
+                            )),
+                        )
+                    }),
+                button,
+            )
+        })?;
         context.append_child(title_trailing, minimize)?;
         context.append_child(title_trailing, maximize)?;
         context.append_child(title_trailing, close)?;
-        bind_activate(
-            context,
-            minimize,
-            Arc::clone(&sink),
-            ShellIntent::WindowChrome(WindowChromeEvent::Action(WindowChromeAction::Minimize)),
-        )?;
-        bind_activate(
-            context,
-            maximize,
-            Arc::clone(&sink),
-            ShellIntent::WindowChrome(WindowChromeEvent::Action(
-                WindowChromeAction::ToggleMaximize,
-            )),
-        )?;
-        bind_activate(
-            context,
-            close,
-            Arc::clone(&sink),
-            ShellIntent::WindowChrome(WindowChromeEvent::Action(WindowChromeAction::Close)),
-        )?;
     }
 
-    let sidebar_top = context.create_detached_component(document_id, Stack::bar(6.0))?;
-    let new_conversation_icon = context
-        .create_detached_component(document_id, SidebarRowIcon::new(Icon::MessageSquarePlus))?;
-    let new_conversation = context.create_detached_component(
-        document_id,
-        new_conversation_row(new_conversation_icon.stable_id()),
-    )?;
+    let (_, sidebar_top) = context.mount_view_detached(document_id, || {
+        let top = entity_ref::<Stack>();
+        with_refs(widget(Stack::bar(6.0)).entity_ref(top), top)
+    })?;
+    let (_, new_conversation_icon) = context.mount_view_detached(document_id, || {
+        let icon = entity_ref::<SidebarRowIcon>();
+        with_refs(
+            widget(SidebarRowIcon::new(Icon::MessageSquarePlus)).entity_ref(icon),
+            icon,
+        )
+    })?;
+    let (_, new_conversation) = context.mount_view_detached(document_id, || {
+        let row = entity_ref::<SidebarRow>();
+        with_refs(
+            widget(new_conversation_row(new_conversation_icon.stable_id())).entity_ref(row),
+            row,
+        )
+    })?;
     context.append_child(new_conversation, new_conversation_icon)?;
-    let search_toggle = context.create_detached_component(document_id, sidebar_search_toggle())?;
-    let search_close = context.create_detached_component(document_id, sidebar_search_close())?;
-    let search_input = context.create_detached_component(
-        document_id,
-        TextArea::new(snapshot.sidebar_search_query.clone())
-            .placeholder("搜索项目和会话")
-            .height(32.0),
-    )?;
+    let (_, search_toggle) = context.mount_view_detached(document_id, || {
+        let toggle = entity_ref::<IconButton>();
+        with_refs(widget(sidebar_search_toggle()).entity_ref(toggle), toggle)
+    })?;
+    let (_, search_close) = context.mount_view_detached(document_id, || {
+        let close = entity_ref::<IconButton>();
+        with_refs(widget(sidebar_search_close()).entity_ref(close), close)
+    })?;
+    let search_query = snapshot.sidebar_search_query.clone();
+    let (_, search_input) = context.mount_view_detached(document_id, move || {
+        let input = entity_ref::<TextArea>();
+        with_refs(
+            widget(
+                TextArea::new(search_query)
+                    .placeholder("搜索项目和会话")
+                    .height(32.0),
+            )
+            .entity_ref(input),
+            input,
+        )
+    })?;
     let search_sink = Arc::clone(&sink);
     context.on(search_input, move |_, event: &TextChanged, _| {
         emit(
@@ -2374,16 +2722,16 @@ pub fn mount_primary_shell(
         context.append_child(sidebar_top, search_toggle)?;
     }
 
-    let add_project_menu = context.create_detached_component(
-        document_id,
-        sidebar_section_tool_button(Icon::Add, "添加项目"),
-    )?;
-    bind_activate(
-        context,
-        add_project_menu,
-        Arc::clone(&sink),
-        ShellIntent::OpenAddProjectMenu,
-    )?;
+    let add_project_sink = Arc::clone(&sink);
+    let (_, add_project_menu) = context.mount_view_detached(document_id, move || {
+        let menu = entity_ref::<IconButton>();
+        with_refs(
+            widget(sidebar_section_tool_button(Icon::Add, "添加项目"))
+                .entity_ref(menu)
+                .on_activate(move || emit(&add_project_sink, ShellIntent::OpenAddProjectMenu)),
+            menu,
+        )
+    })?;
     let (section, _session_header, task_body) = mount_sidebar_section(
         context,
         document_id,
@@ -2418,23 +2766,39 @@ pub fn mount_primary_shell(
         mount_sidebar_reorder(context, document_id, "项目", true, Arc::clone(&sink))?;
     let inbox_reorder =
         mount_sidebar_reorder(context, document_id, "收集箱", false, Arc::clone(&sink))?;
-    let scroll =
-        context.create_detached_component(document_id, SidebarFrame::vertical_body_scroll())?;
+    let (_, scroll) = context.mount_view_detached(document_id, || {
+        let scroll = entity_ref::<ScrollView>();
+        with_refs(
+            widget(SidebarFrame::vertical_body_scroll()).entity_ref(scroll),
+            scroll,
+        )
+    })?;
     context.append_child(scroll, section)?;
-    let footer = context.create_detached_component(document_id, SidebarFooter::new())?;
+    let (_, footer) = context.mount_view_detached(document_id, || {
+        let footer = entity_ref::<SidebarFooter>();
+        with_refs(widget(SidebarFooter::new()).entity_ref(footer), footer)
+    })?;
     let mut footer_nav = HashMap::new();
     for item in &snapshot.nav_items {
-        let button = context.create_detached_component(
-            document_id,
-            SidebarFooterButton::new(item.label.clone(), footer_nav_icon(item.settings))
-                .selected(item.selected),
-        )?;
+        let label = item.label.clone();
+        let settings = item.settings;
+        let selected = item.selected;
+        let (_, button) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<SidebarFooterButton>();
+            with_refs(
+                widget(
+                    SidebarFooterButton::new(label, footer_nav_icon(settings)).selected(selected),
+                )
+                .entity_ref(button),
+                button,
+            )
+        })?;
         context.append_child(footer, button)?;
         bind_activate(
             context,
             button,
             Arc::clone(&sink),
-            if item.settings {
+            if settings {
                 ShellIntent::OpenSettings
             } else {
                 ShellIntent::OpenAutomations
@@ -2442,8 +2806,13 @@ pub fn mount_primary_shell(
         )?;
         footer_nav.insert(item.id.clone(), button);
     }
-    let more = context
-        .create_detached_component(document_id, SidebarFooterButton::new("更多", Icon::More))?;
+    let (_, more) = context.mount_view_detached(document_id, move || {
+        let more = entity_ref::<SidebarFooterButton>();
+        with_refs(
+            widget(SidebarFooterButton::new("更多", Icon::More)).entity_ref(more),
+            more,
+        )
+    })?;
     context.append_child(footer, more)?;
     bind_activate(
         context,
@@ -2451,13 +2820,15 @@ pub fn mount_primary_shell(
         Arc::clone(&sink),
         ShellIntent::ToggleTitlebarMenu,
     )?;
-    let provider_badge = context.create_detached_component(
-        document_id,
-        SidebarFooterButton::new(
-            snapshot.provider_badge.clone(),
-            snapshot.provider_badge_icon,
-        ),
-    )?;
+    let provider_label = snapshot.provider_badge.clone();
+    let provider_icon = snapshot.provider_badge_icon;
+    let (_, provider_badge) = context.mount_view_detached(document_id, move || {
+        let provider = entity_ref::<SidebarFooterButton>();
+        with_refs(
+            widget(SidebarFooterButton::new(provider_label, provider_icon)).entity_ref(provider),
+            provider,
+        )
+    })?;
     context.append_child(footer, provider_badge)?;
     bind_activate(
         context,
@@ -2465,18 +2836,30 @@ pub fn mount_primary_shell(
         Arc::clone(&sink),
         ShellIntent::OpenSettings,
     )?;
-    let conversation_sidebar = context.create_detached_component(
-        document_id,
-        SidebarFrame::new()
-            .top(sidebar_top.stable_id())
-            .body(scroll.stable_id())
-            .footer(footer.stable_id()),
-    )?;
+    let (_, conversation_sidebar) = context.mount_view_detached(document_id, || {
+        let sidebar = entity_ref::<SidebarFrame>();
+        with_refs(
+            widget(
+                SidebarFrame::new()
+                    .top(sidebar_top.stable_id())
+                    .body(scroll.stable_id())
+                    .footer(footer.stable_id()),
+            )
+            .entity_ref(sidebar),
+            sidebar,
+        )
+    })?;
     context.append_child(conversation_sidebar, sidebar_top)?;
     context.append_child(conversation_sidebar, scroll)?;
     context.append_child(conversation_sidebar, footer)?;
 
-    let conversation = context.create_detached_component(document_id, conversation_root())?;
+    let (_, conversation) = context.mount_view_detached(document_id, || {
+        let conversation = entity_ref::<Stack>();
+        with_refs(
+            widget(conversation_root()).entity_ref(conversation),
+            conversation,
+        )
+    })?;
     let task_view = crate::module::task::view::TaskView::mount(
         context,
         document_id,
@@ -2492,98 +2875,141 @@ pub fn mount_primary_shell(
         snapshot.theme,
         Arc::clone(&sink),
     )?;
-    let workspace_page = context.create_detached_component(document_id, Stack::fill_column(0.0))?;
-    let terminal_page = context.create_detached_component(document_id, Stack::fill_column(0.0))?;
-    let workbench_bottom =
-        context.create_detached_component(document_id, Stack::fill_column(0.0))?;
+    let (_, workspace_page) = context.mount_view_detached(document_id, || {
+        let page = entity_ref::<Stack>();
+        with_refs(widget(Stack::fill_column(0.0)).entity_ref(page), page)
+    })?;
+    let (_, terminal_page) = context.mount_view_detached(document_id, || {
+        let page = entity_ref::<Stack>();
+        with_refs(widget(Stack::fill_column(0.0)).entity_ref(page), page)
+    })?;
+    let (_, workbench_bottom) = context.mount_view_detached(document_id, || {
+        let page = entity_ref::<Stack>();
+        with_refs(widget(Stack::fill_column(0.0)).entity_ref(page), page)
+    })?;
     let compact_workbench = crate::workspace_view::CompactWorkbench::mount(
         context,
         document_id,
         conversation.stable_id(),
     )?;
-    let pane_header = context.create_detached_component(document_id, Stack::bar(6.0))?;
+    let (_, pane_header) = context.mount_view_detached(document_id, || {
+        let header = entity_ref::<Stack>();
+        with_refs(widget(Stack::bar(6.0)).entity_ref(header), header)
+    })?;
     let (pane_selected, pane_options) = pane_tab_options(snapshot);
-    let pane_tabs = context.create_detached_component(
-        document_id,
-        Tabs::new(pane_selected)
-            .options(pane_options)
-            .strip_id(active_pane_strip_id(snapshot))
-            .fill(true),
-    )?;
+    let pane_strip = active_pane_strip_id(snapshot);
+    let (_, pane_tabs) = context.mount_view_detached(document_id, move || {
+        let tabs = entity_ref::<Tabs>();
+        with_refs(
+            widget(
+                Tabs::new(pane_selected)
+                    .options(pane_options)
+                    .strip_id(pane_strip)
+                    .fill(true),
+            )
+            .entity_ref(tabs),
+            tabs,
+        )
+    })?;
     let pane_sink = Arc::clone(&sink);
     context.on(pane_tabs, move |_, event: &TabsEvent, _| {
         emit(&pane_sink, workspace_tabs_intent(event));
     })?;
-    let pane_split_h = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("左右分栏", Icon::Sidebar),
-    )?;
-    let pane_split_v = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("上下分栏", Icon::Workspace),
-    )?;
-    bind_activate(
-        context,
-        pane_split_h,
-        Arc::clone(&sink),
+    let mount_pane_button = |label: &'static str,
+                             icon: Icon,
+                             intent: ShellIntent,
+                             context: &mut nana_ui::runtime::AppContext|
+     -> Result<Entity<IconButton>, FrameworkError> {
+        let button_sink = Arc::clone(&sink);
+        let (_, button) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<IconButton>();
+            with_refs(
+                widget(workspace_chrome_button(label, icon))
+                    .entity_ref(button)
+                    .on_activate(move || emit(&button_sink, intent.clone())),
+                button,
+            )
+        })?;
+        Ok(button)
+    };
+    let pane_split_h = mount_pane_button(
+        "左右分栏",
+        Icon::Sidebar,
         ShellIntent::SplitWorkspaceHorizontal,
-    )?;
-    bind_activate(
         context,
-        pane_split_v,
-        Arc::clone(&sink),
+    )?;
+    let pane_split_v = mount_pane_button(
+        "上下分栏",
+        Icon::Workspace,
         ShellIntent::SplitWorkspaceVertical,
-    )?;
-    let pane_move_window = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("移至新窗口", Icon::Restore),
-    )?;
-    let pane_move_next = context.create_detached_component(
-        document_id,
-        workspace_chrome_button("移至下一窗格", Icon::ArrowRight),
-    )?;
-    bind_activate(
         context,
-        pane_move_window,
-        Arc::clone(&sink),
+    )?;
+    let pane_move_window = mount_pane_button(
+        "移至新窗口",
+        Icon::Restore,
         ShellIntent::MovePaneToWindow,
-    )?;
-    bind_activate(
         context,
-        pane_move_next,
-        Arc::clone(&sink),
+    )?;
+    let pane_move_next = mount_pane_button(
+        "移至下一窗格",
+        Icon::ArrowRight,
         ShellIntent::MovePaneToNext,
+        context,
     )?;
-    let pane_body = context.create_detached_component(document_id, Stack::fill_column(0.0))?;
-    let pane_chrome = context.create_detached_component(
-        document_id,
-        PaneChrome::new()
-            .header(pane_header.stable_id())
-            .tabs(pane_tabs.stable_id())
-            .body(pane_body.stable_id())
-            .actions([
-                PaneChromeAction::new(PaneChromeActionKind::SplitHorizontal, "左右分栏")
-                    .target(pane_split_h.stable_id()),
-                PaneChromeAction::new(PaneChromeActionKind::SplitVertical, "上下分栏")
-                    .target(pane_split_v.stable_id()),
-                PaneChromeAction::new(PaneChromeActionKind::MoveToWindow, "移至新窗口")
-                    .target(pane_move_window.stable_id()),
-                PaneChromeAction::new(PaneChromeActionKind::MoveToNextPane, "移至下一窗格")
-                    .target(pane_move_next.stable_id()),
-            ]),
-    )?;
+    let (_, pane_body) = context.mount_view_detached(document_id, || {
+        let body = entity_ref::<Stack>();
+        with_refs(widget(Stack::fill_column(0.0)).entity_ref(body), body)
+    })?;
+    let pane_chrome_spec = PaneChrome::new()
+        .header(pane_header.stable_id())
+        .tabs(pane_tabs.stable_id())
+        .body(pane_body.stable_id())
+        .actions([
+            PaneChromeAction::new(PaneChromeActionKind::SplitHorizontal, "左右分栏")
+                .target(pane_split_h.stable_id()),
+            PaneChromeAction::new(PaneChromeActionKind::SplitVertical, "上下分栏")
+                .target(pane_split_v.stable_id()),
+            PaneChromeAction::new(PaneChromeActionKind::MoveToWindow, "移至新窗口")
+                .target(pane_move_window.stable_id()),
+            PaneChromeAction::new(PaneChromeActionKind::MoveToNextPane, "移至下一窗格")
+                .target(pane_move_next.stable_id()),
+        ]);
+    let (_, pane_chrome) = context.mount_view_detached(document_id, move || {
+        let chrome = entity_ref::<PaneChrome>();
+        with_refs(widget(pane_chrome_spec).entity_ref(chrome), chrome)
+    })?;
     assemble_workspace_chrome(context, pane_chrome)?;
     context.append_child(workspace_page, pane_chrome)?;
-    let pane_bar = context.create_detached_component(document_id, Stack::row(8.0))?;
+    let (_, pane_bar) = context.mount_view_detached(document_id, || {
+        let bar = entity_ref::<Stack>();
+        with_refs(widget(Stack::row(8.0)).entity_ref(bar), bar)
+    })?;
     context.append_child(workspace_page, pane_bar)?;
-    let workspace_content =
-        context.create_detached_component(document_id, Stack::fill_column(12.0).padding(16.0))?;
-    let workspace_heading =
-        context.create_detached_component(document_id, Text::new(String::new()))?;
-    let workspace_status =
-        context.create_detached_component(document_id, Text::new(String::new()))?;
-    let workspace_editor = context
-        .create_detached_component(document_id, fill_workspace_editor(String::new(), None))?;
+    let (_, workspace_content) = context.mount_view_detached(document_id, || {
+        let content = entity_ref::<Stack>();
+        with_refs(
+            widget(Stack::fill_column(12.0).padding(16.0)).entity_ref(content),
+            content,
+        )
+    })?;
+    let (_, workspace_heading) = context.mount_view_detached(document_id, || {
+        let heading = entity_ref::<Text>();
+        with_refs(
+            widget(Text::new(String::new())).entity_ref(heading),
+            heading,
+        )
+    })?;
+    let (_, workspace_status) = context.mount_view_detached(document_id, || {
+        let status = entity_ref::<Text>();
+        with_refs(widget(Text::new(String::new())).entity_ref(status), status)
+    })?;
+    let (_, workspace_editor) = context.mount_view_detached(document_id, || {
+        let editor = entity_ref::<TextArea>();
+        with_refs(
+            widget(fill_workspace_editor(String::new(), None)).entity_ref(editor),
+            editor,
+        )
+    })?;
     let workspace_bindings = Arc::new(Mutex::new(PaneInputBindings::default()));
     bind_document_input(context, workspace_editor, &sink, &workspace_bindings)?;
     let workspace_search = EditorSearchView::mount(
@@ -2596,8 +3022,10 @@ pub fn mount_primary_shell(
     let workspace_log = mount_terminal(context, document_id, &sink, &workspace_bindings)?;
     let workspace_browser =
         crate::browser_workbench::BrowserView::mount(context, document_id, &sink)?;
-    let workspace_tree =
-        context.create_detached_component(document_id, TreeView::new(Vec::new()))?;
+    let (_, workspace_tree) = context.mount_view_detached(document_id, || {
+        let tree = entity_ref::<TreeView>();
+        with_refs(widget(TreeView::new(Vec::new())).entity_ref(tree), tree)
+    })?;
     let tree_sink = Arc::clone(&sink);
     context.on(
         workspace_tree,
@@ -2610,19 +3038,40 @@ pub fn mount_primary_shell(
             }
         },
     )?;
-    let workspace_actions = context.create_detached_component(document_id, Stack::row(8.0))?;
+    let (_, workspace_actions) = context.mount_view_detached(document_id, || {
+        let actions = entity_ref::<Stack>();
+        with_refs(widget(Stack::row(8.0)).entity_ref(actions), actions)
+    })?;
     context.append_child(workspace_content, workspace_heading)?;
     context.append_child(workspace_content, workspace_status)?;
     context.append_child(pane_body, workspace_content)?;
 
-    let inspector =
-        context.create_detached_component(document_id, Stack::fill_column(8.0).padding(12.0))?;
-    let inspector_header =
-        context.create_detached_component(document_id, inspector_header_bar())?;
-    let inspector_heading = context
-        .create_detached_component(document_id, Text::new(snapshot.inspector_title.clone()))?;
-    let inspector_close = context
-        .create_detached_component(document_id, sidebar_icon_button(Icon::Close, "关闭检查器"))?;
+    let (_, inspector) = context.mount_view_detached(document_id, || {
+        let inspector = entity_ref::<Stack>();
+        with_refs(
+            widget(Stack::fill_column(8.0).padding(12.0)).entity_ref(inspector),
+            inspector,
+        )
+    })?;
+    let (_, inspector_header) = context.mount_view_detached(document_id, || {
+        let header = entity_ref::<Stack>();
+        with_refs(widget(inspector_header_bar()).entity_ref(header), header)
+    })?;
+    let inspector_title = snapshot.inspector_title.clone();
+    let (_, inspector_heading) = context.mount_view_detached(document_id, move || {
+        let heading = entity_ref::<Text>();
+        with_refs(
+            widget(Text::new(inspector_title)).entity_ref(heading),
+            heading,
+        )
+    })?;
+    let (_, inspector_close) = context.mount_view_detached(document_id, || {
+        let close = entity_ref::<IconButton>();
+        with_refs(
+            widget(sidebar_icon_button(Icon::Close, "关闭检查器")).entity_ref(close),
+            close,
+        )
+    })?;
     bind_activate(
         context,
         inspector_close,
@@ -2631,11 +3080,20 @@ pub fn mount_primary_shell(
     )?;
     context.append_child(inspector_header, inspector_heading)?;
     context.append_child(inspector_header, inspector_close)?;
-    let inspector_body = context
-        .create_detached_component(document_id, Text::new(snapshot.inspector_body.clone()))?;
+    let inspector_body_text = snapshot.inspector_body.clone();
+    let (_, inspector_body) = context.mount_view_detached(document_id, move || {
+        let body = entity_ref::<Text>();
+        with_refs(
+            widget(Text::new(inspector_body_text)).entity_ref(body),
+            body,
+        )
+    })?;
     context.append_child(inspector, inspector_header)?;
     context.append_child(inspector, inspector_body)?;
-    let inspector_todos = context.create_detached_component(document_id, Stack::column(4.0))?;
+    let (_, inspector_todos) = context.mount_view_detached(document_id, || {
+        let todos = entity_ref::<Stack>();
+        with_refs(widget(Stack::column(4.0)).entity_ref(todos), todos)
+    })?;
     let todo_panel = crate::todo_panel::TodoPanel::mount(
         context,
         document_id,
@@ -2644,17 +3102,34 @@ pub fn mount_primary_shell(
     )?;
     context.append_child(inspector_todos, todo_panel.root)?;
     context.append_child(inspector, inspector_todos)?;
-    let iab_empty = context.create_detached_component(document_id, iab_unavailable_state())?;
+    let (_, iab_empty) = context.mount_view_detached(document_id, || {
+        let empty = entity_ref::<EmptyState>();
+        with_refs(widget(iab_unavailable_state()).entity_ref(empty), empty)
+    })?;
     context.append_child(inspector, iab_empty)?;
-    let diagnostics_panel =
-        context.create_detached_component(document_id, Stack::column(4.0).padding(8.0))?;
-    let coding_panel = context.create_detached_component(document_id, Stack::fill_column(8.0))?;
-    let coding_query = context.create_detached_component(
-        document_id,
-        TextArea::new(String::new())
-            .placeholder("搜索工作区")
-            .height(36.0),
-    )?;
+    let (_, diagnostics_panel) = context.mount_view_detached(document_id, || {
+        let panel = entity_ref::<Stack>();
+        with_refs(
+            widget(Stack::column(4.0).padding(8.0)).entity_ref(panel),
+            panel,
+        )
+    })?;
+    let (_, coding_panel) = context.mount_view_detached(document_id, || {
+        let panel = entity_ref::<Stack>();
+        with_refs(widget(Stack::fill_column(8.0)).entity_ref(panel), panel)
+    })?;
+    let (_, coding_query) = context.mount_view_detached(document_id, || {
+        let query = entity_ref::<TextArea>();
+        with_refs(
+            widget(
+                TextArea::new(String::new())
+                    .placeholder("搜索工作区")
+                    .height(36.0),
+            )
+            .entity_ref(query),
+            query,
+        )
+    })?;
     context.on(coding_query, {
         let sink = Arc::clone(&sink);
         move |_, event: &TextChanged, _| {
@@ -2675,33 +3150,50 @@ pub fn mount_primary_shell(
         Arc::clone(&sink),
     )?;
 
-    let project_page = context.create_detached_component(
-        document_id,
-        ScrollView::new(ScrollAxes::Vertical)
-            .style(Stack::fill_column(12.0).padding(16.0).node_style()),
-    )?;
-    let project_page_title =
-        context.create_detached_component(document_id, Text::new(String::new()))?;
-    let project_page_body =
-        context.create_detached_component(document_id, Text::new(String::new()))?;
+    let (_, project_page) = context.mount_view_detached(document_id, || {
+        let page = entity_ref::<ScrollView>();
+        with_refs(
+            widget(
+                ScrollView::new(ScrollAxes::Vertical)
+                    .style(Stack::fill_column(12.0).padding(16.0).node_style()),
+            )
+            .entity_ref(page),
+            page,
+        )
+    })?;
+    let (_, project_page_title) = context.mount_view_detached(document_id, || {
+        let title = entity_ref::<Text>();
+        with_refs(widget(Text::new(String::new())).entity_ref(title), title)
+    })?;
+    let (_, project_page_body) = context.mount_view_detached(document_id, || {
+        let body = entity_ref::<Text>();
+        with_refs(widget(Text::new(String::new())).entity_ref(body), body)
+    })?;
     context.append_child(project_page, project_page_title)?;
     context.append_child(project_page, project_page_body)?;
 
-    let conversation_workspace = context.create_detached_component(
-        document_id,
-        // SplitPane 每次装配会全量重投影根节点，自带 Background 承接 Primary 区域底色。
-        SplitPane::from_model(
-            &SplitPaneModel::new(
-                SplitAxis::Horizontal,
-                CONVERSATION_WORKSPACE_SPLIT_SIZE,
-                CONVERSATION_WORKSPACE_SPLIT_MIN,
-                10_000.0,
-            ),
-            conversation.stable_id(),
-            workspace_page.stable_id(),
+    let conversation_split_model = SplitPaneModel::new(
+        SplitAxis::Horizontal,
+        CONVERSATION_WORKSPACE_SPLIT_SIZE,
+        CONVERSATION_WORKSPACE_SPLIT_MIN,
+        10_000.0,
+    );
+    let (_, conversation_workspace) = context.mount_view_detached(document_id, move || {
+        let workspace = entity_ref::<SplitPane>();
+        with_refs(
+            widget(
+                // SplitPane 每次装配会全量重投影根节点，自带 Background 承接 Primary 区域底色。
+                SplitPane::from_model(
+                    &conversation_split_model,
+                    conversation.stable_id(),
+                    workspace_page.stable_id(),
+                )
+                .surface(SemanticColorRole::Background),
+            )
+            .entity_ref(workspace),
+            workspace,
         )
-        .surface(SemanticColorRole::Background),
-    )?;
+    })?;
     let navigation = if snapshot.navigation.is_settings() {
         settings_view.settings_sidebar.stable_id()
     } else if snapshot.navigation.is_automations() {
@@ -2731,7 +3223,10 @@ pub fn mount_primary_shell(
     if !snapshot.inspector_title.is_empty() {
         shell_builder = shell_builder.inspector(inspector.stable_id());
     }
-    let shell = context.create_component(document_id, shell_builder)?;
+    let (_, shell) = context.mount_view_root(document_id, move || {
+        let shell = entity_ref::<DesktopShell>();
+        with_refs(widget(shell_builder).entity_ref(shell), shell)
+    })?;
     context.assemble_desktop_shell(shell)?;
     if primary == conversation_workspace.stable_id() {
         assemble_conversation_workspace(
@@ -3450,6 +3945,7 @@ impl ShellHandles {
         context: &mut AppContext,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let document_id = context
             .world()
             .node(self.sidebar_top.stable_id())
@@ -3478,11 +3974,20 @@ impl ShellHandles {
                 })?;
                 button
             } else {
-                let button = context.create_detached_component(
-                    document_id,
-                    SidebarFooterButton::new(item.label.clone(), footer_nav_icon(item.settings))
-                        .selected(item.selected),
-                )?;
+                let label = item.label.clone();
+                let settings = item.settings;
+                let selected = item.selected;
+                let (_, button) = context.mount_view_detached(document_id, move || {
+                    let button = entity_ref::<SidebarFooterButton>();
+                    with_refs(
+                        widget(
+                            SidebarFooterButton::new(label, footer_nav_icon(settings))
+                                .selected(selected),
+                        )
+                        .entity_ref(button),
+                        button,
+                    )
+                })?;
                 bind_activate(
                     context,
                     button,
@@ -3526,6 +4031,7 @@ impl ShellHandles {
         item: &ShellSidebarRow,
         row: Entity<SidebarRow>,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let stop_prefix = format!("{}-stop-", item.id);
         let expected_stop = item
             .stop_turn_id
@@ -3554,8 +4060,10 @@ impl ShellHandles {
                     if let Some(RowToolButton::Stop(button)) = self.row_tool_buttons.get(&id) {
                         *button
                     } else {
-                        let button =
-                            context.create_detached_component(document_id, row_stop_button())?;
+                        let (_, button) = context.mount_view_detached(document_id, || {
+                            let button = entity_ref::<Button>();
+                            with_refs(widget(row_stop_button()).entity_ref(button), button)
+                        })?;
                         bind_activate(
                             context,
                             button,
@@ -3574,7 +4082,10 @@ impl ShellHandles {
             let button = if let Some(RowToolButton::Tool(button)) = self.row_tool_buttons.get(&id) {
                 *button
             } else {
-                let button = context.create_detached_component(document_id, row_draft_button())?;
+                let (_, button) = context.mount_view_detached(document_id, || {
+                    let button = entity_ref::<IconButton>();
+                    with_refs(widget(row_draft_button()).entity_ref(button), button)
+                })?;
                 bind_activate(
                     context,
                     button,
@@ -3592,7 +4103,10 @@ impl ShellHandles {
             let button = if let Some(RowToolButton::Tool(button)) = self.row_tool_buttons.get(&id) {
                 *button
             } else {
-                let button = context.create_detached_component(document_id, row_menu_button())?;
+                let (_, button) = context.mount_view_detached(document_id, || {
+                    let button = entity_ref::<IconButton>();
+                    with_refs(widget(row_menu_button()).entity_ref(button), button)
+                })?;
                 let intent = match item.kind {
                     ShellSidebarKind::Task
                     | ShellSidebarKind::SearchTask
@@ -3618,7 +4132,10 @@ impl ShellHandles {
         let host = if let Some(host) = self.row_tools.get(&item.id).copied() {
             host
         } else {
-            let host = context.create_detached_component(document_id, Stack::row(2.0))?;
+            let (_, host) = context.mount_view_detached(document_id, || {
+                let host = entity_ref::<Stack>();
+                with_refs(widget(Stack::row(2.0)).entity_ref(host), host)
+            })?;
             context.update_component(row, |row, _| {
                 row.tools = Some(host.stable_id());
             })?;
@@ -3650,6 +4167,7 @@ impl ShellHandles {
         items: &[ShellSidebarRow],
         keep: &mut HashSet<String>,
     ) -> Result<Vec<StableNodeId>, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let mut order = Vec::new();
         for item in items {
             keep.insert(item.id.clone());
@@ -3679,10 +4197,15 @@ impl ShellHandles {
                 // Nested session rows read as children of their project through
                 // indentation alone; a glyph there only competes with the label.
                 let leading = if item.depth == 0 {
-                    Some(context.create_detached_component(
-                        document_id,
-                        SidebarRowIcon::new(sidebar_row_icon(item.kind, &item.id)),
-                    )?)
+                    let icon = sidebar_row_icon(item.kind, &item.id);
+                    let (_, leading) = context.mount_view_detached(document_id, move || {
+                        let leading = entity_ref::<SidebarRowIcon>();
+                        with_refs(
+                            widget(SidebarRowIcon::new(icon)).entity_ref(leading),
+                            leading,
+                        )
+                    })?;
+                    Some(leading)
                 } else {
                     None
                 };
@@ -3698,7 +4221,10 @@ impl ShellHandles {
                 if let Some(expanded) = item.expanded {
                     row_view = row_view.disclosure(expanded);
                 }
-                let row = context.create_detached_component(document_id, row_view)?;
+                let (_, row) = context.mount_view_detached(document_id, move || {
+                    let row = entity_ref::<SidebarRow>();
+                    with_refs(widget(row_view).entity_ref(row), row)
+                })?;
                 if let Some(leading) = leading {
                     context.append_child(row, leading)?;
                 }
@@ -3864,6 +4390,7 @@ impl ShellHandles {
         intent: ShellIntent,
         disabled: bool,
     ) -> Result<Entity<Button>, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         if let Some(button) = self.extra_buttons.get(id).copied() {
             context.update_component(button, |button, _| {
                 *button = extra_button(label, kind);
@@ -3873,7 +4400,10 @@ impl ShellHandles {
         } else {
             let mut view = extra_button(label, kind);
             view.disabled = disabled;
-            let button = context.create_detached_component(document_id, view)?;
+            let (_, button) = context.mount_view_detached(document_id, move || {
+                let button = entity_ref::<Button>();
+                with_refs(widget(view).entity_ref(button), button)
+            })?;
             bind_activate(context, button, Arc::clone(&self.sink), intent)?;
             self.extra_buttons.insert(id.to_owned(), button);
             Ok(button)
@@ -3886,6 +4416,7 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         context.update_component(self.iab_empty, |empty, _| {
             *empty = iab_unavailable_state();
         })?;
@@ -3915,8 +4446,11 @@ impl ShellHandles {
                     })?;
                     row
                 } else {
-                    let row =
-                        context.create_detached_component(document_id, Text::new(label.clone()))?;
+                    let row_label = label.clone();
+                    let (_, row) = context.mount_view_detached(document_id, move || {
+                        let row = entity_ref::<Text>();
+                        with_refs(widget(Text::new(row_label)).entity_ref(row), row)
+                    })?;
                     self.inspector_todo_rows.insert(id.clone(), row);
                     row
                 };
@@ -4084,14 +4618,21 @@ impl ShellHandles {
         label: &str,
         intent: ShellIntent,
     ) -> Result<Entity<Button>, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         if let Some(button) = self.coding_rows.get(id).copied() {
             context.update_component(button, |button, _| {
                 *button = extra_button(label, ButtonKind::Subtle);
             })?;
             Ok(button)
         } else {
-            let button = context
-                .create_detached_component(document_id, extra_button(label, ButtonKind::Subtle))?;
+            let button_label = label.to_owned();
+            let (_, button) = context.mount_view_detached(document_id, move || {
+                let button = entity_ref::<Button>();
+                with_refs(
+                    widget(extra_button(&button_label, ButtonKind::Subtle)).entity_ref(button),
+                    button,
+                )
+            })?;
             bind_activate(context, button, Arc::clone(&self.sink), intent)?;
             self.coding_rows.insert(id.to_owned(), button);
             Ok(button)
@@ -4104,6 +4645,7 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let project_visible = !snapshot.navigation.is_management();
         let memory_visible =
             project_visible && snapshot.project_page == Some(ShellProjectPage::Memory);
@@ -4415,10 +4957,14 @@ impl ShellHandles {
                 })?;
                 card
             } else {
-                let card = context.create_detached_component(
-                    document_id,
-                    Button::new(title.clone()).kind(ButtonKind::Subtle),
-                )?;
+                let card_title = title.clone();
+                let (_, card) = context.mount_view_detached(document_id, move || {
+                    let card = entity_ref::<Button>();
+                    with_refs(
+                        widget(Button::new(card_title).kind(ButtonKind::Subtle)).entity_ref(card),
+                        card,
+                    )
+                })?;
                 if let Some(intent) = intent {
                     bind_activate(context, card, Arc::clone(&self.sink), intent)?;
                 }
@@ -4589,6 +5135,7 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let mut desired = Vec::new();
         let bindings = self.workspace_bindings.lock().unwrap().clone();
         match workspace_pane_kind(snapshot) {
@@ -4656,8 +5203,14 @@ impl ShellHandles {
                 })?;
                 button
             } else {
-                let button =
-                    context.create_detached_component(document_id, extra_button(label, kind))?;
+                let button_label = label.to_owned();
+                let (_, button) = context.mount_view_detached(document_id, move || {
+                    let button = entity_ref::<Button>();
+                    with_refs(
+                        widget(extra_button(&button_label, kind)).entity_ref(button),
+                        button,
+                    )
+                })?;
                 bind_activate(context, button, Arc::clone(&self.sink), intent)?;
                 self.workspace_buttons.insert(id.to_owned(), button);
                 button
@@ -4886,6 +5439,7 @@ impl ShellHandles {
         layout: &ShellPaneLayout,
         primary_id: &str,
     ) -> Result<StableNodeId, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         match layout {
             ShellPaneLayout::Leaf(id) => Ok(self.pane_chrome_for(id, primary_id)),
             ShellPaneLayout::Split {
@@ -4910,7 +5464,10 @@ impl ShellHandles {
                 let handle = if let Some(handle) = self.workspace_split_handles.get(&key).copied() {
                     handle
                 } else {
-                    let handle = context.create_detached_component(document_id, Stack::bar(0.0))?;
+                    let (_, handle) = context.mount_view_detached(document_id, || {
+                        let handle = entity_ref::<Stack>();
+                        with_refs(widget(Stack::bar(0.0)).entity_ref(handle), handle)
+                    })?;
                     self.workspace_split_handles.insert(key.clone(), handle);
                     handle
                 };
@@ -4922,15 +5479,16 @@ impl ShellHandles {
                     })?;
                     split
                 } else {
-                    let split = context.create_detached_component(
-                        document_id,
-                        SplitPane::from_model(
-                            &SplitPaneModel::new(axis, size, 80.0, 10_000.0),
-                            first_id,
-                            second_id,
-                        )
-                        .handle(handle.stable_id()),
-                    )?;
+                    let pane_view = SplitPane::from_model(
+                        &SplitPaneModel::new(axis, size, 80.0, 10_000.0),
+                        first_id,
+                        second_id,
+                    )
+                    .handle(handle.stable_id());
+                    let (_, split) = context.mount_view_detached(document_id, move || {
+                        let split = entity_ref::<SplitPane>();
+                        with_refs(widget(pane_view).entity_ref(split), split)
+                    })?;
                     self.workspace_splits.insert(key.clone(), split);
                     split
                 };
@@ -4995,14 +5553,21 @@ impl ShellHandles {
         kind: ButtonKind,
         intent: ShellIntent,
     ) -> Result<Entity<Button>, FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         if let Some(button) = self.pane_buttons.get(id).copied() {
             context.update_component(button, |button, _| {
                 *button = extra_button(label, kind);
             })?;
             Ok(button)
         } else {
-            let button =
-                context.create_detached_component(document_id, extra_button(label, kind))?;
+            let button_label = label.to_owned();
+            let (_, button) = context.mount_view_detached(document_id, move || {
+                let button = entity_ref::<Button>();
+                with_refs(
+                    widget(extra_button(&button_label, kind)).entity_ref(button),
+                    button,
+                )
+            })?;
             bind_activate(context, button, Arc::clone(&self.sink), intent)?;
             self.pane_buttons.insert(id.to_owned(), button);
             Ok(button)
@@ -5155,6 +5720,7 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let Some(host) = self.overlay_host else {
             return Ok(());
         };
@@ -5209,25 +5775,37 @@ impl ShellHandles {
                 })?;
                 dialog
             } else {
-                let dialog = context.create_detached_component(
-                    document_id,
-                    ConfirmDialog::new(confirm.title.clone(), confirm.message.clone()),
-                )?;
-                let cancel = context.create_detached_component(
-                    document_id,
-                    extra_button(&confirm.cancel_label, ButtonKind::Subtle),
-                )?;
-                let commit = context.create_detached_component(
-                    document_id,
-                    extra_button(
-                        &confirm.confirm_label,
-                        if confirm.danger {
-                            ButtonKind::Danger
-                        } else {
-                            ButtonKind::Primary
-                        },
-                    ),
-                )?;
+                let confirm_title = confirm.title.clone();
+                let confirm_message = confirm.message.clone();
+                let (_, dialog) = context.mount_view_detached(document_id, move || {
+                    let dialog = entity_ref::<ConfirmDialog>();
+                    with_refs(
+                        widget(ConfirmDialog::new(confirm_title, confirm_message))
+                            .entity_ref(dialog),
+                        dialog,
+                    )
+                })?;
+                let cancel_label = confirm.cancel_label.clone();
+                let (_, cancel) = context.mount_view_detached(document_id, move || {
+                    let cancel = entity_ref::<Button>();
+                    with_refs(
+                        widget(extra_button(&cancel_label, ButtonKind::Subtle)).entity_ref(cancel),
+                        cancel,
+                    )
+                })?;
+                let commit_label = confirm.confirm_label.clone();
+                let commit_kind = if confirm.danger {
+                    ButtonKind::Danger
+                } else {
+                    ButtonKind::Primary
+                };
+                let (_, commit) = context.mount_view_detached(document_id, move || {
+                    let commit = entity_ref::<Button>();
+                    with_refs(
+                        widget(extra_button(&commit_label, commit_kind)).entity_ref(commit),
+                        commit,
+                    )
+                })?;
                 context.set_confirm_slots(
                     dialog,
                     ConfirmSlots {
@@ -5289,8 +5867,14 @@ impl ShellHandles {
                 })?;
                 palette
             } else {
-                let palette = context
-                    .create_detached_component(document_id, command_palette_view(snapshot))?;
+                let palette_snapshot = snapshot.clone();
+                let (_, palette) = context.mount_view_detached(document_id, move || {
+                    let palette = entity_ref::<CommandPalette>();
+                    with_refs(
+                        widget(command_palette_view(&palette_snapshot)).entity_ref(palette),
+                        palette,
+                    )
+                })?;
                 let sink = Arc::clone(&self.sink);
                 context.on(palette, move |_, event: &CommandPaletteEvent, _| {
                     emit(&sink, ShellIntent::CommandPalette(event.clone()));
@@ -5334,7 +5918,10 @@ impl ShellHandles {
                 menu
             } else {
                 let view = sidebar_menu_view(context, host, anchor, items);
-                let menu = context.create_detached_component(document_id, view)?;
+                let (_, menu) = context.mount_view_detached(document_id, move || {
+                    let menu = entity_ref::<ContextMenu>();
+                    with_refs(widget(view).entity_ref(menu), menu)
+                })?;
                 let sink = Arc::clone(&self.sink);
                 context.on(menu, move |_, event: &ContextMenuEvent, _| match event {
                     ContextMenuEvent::Select(value) => {
@@ -5367,7 +5954,10 @@ impl ShellHandles {
                 })?;
                 menu
             } else {
-                let menu = context.create_detached_component(document_id, view)?;
+                let (_, menu) = context.mount_view_detached(document_id, move || {
+                    let menu = entity_ref::<ContextMenu>();
+                    with_refs(widget(view).entity_ref(menu), menu)
+                })?;
                 let sink = Arc::clone(&self.sink);
                 context.on(menu, move |_, event: &ContextMenuEvent, _| match event {
                     ContextMenuEvent::Select(value) => {
@@ -5393,8 +5983,14 @@ impl ShellHandles {
                 })?;
                 viewer
             } else {
-                let viewer = context
-                    .create_detached_component(document_id, markdown_image_viewer(preview))?;
+                let preview = preview.clone();
+                let (_, viewer) = context.mount_view_detached(document_id, move || {
+                    let viewer = entity_ref::<ImageViewer>();
+                    with_refs(
+                        widget(markdown_image_viewer(&preview)).entity_ref(viewer),
+                        viewer,
+                    )
+                })?;
                 let sink = Arc::clone(&self.sink);
                 context.on(viewer, move |_, event: &ImageViewerEvent, _| match event {
                     ImageViewerEvent::Close | ImageViewerEvent::Outside => {
@@ -5403,6 +5999,7 @@ impl ShellHandles {
                     ImageViewerEvent::Interaction => {
                         emit(&sink, ShellIntent::MarkdownImageViewerInteraction);
                     }
+                    ImageViewerEvent::Previous | ImageViewerEvent::Next => {}
                 })?;
                 context.append_child(host, viewer)?;
                 self.image_viewer = Some(viewer);
@@ -5432,6 +6029,7 @@ impl ShellHandles {
         document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
         let diagnostics = snapshot
             .document
             .as_ref()
@@ -5449,7 +6047,10 @@ impl ShellHandles {
                 })?;
                 row
             } else {
-                let row = context.create_detached_component(document_id, Text::new(label))?;
+                let (_, row) = context.mount_view_detached(document_id, move || {
+                    let row = entity_ref::<Text>();
+                    with_refs(widget(Text::new(label)).entity_ref(row), row)
+                })?;
                 self.diagnostic_rows.insert(id, row);
                 row
             };
@@ -5618,21 +6219,32 @@ fn mount_sidebar_section(
     if let Some(empty) = empty {
         spec = spec.empty_text(empty);
     }
-    let title_label = context.create_detached_component(document_id, spec.title_label())?;
-    spec = spec.title_slot(title_label.stable_id());
-    let header = context.create_detached_component(document_id, spec.header_item())?;
-    context.append_child(header, title_label)?;
     if let Some(tool) = tool {
-        context.append_child(header, tool)?;
+        spec = spec.tools(tool.stable_id());
     }
-    let body = context.create_detached_component(document_id, SidebarSection::body_port())?;
-    let section = context.create_detached_component(
-        document_id,
-        spec.header(header.stable_id()).body(body.stable_id()),
-    )?;
+    use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+    let (_, title_label) = context.mount_view_detached(document_id, || {
+        let label = entity_ref::<Text>();
+        with_refs(widget(spec.title_label()).entity_ref(label), label)
+    })?;
+    spec = spec.title_slot(title_label.stable_id());
+    let (_, header) = context.mount_view_detached(document_id, || {
+        let header = entity_ref::<ListItem>();
+        with_refs(widget(spec.header_item()).entity_ref(header), header)
+    })?;
+    context.append_child(header, title_label)?;
+    let (_, body) = context.mount_view_detached(document_id, || {
+        let body = entity_ref::<List>();
+        with_refs(widget(SidebarSection::body_port()).entity_ref(body), body)
+    })?;
+    let section_spec = spec.header(header.stable_id()).body(body.stable_id());
+    let (_, section) = context.mount_view_detached(document_id, move || {
+        let section = entity_ref::<SidebarSection>();
+        with_refs(widget(section_spec).entity_ref(section), section)
+    })?;
     context.append_child(section, header)?;
     context.append_child(section, body)?;
-    Ok((section, header, body))
+    return Ok((section, header, body));
 }
 
 fn mount_sidebar_reorder(
@@ -5642,18 +6254,26 @@ fn mount_sidebar_reorder(
     tree_drop: bool,
     sink: IntentSink,
 ) -> Result<Entity<ReorderList>, FrameworkError> {
-    let list = context.create_detached_component(
-        document_id,
-        ReorderList::new([])
-            .size(ControlSize::Medium)
-            .spacing(1.0)
-            .tree_drop(tree_drop)
-            .label(label),
-    )?;
-    context.on(list, move |_, event: &ReorderListEvent, _| {
-        if let Some(intent) = sidebar_reorder_intent(event) {
-            emit(&sink, intent);
-        }
+    use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+    let label = label.to_owned();
+    let (_, list) = context.mount_view_detached(document_id, move || {
+        let list = entity_ref::<ReorderList>();
+        with_refs(
+            widget(
+                ReorderList::new([])
+                    .size(ControlSize::Medium)
+                    .spacing(1.0)
+                    .tree_drop(tree_drop)
+                    .label(label),
+            )
+            .entity_ref(list)
+            .on(move |event: &ReorderListEvent| {
+                if let Some(intent) = sidebar_reorder_intent(event) {
+                    emit(&sink, intent);
+                }
+            }),
+            list,
+        )
     })?;
     Ok(list)
 }
@@ -6886,7 +7506,24 @@ mod tests {
             .map(|node| node.children.clone())
             .unwrap_or_default();
         assert!(right_content.contains(&right.log.stable_id()));
-        assert!(!right_content.contains(&right.editor.stable_id()));
+        assert!(
+            !document
+                .context()
+                .world()
+                .node_style(right.log.stable_id())
+                .unwrap()
+                .layout
+                .hidden
+        );
+        assert!(
+            document
+                .context()
+                .world()
+                .node_style(right.editor.stable_id())
+                .unwrap()
+                .layout
+                .hidden
+        );
         let left_content = document
             .context()
             .world()
@@ -8460,7 +9097,7 @@ mod tests {
         snapshot.settings.state = SettingsState::new(&model);
         snapshot.settings.model = model;
         snapshot.settings.provider_status = "当前服务可用。".to_owned();
-        let (document, handles, _) = mounted_primary(&snapshot);
+        let (mut document, handles, _) = mounted_primary(&snapshot);
         let stack_layout = &document
             .context()
             .world()
@@ -8482,8 +9119,29 @@ mod tests {
             .expect("settings card style")
             .layout
             .resolved_padding();
-        assert_eq!(card_padding.top, nana_ui::UI_METRICS.panel_padding_y);
-        assert_eq!(card_padding.left, nana_ui::UI_METRICS.panel_padding_x);
+        assert!(card_padding.is_zero());
+        document
+            .flush(
+                nana_ui::runtime::LayoutViewport::new(1400.0, 900.0),
+                &mut nana_ui::NanaTextShaper::default(),
+            )
+            .expect("layout settings card");
+        let card = document
+            .scene()
+            .node_bounds(handles.settings_view.settings_card.stable_id())
+            .expect("settings card bounds");
+        let body_id = document
+            .context()
+            .world()
+            .node(handles.settings_view.settings_card.stable_id())
+            .and_then(|node| node.children.first().copied())
+            .expect("settings card body child");
+        let body = document
+            .scene()
+            .node_bounds(body_id)
+            .expect("settings body bounds");
+        assert!((body.x - card.x - nana_ui::UI_METRICS.panel_padding_x).abs() < 0.5);
+        assert!((body.y - card.y - nana_ui::UI_METRICS.panel_padding_y).abs() < 0.5);
         let children = document
             .context()
             .world()

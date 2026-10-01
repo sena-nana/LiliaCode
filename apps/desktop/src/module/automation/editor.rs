@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AutomationNodeInspectorDraft {

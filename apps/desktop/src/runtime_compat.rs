@@ -68,12 +68,8 @@ pub fn window_event_id(event: &WindowEvent) -> WindowId {
         | WindowEvent::Moved { id, .. }
         | WindowEvent::VisibilityChanged { id, .. }
         | WindowEvent::FocusChanged { id, .. }
-        | WindowEvent::Ime { id, .. }
         | WindowEvent::CloseRequested { id }
         | WindowEvent::Closed { id }
-        | WindowEvent::FileHovered { id, .. }
-        | WindowEvent::FileDropped { id, .. }
-        | WindowEvent::FileHoverCancelled { id }
         | WindowEvent::FileDialogCompleted { id, .. }
         | WindowEvent::FileDialogRejected { id, .. }
         | WindowEvent::AppearanceChanged { id, .. }
@@ -104,42 +100,34 @@ pub fn startup_document(
 ) -> Result<nana_ui::runtime::RuntimeDocument, nana_ui::runtime::FrameworkError> {
     let document_id = nana_ui::runtime::DocumentId::new(1).expect("startup document id");
     let mut document = nana_ui::runtime::RuntimeDocument::new(document_id);
-    let title = document
+    use nana_ui::runtime::view::widget;
+    let status = status.to_owned();
+    document
         .context_mut()
-        .create_component(document_id, nana_ui::runtime::Text::new("LiliaCode"))?;
-    let message = document
-        .context_mut()
-        .create_component(document_id, nana_ui::runtime::Text::new(status))?;
-    document.context_mut().append_child(title, message)?;
+        .mount_view_root(document_id, move || {
+            widget(nana_ui::runtime::Stack::column(0.0)).children((
+                widget(nana_ui::runtime::Text::new("LiliaCode")),
+                widget(nana_ui::runtime::Text::new(status)),
+            ))
+        })?;
     Ok(document)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
-    fn window_event_id_covers_file_drop_events() {
+    fn window_event_id_reads_the_window_on_every_variant() {
         let id = WindowId(7);
         assert_eq!(
-            window_event_id(&WindowEvent::FileHovered {
+            window_event_id(&WindowEvent::Ready {
                 id,
-                paths: vec![PathBuf::from("/tmp/project")],
-                position: Some((12.0, 40.0)),
-                modifiers: Default::default(),
+                geometry: WindowGeometry::default(),
             }),
             id
         );
-        assert_eq!(
-            window_event_id(&WindowEvent::FileDropped {
-                id,
-                paths: vec![PathBuf::from("/tmp/note.md")],
-                position: None,
-                modifiers: Default::default(),
-            }),
-            id
-        );
-        assert_eq!(window_event_id(&WindowEvent::FileHoverCancelled { id }), id);
+        assert_eq!(window_event_id(&WindowEvent::CloseRequested { id }), id);
+        assert_eq!(window_event_id(&WindowEvent::Closed { id }), id);
     }
 }
