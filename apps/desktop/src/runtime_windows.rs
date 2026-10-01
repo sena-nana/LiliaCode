@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use lilia_contracts::TaskId;
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     AppContext, Button, DesktopShell, DocumentId, Entity, FrameworkError, List, Stack, Text,
 };
@@ -11,7 +12,7 @@ use nana_ui_platform::WindowId;
 use crate::module::composer::view::ComposerViewSnapshot;
 use crate::module::task::view::{TaskView, TaskViewInput};
 use crate::runtime_layout::{reconcile_children, window_control};
-use crate::runtime_shell::{ShellIntent, bind_activate};
+use crate::runtime_shell::{emit, ShellIntent};
 
 const CONVERSATION_STATUS_DOCUMENT: u64 = 10_001;
 
@@ -82,80 +83,98 @@ pub fn mount_conversation_status(
     let context = document.context_mut();
     let _ = context.set_theme(snapshot.theme);
 
-    let title = context.create_detached_component(document_id, Text::new("会话状态"))?;
-    let error = context.create_detached_component(
-        document_id,
-        Text::new(snapshot.error.clone().unwrap_or_default()),
-    )?;
-    let list = context.create_detached_component(document_id, List::new())?;
-    let actions = context.create_detached_component(document_id, Stack::row(8.0))?;
-    let pin = context.create_detached_component(
-        document_id,
-        action_button(
-            if snapshot.pinned {
-                "取消置顶"
-            } else {
-                "置顶"
-            },
-            ButtonKind::Subtle,
-        ),
-    )?;
-    let new_chat = context
-        .create_detached_component(document_id, action_button("新会话", ButtonKind::Primary))?;
-    let close = context
-        .create_detached_component(document_id, action_button("关闭", ButtonKind::Subtle))?;
-    bind_activate(
-        context,
-        pin,
-        Arc::clone(&sink),
-        ShellIntent::ToggleConversationStatusPin,
-    )?;
-    bind_activate(
-        context,
-        new_chat,
-        Arc::clone(&sink),
-        ShellIntent::OpenConversationStatusNewChat,
-    )?;
-    bind_activate(
-        context,
-        close,
-        Arc::clone(&sink),
-        ShellIntent::CloseConversationStatus,
-    )?;
+    let (_, (title, error, list, actions, page)) =
+        context.mount_view_detached(document_id, || {
+            let title = entity_ref::<Text>();
+            let error = entity_ref::<Text>();
+            let list = entity_ref::<List>();
+            let actions = entity_ref::<Stack>();
+            let page = entity_ref::<Stack>();
+            with_refs(
+                (widget(Stack::fill_column(10.0).padding(16.0))
+                    .entity_ref(page)
+                    .children((
+                        widget(Text::new("会话状态")).entity_ref(title),
+                        widget(Text::new(snapshot.error.clone().unwrap_or_default()))
+                            .entity_ref(error),
+                        widget(List::new()).entity_ref(list),
+                        widget(Stack::row(8.0)).entity_ref(actions),
+                    )),),
+                (title, error, list, actions, page),
+            )
+        })?;
+    let pin_label = if snapshot.pinned {
+        "取消置顶"
+    } else {
+        "置顶"
+    };
+    let pin_sink = Arc::clone(&sink);
+    let (_, pin) = context.mount_view_detached(document_id, move || {
+        let pin = entity_ref::<Button>();
+        with_refs(
+            widget(action_button(pin_label, ButtonKind::Subtle))
+                .entity_ref(pin)
+                .on_activate(move || emit(&pin_sink, ShellIntent::ToggleConversationStatusPin)),
+            pin,
+        )
+    })?;
+    let new_chat_sink = Arc::clone(&sink);
+    let (_, new_chat) = context.mount_view_detached(document_id, move || {
+        let new_chat = entity_ref::<Button>();
+        with_refs(
+            widget(action_button("新会话", ButtonKind::Primary))
+                .entity_ref(new_chat)
+                .on_activate(move || {
+                    emit(&new_chat_sink, ShellIntent::OpenConversationStatusNewChat)
+                }),
+            new_chat,
+        )
+    })?;
+    let close_sink = Arc::clone(&sink);
+    let (_, close) = context.mount_view_detached(document_id, move || {
+        let close = entity_ref::<Button>();
+        with_refs(
+            widget(action_button("关闭", ButtonKind::Subtle))
+                .entity_ref(close)
+                .on_activate(move || emit(&close_sink, ShellIntent::CloseConversationStatus)),
+            close,
+        )
+    })?;
     context.append_child(actions, pin)?;
     context.append_child(actions, new_chat)?;
     context.append_child(actions, close)?;
 
-    let page =
-        context.create_detached_component(document_id, Stack::fill_column(10.0).padding(16.0))?;
-    context.append_child(page, title)?;
-    context.append_child(page, error)?;
-    context.append_child(page, list)?;
-    context.append_child(page, actions)?;
-
-    let title_trailing = context.create_detached_component(document_id, Stack::row(6.0))?;
+    let (_, title_trailing) = context.mount_view_detached(document_id, || {
+        let trailing = entity_ref::<Stack>();
+        with_refs(widget(Stack::row(6.0)).entity_ref(trailing), trailing)
+    })?;
     if WindowChrome::platform_default().uses_custom_controls() {
-        let close_win = context.create_detached_component(
-            document_id,
-            window_control(nana_ui::Icon::Close, "关闭", ButtonKind::Text),
-        )?;
+        let close_sink = Arc::clone(&sink);
+        let (_, close_win) = context.mount_view_detached(document_id, move || {
+            let close = entity_ref::<nana_ui::runtime::IconButton>();
+            with_refs(
+                widget(window_control(
+                    nana_ui::Icon::Close,
+                    "关闭",
+                    ButtonKind::Text,
+                ))
+                .entity_ref(close)
+                .on_activate(move || emit(&close_sink, ShellIntent::CloseConversationStatus)),
+                close,
+            )
+        })?;
         context.append_child(title_trailing, close_win)?;
-        bind_activate(
-            context,
-            close_win,
-            Arc::clone(&sink),
-            ShellIntent::CloseConversationStatus,
-        )?;
     }
 
-    let shell = context.create_component(
-        document_id,
-        DesktopShell::from_model(nana_ui::WorkspaceModel::new())
-            .title("会话状态")
-            .title_center(title.stable_id())
-            .title_trailing(title_trailing.stable_id())
-            .primary(page.stable_id()),
-    )?;
+    let shell_view = DesktopShell::from_model(nana_ui::WorkspaceModel::new())
+        .title("会话状态")
+        .title_center(title.stable_id())
+        .title_trailing(title_trailing.stable_id())
+        .primary(page.stable_id());
+    let (_, shell) = context.mount_view_root(document_id, move || {
+        let shell = entity_ref::<DesktopShell>();
+        with_refs(widget(shell_view).entity_ref(shell), shell)
+    })?;
     context.assemble_desktop_shell(shell)?;
 
     let mut handles = ConversationStatusHandles {
@@ -224,36 +243,53 @@ impl ConversationStatusHandles {
             let row = if let Some(row) = self.rows.get(&key).copied() {
                 row
             } else {
-                let row =
-                    context.create_detached_component(document_id, Stack::fill_column(4.0))?;
-                let text =
-                    context.create_detached_component(document_id, Text::new(label.clone()))?;
-                let open = context.create_detached_component(
-                    document_id,
-                    action_button("打开", ButtonKind::Subtle),
-                )?;
-                bind_activate(
-                    context,
-                    open,
-                    Arc::clone(&self.sink),
-                    ShellIntent::OpenStatusTask(entry.task_id.clone()),
-                )?;
+                let (_, row) = context.mount_view_detached(document_id, || {
+                    let row = entity_ref::<Stack>();
+                    with_refs(widget(Stack::fill_column(4.0)).entity_ref(row), row)
+                })?;
+                let row_label = label.clone();
+                let (_, text) = context.mount_view_detached(document_id, move || {
+                    let text = entity_ref::<Text>();
+                    with_refs(widget(Text::new(row_label)).entity_ref(text), text)
+                })?;
+                let open_sink = Arc::clone(&self.sink);
+                let open_task = entry.task_id.clone();
+                let (_, open) = context.mount_view_detached(document_id, move || {
+                    let open = entity_ref::<Button>();
+                    with_refs(
+                        widget(action_button("打开", ButtonKind::Subtle))
+                            .entity_ref(open)
+                            .on_activate(move || {
+                                emit(&open_sink, ShellIntent::OpenStatusTask(open_task.clone()))
+                            }),
+                        open,
+                    )
+                })?;
                 context.append_child(row, text)?;
                 context.append_child(row, open)?;
                 if let Some(turn_id) = entry.stop_turn_id.as_ref().filter(|_| entry.can_stop) {
-                    let stop = context.create_detached_component(
-                        document_id,
-                        action_button("停止", ButtonKind::Danger),
-                    )?;
-                    bind_activate(
-                        context,
-                        stop,
-                        Arc::clone(&self.sink),
-                        ShellIntent::StopStatusTask(crate::runtime_shell::TurnStopTarget {
-                            task_id: entry.task_id.clone(),
-                            turn_id: turn_id.clone(),
-                        }),
-                    )?;
+                    let stop_sink = Arc::clone(&self.sink);
+                    let stop_task = entry.task_id.clone();
+                    let stop_turn = turn_id.clone();
+                    let (_, stop) = context.mount_view_detached(document_id, move || {
+                        let stop = entity_ref::<Button>();
+                        with_refs(
+                            widget(action_button("停止", ButtonKind::Danger))
+                                .entity_ref(stop)
+                                .on_activate(move || {
+                                    emit(
+                                        &stop_sink,
+                                        ShellIntent::StopStatusTask(
+                                            crate::runtime_shell::TurnStopTarget {
+                                                task_id: stop_task.clone(),
+                                                turn_id: stop_turn.clone(),
+                                            },
+                                        ),
+                                    )
+                                }),
+                            stop,
+                        )
+                    })?;
                     context.append_child(row, stop)?;
                 }
                 self.rows.insert(key, row);
@@ -303,25 +339,34 @@ pub fn mount_task_popup(
         snapshot.task_input(),
         Arc::clone(&sink),
     )?;
-    let page = context
-        .create_detached_component(document_id, Stack::fill_column(0.0).padding_xy(24.0, 20.0))?;
+    let (_, page) = context.mount_view_detached(document_id, || {
+        let page = entity_ref::<Stack>();
+        with_refs(
+            widget(Stack::fill_column(0.0).padding_xy(24.0, 20.0)).entity_ref(page),
+            page,
+        )
+    })?;
     context.append_child(page, task_view.conversation_column)?;
 
-    let title =
-        context.create_detached_component(document_id, Text::new(snapshot.title.clone()))?;
+    let title_text = snapshot.title.clone();
+    let (_, title) = context.mount_view_detached(document_id, move || {
+        let title = entity_ref::<Text>();
+        with_refs(widget(Text::new(title_text)).entity_ref(title), title)
+    })?;
     let workspace = crate::workspace_view::WorkspaceView::mount(
         context,
         document_id,
         snapshot.window_id,
         Arc::clone(&sink),
     )?;
-    let shell = context.create_component(
-        document_id,
-        DesktopShell::from_model(nana_ui::WorkspaceModel::new())
-            .title(snapshot.title.clone())
-            .title_center(title.stable_id())
-            .primary(workspace.root.stable_id()),
-    )?;
+    let shell_view = DesktopShell::from_model(nana_ui::WorkspaceModel::new())
+        .title(snapshot.title.clone())
+        .title_center(title.stable_id())
+        .primary(workspace.root.stable_id());
+    let (_, shell) = context.mount_view_root(document_id, move || {
+        let shell = entity_ref::<DesktopShell>();
+        with_refs(widget(shell_view).entity_ref(shell), shell)
+    })?;
     context.assemble_desktop_shell(shell)?;
 
     let mut handles = TaskPopupHandles {

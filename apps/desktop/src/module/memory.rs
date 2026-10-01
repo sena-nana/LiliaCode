@@ -204,9 +204,7 @@ impl MemoryModule {
 
     fn editor_is_dirty(&self) -> bool {
         if self.selected.is_none() {
-            return !self.title.is_empty()
-                || !self.body.text().is_empty()
-                || !self.tags.is_empty();
+            return !self.title.is_empty() || !self.body.text().is_empty() || !self.tags.is_empty();
         }
         self.title != self.loaded_title
             || self.body.text() != self.loaded_body

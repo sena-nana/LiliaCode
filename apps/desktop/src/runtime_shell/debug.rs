@@ -22,42 +22,24 @@ impl ShellHandles {
         }
         let doc = document.document();
         let context = document.context_mut();
-        let mut adapter = nana_ui::RuntimeInputAdapter::default();
+        let mut input = crate::runtime_input::ScriptedInput::bind(context, doc);
         let mut handled = false;
         for (phase, point, buttons) in [
             (nana_ui_platform::PointerPhase::Down, start, 1),
             (nana_ui_platform::PointerPhase::Move, end, 1),
             (nana_ui_platform::PointerPhase::Up, end, 0),
         ] {
-            let mut event = nana_ui_platform::InputEvent::Pointer {
-                phase,
-                pointer_id: 1,
-                pointer_type: nana_ui_platform::PointerType::Mouse,
-                x: point.0,
-                y: point.1,
-                screen_x: point.0,
-                screen_y: point.1,
-                button: 0,
-                buttons,
-                pressure: if buttons != 0 { 1.0 } else { 0.0 },
-                tangential_pressure: 0.0,
-                tilt_x: 0,
-                tilt_y: 0,
-                twist: 0,
-                is_primary: true,
-                activation_click: false,
-                modifiers: Default::default(),
-            };
-            match adapter.dispatch(context, doc, &event) {
+            match input.pointer(context, phase, point.0, point.1, buttons) {
                 Ok(result) => handled |= result.prevent_default,
                 Err(error) => {
-                    if let nana_ui_platform::InputEvent::Pointer { phase, buttons, .. } = &mut event
-                    {
-                        *phase = nana_ui_platform::PointerPhase::Cancel;
-                        *buttons = 0;
-                    }
-                    let _ = adapter.dispatch(context, doc, &event);
-                    return Err(error);
+                    let _ = input.pointer(
+                        context,
+                        nana_ui_platform::PointerPhase::Cancel,
+                        point.0,
+                        point.1,
+                        0,
+                    );
+                    return Err(crate::runtime_input::route_error(error));
                 }
             }
         }
@@ -123,29 +105,9 @@ impl ShellHandles {
         if hit != Some(id) {
             return Ok(false);
         }
-        nana_ui::RuntimeInputAdapter::default().dispatch(
-            context,
-            doc,
-            &nana_ui_platform::InputEvent::Pointer {
-                phase: nana_ui_platform::PointerPhase::Move,
-                pointer_id: 1,
-                pointer_type: nana_ui_platform::PointerType::Mouse,
-                x,
-                y,
-                screen_x: x,
-                screen_y: y,
-                button: 0,
-                buttons: 0,
-                pressure: 0.0,
-                tangential_pressure: 0.0,
-                tilt_x: 0,
-                tilt_y: 0,
-                twist: 0,
-                is_primary: true,
-                activation_click: false,
-                modifiers: Default::default(),
-            },
-        )?;
+        crate::runtime_input::ScriptedInput::bind(context, doc)
+            .pointer(context, nana_ui_platform::PointerPhase::Move, x, y, 0)
+            .map_err(crate::runtime_input::route_error)?;
         Ok(true)
     }
 
@@ -181,36 +143,15 @@ impl ShellHandles {
         if hit != Some(id) {
             return Ok(false);
         }
-        let mut adapter = nana_ui::RuntimeInputAdapter::default();
+        let mut input = crate::runtime_input::ScriptedInput::bind(context, document_id);
         let mut handled = false;
         for (phase, buttons) in [
             (nana_ui_platform::PointerPhase::Down, 1),
             (nana_ui_platform::PointerPhase::Up, 0),
         ] {
-            handled |= adapter
-                .dispatch(
-                    context,
-                    document_id,
-                    &nana_ui_platform::InputEvent::Pointer {
-                        phase,
-                        pointer_id: 1,
-                        pointer_type: nana_ui_platform::PointerType::Mouse,
-                        x,
-                        y,
-                        screen_x: x,
-                        screen_y: y,
-                        button: 0,
-                        buttons,
-                        pressure: 0.0,
-                        tangential_pressure: 0.0,
-                        tilt_x: 0,
-                        tilt_y: 0,
-                        twist: 0,
-                        is_primary: true,
-                        activation_click: false,
-                        modifiers: Default::default(),
-                    },
-                )?
+            handled |= input
+                .pointer(context, phase, x, y, buttons)
+                .map_err(crate::runtime_input::route_error)?
                 .prevent_default;
         }
         Ok(handled)
@@ -234,15 +175,9 @@ impl ShellHandles {
         let Some((x, y)) = self.target_exposed_point(context, id) else {
             return Ok(false);
         };
-        let event = nana_ui_platform::InputEvent::Wheel {
-            x,
-            y,
-            delta_x: 0.0,
-            delta_y,
-            line_delta: false,
-            modifiers: nana_ui_platform::InputModifiers::default(),
-        };
-        nana_ui::RuntimeInputAdapter::default().dispatch(context, document_id, &event)?;
+        crate::runtime_input::ScriptedInput::bind(context, document_id)
+            .wheel(context, x, y, delta_y)
+            .map_err(crate::runtime_input::route_error)?;
         Ok(true)
     }
     pub(crate) fn key_retained_ui(
@@ -275,9 +210,12 @@ impl ShellHandles {
             return Ok(false);
         }
         let event = crate::agent_debug::retained_key_event(key);
-        Ok(nana_ui::RuntimeInputAdapter::default()
-            .dispatch(context, document_id, &event)?
-            .prevent_default)
+        Ok(
+            crate::runtime_input::ScriptedInput::bind(context, document_id)
+                .press_key(context, event)
+                .map_err(crate::runtime_input::route_error)?
+                .prevent_default,
+        )
     }
 
     fn retained_targets(&self, context: &AppContext) -> BTreeMap<String, StableNodeId> {
@@ -586,10 +524,10 @@ impl ShellHandles {
             .filter(|(_, id)| self.target_is_exposed(context, *id))
             .map(|(id, node)| {
                 let bounds = context.world().layout_box(node).expect("mounted target");
-                let dropdown = context.read(Entity::<nana_ui::Dropdown>::from_stable_id(node), |field| {
+                let dropdown = context.read(Entity::<nana_ui::runtime::Dropdown>::from_stable_id(node), |field| {
                     let selection = match &field.selection {
-                        nana_ui::DropdownSelection::Single(value) => serde_json::json!(value.as_deref()),
-                        nana_ui::DropdownSelection::Multiple(values) => serde_json::json!(values.iter().map(AsRef::as_ref).collect::<Vec<&str>>()),
+                        nana_ui::runtime::DropdownSelection::Single(value) => serde_json::json!(value.as_deref()),
+                        nana_ui::runtime::DropdownSelection::Multiple(values) => serde_json::json!(values.iter().map(AsRef::as_ref).collect::<Vec<&str>>()),
                     };
                     serde_json::json!({"opened":field.opened,"highlighted":field.highlighted,
                         "selection":selection,"focused":context.world().focused(document.document()) == Some(node),
@@ -889,21 +827,17 @@ mod tests {
         for (key, expected) in [(None, 0), (Some("Meta+z"), 1), (Some("Meta+Shift+z"), 0)] {
             events.lock().unwrap().clear();
             if let Some(key) = key {
-                assert!(
-                    handles
-                        .key_retained_ui(&mut document, target_ids::COMPOSER_INPUT, key)
-                        .unwrap()
-                );
+                assert!(handles
+                    .key_retained_ui(&mut document, target_ids::COMPOSER_INPUT, key)
+                    .unwrap());
             } else {
-                assert!(
-                    handles
-                        .act_retained_ui(
-                            &mut document,
-                            target_ids::COMPOSER_INPUT,
-                            Some("中文草稿\n第二行")
-                        )
-                        .unwrap()
-                );
+                assert!(handles
+                    .act_retained_ui(
+                        &mut document,
+                        target_ids::COMPOSER_INPUT,
+                        Some("中文草稿\n第二行")
+                    )
+                    .unwrap());
             }
             let value = events
                 .lock()
@@ -932,12 +866,10 @@ mod tests {
                 vec![reference.clone()],
                 "undo metadata stays retained"
             );
-            assert!(
-                handles
-                    .retained_targets(document.context())
-                    .keys()
-                    .all(|id| !id.contains("reference-remove-"))
-            );
+            assert!(handles
+                .retained_targets(document.context())
+                .keys()
+                .all(|id| !id.contains("reference-remove-")));
         }
     }
 
@@ -963,59 +895,45 @@ mod tests {
                 .unwrap();
         };
         layout(&mut document);
-        assert!(
-            handles
-                .act_retained_ui(
-                    &mut document,
-                    target_ids::COMPOSER_INPUT,
-                    Some("草稿\n中文")
-                )
-                .unwrap()
-        );
-        assert!(
-            events
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|event| composer_set_content(event) == Some("草稿\n中文"))
-        );
-        assert!(
-            handles
-                .act_retained_ui(
-                    &mut document,
-                    target_ids::COMPOSER_INPUT,
-                    Some("第二次输入")
-                )
-                .unwrap()
-        );
-        assert!(
-            events
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|event| composer_set_content(event) == Some("第二次输入"))
-        );
-        assert!(
-            !handles
-                .act_retained_ui(&mut document, "lilia.ui.send", None)
-                .unwrap()
-        );
+        assert!(handles
+            .act_retained_ui(
+                &mut document,
+                target_ids::COMPOSER_INPUT,
+                Some("草稿\n中文")
+            )
+            .unwrap());
+        assert!(events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| composer_set_content(event) == Some("草稿\n中文")));
+        assert!(handles
+            .act_retained_ui(
+                &mut document,
+                target_ids::COMPOSER_INPUT,
+                Some("第二次输入")
+            )
+            .unwrap());
+        assert!(events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| composer_set_content(event) == Some("第二次输入")));
+        assert!(!handles
+            .act_retained_ui(&mut document, "lilia.ui.send", None)
+            .unwrap());
         snapshot.navigation = WindowRoute::Settings;
         handles.sync(&mut document, &snapshot).unwrap();
         layout(&mut document);
-        assert!(
-            !handles
-                .act_retained_ui(
-                    &mut document,
-                    target_ids::COMPOSER_INPUT,
-                    Some("must not replace")
-                )
-                .unwrap()
-        );
-        assert!(
-            !handles
-                .act_retained_ui(&mut document, "missing", None)
-                .unwrap()
-        );
+        assert!(!handles
+            .act_retained_ui(
+                &mut document,
+                target_ids::COMPOSER_INPUT,
+                Some("must not replace")
+            )
+            .unwrap());
+        assert!(!handles
+            .act_retained_ui(&mut document, "missing", None)
+            .unwrap());
     }
 }

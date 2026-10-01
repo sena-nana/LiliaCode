@@ -9,7 +9,8 @@ use lilia_feature_architecture::{
     ArchitectureBackend, ProjectArchitectureChangeRecord, ProjectArchitectureGraph,
 };
 use lilia_kernel::FeatureId;
-use nana_ui::{GraphCanvasEvent, GraphModel, GraphSelection, GraphViewport};
+use nana_ui::runtime::GraphCanvasEvent;
+use nana_ui::{GraphModel, GraphSelection, GraphViewport};
 
 use crate::application::ProjectWorkspaceSurface;
 use crate::runtime_shell::ShellProjectPage;

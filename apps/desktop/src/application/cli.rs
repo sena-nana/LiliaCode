@@ -270,11 +270,10 @@ mod tests {
 
         assert!(!result.accepted);
         assert_eq!(result.exit_code, Some(2));
-        assert!(
-            app.query_projects(ProjectQuery::default())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .query_projects(ProjectQuery::default())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

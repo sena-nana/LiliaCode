@@ -4,17 +4,17 @@ use lilia_contracts::{
 };
 
 use crate::application::{
-    DesktopApplication, DesktopApplicationError, DocumentId, DocumentSnapshot, WorkspaceItemId,
-    document_resource_key, path_from_document_resource_key,
+    document_resource_key, path_from_document_resource_key, DesktopApplication,
+    DesktopApplicationError, DocumentId, DocumentSnapshot, WorkspaceItemId,
 };
 
 pub use lilia_feature_workspace::{
-    ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND, ApplicationWorkspaceSurface,
-    DOCUMENT_WORKSPACE_ITEM_KIND, MEMORY_WORKSPACE_ITEM_KIND, PROJECT_FILES_WORKSPACE_ITEM_KIND,
-    ProjectWorkspaceSurface, ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND,
-    TASK_WORKSPACE_ITEM_KIND, TERMINAL_WORKSPACE_ITEM_KIND, WorkspaceFocusTarget, WorkspaceItem,
+    ApplicationWorkspaceSurface, ProjectWorkspaceSurface, WorkspaceFocusTarget, WorkspaceItem,
     WorkspaceItemCapabilities, WorkspaceItemError, WorkspaceItemKind, WorkspaceItemRestoration,
-    WorkspaceResourceId,
+    WorkspaceResourceId, ARCHITECTURE_WORKSPACE_ITEM_KIND, AUTOMATION_WORKSPACE_ITEM_KIND,
+    DOCUMENT_WORKSPACE_ITEM_KIND, MEMORY_WORKSPACE_ITEM_KIND, PROJECT_FILES_WORKSPACE_ITEM_KIND,
+    ROADMAP_WORKSPACE_ITEM_KIND, SETTINGS_WORKSPACE_ITEM_KIND, TASK_WORKSPACE_ITEM_KIND,
+    TERMINAL_WORKSPACE_ITEM_KIND,
 };
 
 pub const BROWSER_WORKSPACE_ITEM_KIND: &str = "task-browser";
@@ -758,16 +758,15 @@ mod tests {
         let mut absent = state;
         absent.scope.task_id = TaskId::new("missing-task").unwrap();
         absent.scope.tab_id = "browser:missing-task".into();
-        assert!(
-            app.restore_workspace_item(
+        assert!(app
+            .restore_workspace_item(
                 &browser_workspace_item(&absent)
                     .unwrap()
                     .restoration()
                     .unwrap()
             )
             .unwrap()
-            .is_none()
-        );
+            .is_none());
         assert_eq!(serde_json::to_value(&record).unwrap(), original);
     }
 

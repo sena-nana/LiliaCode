@@ -5,6 +5,7 @@ use nana_ui::runtime::{
     AlignSpec, AppContext, DocumentId, Entity, FrameworkError, LengthSpec, ListItem, ListItemSlots,
     SemanticColorRole, Stack, Text,
 };
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui_platform::WindowId;
 
 use crate::runtime_shell::{bind_activate, ShellIntent, ShellSuggestionRow};
@@ -119,8 +120,10 @@ impl EmptySuggestions {
                 context.update_component(text, |text, _| *text = Text::new(message.clone()))?;
                 text
             } else {
-                let text =
-                    context.create_detached_component(document, Text::new(message.clone()))?;
+                let (_, text) = context.mount_view_detached(document, move || {
+                    let text = entity_ref::<Text>();
+                    with_refs(widget(Text::new(message)).entity_ref(text), text)
+                })?;
                 self.status = Some(text);
                 text
             };
@@ -132,19 +135,33 @@ impl EmptySuggestions {
         for (id, label, source, intent) in desired {
             keep.insert(id.clone());
             if !self.buttons.contains_key(&id) {
-                let root = context.create_detached_component(
-                    document,
-                    suggestion_button(&label, source.as_deref()),
-                )?;
-                let content = context.create_detached_component(
-                    document,
-                    Stack::column(3.0)
-                        .align(AlignSpec::Start)
-                        .width(LengthSpec::Auto)
-                        .with_layout(|layout| layout.max_width = Some(LengthSpec::Percent(100.0))),
-                )?;
-                let summary =
-                    context.create_detached_component(document, suggestion_text(&label, false))?;
+                let (_, root) = context.mount_view_detached(document, move || {
+                    let root = entity_ref::<ListItem>();
+                    with_refs(widget(suggestion_button(&label, source.as_deref())).entity_ref(root), root)
+                })?;
+                let (_, content) = context.mount_view_detached(document, || {
+                    let content = entity_ref::<Stack>();
+                    with_refs(
+                        widget(
+                            Stack::column(3.0)
+                                .align(AlignSpec::Start)
+                                .width(LengthSpec::Auto)
+                                .with_layout(|layout| {
+                                    layout.max_width = Some(LengthSpec::Percent(100.0))
+                                }),
+                        )
+                        .entity_ref(content),
+                        content,
+                    )
+                })?;
+                let summary_label = label.clone();
+                let (_, summary) = context.mount_view_detached(document, move || {
+                    let summary = entity_ref::<Text>();
+                    with_refs(
+                        widget(suggestion_text(&summary_label, false)).entity_ref(summary),
+                        summary,
+                    )
+                })?;
                 context.append_child(content, summary)?;
                 bind_activate(context, root, sink.clone(), intent)?;
                 self.buttons.insert(
@@ -171,8 +188,14 @@ impl EmptySuggestions {
                         .update_component(text, |text, _| *text = suggestion_text(&source, true))?;
                     text
                 } else {
-                    let text = context
-                        .create_detached_component(document, suggestion_text(&source, true))?;
+                    let source_label = source.clone();
+                    let (_, text) = context.mount_view_detached(document, move || {
+                        let text = entity_ref::<Text>();
+                        with_refs(
+                            widget(suggestion_text(&source_label, true)).entity_ref(text),
+                            text,
+                        )
+                    })?;
                     entry.source = Some(text);
                     text
                 };

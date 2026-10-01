@@ -709,14 +709,12 @@ mod tests {
                 ..
             })
         ));
-        assert!(
-            service
-                .ensure_project_document_language_binding(
-                    &ProjectId::new("missing").unwrap(),
-                    snapshot.id
-                )
-                .is_err()
-        );
+        assert!(service
+            .ensure_project_document_language_binding(
+                &ProjectId::new("missing").unwrap(),
+                snapshot.id
+            )
+            .is_err());
         let outside = tempfile::tempdir().unwrap();
         assert!(lsp_workspace_document_path(outside.path(), &path).is_err());
         assert!(lsp_workspace_document_path(home.path(), &home.path().join("new.rs")).is_ok());

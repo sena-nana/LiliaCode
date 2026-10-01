@@ -50,12 +50,13 @@ fn content_hash(item: &TimelineRow) -> u64 {
     }
     hasher.finish()
 }
-use nana_ui::ButtonKind;
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AppContext, Button, Chip, DocumentId, Entity, FlexDirection, FrameworkError,
     LengthSpec, List, NativeMarkdown, NodeStyle, RichTextEvent, ScrollAxes, ScrollChanged,
     ScrollView, Stack, VirtualListItems, VirtualListLayout,
 };
+use nana_ui::ButtonKind;
 use nana_ui_platform::WindowId;
 use std::{
     collections::{HashMap, HashSet},
@@ -119,35 +120,45 @@ impl TimelineView {
         target: TimelineTarget,
         sink: Sink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::fill_column(6.0))?;
-        let timeline_scroll = context.create_detached_component(
-            document,
-            ScrollView::new(ScrollAxes::Vertical).style(timeline_scroll_style()),
-        )?;
-        let timeline_list = context.create_detached_component(
-            document,
-            List::new()
-                .label("时间线")
-                .style(timeline_list_style(0.0, 0.0, 0.0)),
-        )?;
-        context.append_child(timeline_scroll, timeline_list)?;
-        context.append_child(root, timeline_scroll)?;
         let scroll_target = Arc::new(Mutex::new((
             target.clone(),
             TIMELINE_DEFAULT_VIEWPORT_EXTENT,
         )));
         let scroll_binding = Arc::clone(&scroll_target);
         let scroll_sink = Arc::clone(&sink);
-        context.on(timeline_scroll, move |_, event: &ScrollChanged, _| {
-            let (target, viewport_extent) = scroll_binding.lock().unwrap().clone();
-            scroll_sink(
-                target,
-                TimelineAction::Scrolled {
-                    offset: event.offset.y,
-                    viewport_extent,
-                },
-            );
-        })?;
+        let (_, (root, timeline_scroll, timeline_list)) =
+            context.mount_view_detached(document, move || {
+                let root = entity_ref::<Stack>();
+                let timeline_scroll = entity_ref::<ScrollView>();
+                let timeline_list = entity_ref::<List>();
+                with_refs(
+                    widget(Stack::fill_column(6.0)).entity_ref(root).children(
+                        widget(
+                            ScrollView::new(ScrollAxes::Vertical).style(timeline_scroll_style()),
+                        )
+                        .entity_ref(timeline_scroll)
+                        .on(move |event: &ScrollChanged| {
+                            let (target, viewport_extent) = scroll_binding.lock().unwrap().clone();
+                            scroll_sink(
+                                target,
+                                TimelineAction::Scrolled {
+                                    offset: event.offset.y,
+                                    viewport_extent,
+                                },
+                            );
+                        })
+                        .children(
+                            widget(
+                                List::new()
+                                    .label("时间线")
+                                    .style(timeline_list_style(0.0, 0.0, 0.0)),
+                            )
+                            .entity_ref(timeline_list),
+                        ),
+                    ),
+                    (root, timeline_scroll, timeline_list),
+                )
+            })?;
         Ok(Self {
             root,
             timeline_scroll,
@@ -273,8 +284,11 @@ impl TimelineView {
                 }
                 entity
             } else {
-                let entity =
-                    context.create_detached_component(document_id, timeline_markdown_view(item))?;
+                let markdown_view = timeline_markdown_view(item);
+                let (_, entity) = context.mount_view_detached(document_id, move || {
+                    let entity = entity_ref::<NativeMarkdown>();
+                    with_refs(widget(markdown_view).entity_ref(entity), entity)
+                })?;
                 let target = snapshot.target.clone();
                 let sink = Arc::clone(&self.sink);
                 context.on(entity, move |_, event: &RichTextEvent, _| {
@@ -358,8 +372,10 @@ impl TimelineView {
                 let toolbar = if let Some(toolbar) = self.timeline_toolbars.get(&item.id) {
                     *toolbar
                 } else {
-                    let toolbar =
-                        context.create_detached_component(document_id, Stack::row(6.0))?;
+                    let (_, toolbar) = context.mount_view_detached(document_id, || {
+                        let toolbar = entity_ref::<Stack>();
+                        with_refs(widget(Stack::row(6.0)).entity_ref(toolbar), toolbar)
+                    })?;
                     self.timeline_toolbars.insert(item.id.clone(), toolbar);
                     toolbar
                 };
@@ -384,10 +400,13 @@ impl TimelineView {
         let mut children = vec![self.timeline_scroll.stable_id()];
         if snapshot.can_load_earlier {
             if self.load_earlier.is_none() {
-                let button = context.create_detached_component(
-                    document_id,
-                    pill_button("加载更早", ButtonKind::Subtle),
-                )?;
+                let (_, button) = context.mount_view_detached(document_id, || {
+                    let button = entity_ref::<Button>();
+                    with_refs(
+                        widget(pill_button("加载更早", ButtonKind::Subtle)).entity_ref(button),
+                        button,
+                    )
+                })?;
                 let target = snapshot.target.clone();
                 let sink = Arc::clone(&self.sink);
                 context.on(button, move |_, _: &Activate, _| {
@@ -434,8 +453,14 @@ impl TimelineView {
             })?;
             Ok(button)
         } else {
-            let button =
-                context.create_detached_component(document_id, token_chip(label, false))?;
+            let chip_label = label.to_owned();
+            let (_, button) = context.mount_view_detached(document_id, move || {
+                let button = entity_ref::<Chip>();
+                with_refs(
+                    widget(token_chip(&chip_label, false)).entity_ref(button),
+                    button,
+                )
+            })?;
             let sink = Arc::clone(&self.sink);
             let target = self.target.clone();
             context.on(button, move |_, _: &Activate, _| {
@@ -540,7 +565,7 @@ mod tests {
         assert!(view.blocks().iter().any(|block| {
             matches!(
                 block,
-                nana_ui::MarkdownBlock::Text { spans, .. }
+                nana_ui::runtime::MarkdownBlock::Text { spans, .. }
                     if spans.iter().any(|span| {
                         span.image_resource.as_ref().is_some_and(|image| image.width == 1 && image.height == 1)
                     })
@@ -609,11 +634,9 @@ mod tests {
         assert_eq!(received.len(), 8);
         for (index, (_, _, snapshot)) in views.iter().enumerate() {
             let actions = &received[index * 4..index * 4 + 4];
-            assert!(
-                actions
-                    .iter()
-                    .all(|(target, _)| target.matches(&snapshot.target))
-            );
+            assert!(actions
+                .iter()
+                .all(|(target, _)| target.matches(&snapshot.target)));
             assert_eq!(
                 actions
                     .iter()
@@ -643,15 +666,13 @@ mod tests {
                 cx.emit(Activate)
             })
             .unwrap();
-        assert!(
-            events
-                .lock()
-                .unwrap()
-                .last()
-                .unwrap()
-                .0
-                .matches(&current.target)
-        );
+        assert!(events
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .0
+            .matches(&current.target));
         let closed = TimelineTarget {
             window_id: current.target.window_id,
             task_id: None,

@@ -11,7 +11,7 @@ use mutsuki_agent_contracts::{
     AgentEvent, AgentMessage, AgentSession, AgentWireError, AgentWireRequestEnvelope,
     AgentWireResponseEnvelope, InteractionResolution,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::application::agent_architecture::DesktopArchitectureInteractionPayload;
@@ -24,25 +24,25 @@ use crate::application::{
     DesktopTodoGuideStatus, DesktopTurnState,
 };
 use crate::application::{TimelineChanged, TurnRecoveryIssue, TurnStateChanged};
-use lilia_agent::{AgentTurnCheckpoint, agent_owned_pending_kind, checkpoint_from_session};
+use lilia_agent::{agent_owned_pending_kind, checkpoint_from_session, AgentTurnCheckpoint};
 use lilia_feature_agent_session::PersistedDesktopTurnState;
 
 pub use lilia_contracts::ExecutionPermission as DesktopExecutionPermission;
 
+use lilia_feature_agent_session::{
+    accept_persisted_turn, prepare_turn_request, run_approval_resume, run_interaction_resume,
+    InteractionResumeSpec, TurnCancellationMode,
+};
 pub use lilia_feature_agent_session::{
-    APPROVAL_PROTOCOL, DesktopAgentRuntime, DesktopApprovalResponse, DesktopAutomaticTurnSelection,
+    DesktopAgentRuntime, DesktopApprovalResponse, DesktopAutomaticTurnSelection,
     DesktopAutomationTurnCorrelation, DesktopInteractionResponse, DesktopInterruptResult,
     DesktopSessionBranchAnchor, DesktopSessionBranchMode, DesktopTaskRuntimeSnapshot,
-    DesktopTurnDispatch, DesktopTurnDispatchKind, DesktopTurnRequest, INTERACTION_PROTOCOL,
-    TURN_PROTOCOL,
+    DesktopTurnDispatch, DesktopTurnDispatchKind, DesktopTurnRequest, APPROVAL_PROTOCOL,
+    INTERACTION_PROTOCOL, TURN_PROTOCOL,
 };
 #[cfg(debug_assertions)]
 pub use lilia_feature_agent_session::{
     DesktopDurableTurnDebugSnapshot, DesktopQuarantinedTurnDebugSnapshot,
-};
-use lilia_feature_agent_session::{
-    InteractionResumeSpec, TurnCancellationMode, accept_persisted_turn, prepare_turn_request,
-    run_approval_resume, run_interaction_resume,
 };
 
 pub use crate::application::agent_architecture::{

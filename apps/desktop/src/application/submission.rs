@@ -6,7 +6,7 @@ use rusqlite::{Transaction, TransactionBehavior};
 
 use crate::application::agent::turn_content_with_references;
 use crate::application::composer::DesktopComposerStore;
-use crate::application::todo::{DesktopTodoStore, guide_message};
+use crate::application::todo::{guide_message, DesktopTodoStore};
 use crate::application::{
     ChatAttachment, DesktopComposerState, DesktopGuideDispatchWindow, DesktopTaskTodo,
     DesktopTodoCreate, DesktopTodoError, DesktopTodoGuideStatus, DesktopTodoSource,

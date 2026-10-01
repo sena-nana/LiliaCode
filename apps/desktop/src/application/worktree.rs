@@ -975,11 +975,9 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
-        assert!(
-            entered
-                .recv_timeout(std::time::Duration::from_millis(150))
-                .is_err()
-        );
+        assert!(entered
+            .recv_timeout(std::time::Duration::from_millis(150))
+            .is_err());
         release.send(()).unwrap();
         assert!(first.join().unwrap().is_ok());
         assert!(second.join().unwrap().is_ok());
@@ -1282,11 +1280,9 @@ mod tests {
             task_id: id.as_str().into(),
             operation: WorktreeOperationRequest::Create,
         };
-        assert!(
-            service
-                .operate_with_context(request.clone(), &context)
-                .is_err()
-        );
+        assert!(service
+            .operate_with_context(request.clone(), &context)
+            .is_err());
         assert_eq!(list_git_worktrees(&repo).unwrap().len(), 1);
         assert!(service.store.for_task(&id).unwrap().is_none());
         let context = JobContext::new();

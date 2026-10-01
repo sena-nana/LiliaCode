@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use ignore::WalkBuilder;
 use lilia_contracts::{ChatContextSearchMatch, ChatContextSearchResult, ProjectId, TaskId};
 
-use crate::application::{DesktopApplication, DesktopApplicationError, describe_attachment_path};
+use crate::application::{describe_attachment_path, DesktopApplication, DesktopApplicationError};
 
 const DEFAULT_CONTEXT_SEARCH_LIMIT: usize = 12;
 const MAX_CONTEXT_SEARCH_LIMIT: usize = 50;

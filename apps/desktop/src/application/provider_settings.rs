@@ -1,4 +1,4 @@
-use super::provider::{DesktopAgentRuntimeSettingsState, runtime_configuration};
+use super::provider::{runtime_configuration, DesktopAgentRuntimeSettingsState};
 use crate::application::{
     DesktopAgentRuntimeSettings, DesktopAgentRuntimeSettingsUpdate, DesktopApplication,
     DesktopApplicationError, DesktopProviderError, ProviderChanged,
@@ -8,8 +8,8 @@ use lilia_kernel::{
 };
 use lilia_storage::SqliteAgentRuntimeStateStore;
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
 pub trait ProviderModelRuntimePort: Send + Sync {

@@ -1,10 +1,10 @@
 use lilia_agent::{RegisteredMcpActivation, SharedCodingServicesStatus};
 use lilia_feature_extensions::{
-    CodingRuntimeFacts, ExtensionsHost, LoadedPluginFacts, McpPromptRead, activate_mcp_entry,
-    activate_registered_mcp_servers, create_skill_package, delete_mcp_credentials_for_entries,
-    delete_mcp_server, delete_mcp_server_credential, delete_skill_package, extensions_snapshot,
-    get_mcp_prompt, mcp_state_key, read_mcp_resource, set_mcp_server_credential,
-    set_mcp_server_enabled, set_skill_package_enabled, upsert_mcp_server,
+    activate_mcp_entry, activate_registered_mcp_servers, create_skill_package,
+    delete_mcp_credentials_for_entries, delete_mcp_server, delete_mcp_server_credential,
+    delete_skill_package, extensions_snapshot, get_mcp_prompt, mcp_state_key, read_mcp_resource,
+    set_mcp_server_credential, set_mcp_server_enabled, set_skill_package_enabled,
+    upsert_mcp_server, CodingRuntimeFacts, ExtensionsHost, LoadedPluginFacts, McpPromptRead,
 };
 use lilia_kernel::{Feature, FeatureContext, FeatureId, KernelError, ServiceKey, ServiceRef};
 use lilia_storage::{AgentkitMcpRegistryEntry, LiliaDataPaths};
@@ -703,11 +703,9 @@ mod tests {
                 .unwrap();
         });
         second_attempt_receiver.recv().unwrap();
-        assert!(
-            second_completed_receiver
-                .recv_timeout(Duration::from_millis(50))
-                .is_err()
-        );
+        assert!(second_completed_receiver
+            .recv_timeout(Duration::from_millis(50))
+            .is_err());
 
         release_sender.send(()).unwrap();
         second_completed_receiver.recv().unwrap();
@@ -831,11 +829,9 @@ mod tests {
         assert_eq!(disabled.skills_registry_revision, 2);
         assert!(!disabled.skills[0].enabled);
         assert!(!disabled.skills[0].runtime_available);
-        assert!(
-            application
-                .set_skill_package_enabled("review-changes", true, 1)
-                .is_err()
-        );
+        assert!(application
+            .set_skill_package_enabled("review-changes", true, 1)
+            .is_err());
 
         let enabled = application
             .set_skill_package_enabled("review-changes", true, 2)
@@ -881,13 +877,11 @@ mod tests {
         assert_eq!(created.snapshot.mcp_servers.len(), 1);
         assert!(!created.snapshot.mcp_servers[0].enabled);
         assert!(created.results[0].error.is_none());
-        assert!(
-            application
-                .activate_registered_mcp_servers()
-                .unwrap()
-                .results
-                .is_empty()
-        );
+        assert!(application
+            .activate_registered_mcp_servers()
+            .unwrap()
+            .results
+            .is_empty());
 
         let stale = application
             .set_mcp_server_enabled("fixture.server", true, 0)
@@ -1007,13 +1001,11 @@ mod tests {
             .set_mcp_server_enabled("secured", true, 1)
             .unwrap();
         assert!(enabled.results[0].error.is_some());
-        assert!(
-            !enabled.results[0]
-                .error
-                .as_deref()
-                .unwrap_or_default()
-                .contains(canary)
-        );
+        assert!(!enabled.results[0]
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains(canary));
 
         let cleared = application
             .delete_mcp_server_credential(
@@ -1023,12 +1015,10 @@ mod tests {
             )
             .unwrap();
         assert!(!cleared.snapshot.mcp_servers[0].credentials[0].present);
-        assert!(
-            cleared.results[0]
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("OS Keyring"))
-        );
+        assert!(cleared.results[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("OS Keyring")));
 
         application
             .set_mcp_server_credential(
@@ -1040,15 +1030,13 @@ mod tests {
             .unwrap();
         let deleted = application.delete_mcp_server("secured", 2).unwrap();
         assert!(deleted.snapshot.mcp_servers.is_empty());
-        assert!(
-            !application
-                .read_mcp_credential(
-                    "secured",
-                    DesktopMcpCredentialKind::Environment,
-                    "API_TOKEN"
-                )
-                .unwrap()
-                .is_some()
-        );
+        assert!(!application
+            .read_mcp_credential(
+                "secured",
+                DesktopMcpCredentialKind::Environment,
+                "API_TOKEN"
+            )
+            .unwrap()
+            .is_some());
     }
 }

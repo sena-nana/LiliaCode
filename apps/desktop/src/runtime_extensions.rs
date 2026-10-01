@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AppContext, Dialog, DocumentId, EmptyState, Entity, FrameworkError, LengthSpec,
-    ModalSlots,
-    OverlayHost, ScrollAxes, ScrollView, SemanticColorRole, SidebarRow, SidebarRowState,
-    StableNodeId, Stack, Text, TextChanged, TextInput,
+    ModalSlots, OverlayHost, ScrollAxes, ScrollView, SemanticColorRole, SidebarRow,
+    SidebarRowState, StableNodeId, Stack, Text, TextChanged, TextInput,
 };
 use nana_ui::{DialogClosePolicy, DialogSize};
 
@@ -495,87 +495,150 @@ pub(crate) struct ExtensionBrowser {
 
 impl ExtensionBrowser {
     pub fn mount(cx: &mut AppContext, doc: DocumentId, sink: Sink) -> Result<Self, FrameworkError> {
-        let root = cx.create_detached_component(
-            doc,
-            Stack::fill_column(0.0)
-                .surface(SemanticColorRole::Surface)
-                .outline(SemanticColorRole::BorderSoft, 1.0)
-                .radius(nana_ui::theme::RadiusTier::Md),
-        )?;
-        let toolbar = cx.create_detached_component(
-            doc,
-            Stack::bar(8.0)
-                .min_height(LengthSpec::Px(42.0))
-                .padding_xy(8.0, 6.0),
-        )?;
-        let toolbar_actions = cx.create_detached_component(doc, Stack::row(8.0))?;
-        let plugin_source =
-            cx.create_detached_component(doc, TextInput::new("").placeholder("插件目录"))?;
-        let dispatch = sink.clone();
-        cx.on(plugin_source, move |_, event: &TextChanged, _| {
-            dispatch(ShellIntent::ExtensionsCommand(
-                ExtensionsMessage::PluginSourceChanged(event.value.to_string()),
-            ));
-        })?;
-        let body = cx.create_detached_component(doc, Stack::fill_row(0.0))?;
-        let content_scroll = cx.create_detached_component(
-            doc,
-            ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
-        )?;
-        let list_panel = cx.create_detached_component(
-            doc,
-            Stack::fill_column(8.0)
-                .width(LengthSpec::Px(320.0))
-                .min_width(LengthSpec::Px(250.0))
-                .grow(0.0)
-                .shrink(1.0)
-                .padding(8.0),
-        )?;
-        let search = cx.create_detached_component(
-            doc,
-            TextInput::new("").placeholder("搜索当前列表").layout(
-                Stack::bar(0.0)
-                    .height(LengthSpec::Px(30.0))
-                    .node_style()
-                    .layout,
+        let plugin_dispatch = sink.clone();
+        let search_dispatch = sink.clone();
+        let (
+            _,
+            (
+                (
+                    root,
+                    toolbar,
+                    toolbar_actions,
+                    plugin_source,
+                    body,
+                    content_scroll,
+                    list_panel,
+                    search,
+                ),
+                (
+                    (list, list_scroll, detail, detail_panel, detail_header),
+                    (detail_title, detail_action_row, detail_scroll, empty),
+                ),
             ),
-        )?;
-        cx.on(search, move |_, event: &TextChanged, _| {
-            sink(ShellIntent::ExtensionsCommand(
-                ExtensionsMessage::SearchChanged(event.value.to_string()),
-            ))
+        ) = cx.mount_view_detached(doc, move || {
+            let root = entity_ref();
+            let toolbar = entity_ref();
+            let toolbar_actions = entity_ref();
+            let plugin_source = entity_ref();
+            let body = entity_ref();
+            let content_scroll = entity_ref();
+            let list_panel = entity_ref();
+            let search = entity_ref();
+            let list = entity_ref();
+            let list_scroll = entity_ref();
+            let detail = entity_ref();
+            let detail_panel = entity_ref();
+            let detail_header = entity_ref();
+            let detail_title = entity_ref();
+            let detail_action_row = entity_ref();
+            let detail_scroll = entity_ref();
+            let empty = entity_ref();
+            with_refs(
+                widget(
+                    Stack::fill_column(0.0)
+                        .surface(SemanticColorRole::Surface)
+                        .outline(SemanticColorRole::BorderSoft, 1.0)
+                        .radius(nana_ui::theme::RadiusTier::Md),
+                )
+                .entity_ref(root)
+                .children((
+                    widget(
+                        Stack::bar(8.0)
+                            .min_height(LengthSpec::Px(42.0))
+                            .padding_xy(8.0, 6.0),
+                    )
+                    .entity_ref(toolbar)
+                    .children((
+                        widget(Stack::row(8.0)).entity_ref(toolbar_actions),
+                        widget(TextInput::new("").placeholder("插件目录"))
+                            .entity_ref(plugin_source)
+                            .on_input(move |event: &TextChanged| {
+                                plugin_dispatch(ShellIntent::ExtensionsCommand(
+                                    ExtensionsMessage::PluginSourceChanged(event.value.to_string()),
+                                ))
+                            }),
+                    )),
+                    widget(Stack::fill_row(0.0)).entity_ref(body).children((
+                        widget(
+                            Stack::fill_column(8.0)
+                                .width(LengthSpec::Px(320.0))
+                                .min_width(LengthSpec::Px(250.0))
+                                .grow(0.0)
+                                .shrink(1.0)
+                                .padding(8.0),
+                        )
+                        .entity_ref(list_panel)
+                        .children((
+                            widget(
+                                TextInput::new("").placeholder("搜索当前列表").layout(
+                                    Stack::bar(0.0)
+                                        .height(LengthSpec::Px(30.0))
+                                        .node_style()
+                                        .layout,
+                                ),
+                            )
+                            .entity_ref(search)
+                            .on_input(move |event: &TextChanged| {
+                                search_dispatch(ShellIntent::ExtensionsCommand(
+                                    ExtensionsMessage::SearchChanged(event.value.to_string()),
+                                ))
+                            }),
+                            widget(
+                                ScrollView::new(ScrollAxes::Vertical)
+                                    .style(Stack::fill_column(0.0).node_style()),
+                            )
+                            .entity_ref(list_scroll)
+                            .children(
+                                widget(Stack::column(4.0)).entity_ref(list).children(
+                                    widget(EmptyState::new("没有匹配的条目").compact(true))
+                                        .entity_ref(empty),
+                                ),
+                            ),
+                        )),
+                        widget(Stack::fill_column(0.0))
+                            .entity_ref(detail_panel)
+                            .children((
+                                widget(detail_header_layout(false))
+                                    .entity_ref(detail_header)
+                                    .children((
+                                        widget(Text::new("选择一项")).entity_ref(detail_title),
+                                        widget(crate::runtime_layout::wrapping_controls_row(6.0))
+                                            .entity_ref(detail_action_row),
+                                    )),
+                                widget(
+                                    ScrollView::new(ScrollAxes::Vertical)
+                                        .style(Stack::fill_column(0.0).node_style()),
+                                )
+                                .entity_ref(detail_scroll)
+                                .children(
+                                    widget(Stack::column(12.0).padding(16.0)).entity_ref(detail),
+                                ),
+                            )),
+                    )),
+                    widget(
+                        ScrollView::new(ScrollAxes::Vertical)
+                            .style(Stack::fill_column(0.0).node_style()),
+                    )
+                    .entity_ref(content_scroll),
+                )),
+                (
+                    (
+                        root,
+                        toolbar,
+                        toolbar_actions,
+                        plugin_source,
+                        body,
+                        content_scroll,
+                        list_panel,
+                        search,
+                    ),
+                    (
+                        (list, list_scroll, detail, detail_panel, detail_header),
+                        (detail_title, detail_action_row, detail_scroll, empty),
+                    ),
+                ),
+            )
         })?;
-        let list = cx.create_detached_component(doc, Stack::column(4.0))?;
-        let list_scroll = cx.create_detached_component(
-            doc,
-            ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
-        )?;
-        let detail = cx.create_detached_component(doc, Stack::column(12.0).padding(16.0))?;
-        let detail_panel = cx.create_detached_component(doc, Stack::fill_column(0.0))?;
-        let detail_header = cx.create_detached_component(doc, detail_header_layout(false))?;
-        let detail_title = cx.create_detached_component(doc, Text::new("选择一项"))?;
-        let detail_action_row =
-            cx.create_detached_component(doc, crate::runtime_layout::wrapping_controls_row(6.0))?;
-        let detail_scroll = cx.create_detached_component(
-            doc,
-            ScrollView::new(ScrollAxes::Vertical).style(Stack::fill_column(0.0).node_style()),
-        )?;
-        let empty = cx.create_detached_component(
-            doc,
-            EmptyState::new("没有匹配的条目").compact(true),
-        )?;
-        cx.append_child(list_scroll, list)?;
-        cx.append_child(detail_scroll, detail)?;
-        cx.append_child(list_panel, search)?;
-        cx.append_child(list_panel, list_scroll)?;
-        cx.append_child(body, list_panel)?;
-        cx.append_child(detail_header, detail_title)?;
-        cx.append_child(detail_header, detail_action_row)?;
-        cx.append_child(detail_panel, detail_header)?;
-        cx.append_child(detail_panel, detail_scroll)?;
-        cx.append_child(body, detail_panel)?;
-        cx.append_child(root, toolbar)?;
-        cx.append_child(root, body)?;
         Ok(Self {
             root,
             toolbar,
@@ -766,17 +829,24 @@ impl ExtensionBrowser {
                 cx.update_component(row, |r, _| *r = row_view)?;
                 row
             } else {
-                let row = cx.create_detached_component(doc, row_view)?;
                 let target = entry.key.clone();
                 let tab = view.tab.clone();
                 let dispatch = sink.clone();
-                cx.on(row, move |_, _: &Activate, _| {
-                    dispatch(ShellIntent::ExtensionsCommand(
-                        ExtensionsMessage::SelectEntry {
-                            tab: tab.clone(),
-                            key: target.clone(),
-                        },
-                    ))
+                let (_, row) = cx.mount_view_detached(doc, move || {
+                    let row_ref = entity_ref();
+                    with_refs(
+                        widget(row_view)
+                            .entity_ref(row_ref)
+                            .on(move |_event: &Activate| {
+                                dispatch(ShellIntent::ExtensionsCommand(
+                                    ExtensionsMessage::SelectEntry {
+                                        tab: tab.clone(),
+                                        key: target.clone(),
+                                    },
+                                ))
+                            }),
+                        row_ref,
+                    )
                 })?;
                 self.rows.insert(entry.key.clone(), row);
                 row
@@ -851,20 +921,39 @@ impl ExtensionBrowser {
         let dialog = if let Some(dialog) = self.dialog {
             dialog
         } else {
-            let dialog = cx.create_detached_component(
-                doc,
-                Dialog::new(editor.title.as_str()).size(DialogSize::Wide),
-            )?;
-            let body = cx.create_detached_component(doc, Stack::column(12.0).padding(8.0))?;
-            let scroll = cx.create_detached_component(
-                doc,
-                ScrollView::new(ScrollAxes::Vertical).style(
-                    Stack::column(0.0)
-                        .height(LengthSpec::Px(380.0))
-                        .node_style(),
-                ),
-            )?;
-            let footer = cx.create_detached_component(doc, Stack::bar(8.0))?;
+            let dialog_title = editor.title.clone();
+            let (_, dialog) = cx.mount_view_detached(doc, move || {
+                let dialog = entity_ref::<Dialog>();
+                with_refs(
+                    widget(Dialog::new(dialog_title).size(DialogSize::Wide)).entity_ref(dialog),
+                    dialog,
+                )
+            })?;
+            let (_, body) = cx.mount_view_detached(doc, || {
+                let body = entity_ref::<Stack>();
+                with_refs(
+                    widget(Stack::column(12.0).padding(8.0)).entity_ref(body),
+                    body,
+                )
+            })?;
+            let (_, scroll) = cx.mount_view_detached(doc, || {
+                let scroll = entity_ref::<ScrollView>();
+                with_refs(
+                    widget(
+                        ScrollView::new(ScrollAxes::Vertical).style(
+                            Stack::column(0.0)
+                                .height(LengthSpec::Px(380.0))
+                                .node_style(),
+                        ),
+                    )
+                    .entity_ref(scroll),
+                    scroll,
+                )
+            })?;
+            let (_, footer) = cx.mount_view_detached(doc, || {
+                let footer = entity_ref::<Stack>();
+                with_refs(widget(Stack::bar(8.0)).entity_ref(footer), footer)
+            })?;
             cx.append_child(scroll, body)?;
             cx.set_modal_slots(
                 dialog,

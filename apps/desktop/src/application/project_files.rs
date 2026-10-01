@@ -696,8 +696,8 @@ mod tests {
         ProjectWorkspaceSurface, WorkspaceItemRestoration,
     };
     use lilia_service::ServiceAuthority;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+    use std::sync::Arc;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -773,12 +773,10 @@ mod tests {
         let snapshot = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("reentrant stop must not deadlock");
-        assert!(
-            snapshot
-                .entries
-                .iter()
-                .any(|entry| entry.name == "callback.txt")
-        );
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.name == "callback.txt"));
         assert!(service.watchers.lock().unwrap().is_empty());
         service.ensure_project_files_watcher(&project_id).unwrap();
         let stopped = service.watchers.lock().unwrap()[project_id.as_str()]
@@ -827,18 +825,14 @@ mod tests {
         let snapshot = service
             .project_files_snapshot(&project_id, Default::default())
             .unwrap();
-        assert!(
-            snapshot
-                .entries
-                .iter()
-                .any(|entry| entry.name == "current.txt")
-        );
-        assert!(
-            !snapshot
-                .entries
-                .iter()
-                .any(|entry| entry.name == "stale.txt")
-        );
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.name == "current.txt"));
+        assert!(!snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.name == "stale.txt"));
         app.inner
             .project_tasks
             .update_project(
@@ -850,11 +844,9 @@ mod tests {
             )
             .unwrap();
         assert!(service.list_project_directory(&project_id, "").is_err());
-        assert!(
-            service
-                .open_project_file(&project_id, "current.txt")
-                .is_err()
-        );
+        assert!(service
+            .open_project_file(&project_id, "current.txt")
+            .is_err());
         assert!(service.ensure_project_files_watcher(&project_id).is_err());
     }
 
@@ -986,12 +978,10 @@ mod tests {
             .project_files_snapshot(&project_id, ProjectFilesViewState::default())
             .unwrap();
         assert!(after.revision > before);
-        assert!(
-            after
-                .entries
-                .iter()
-                .any(|entry| entry.relative_path == "b.txt")
-        );
+        assert!(after
+            .entries
+            .iter()
+            .any(|entry| entry.relative_path == "b.txt"));
 
         let item = app
             .project_workspace_item(&project_id, ProjectWorkspaceSurface::Files)

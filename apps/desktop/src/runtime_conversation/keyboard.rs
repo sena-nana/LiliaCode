@@ -166,24 +166,28 @@ impl ComposerKeyboard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nana_ui::{
-        runtime::{DocumentId, Stack},
-        RuntimeInputAdapter,
-    };
-    use nana_ui_platform::{InputEvent, InputModifiers};
+    use crate::runtime_input::ScriptedInput;
+    use nana_ui::runtime::{DocumentId, InputRouteOutcome, Stack};
+    use nana_ui_platform::InputModifiers;
 
-    fn key(name: &str, shift: bool, repeat: bool) -> InputEvent {
-        InputEvent::Keyboard {
-            pressed: true,
-            key: name.into(),
-            code: name.into(),
-            text: None,
-            repeat,
-            modifiers: InputModifiers {
-                shift,
-                ..Default::default()
-            },
-        }
+    fn tap(
+        input: &mut ScriptedInput,
+        context: &mut AppContext,
+        name: &str,
+        shift: bool,
+        repeat: bool,
+    ) -> InputRouteOutcome {
+        input
+            .press(
+                context,
+                name,
+                InputModifiers {
+                    shift,
+                    ..Default::default()
+                },
+                repeat,
+            )
+            .unwrap()
     }
 
     fn fixture(
@@ -200,8 +204,14 @@ mod tests {
         let root = context
             .create_component(document, Stack::column(0.0))
             .unwrap();
-        let editor = context
-            .create_detached_component(document, TextArea::new("草稿"))
+        let (_, editor) = context
+            .mount_view_detached(document, || {
+                let editor = nana_ui::runtime::view::entity_ref::<TextArea>();
+                nana_ui::runtime::view::with_refs(
+                    nana_ui::runtime::view::widget(TextArea::new("草稿")).entity_ref(editor),
+                    editor,
+                )
+            })
             .unwrap();
         context.append_child(root, editor).unwrap();
         assert!(context.focus_node(document, editor.stable_id()).unwrap());
@@ -293,21 +303,13 @@ mod tests {
                 };
             })
             .unwrap();
-            let mut adapter = RuntimeInputAdapter::default().with_clipboard(
-                nana_ui_platform::shared_clipboard(nana_ui_platform::MemoryClipboard::new()),
-            );
-            let paste = InputEvent::Keyboard {
-                pressed: true,
-                key: "v".into(),
-                code: "KeyV".into(),
-                text: Some("v".into()),
-                repeat: false,
-                modifiers: InputModifiers {
-                    meta: true,
-                    ..Default::default()
-                },
+            let mut input = ScriptedInput::bind(&mut cx, doc);
+            input.services_mut().set_clipboard(Some("pasted".into()));
+            let paste = InputModifiers {
+                meta: true,
+                ..Default::default()
             };
-            adapter.dispatch(&mut cx, doc, &paste).unwrap();
+            input.press(&mut cx, "v", paste, false).unwrap();
             assert_eq!(
                 cx.read(editor, |view| view.state.value.clone()).unwrap(),
                 "草稿"
@@ -319,7 +321,7 @@ mod tests {
             );
             drop(requests);
             cx.set_ime_preedit(doc, "候选".into(), None).unwrap();
-            adapter.dispatch(&mut cx, doc, &paste).unwrap();
+            input.press(&mut cx, "v", paste, false).unwrap();
             assert_eq!(events.lock().unwrap().len(), 1);
         }
     }
@@ -328,14 +330,9 @@ mod tests {
     fn enter_sends_once_and_shift_enter_edits_in_both_windows() {
         for window in [WindowId::PRIMARY, WindowId(42)] {
             let (mut context, document, editor, keyboard, events) = fixture(window);
-            let mut input = RuntimeInputAdapter::default();
+            let mut input = ScriptedInput::bind(&mut context, document);
             for repeat in [false, true, false] {
-                assert!(
-                    input
-                        .dispatch(&mut context, document, &key("Enter", false, repeat))
-                        .unwrap()
-                        .prevent_default
-                );
+                assert!(tap(&mut input, &mut context, "Enter", false, repeat).prevent_default);
             }
             let events = events.lock().unwrap();
             assert_eq!(events.len(), 1);
@@ -352,12 +349,7 @@ mod tests {
                     .value,
                 "草稿"
             );
-            assert!(
-                input
-                    .dispatch(&mut context, document, &key("Enter", true, false))
-                    .unwrap()
-                    .prevent_default
-            );
+            assert!(tap(&mut input, &mut context, "Enter", true, false).prevent_default);
             let value = &context
                 .world()
                 .text_input(editor.stable_id())
@@ -393,23 +385,14 @@ mod tests {
                     }
                 };
                 keyboard.sync(&controls, "草稿", true);
-                let mut input = RuntimeInputAdapter::default();
+                let mut input = ScriptedInput::bind(&mut context, document);
                 for name in ["ArrowDown", "ArrowUp", "ArrowUp"] {
-                    assert!(
-                        input
-                            .dispatch(&mut context, document, &key(name, false, false))
-                            .unwrap()
-                            .prevent_default
-                    );
+                    assert!(tap(&mut input, &mut context, name, false, false).prevent_default);
                 }
                 assert!(keyboard.is_active(&selected));
                 let accept = if kind == "slash" { "Tab" } else { "Enter" };
-                input
-                    .dispatch(&mut context, document, &key(accept, false, false))
-                    .unwrap();
-                input
-                    .dispatch(&mut context, document, &key(accept, false, true))
-                    .unwrap();
+                tap(&mut input, &mut context, accept, false, false);
+                tap(&mut input, &mut context, accept, false, true);
                 let actions = events.lock().unwrap();
                 assert_eq!(actions.len(), 4);
                 assert!(
@@ -430,37 +413,29 @@ mod tests {
     #[test]
     fn disabled_composer_other_focus_and_ime_never_submit() {
         let (mut context, document, editor, keyboard, events) = fixture(WindowId(42));
-        let mut input = RuntimeInputAdapter::default();
+        let mut input = ScriptedInput::bind(&mut context, document);
         keyboard.sync(&ConversationControls::default(), "草稿", false);
-        input
-            .dispatch(&mut context, document, &key("Enter", false, false))
-            .unwrap();
+        tap(&mut input, &mut context, "Enter", false, false);
         assert!(events.lock().unwrap().is_empty());
         keyboard.sync(&ConversationControls::default(), "草稿", true);
         context
             .set_ime_preedit(document, "拼音".into(), None)
             .unwrap();
-        input
-            .dispatch(&mut context, document, &key("Enter", false, false))
-            .unwrap();
+        tap(&mut input, &mut context, "Enter", false, false);
         assert!(events.lock().unwrap().is_empty());
         context.clear_ime(document).unwrap();
         let other = context
             .create_component(document, TextArea::new("其他字段"))
             .unwrap();
         context.focus_node(document, other.stable_id()).unwrap();
-        input
-            .dispatch(&mut context, document, &key("Enter", false, false))
-            .unwrap();
+        tap(&mut input, &mut context, "Enter", false, false);
         assert!(events.lock().unwrap().is_empty());
         assert_eq!(
             context.world().text_input(other.stable_id()).unwrap().value,
             "其他字段\n"
         );
         context.remove_view(editor).unwrap();
-        input
-            .dispatch(&mut context, document, &key("Enter", false, false))
-            .unwrap();
+        tap(&mut input, &mut context, "Enter", false, false);
         assert!(events.lock().unwrap().is_empty());
     }
 }

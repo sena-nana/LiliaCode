@@ -32,6 +32,7 @@ mod project_files_panel;
 mod provider_ai_settings;
 mod runtime_compat;
 mod runtime_extensions;
+mod runtime_input;
 mod runtime_layout;
 mod runtime_shell;
 mod runtime_surface;

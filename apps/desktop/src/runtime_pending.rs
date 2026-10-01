@@ -6,6 +6,7 @@ use nana_ui::runtime::{
     AppContext, Button, Card, DocumentId, Entity, FormField, FrameworkError, LengthSpec,
     ScrollAxes, ScrollView, StableNodeId, Stack, Text, TextArea, TextChanged,
 };
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::ButtonKind;
 use nana_ui_platform::WindowId;
 use std::collections::{HashMap, HashSet};
@@ -65,115 +66,147 @@ impl PendingPanel {
                 }
             })
         };
-        let pending_panel =
-            context.create_detached_component(document_id, pending_interaction_card())?;
-        let pending_body = context.create_detached_component(document_id, Stack::column(8.0))?;
-        let pending_scroll = context.create_detached_component(
-            document_id,
-            ScrollView::new(ScrollAxes::Vertical).style(
-                Stack::column(0.0)
-                    .with_layout(|layout| layout.max_height = Some(LengthSpec::Px(260.0)))
-                    .shrink(1.0)
-                    .node_style(),
-            ),
-        )?;
-        context.append_child(pending_scroll, pending_body)?;
-        let pending_title =
-            context.create_detached_component(document_id, Text::new(String::new()))?;
-        let pending_prompt =
-            context.create_detached_component(document_id, Text::new(String::new()))?;
-        let pending_draft = context
-            .create_detached_component(document_id, pending_textarea(String::new(), 74.0))?;
         let pending_request = Arc::new(Mutex::new(String::new()));
         let pending_is_question = Arc::new(AtomicBool::new(false));
         let pending_tool_command_value = Arc::new(Mutex::new(String::new()));
         let pending_tool_message_value = Arc::new(Mutex::new(String::new()));
-        context.on(pending_draft, {
-            let sink = Arc::clone(&sink);
-            let pending_request = Arc::clone(&pending_request);
-            let pending_is_question = Arc::clone(&pending_is_question);
-            move |_, event: &TextChanged, _| {
-                let request_id = pending_request
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                emit(
-                    &sink,
-                    if pending_is_question.load(Ordering::Relaxed) {
-                        ShellIntent::AskUserPending {
-                            request_id,
-                            action: "freeform".into(),
-                            value: event.value.to_string(),
-                        }
-                    } else {
-                        ShellIntent::PendingDraftChanged {
-                            request_id,
-                            value: event.value.to_string(),
-                        }
-                    },
-                );
-            }
+        let draft_sink = Arc::clone(&sink);
+        let draft_request = Arc::clone(&pending_request);
+        let draft_question = Arc::clone(&pending_is_question);
+        let command_sink = Arc::clone(&sink);
+        let command_request = Arc::clone(&pending_request);
+        let command_value = Arc::clone(&pending_tool_command_value);
+        let command_message = Arc::clone(&pending_tool_message_value);
+        let message_sink = Arc::clone(&sink);
+        let message_request = Arc::clone(&pending_request);
+        let message_command = Arc::clone(&pending_tool_command_value);
+        let message_value = Arc::clone(&pending_tool_message_value);
+        let (
+            _,
+            (
+                pending_panel,
+                pending_scroll,
+                pending_body,
+                pending_title,
+                pending_prompt,
+                pending_draft,
+                pending_tool_command,
+                pending_tool_message,
+                pending_actions,
+            ),
+        ) = context.mount_view_detached(document_id, move || {
+            let pending_panel = entity_ref::<Card>();
+            let pending_scroll = entity_ref::<ScrollView>();
+            let pending_body = entity_ref::<Stack>();
+            let pending_title = entity_ref::<Text>();
+            let pending_prompt = entity_ref::<Text>();
+            let pending_draft = entity_ref::<TextArea>();
+            let pending_tool_command = entity_ref::<TextArea>();
+            let pending_tool_message = entity_ref::<TextArea>();
+            let pending_actions = entity_ref::<Stack>();
+            with_refs(
+                (
+                    widget(pending_interaction_card()).entity_ref(pending_panel),
+                    widget(
+                        ScrollView::new(ScrollAxes::Vertical).style(
+                            Stack::column(0.0)
+                                .with_layout(|layout| {
+                                    layout.max_height = Some(LengthSpec::Px(260.0))
+                                })
+                                .shrink(1.0)
+                                .node_style(),
+                        ),
+                    )
+                    .entity_ref(pending_scroll)
+                    .children(widget(Stack::column(8.0)).entity_ref(pending_body)),
+                    widget(Text::new(String::new())).entity_ref(pending_title),
+                    widget(Text::new(String::new())).entity_ref(pending_prompt),
+                    widget(pending_textarea(String::new(), 74.0))
+                        .entity_ref(pending_draft)
+                        .on(move |event: &TextChanged| {
+                            let request_id = draft_request
+                                .lock()
+                                .map(|guard| guard.clone())
+                                .unwrap_or_default();
+                            emit(
+                                &draft_sink,
+                                if draft_question.load(Ordering::Relaxed) {
+                                    ShellIntent::AskUserPending {
+                                        request_id,
+                                        action: "freeform".into(),
+                                        value: event.value.to_string(),
+                                    }
+                                } else {
+                                    ShellIntent::PendingDraftChanged {
+                                        request_id,
+                                        value: event.value.to_string(),
+                                    }
+                                },
+                            );
+                        }),
+                    widget(pending_textarea(String::new(), 74.0))
+                        .entity_ref(pending_tool_command)
+                        .on(move |event: &TextChanged| {
+                            let request_id = command_request
+                                .lock()
+                                .map(|guard| guard.clone())
+                                .unwrap_or_default();
+                            let command = event.value.to_string();
+                            if let Ok(mut guard) = command_value.lock() {
+                                *guard = command.clone();
+                            }
+                            let message = command_message
+                                .lock()
+                                .map(|guard| guard.clone())
+                                .unwrap_or_default();
+                            emit(
+                                &command_sink,
+                                ShellIntent::ToolConsentDraftChanged {
+                                    request_id,
+                                    command,
+                                    message,
+                                },
+                            );
+                        }),
+                    widget(pending_textarea(String::new(), 74.0))
+                        .entity_ref(pending_tool_message)
+                        .on(move |event: &TextChanged| {
+                            let request_id = message_request
+                                .lock()
+                                .map(|guard| guard.clone())
+                                .unwrap_or_default();
+                            let message = event.value.to_string();
+                            if let Ok(mut guard) = message_value.lock() {
+                                *guard = message.clone();
+                            }
+                            let command = message_command
+                                .lock()
+                                .map(|guard| guard.clone())
+                                .unwrap_or_default();
+                            emit(
+                                &message_sink,
+                                ShellIntent::ToolConsentDraftChanged {
+                                    request_id,
+                                    command,
+                                    message,
+                                },
+                            );
+                        }),
+                    widget(pending_actions_row()).entity_ref(pending_actions),
+                ),
+                (
+                    pending_panel,
+                    pending_scroll,
+                    pending_body,
+                    pending_title,
+                    pending_prompt,
+                    pending_draft,
+                    pending_tool_command,
+                    pending_tool_message,
+                    pending_actions,
+                ),
+            )
         })?;
-        let pending_tool_command = context
-            .create_detached_component(document_id, pending_textarea(String::new(), 74.0))?;
-        context.on(pending_tool_command, {
-            let sink = Arc::clone(&sink);
-            let pending_request = Arc::clone(&pending_request);
-            let pending_tool_command_value = Arc::clone(&pending_tool_command_value);
-            let pending_tool_message_value = Arc::clone(&pending_tool_message_value);
-            move |_, event: &TextChanged, _| {
-                let request_id = pending_request
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                if let Ok(mut guard) = pending_tool_command_value.lock() {
-                    *guard = event.value.to_string();
-                }
-                let message = pending_tool_message_value
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                emit(
-                    &sink,
-                    ShellIntent::ToolConsentDraftChanged {
-                        request_id,
-                        command: event.value.to_string(),
-                        message,
-                    },
-                );
-            }
-        })?;
-        let pending_tool_message = context
-            .create_detached_component(document_id, pending_textarea(String::new(), 74.0))?;
-        context.on(pending_tool_message, {
-            let sink = Arc::clone(&sink);
-            let pending_request = Arc::clone(&pending_request);
-            let pending_tool_command_value = Arc::clone(&pending_tool_command_value);
-            let pending_tool_message_value = Arc::clone(&pending_tool_message_value);
-            move |_, event: &TextChanged, _| {
-                let request_id = pending_request
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                if let Ok(mut guard) = pending_tool_message_value.lock() {
-                    *guard = event.value.to_string();
-                }
-                let command = pending_tool_command_value
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                emit(
-                    &sink,
-                    ShellIntent::ToolConsentDraftChanged {
-                        request_id,
-                        command,
-                        message: event.value.to_string(),
-                    },
-                );
-            }
-        })?;
-        let pending_actions =
-            context.create_detached_component(document_id, pending_actions_row())?;
         Ok(Self {
             pending_panel,
             pending_scroll,
@@ -532,7 +565,10 @@ impl PendingPanel {
         } else {
             let mut view = pill_button(label, kind);
             view.disabled = disabled;
-            let button = context.create_detached_component(document_id, view)?;
+            let (_, button) = context.mount_view_detached(document_id, move || {
+                let button = entity_ref::<Button>();
+                with_refs(widget(view).entity_ref(button), button)
+            })?;
             bind_activate(context, button, Arc::clone(&self.sink), intent)?;
             self.extra_buttons.insert(id.to_owned(), button);
             Ok(button)
@@ -559,8 +595,13 @@ impl PendingPanel {
             })?;
             field
         } else {
-            let field = context
-                .create_detached_component(document_id, pending_textarea(value.to_owned(), 74.0))?;
+            let (_, field) = context.mount_view_detached(document_id, move || {
+                let field = entity_ref::<TextArea>();
+                with_refs(
+                    widget(pending_textarea(value.to_owned(), 74.0)).entity_ref(field),
+                    field,
+                )
+            })?;
             let sink = Arc::clone(&self.sink);
             context.on(field, move |_, event: &TextChanged, _| {
                 emit(&sink, intent(event.value.to_string()));
@@ -574,10 +615,15 @@ impl PendingPanel {
             })?;
             wrapper
         } else {
-            let wrapper = context.create_detached_component(
-                document_id,
-                FormField::new(label).control_child(editor.stable_id()),
-            )?;
+            let label = label.to_owned();
+            let editor_id = editor.stable_id();
+            let (_, wrapper) = context.mount_view_detached(document_id, move || {
+                let wrapper = entity_ref::<FormField>();
+                with_refs(
+                    widget(FormField::new(label).control_child(editor_id)).entity_ref(wrapper),
+                    wrapper,
+                )
+            })?;
             context.set_form_field_control(wrapper, Some(editor.stable_id()))?;
             self.form_wrappers.insert(id.to_owned(), wrapper);
             wrapper

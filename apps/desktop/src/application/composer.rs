@@ -1,8 +1,8 @@
 use lilia_contracts::{ProductTask, ProductTaskStatus, TaskId};
 use uuid::Uuid;
 
-use crate::application::ComposerChanged;
 use crate::application::submission::DesktopGuideQueueInput;
+use crate::application::ComposerChanged;
 use crate::application::{
     DesktopApplication, DesktopApplicationError, DesktopSessionBranchAnchor, DesktopTaskPatch,
     DesktopTaskTodo, DesktopTodoCreate, DesktopTodoPriority, DesktopTurnDispatch,
@@ -11,8 +11,8 @@ use crate::application::{
 
 pub(crate) use lilia_feature_composer::ComposerStore as DesktopComposerStore;
 pub use lilia_feature_composer::{
-    ComposerCommand as DesktopComposerCommand, ComposerError as DesktopComposerError,
-    ComposerState as DesktopComposerState, ensure_expected_revision,
+    ensure_expected_revision, ComposerCommand as DesktopComposerCommand,
+    ComposerError as DesktopComposerError, ComposerState as DesktopComposerState,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -348,8 +348,8 @@ impl DesktopApplication {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use lilia_contracts::{
         ChatConversationReference, LiliaAgentWorkflow, ProductEntity, ProductTask,
@@ -488,13 +488,11 @@ mod tests {
             .with_parent(parent_id.clone());
         let task_id = input.id.clone();
         let mut draft = DesktopComposerState::transient(task_id.clone());
-        assert!(
-            draft
-                .apply_transient_command(DesktopComposerCommand::SetContent(
-                    "first message".to_owned(),
-                ))
-                .unwrap()
-        );
+        assert!(draft
+            .apply_transient_command(DesktopComposerCommand::SetContent(
+                "first message".to_owned(),
+            ))
+            .unwrap());
 
         assert!(application.get_task(&task_id).is_err());
         let task = application

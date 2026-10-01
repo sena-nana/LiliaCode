@@ -32,10 +32,7 @@ pub enum BrowserAction {
 #[derive(Clone)]
 pub struct BrowserView {
     pub root: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
-    page: nana_ui::runtime::Entity<nana_ui::runtime::NativeContent>,
     address: nana_ui::runtime::Entity<nana_ui::runtime::TextInput>,
-    status: nana_ui::runtime::Entity<nana_ui::runtime::Text>,
-    status_row: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
     control: nana_ui::runtime::Entity<nana_ui::runtime::Button>,
     cancel: nana_ui::runtime::Entity<nana_ui::runtime::Button>,
     binding: std::sync::Arc<
@@ -45,13 +42,20 @@ pub struct BrowserView {
     ready: bool,
     failed: bool,
     navigation: Vec<nana_ui::runtime::Entity<nana_ui::runtime::Button>>,
-    document: nana_ui::runtime::DocumentId,
-    sink: crate::runtime_shell::IntentSink,
     requests: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
     request_rows: Vec<nana_ui::runtime::Entity<nana_ui::runtime::Stack>>,
     last_requests: Vec<BrowserHostRequest>,
-    toolbar: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
     recovery: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
+    address_value: crate::runtime_layout::Bound<String>,
+    chrome_off: crate::runtime_layout::Bound<bool>,
+    status_text: crate::runtime_layout::Bound<String>,
+    control_label: crate::runtime_layout::Bound<String>,
+    cancel_off: crate::runtime_layout::Bound<bool>,
+    show_recovery: crate::runtime_layout::Bound<bool>,
+    show_requests: crate::runtime_layout::Bound<bool>,
+    request_items: crate::runtime_layout::Bound<Vec<BrowserHostRequest>>,
+    page_resource: crate::runtime_layout::Bound<String>,
+    page_attached: crate::runtime_layout::Bound<bool>,
 }
 
 impl BrowserView {
@@ -90,12 +94,7 @@ impl BrowserView {
         } else {
             vec![]
         };
-        if document
-            .context()
-            .world()
-            .node(self.recovery.stable_id())
-            .is_some_and(|node| node.parent.is_some())
-        {
+        if browser_node_shown(document.context().world(), self.recovery.stable_id()) {
             actions.extend(["retry".into(), "install-runtime".into()]);
         }
         for request in &self.last_requests {
@@ -223,150 +222,242 @@ impl BrowserView {
         document: nana_ui::runtime::DocumentId,
         sink: &crate::runtime_shell::IntentSink,
     ) -> Result<Self, nana_ui::runtime::FrameworkError> {
-        use nana_ui::runtime::*;
-        let root = context.create_detached_component(document, Stack::fill_column(8.0))?;
-        let toolbar = context.create_detached_component(document, Stack::bar(6.0))?;
-        let mut address_input = TextInput::new("about:blank");
-        let layout = std::sync::Arc::make_mut(&mut address_input.style.layout);
-        layout.flex_grow = Some(1.0);
-        layout.flex_shrink = Some(1.0);
-        layout.min_width = Some(LengthSpec::Px(0.0));
-        let address = context.create_detached_component(document, address_input)?;
-        let mut status_text = Text::new("正在打开浏览器…");
-        let status_layout = std::sync::Arc::make_mut(&mut status_text.style.layout);
-        status_layout.flex_grow = Some(1.0);
-        status_layout.flex_shrink = Some(1.0);
-        status_layout.min_width = Some(LengthSpec::Px(0.0));
-        let status = context.create_detached_component(document, status_text)?;
-        let page = context.create_detached_component(
-            document,
-            NativeContent::new("browser-pending").attached(false),
-        )?;
+        use nana_ui::runtime::view::{entity_ref, signal, text, widget, with_refs, EachExt};
+        use nana_ui::runtime::{Button, JustifySpec, NativeContent, Stack};
         let binding = std::sync::Arc::new(std::sync::Mutex::new(
             None::<(crate::runtime_shell::ShellPaneTarget, String, bool)>,
         ));
-        let mut navigation = Vec::new();
-        for (label, action) in [
-            ("后退", BrowserAction::Back),
-            ("前进", BrowserAction::Forward),
-            ("刷新", BrowserAction::Reload),
-            ("打开", BrowserAction::Navigate(String::new())),
-        ] {
-            let button = context.create_detached_component(document, Button::new(label))?;
-            let state = binding.clone();
-            let sink = sink.clone();
-            context.on(button, move |_, _: &Activate, _| {
-                if let Some((target, url, _)) = state.lock().unwrap().as_ref() {
-                    let action = if matches!(action, BrowserAction::Navigate(_)) {
-                        BrowserAction::Navigate(url.clone())
-                    } else {
-                        action.clone()
-                    };
-                    crate::runtime_shell::emit(
-                        &sink,
-                        crate::runtime_shell::ShellIntent::Browser {
-                            target: target.clone(),
-                            action,
+        let address_value = crate::runtime_layout::Bound::new();
+        let chrome_off = crate::runtime_layout::Bound::new();
+        let status_text = crate::runtime_layout::Bound::new();
+        let control_label = crate::runtime_layout::Bound::new();
+        let cancel_off = crate::runtime_layout::Bound::new();
+        let show_recovery = crate::runtime_layout::Bound::new();
+        let show_requests = crate::runtime_layout::Bound::new();
+        let request_items: crate::runtime_layout::Bound<Vec<BrowserHostRequest>> =
+            crate::runtime_layout::Bound::new();
+        let page_resource = crate::runtime_layout::Bound::new();
+        let page_attached = crate::runtime_layout::Bound::new();
+        let address_slot = address_value.clone();
+        let chrome_slot = chrome_off.clone();
+        let status_slot = status_text.clone();
+        let control_label_slot = control_label.clone();
+        let cancel_slot = cancel_off.clone();
+        let recovery_slot = show_recovery.clone();
+        let requests_slot = show_requests.clone();
+        let request_items_slot = request_items.clone();
+        let page_resource_slot = page_resource.clone();
+        let page_attached_slot = page_attached.clone();
+        let view_binding = std::sync::Arc::clone(&binding);
+        let view_sink = sink.clone();
+        let (_, (root, recovery, address, [back, forward, reload, open, control, cancel])) =
+            context.mount_view_detached(document, move || {
+                let address_value = address_slot.install(signal("about:blank".to_owned()));
+                let chrome_off = chrome_slot.install(signal(true));
+                let status_text = status_slot.install(signal("正在打开浏览器…".to_owned()));
+                let control_label = control_label_slot.install(signal("接管".to_owned()));
+                let cancel_off = cancel_slot.install(signal(true));
+                let show_recovery = recovery_slot.install(signal(false));
+                let show_requests = requests_slot.install(signal(false));
+                let request_items = request_items_slot.install(signal(Vec::new()));
+                let page_resource =
+                    page_resource_slot.install(signal("browser-pending".to_owned()));
+                let page_attached = page_attached_slot.install(signal(false));
+                let root = entity_ref();
+                let recovery = entity_ref();
+                let address = entity_ref();
+                let back = entity_ref();
+                let forward = entity_ref();
+                let reload = entity_ref();
+                let open = entity_ref();
+                let control = entity_ref();
+                let cancel = entity_ref();
+                let nav = |label: &'static str,
+                           slot,
+                           action: BrowserAction,
+                           binding: std::sync::Arc<
+                    std::sync::Mutex<Option<(crate::runtime_shell::ShellPaneTarget, String, bool)>>,
+                >,
+                           sink: crate::runtime_shell::IntentSink| {
+                    widget(Button::new(label))
+                        .entity_ref(slot)
+                        .label(label)
+                        .disabled(chrome_off)
+                        .on_activate(move || emit_browser(&sink, &binding, action.clone()))
+                };
+                let page_resource_bind = page_resource;
+                let page_attached_bind = page_attached;
+                let view = widget(Stack::fill_column(8.0)).entity_ref(root).children((
+                    widget(Stack::bar(6.0)).children((
+                        nav(
+                            "后退",
+                            back,
+                            BrowserAction::Back,
+                            std::sync::Arc::clone(&view_binding),
+                            view_sink.clone(),
+                        ),
+                        nav(
+                            "前进",
+                            forward,
+                            BrowserAction::Forward,
+                            std::sync::Arc::clone(&view_binding),
+                            view_sink.clone(),
+                        ),
+                        nav(
+                            "刷新",
+                            reload,
+                            BrowserAction::Reload,
+                            std::sync::Arc::clone(&view_binding),
+                            view_sink.clone(),
+                        ),
+                        widget(flexible_input("about:blank"))
+                            .entity_ref(address)
+                            .value(address_value)
+                            .disabled(chrome_off)
+                            .on_input({
+                                let binding = std::sync::Arc::clone(&view_binding);
+                                move |event| {
+                                    if let Some((_, url, _)) = binding.lock().unwrap().as_mut() {
+                                        *url = event.value.to_string();
+                                    }
+                                }
+                            }),
+                        nav(
+                            "打开",
+                            open,
+                            BrowserAction::Navigate(String::new()),
+                            std::sync::Arc::clone(&view_binding),
+                            view_sink.clone(),
+                        ),
+                    )),
+                    widget(Stack::bar(8.0).justify(JustifySpec::SpaceBetween)).children((
+                        widget(flexible_text("正在打开浏览器…")).value(status_text),
+                        widget(Button::new("接管"))
+                            .entity_ref(control)
+                            .label(control_label)
+                            .disabled(chrome_off)
+                            .on_activate({
+                                let binding = std::sync::Arc::clone(&view_binding);
+                                let sink = view_sink.clone();
+                                move || emit_browser(&sink, &binding, BrowserAction::Takeover)
+                            }),
+                        widget(Button::new("停止操作"))
+                            .entity_ref(cancel)
+                            .label("停止操作")
+                            .disabled(cancel_off)
+                            .on_activate({
+                                let binding = std::sync::Arc::clone(&view_binding);
+                                let sink = view_sink.clone();
+                                move || emit_browser(&sink, &binding, BrowserAction::Cancel)
+                            }),
+                    )),
+                    widget(Stack::row(8.0))
+                        .entity_ref(recovery)
+                        .visible(show_recovery)
+                        .children((
+                            {
+                                let binding = std::sync::Arc::clone(&view_binding);
+                                let sink = view_sink.clone();
+                                widget(Button::new("重试"))
+                                    .label("重试")
+                                    .on_activate(move || {
+                                        emit_browser(&sink, &binding, BrowserAction::Retry)
+                                    })
+                            },
+                            {
+                                let binding = std::sync::Arc::clone(&view_binding);
+                                let sink = view_sink.clone();
+                                widget(Button::new("安装浏览组件"))
+                                    .label("安装浏览组件")
+                                    .on_activate(move || {
+                                        emit_browser(&sink, &binding, BrowserAction::InstallRuntime)
+                                    })
+                            },
+                        )),
+                    request_items
+                        .each(|request| request.id, {
+                            let binding = std::sync::Arc::clone(&view_binding);
+                            let sink = view_sink.clone();
+                            move |request| {
+                                let id = request.id;
+                                let requests = request_items;
+                                let approve_binding = std::sync::Arc::clone(&binding);
+                                let approve_sink = sink.clone();
+                                let reject_binding = std::sync::Arc::clone(&binding);
+                                let reject_sink = sink.clone();
+                                widget(request_card()).children((
+                                    text(move || request_message(requests, id)),
+                                    widget(Stack::row(6.0)).children((
+                                        widget(Button::new(""))
+                                            .label(move || request_approve_label(requests, id))
+                                            .on_activate(move || {
+                                                emit_request(
+                                                    &approve_sink,
+                                                    &approve_binding,
+                                                    requests,
+                                                    id,
+                                                    true,
+                                                )
+                                            }),
+                                        widget(Button::new("拒绝")).label("拒绝").on_activate(
+                                            move || {
+                                                emit_request(
+                                                    &reject_sink,
+                                                    &reject_binding,
+                                                    requests,
+                                                    id,
+                                                    false,
+                                                )
+                                            },
+                                        ),
+                                    )),
+                                ))
+                            }
+                        })
+                        .gap(6.0)
+                        .visible(show_requests),
+                    widget(NativeContent::new("browser-pending").attached(false)).bind(
+                        move |page| {
+                            page.resource = page_resource_bind.get().into();
+                            page.attached = page_attached_bind.get();
                         },
-                    );
-                }
+                    ),
+                ));
+                with_refs(
+                    view,
+                    (
+                        root,
+                        recovery,
+                        address,
+                        [back, forward, reload, open, control, cancel],
+                    ),
+                )
             })?;
-            navigation.push(button);
-            if label == "打开" {
-                context.append_child(toolbar, address)?;
-            }
-            context.append_child(toolbar, button)?;
-        }
-        let state = binding.clone();
-        context.on(address, move |_, event: &TextChanged, _| {
-            if let Some((_, url, _)) = state.lock().unwrap().as_mut() {
-                *url = event.value.to_string();
-            }
-        })?;
-        let control = context.create_detached_component(document, Button::new("接管"))?;
-        let cancel = context.create_detached_component(document, Button::new("停止操作"))?;
-        let cancel_state = binding.clone();
-        let cancel_sink = sink.clone();
-        context.on(cancel, move |_, _: &Activate, _| {
-            if let Some((target, _, _)) = cancel_state.lock().unwrap().as_ref() {
-                crate::runtime_shell::emit(
-                    &cancel_sink,
-                    crate::runtime_shell::ShellIntent::Browser {
-                        target: target.clone(),
-                        action: BrowserAction::Cancel,
-                    },
-                );
-            }
-        })?;
-        let state = binding.clone();
-        let control_sink = sink.clone();
-        context.on(control, move |_, _: &Activate, _| {
-            if let Some((target, _, human)) = state.lock().unwrap().as_ref() {
-                crate::runtime_shell::emit(
-                    &control_sink,
-                    crate::runtime_shell::ShellIntent::Browser {
-                        target: target.clone(),
-                        action: if *human {
-                            BrowserAction::Resume
-                        } else {
-                            BrowserAction::Takeover
-                        },
-                    },
-                );
-            }
-        })?;
-        let status_row = context.create_detached_component(
-            document,
-            Stack::bar(8.0).justify(JustifySpec::SpaceBetween),
-        )?;
-        context.append_child(status_row, status)?;
-        context.append_child(status_row, control)?;
-        context.append_child(status_row, cancel)?;
-        let recovery = context.create_detached_component(document, Stack::row(8.0))?;
-        for (label, action) in [
-            ("重试", BrowserAction::Retry),
-            ("安装浏览组件", BrowserAction::InstallRuntime),
-        ] {
-            let button = context.create_detached_component(document, Button::new(label))?;
-            let state = binding.clone();
-            let sink = sink.clone();
-            context.on(button, move |_, _: &Activate, _| {
-                if let Some((target, _, _)) = state.lock().unwrap().as_ref() {
-                    crate::runtime_shell::emit(
-                        &sink,
-                        crate::runtime_shell::ShellIntent::Browser {
-                            target: target.clone(),
-                            action: action.clone(),
-                        },
-                    );
-                }
-            })?;
-            context.append_child(recovery, button)?;
-        }
-        let requests = context.create_detached_component(document, Stack::column(6.0))?;
-        context.append_child(root, toolbar)?;
-        context.append_child(root, status_row)?;
-        context.append_child(root, page)?;
+        let requests = child_stack(context, root, 3)?;
         Ok(Self {
             root,
-            page,
             address,
-            status,
-            status_row,
             control,
             cancel,
             binding,
             last_url: String::new(),
             ready: false,
             failed: false,
-            navigation,
-            toolbar,
-            recovery,
-            document,
-            sink: sink.clone(),
+            navigation: vec![back, forward, reload, open],
             requests,
-            request_rows: vec![],
-            last_requests: vec![],
+            request_rows: Vec::new(),
+            last_requests: Vec::new(),
+            recovery,
+            address_value,
+            chrome_off,
+            status_text,
+            control_label,
+            cancel_off,
+            show_recovery,
+            show_requests,
+            request_items,
+            page_resource,
+            page_attached,
         })
     }
 
@@ -381,9 +472,7 @@ impl BrowserView {
             .as_ref()
             .is_none_or(|(old, _, _)| old.item_id != target.item_id);
         let url = if changed || self.last_url != snapshot.url {
-            context.update_component(self.address, |address, _| {
-                address.state.replace_value(snapshot.url.clone());
-            })?;
+            self.address_value.set(snapshot.url.clone());
             self.last_url = snapshot.url.clone();
             snapshot.url.clone()
         } else {
@@ -393,122 +482,190 @@ impl BrowserView {
         };
         *binding = Some((target, url, snapshot.human_control));
         drop(binding);
-        self.sync_requests(context, &snapshot.requests)?;
         self.ready = snapshot.ready;
         self.failed = snapshot.failed;
-        context.update_component(self.address, |address, _| {
-            address.disabled = !snapshot.ready;
-        })?;
-        for button in &self.navigation {
-            context.update_component(*button, |button, _| {
-                button.disabled = !snapshot.ready;
-            })?;
-        }
-        context.update_component(self.page, |page, _| {
-            page.resource = snapshot.resource.clone().into();
-            page.attached = snapshot.ready;
-        })?;
-        context.update_component(self.status, |status, _| {
-            status.value = snapshot.status.clone();
-        })?;
-        context.update_component(self.control, |button, _| {
-            *button = nana_ui::runtime::Button::new(if snapshot.human_control {
+        self.chrome_off.set(!snapshot.ready);
+        self.status_text.set(snapshot.status.clone());
+        self.control_label.set(
+            if snapshot.human_control {
                 "恢复 Agent"
             } else {
                 "接管"
-            });
-            button.disabled = !snapshot.ready;
-        })?;
-        context.update_component(self.cancel, |button, _| {
-            *button = nana_ui::runtime::Button::new("停止操作");
-            button.disabled = !snapshot.busy;
-        })?;
-        let mut children = vec![self.toolbar.stable_id(), self.status_row.stable_id()];
-        if snapshot.failed {
-            children.push(self.recovery.stable_id());
-        }
-        if !snapshot.requests.is_empty() {
-            children.push(self.requests.stable_id());
-        }
-        children.push(self.page.stable_id());
-        crate::runtime_layout::reconcile_children(context, self.root.stable_id(), &children)?;
-        Ok(())
-    }
-
-    fn sync_requests(
-        &mut self,
-        context: &mut nana_ui::runtime::AppContext,
-        requests: &[BrowserHostRequest],
-    ) -> Result<(), nana_ui::runtime::FrameworkError> {
-        use nana_ui::runtime::*;
-        if self.last_requests == requests {
-            return Ok(());
-        }
-        for row in self.request_rows.drain(..) {
-            context.remove_view(row)?;
-        }
-        for request in requests {
-            let row = context.create_detached_component(
-                self.document,
-                Stack::column(6.0)
-                    .padding(8.0)
-                    .surface(SemanticColorRole::Surface)
-                    .outline(SemanticColorRole::Border, 1.0)
-                    .radius(nana_ui::theme::RadiusTier::Md),
-            )?;
-            let (message, approve) = match &request.kind {
-                BrowserHostRequestKind::Download { suggested_filename } => (
-                    format!("网页请求下载：{suggested_filename}"),
-                    "选择保存位置",
-                ),
-                BrowserHostRequestKind::Upload { multiple } => (
-                    "网页请求上传文件".into(),
-                    if *multiple {
-                        "选择文件"
-                    } else {
-                        "选择一个文件"
-                    },
-                ),
-                BrowserHostRequestKind::NewWindow { url } => {
-                    (format!("网页请求打开新标签页：{url}"), "打开标签页")
-                }
-            };
-            let text = context.create_detached_component(self.document, Text::new(message))?;
-            context.append_child(row, text)?;
-            let actions = context.create_detached_component(self.document, Stack::row(6.0))?;
-            for (label, allow) in [(approve, true), ("拒绝", false)] {
-                let button =
-                    context.create_detached_component(self.document, Button::new(label))?;
-                let binding = self.binding.clone();
-                let sink = self.sink.clone();
-                let ticket = request.clone();
-                context.on(button, move |_, _: &Activate, _| {
-                    if let Some((target, _, _)) = binding.lock().unwrap().as_ref() {
-                        if target.item_id.as_str() != ticket.scope.tab_id {
-                            return;
-                        }
-                        crate::runtime_shell::emit(
-                            &sink,
-                            crate::runtime_shell::ShellIntent::Browser {
-                                target: target.clone(),
-                                action: if allow {
-                                    BrowserAction::ApproveRequest(ticket.clone())
-                                } else {
-                                    BrowserAction::RejectRequest(ticket.clone())
-                                },
-                            },
-                        );
-                    }
-                })?;
-                context.append_child(actions, button)?;
             }
-            context.append_child(row, actions)?;
-            context.append_child(self.requests, row)?;
-            self.request_rows.push(row);
-        }
-        self.last_requests = requests.to_vec();
+            .to_owned(),
+        );
+        self.cancel_off.set(!snapshot.busy);
+        self.show_recovery.set(snapshot.failed);
+        self.show_requests.set(!snapshot.requests.is_empty());
+        self.page_resource.set(snapshot.resource.clone());
+        self.page_attached.set(snapshot.ready);
+        self.request_items.set(snapshot.requests.clone());
+        context.flush_reactive()?;
+        self.request_rows = zip_request_rows(context, self.requests, &snapshot.requests);
+        self.last_requests = snapshot.requests.clone();
         Ok(())
     }
+}
+
+fn flexible_input(value: &str) -> nana_ui::runtime::TextInput {
+    let mut input = nana_ui::runtime::TextInput::new(value);
+    let layout = std::sync::Arc::make_mut(&mut input.style.layout);
+    layout.flex_grow = Some(1.0);
+    layout.flex_shrink = Some(1.0);
+    layout.min_width = Some(nana_ui::runtime::LengthSpec::Px(0.0));
+    input
+}
+
+fn flexible_text(value: &str) -> nana_ui::runtime::Text {
+    let mut text = nana_ui::runtime::Text::new(value);
+    let layout = std::sync::Arc::make_mut(&mut text.style.layout);
+    layout.flex_grow = Some(1.0);
+    layout.flex_shrink = Some(1.0);
+    layout.min_width = Some(nana_ui::runtime::LengthSpec::Px(0.0));
+    text
+}
+
+fn request_card() -> nana_ui::runtime::Stack {
+    nana_ui::runtime::Stack::column(6.0)
+        .padding(8.0)
+        .surface(nana_ui::runtime::SemanticColorRole::Surface)
+        .outline(nana_ui::runtime::SemanticColorRole::Border, 1.0)
+        .radius(nana_ui::theme::RadiusTier::Md)
+}
+
+fn request_copy(
+    requests: nana_ui::runtime::view::Signal<Vec<BrowserHostRequest>>,
+    id: u64,
+) -> Option<BrowserHostRequest> {
+    requests.with(|requests| requests.iter().find(|request| request.id == id).cloned())
+}
+
+fn request_message(
+    requests: nana_ui::runtime::view::Signal<Vec<BrowserHostRequest>>,
+    id: u64,
+) -> String {
+    let Some(request) = request_copy(requests, id) else {
+        return String::new();
+    };
+    match request.kind {
+        BrowserHostRequestKind::Download { suggested_filename } => {
+            format!("网页请求下载：{suggested_filename}")
+        }
+        BrowserHostRequestKind::Upload { .. } => "网页请求上传文件".to_owned(),
+        BrowserHostRequestKind::NewWindow { url } => format!("网页请求打开新标签页：{url}"),
+    }
+}
+
+fn request_approve_label(
+    requests: nana_ui::runtime::view::Signal<Vec<BrowserHostRequest>>,
+    id: u64,
+) -> String {
+    let Some(request) = request_copy(requests, id) else {
+        return String::new();
+    };
+    match request.kind {
+        BrowserHostRequestKind::Download { .. } => "选择保存位置".to_owned(),
+        BrowserHostRequestKind::Upload { multiple: true } => "选择文件".to_owned(),
+        BrowserHostRequestKind::Upload { multiple: false } => "选择一个文件".to_owned(),
+        BrowserHostRequestKind::NewWindow { .. } => "打开标签页".to_owned(),
+    }
+}
+
+fn emit_browser(
+    sink: &crate::runtime_shell::IntentSink,
+    binding: &std::sync::Mutex<Option<(crate::runtime_shell::ShellPaneTarget, String, bool)>>,
+    action: BrowserAction,
+) {
+    let Some((target, url, human)) = binding.lock().unwrap().clone() else {
+        return;
+    };
+    let action = match action {
+        BrowserAction::Navigate(_) => BrowserAction::Navigate(url),
+        BrowserAction::Takeover if human => BrowserAction::Resume,
+        other => other,
+    };
+    crate::runtime_shell::emit(
+        sink,
+        crate::runtime_shell::ShellIntent::Browser { target, action },
+    );
+}
+
+fn emit_request(
+    sink: &crate::runtime_shell::IntentSink,
+    binding: &std::sync::Mutex<Option<(crate::runtime_shell::ShellPaneTarget, String, bool)>>,
+    requests: nana_ui::runtime::view::Signal<Vec<BrowserHostRequest>>,
+    id: u64,
+    allow: bool,
+) {
+    let Some(ticket) = request_copy(requests, id) else {
+        return;
+    };
+    let Some((target, _, _)) = binding.lock().unwrap().clone() else {
+        return;
+    };
+    if target.item_id.as_str() != ticket.scope.tab_id {
+        return;
+    }
+    crate::runtime_shell::emit(
+        sink,
+        crate::runtime_shell::ShellIntent::Browser {
+            target,
+            action: if allow {
+                BrowserAction::ApproveRequest(ticket)
+            } else {
+                BrowserAction::RejectRequest(ticket)
+            },
+        },
+    );
+}
+
+fn child_stack(
+    context: &nana_ui::runtime::AppContext,
+    parent: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
+    index: usize,
+) -> Result<nana_ui::runtime::Entity<nana_ui::runtime::Stack>, nana_ui::runtime::FrameworkError> {
+    let id = context
+        .world()
+        .node(parent.stable_id())
+        .and_then(|node| node.children.get(index).copied())
+        .ok_or(nana_ui::runtime::FrameworkError::InvalidInput)?;
+    Ok(nana_ui::runtime::Entity::from_stable_id(id))
+}
+
+fn zip_request_rows(
+    context: &nana_ui::runtime::AppContext,
+    requests: nana_ui::runtime::Entity<nana_ui::runtime::Stack>,
+    items: &[BrowserHostRequest],
+) -> Vec<nana_ui::runtime::Entity<nana_ui::runtime::Stack>> {
+    let children = context
+        .world()
+        .node(requests.stable_id())
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut rows = Vec::new();
+    let mut cursor = children.into_iter();
+    let mut seen = Vec::new();
+    for item in items {
+        if seen.contains(&item.id) {
+            continue;
+        }
+        seen.push(item.id);
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        rows.push(nana_ui::runtime::Entity::from_stable_id(child));
+    }
+    rows
+}
+
+fn browser_node_shown(
+    world: &nana_ui::runtime::UiWorld,
+    id: nana_ui::runtime::StableNodeId,
+) -> bool {
+    world.node(id).is_some_and(|node| node.parent.is_some())
+        && world
+            .node_style(id)
+            .is_none_or(|style| !style.layout.hidden)
 }
 
 #[cfg(debug_assertions)]
@@ -1179,10 +1336,10 @@ impl BrowserWorkbench {
     pub fn input(
         &self,
         id: nana_ui_platform::WindowId,
-        event: &nana_ui_platform::InputEvent,
+        event: &nana_ui_platform::CanonicalInputEvent,
         hit: Option<nana_ui::runtime::StableNodeId>,
     ) -> bool {
-        use nana_ui_platform::{InputEvent, PointerPhase};
+        use nana_ui_platform::{InputPayload, PointerPhase, WheelUnit};
         use webview2_com::Microsoft::Web::WebView2::Win32::*;
         use windows::Win32::Foundation::POINT;
         let Some((scale, regions)) = self.regions.get(&id) else {
@@ -1190,7 +1347,7 @@ impl BrowserWorkbench {
         };
         let hit_region = regions.iter().find(|region| Some(region.node) == hit);
         let capture = self.captured.borrow().get(&id).cloned();
-        let pointer = matches!(event, InputEvent::Pointer { .. });
+        let pointer = matches!(event.payload, InputPayload::Pointer(_));
         if pointer && capture.is_none() {
             let previous = self.hovered.borrow_mut().remove(&id);
             let current = hit_region.map(|region| region.resource.to_string());
@@ -1213,11 +1370,11 @@ impl BrowserWorkbench {
             }
         }
         if matches!(
-            event,
-            InputEvent::Pointer {
+            event.payload,
+            InputPayload::Pointer(nana_ui_platform::PointerInput {
                 phase: PointerPhase::Down,
                 ..
-            }
+            })
         ) && hit_region.is_none()
             && capture.is_none()
         {
@@ -1245,16 +1402,14 @@ impl BrowserWorkbench {
         let Some(scope) = self.scopes.get(region.resource.as_ref()) else {
             return false;
         };
-        let (x, y, kind, data, modifiers, buttons) = match event {
-            InputEvent::Pointer {
-                x,
-                y,
-                phase,
-                button,
-                buttons,
-                modifiers,
-                ..
-            } => {
+        let (x, y, kind, data, modifiers, buttons) = match &event.payload {
+            InputPayload::Pointer(pointer) => {
+                let x = pointer.x;
+                let y = pointer.y;
+                let phase = pointer.phase;
+                let button = pointer.button;
+                let buttons = pointer.buttons;
+                let modifiers = pointer.modifiers;
                 let kind = match (phase, button) {
                     (PointerPhase::Down, 0) => COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOWN,
                     (PointerPhase::Up, 0) => COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_UP,
@@ -1266,7 +1421,7 @@ impl BrowserWorkbench {
                     (PointerPhase::Cancel, _) => COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
                     _ => return false,
                 };
-                if *phase == PointerPhase::Down {
+                if phase == PointerPhase::Down {
                     self.selected
                         .borrow_mut()
                         .insert(scope.task_id.clone(), scope.tab_id.clone());
@@ -1275,25 +1430,23 @@ impl BrowserWorkbench {
                         self.captured.borrow_mut().insert(id, scope.tab_id.clone());
                     }
                 }
-                if *phase == PointerPhase::Cancel || (*phase == PointerPhase::Up && *buttons == 0) {
+                if phase == PointerPhase::Cancel || (phase == PointerPhase::Up && buttons == 0) {
                     self.captured.borrow_mut().remove(&id);
                     let _ = self.host.set_pointer_capture(scope, false);
                 }
-                (*x, *y, kind, 0, *modifiers, *buttons)
+                (x, y, kind, 0, modifiers, buttons)
             }
-            InputEvent::Wheel {
-                x,
-                y,
-                delta_y,
-                line_delta,
-                modifiers,
-                ..
-            } => (
-                *x,
-                *y,
+            InputPayload::Wheel(wheel) => (
+                wheel.x,
+                wheel.y,
                 COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL,
-                (-delta_y * if *line_delta { 120.0 } else { 1.0 }) as i32 as u32,
-                *modifiers,
+                (-wheel.delta_y
+                    * if wheel.unit == WheelUnit::Lines {
+                        120.0
+                    } else {
+                        1.0
+                    }) as i32 as u32,
+                wheel.modifiers,
                 0,
             ),
             _ => return false,
@@ -1473,13 +1626,15 @@ mod tests {
         view.sync(document.context_mut(), target, &presentation)
             .unwrap();
         assert!(!document.context().world().contains(row));
-        assert!(!document
-            .context()
-            .world()
-            .node(view.root.stable_id())
-            .unwrap()
-            .children
-            .contains(&panel));
+        assert!(
+            document
+                .context()
+                .world()
+                .node_style(panel)
+                .unwrap()
+                .layout
+                .hidden
+        );
         let root = view.root.stable_id();
         let recovery = view.recovery.stable_id();
         view.dispose(document.context_mut()).unwrap();

@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use lilia_feature_memory::MemoryFeature;
 use lilia_feature_roadmap::RoadmapFeature;
@@ -8,7 +8,7 @@ use lilia_service::ServiceAuthority;
 use nana_ui_platform::WindowId;
 
 use crate::application::*;
-use crate::runtime_shell::{ShellProjectPage, empty_snapshot};
+use crate::runtime_shell::{empty_snapshot, ShellProjectPage};
 use crate::shell_service::{WorkspaceSessionFeature, WorkspaceSessions};
 use crate::ui_module::projection::{MemoryProjection, Projection, RoadmapProjection};
 use crate::ui_module::{UiModule, UiModuleContext};
@@ -473,10 +473,7 @@ fn memory_save_creates_from_dirty_draft_after_selected_row_vanishes() {
     module.reduce(MemoryMessage::Refresh, &cx);
     module.reduce(MemoryMessage::Select(original.id.clone()), &cx);
     module.reduce(MemoryMessage::TitleChanged("Kept title".into()), &cx);
-    module.reduce(
-        MemoryMessage::BodyReplaced("Kept body".into()),
-        &cx,
-    );
+    module.reduce(MemoryMessage::BodyReplaced("Kept body".into()), &cx);
     let events = app.subscribe_events();
     app.delete_memory(&original.id, Some(original.updated_at))
         .unwrap();
@@ -687,10 +684,7 @@ fn roadmap_clean_editor_adopts_external_title_and_dirty_draft_survives_delete() 
         "Other window"
     );
 
-    module.reduce(
-        RoadmapMessage::TitleChanged("Local draft".to_owned()),
-        &cx,
-    );
+    module.reduce(RoadmapMessage::TitleChanged("Local draft".to_owned()), &cx);
     app.update_milestone(
         &project.id,
         &first.id,

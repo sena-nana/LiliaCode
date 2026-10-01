@@ -1,9 +1,11 @@
 use super::RoadmapMessage;
-use crate::runtime_layout::reconcile_children;
+use crate::runtime_layout::{view_bar, view_column, view_fill_column, view_row, Bound};
+use nana_ui::runtime::view::{entity_ref, signal, text, widget, with_refs, EachExt};
+#[cfg(test)]
+use nana_ui::runtime::Activate;
 use nana_ui::runtime::{
-    Activate, AppContext, Button, DocumentId, Entity, FormField, FrameworkError, MutationQueue,
-    ScrollAxes, ScrollView, StableNodeId, Stack, Switch, Text, TextArea, TextChanged,
-    ToggleChanged,
+    AppContext, Button, DocumentId, Entity, FormField, FrameworkError, MutationQueue, ScrollAxes,
+    ScrollView, StableNodeId, Stack, Switch, Text, TextArea, TextInput,
 };
 use nana_ui::ButtonKind;
 use std::collections::{HashMap, HashSet};
@@ -45,7 +47,9 @@ struct RoadmapRow {
 pub(crate) struct RoadmapView {
     pub(crate) root: Entity<Stack>,
     error: Entity<Text>,
-    fields: [Entity<TextArea>; 3],
+    fields: [Entity<TextInput>; 1],
+    description: Entity<TextArea>,
+    due: Entity<TextInput>,
     create: Entity<Button>,
     status: Entity<Button>,
     up: Entity<Button>,
@@ -54,8 +58,23 @@ pub(crate) struct RoadmapView {
     delete: Entity<Button>,
     list: Entity<Stack>,
     rows: HashMap<String, RoadmapRow>,
+    task_host: Entity<Stack>,
     task_toggles: HashMap<String, Entity<Switch>>,
-    sink: Sink,
+    title_text: Bound<String>,
+    description_text: Bound<String>,
+    due_text: Bound<String>,
+    error_text: Bound<String>,
+    show_error: Bound<bool>,
+    status_label: Bound<String>,
+    create_off: Bound<bool>,
+    status_off: Bound<bool>,
+    save_off: Bound<bool>,
+    delete_off: Bound<bool>,
+    up_off: Bound<bool>,
+    down_off: Bound<bool>,
+    show_tasks: Bound<bool>,
+    cards: Bound<Vec<RoadmapCard>>,
+    tasks: Bound<Vec<RoadmapTask>>,
     selected: Option<String>,
     project_id: Option<String>,
     suspended: bool,
@@ -79,7 +98,11 @@ impl RoadmapView {
             ),
             (
                 "field.project-milestone-description".into(),
-                self.fields[1].stable_id(),
+                self.description.stable_id(),
+            ),
+            (
+                "field.project-milestone-due-date".into(),
+                self.due.stable_id(),
             ),
         ];
         for (id, toggle) in &self.task_toggles {
@@ -93,109 +116,217 @@ impl RoadmapView {
         document: DocumentId,
         sink: Sink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::fill_column(12.0))?;
-        let header = context.create_detached_component(document, Stack::bar(8.0))?;
-        let title = context.create_detached_component(document, Text::new("路线图"))?;
-        let create = button(
-            context,
-            document,
-            "新建里程碑",
-            ButtonKind::Primary,
-            RoadmapMessage::Create,
-            &sink,
-        )?;
-        context.append_child(header, title)?;
-        context.append_child(header, create)?;
-        context.append_child(root, header)?;
-        let error = context.create_detached_component(document, Text::new(""))?;
-        context.append_child(root, error)?;
-        let mut inputs = Vec::new();
-        for (label, height, message) in [
+        let title_text = Bound::new();
+        let description_text = Bound::new();
+        let due_text = Bound::new();
+        let error_text = Bound::new();
+        let show_error = Bound::new();
+        let status_label = Bound::new();
+        let create_off = Bound::new();
+        let status_off = Bound::new();
+        let save_off = Bound::new();
+        let delete_off = Bound::new();
+        let up_off = Bound::new();
+        let down_off = Bound::new();
+        let show_tasks = Bound::new();
+        let cards: Bound<Vec<RoadmapCard>> = Bound::new();
+        let tasks: Bound<Vec<RoadmapTask>> = Bound::new();
+        let title_slot = title_text.clone();
+        let description_slot = description_text.clone();
+        let due_slot = due_text.clone();
+        let error_slot = error_text.clone();
+        let show_error_slot = show_error.clone();
+        let status_slot = status_label.clone();
+        let create_off_slot = create_off.clone();
+        let status_off_slot = status_off.clone();
+        let save_off_slot = save_off.clone();
+        let delete_off_slot = delete_off.clone();
+        let up_off_slot = up_off.clone();
+        let down_off_slot = down_off.clone();
+        let show_tasks_slot = show_tasks.clone();
+        let cards_slot = cards.clone();
+        let tasks_slot = tasks.clone();
+        let (
+            _,
             (
-                "标题",
-                40.0,
-                RoadmapMessage::TitleChanged as fn(String) -> RoadmapMessage,
+                root,
+                error,
+                fields,
+                description,
+                due,
+                [create, status, up, down, save, delete],
+                scroll,
+                task_host,
             ),
-            (
-                "描述",
-                144.0,
-                RoadmapMessage::DescriptionChanged as fn(String) -> RoadmapMessage,
-            ),
-            (
-                "截止日期",
-                40.0,
-                RoadmapMessage::DueDateChanged as fn(String) -> RoadmapMessage,
-            ),
-        ] {
-            let input =
-                context.create_detached_component(document, TextArea::new("").height(height))?;
-            let field = context.create_detached_component(
-                document,
-                FormField::new(label).control_child(input.stable_id()),
-            )?;
-            context.append_child(field, input)?;
-            context.append_child(root, field)?;
-            let sink = Arc::clone(&sink);
-            context.on(input, move |_, event: &TextChanged, _| {
-                sink(message(event.value.to_string()))
-            })?;
-            inputs.push(input);
-        }
-        let actions = context.create_detached_component(document, Stack::row(8.0))?;
-        let status = button(
-            context,
-            document,
-            "状态",
-            ButtonKind::Subtle,
-            RoadmapMessage::CycleStatus,
-            &sink,
-        )?;
-        let up = button(
-            context,
-            document,
-            "上移",
-            ButtonKind::Subtle,
-            RoadmapMessage::Move(-1),
-            &sink,
-        )?;
-        let down = button(
-            context,
-            document,
-            "下移",
-            ButtonKind::Subtle,
-            RoadmapMessage::Move(1),
-            &sink,
-        )?;
-        let save = button(
-            context,
-            document,
-            "保存",
-            ButtonKind::Primary,
-            RoadmapMessage::Save,
-            &sink,
-        )?;
-        let delete = button(
-            context,
-            document,
-            "删除",
-            ButtonKind::Danger,
-            RoadmapMessage::Delete,
-            &sink,
-        )?;
-        for button in [save, status, up, down, delete] {
-            context.append_child(actions, button)?;
-        }
-        context.append_child(root, actions)?;
-        let scroll =
-            context.create_detached_component(document, ScrollView::new(ScrollAxes::Vertical))?;
-        let list = context.create_detached_component(document, Stack::column(6.0))?;
-        context.append_child(scroll, list)?;
-        context.append_child(root, scroll)?;
-        context.world_mut().register_focus_scope(root.stable_id())?;
+        ) = context.mount_view_detached(document, move || {
+            let title_text = title_slot.install(signal(String::new()));
+            let description_text = description_slot.install(signal(String::new()));
+            let due_text = due_slot.install(signal(String::new()));
+            let error_text = error_slot.install(signal(String::new()));
+            let show_error = show_error_slot.install(signal(false));
+            let status_label = status_slot.install(signal("状态".to_owned()));
+            let create_off = create_off_slot.install(signal(false));
+            let status_off = status_off_slot.install(signal(false));
+            let save_off = save_off_slot.install(signal(false));
+            let delete_off = delete_off_slot.install(signal(false));
+            let up_off = up_off_slot.install(signal(false));
+            let down_off = down_off_slot.install(signal(false));
+            let show_tasks = show_tasks_slot.install(signal(false));
+            let cards = cards_slot.install(signal(Vec::new()));
+            let tasks = tasks_slot.install(signal(Vec::new()));
+            let root = entity_ref::<Stack>();
+            let error = entity_ref::<Text>();
+            let title = entity_ref::<TextInput>();
+            let description = entity_ref::<TextArea>();
+            let due = entity_ref::<TextInput>();
+            let create = entity_ref::<Button>();
+            let status = entity_ref::<Button>();
+            let up = entity_ref::<Button>();
+            let down = entity_ref::<Button>();
+            let save = entity_ref::<Button>();
+            let delete = entity_ref::<Button>();
+            let scroll = entity_ref::<ScrollView>();
+            let task_host = entity_ref::<Stack>();
+            let create_sink = Arc::clone(&sink);
+            let status_sink = Arc::clone(&sink);
+            let up_sink = Arc::clone(&sink);
+            let down_sink = Arc::clone(&sink);
+            let save_sink = Arc::clone(&sink);
+            let delete_sink = Arc::clone(&sink);
+            let title_sink = Arc::clone(&sink);
+            let description_sink = Arc::clone(&sink);
+            let due_sink = Arc::clone(&sink);
+            let card_sink = Arc::clone(&sink);
+            let task_sink = sink;
+            let page = view_fill_column(12.0).entity_ref(root).children((
+                view_bar(8.0).children((
+                    text("路线图"),
+                    widget(Button::new("新建里程碑").kind(ButtonKind::Primary))
+                        .entity_ref(create)
+                        .disabled(create_off)
+                        .on_activate(move || create_sink(RoadmapMessage::Create)),
+                )),
+                text(error_text).entity_ref(error).visible(show_error),
+                field(
+                    "标题",
+                    widget(TextInput::new(""))
+                        .entity_ref(title)
+                        .value(title_text)
+                        .on_input(move |event| {
+                            title_sink(RoadmapMessage::TitleChanged(event.value.to_string()))
+                        }),
+                ),
+                field(
+                    "描述",
+                    widget(TextArea::new("").height(144.0))
+                        .entity_ref(description)
+                        .value(description_text)
+                        .on_input(move |event| {
+                            description_sink(RoadmapMessage::DescriptionChanged(
+                                event.value.to_string(),
+                            ))
+                        }),
+                ),
+                field(
+                    "截止日期",
+                    widget(TextInput::new(""))
+                        .entity_ref(due)
+                        .value(due_text)
+                        .on_input(move |event| {
+                            due_sink(RoadmapMessage::DueDateChanged(event.value.to_string()))
+                        }),
+                ),
+                view_row(8.0).children((
+                    widget(Button::new("保存").kind(ButtonKind::Primary))
+                        .entity_ref(save)
+                        .disabled(save_off)
+                        .on_activate(move || save_sink(RoadmapMessage::Save)),
+                    widget(Button::new("状态").kind(ButtonKind::Subtle))
+                        .entity_ref(status)
+                        .label(status_label)
+                        .disabled(status_off)
+                        .on_activate(move || status_sink(RoadmapMessage::CycleStatus)),
+                    widget(Button::new("上移").kind(ButtonKind::Subtle))
+                        .entity_ref(up)
+                        .disabled(up_off)
+                        .on_activate(move || up_sink(RoadmapMessage::Move(-1))),
+                    widget(Button::new("下移").kind(ButtonKind::Subtle))
+                        .entity_ref(down)
+                        .disabled(down_off)
+                        .on_activate(move || down_sink(RoadmapMessage::Move(1))),
+                    widget(Button::new("删除").kind(ButtonKind::Danger))
+                        .entity_ref(delete)
+                        .disabled(delete_off)
+                        .on_activate(move || delete_sink(RoadmapMessage::Delete)),
+                )),
+                widget(ScrollView::new(ScrollAxes::Vertical))
+                    .entity_ref(scroll)
+                    .children(
+                        cards
+                            .each(
+                                |card| card.id.clone(),
+                                move |card| {
+                                    let id = card.id.clone();
+                                    let label_id = id.clone();
+                                    let cards = cards;
+                                    let sink = Arc::clone(&card_sink);
+                                    widget(Button::new("").kind(ButtonKind::Subtle))
+                                        .label(move || card_label(&cards, &label_id))
+                                        .on_activate(move || {
+                                            sink(RoadmapMessage::Select(id.clone()))
+                                        })
+                                },
+                            )
+                            .gap(6.0),
+                    ),
+                view_column(0.0)
+                    .entity_ref(task_host)
+                    .visible(show_tasks)
+                    .children(
+                        tasks
+                            .each(
+                                |task| task.id.clone(),
+                                move |task| {
+                                    let id = task.id.clone();
+                                    let title_id = id.clone();
+                                    let linked_id = id.clone();
+                                    let tasks = tasks;
+                                    let sink = Arc::clone(&task_sink);
+                                    widget(Switch::new(task.title.clone(), task.linked))
+                                        .label(move || task_title(&tasks, &title_id))
+                                        .checked(move || task_linked(&tasks, &linked_id))
+                                        .on_change(move |_| {
+                                            sink(RoadmapMessage::ToggleTask(id.clone()))
+                                        })
+                                },
+                            )
+                            .gap(12.0),
+                    ),
+            ));
+            with_refs(
+                page,
+                (
+                    root,
+                    error,
+                    [title],
+                    description,
+                    due,
+                    [create, status, up, down, save, delete],
+                    scroll,
+                    task_host,
+                ),
+            )
+        })?;
+        let list = only_child(context, scroll.stable_id())?;
+        context
+            .compat_world_mut()
+            .register_focus_scope(root.stable_id())?;
         Ok(Self {
             root,
             error,
-            fields: inputs.try_into().ok().unwrap(),
+            fields,
+            description,
+            due,
             create,
             status,
             up,
@@ -204,8 +335,23 @@ impl RoadmapView {
             delete,
             list,
             rows: HashMap::new(),
+            task_host,
             task_toggles: HashMap::new(),
-            sink,
+            title_text,
+            description_text,
+            due_text,
+            error_text,
+            show_error,
+            status_label,
+            create_off,
+            status_off,
+            save_off,
+            delete_off,
+            up_off,
+            down_off,
+            show_tasks,
+            cards,
+            tasks,
             selected: None,
             project_id: None,
             suspended: false,
@@ -216,156 +362,61 @@ impl RoadmapView {
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
-        document: DocumentId,
+        _document: DocumentId,
         snapshot: &RoadmapViewSnapshot,
     ) -> Result<(), FrameworkError> {
         let changed_selection = self.selected != snapshot.selected;
-        for (input, value) in self.fields.into_iter().zip([
-            &snapshot.title,
-            &snapshot.description,
-            &snapshot.due_date,
-        ]) {
-            context.update_component(input, |input, _| {
-                if changed_selection || input.state.value != *value {
-                    input.state.replace_value(value.clone());
-                }
-            })?;
-        }
         self.selected = snapshot.selected.clone();
         self.project_id = snapshot.project_id.clone();
-        context.update_component(self.error, |text, _| {
-            *text = Text::new(snapshot.error.clone().unwrap_or_default())
-        })?;
-        let mut children = context
-            .world()
-            .node(self.root.stable_id())
-            .unwrap()
-            .children
-            .clone();
-        children.retain(|id| *id != self.error.stable_id());
-        if snapshot
-            .error
-            .as_ref()
-            .is_some_and(|error| !error.is_empty())
-        {
-            children.insert(1, self.error.stable_id());
-        }
-        reconcile_children(context, self.root.stable_id(), &children)?;
-        context.update_component(self.create, |button, _| {
-            button.disabled = snapshot.project_id.is_none();
-        })?;
-        context.update_component(self.status, |button, _| {
-            button.label = if snapshot.status_label.is_empty() {
-                "状态".into()
-            } else {
-                snapshot.status_label.clone()
-            };
-            button.disabled = snapshot.selected.is_none();
-        })?;
-        context.update_component(self.save, |button, _| {
-            button.disabled = snapshot.title.trim().is_empty();
-        })?;
-        context.update_component(self.delete, |button, _| {
-            button.disabled = snapshot.selected.is_none()
-        })?;
+        self.title_text.set(snapshot.title.clone());
+        self.description_text.set(snapshot.description.clone());
+        self.due_text.set(snapshot.due_date.clone());
+        self.error_text
+            .set(snapshot.error.clone().unwrap_or_default());
+        self.show_error.set(
+            snapshot
+                .error
+                .as_ref()
+                .is_some_and(|error| !error.is_empty()),
+        );
+        self.status_label.set(if snapshot.status_label.is_empty() {
+            "状态".to_owned()
+        } else {
+            snapshot.status_label.clone()
+        });
+        self.create_off.set(snapshot.project_id.is_none());
+        self.status_off.set(snapshot.selected.is_none());
+        self.save_off.set(snapshot.title.trim().is_empty());
+        self.delete_off.set(snapshot.selected.is_none());
         let position = snapshot
             .cards
             .iter()
             .position(|card| Some(&card.id) == snapshot.selected.as_ref());
-        context.update_component(self.up, |button, _| {
-            button.disabled = position.is_none_or(|index| index == 0)
-        })?;
-        context.update_component(self.down, |button, _| {
-            button.disabled = position.is_none_or(|index| index + 1 == snapshot.cards.len())
-        })?;
-        let keep = snapshot
-            .cards
-            .iter()
-            .map(|card| card.id.as_str())
-            .collect::<HashSet<_>>();
-        let stale = self
-            .rows
-            .keys()
-            .filter(|id| !keep.contains(id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in stale {
-            context.remove_view(self.rows.remove(&id).unwrap().root)?;
-        }
-        let mut order = Vec::new();
-        for card in &snapshot.cards {
-            if !self.rows.contains_key(&card.id) {
-                let root = context.create_detached_component(
-                    document,
-                    Button::new(format!("{} · {}", card.title, card.subtitle))
-                        .kind(ButtonKind::Subtle),
-                )?;
-                let sink = Arc::clone(&self.sink);
-                let id = card.id.clone();
-                context.on(root, move |_, _: &Activate, _| {
-                    sink(RoadmapMessage::Select(id.clone()))
+        self.up_off.set(position.is_none_or(|index| index == 0));
+        self.down_off
+            .set(position.is_none_or(|index| index + 1 == snapshot.cards.len()));
+        self.show_tasks.set(!snapshot.tasks.is_empty());
+        self.cards.set(snapshot.cards.clone());
+        self.tasks.set(snapshot.tasks.clone());
+        if changed_selection {
+            for (input, value) in self.fields.into_iter().zip([snapshot.title.as_str()]) {
+                context.update_component(input, |input, _| {
+                    input.state.replace_value(value.to_owned());
                 })?;
-                self.rows.insert(card.id.clone(), RoadmapRow { root });
             }
-            let row = &self.rows[&card.id];
-            context.update_component(row.root, |button, _| {
-                button.label = format!("{} · {}", card.title, card.subtitle);
+            context.update_component(self.due, |input, _| {
+                input.state.replace_value(snapshot.due_date.clone());
             })?;
-            order.push(row.root.stable_id());
+            context.update_component(self.description, |input, _| {
+                input.state.replace_value(snapshot.description.clone());
+            })?;
         }
-        reconcile_children(context, self.list.stable_id(), &order)?;
-        let keep_tasks = snapshot
-            .tasks
-            .iter()
-            .map(|task| task.id.as_str())
-            .collect::<HashSet<_>>();
-        let stale_tasks = self
-            .task_toggles
-            .keys()
-            .filter(|id| !keep_tasks.contains(id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in stale_tasks {
-            if let Some(toggle) = self.task_toggles.remove(&id) {
-                context.remove_view(toggle)?;
-            }
-        }
-        let mut task_order = Vec::new();
-        for task in &snapshot.tasks {
-            let toggle = if let Some(toggle) = self.task_toggles.get(&task.id).copied() {
-                context.update_component(toggle, |view, _| {
-                    *view = Switch::new(task.title.clone(), task.linked);
-                })?;
-                toggle
-            } else {
-                let toggle = context.create_detached_component(
-                    document,
-                    Switch::new(task.title.clone(), task.linked),
-                )?;
-                let sink = Arc::clone(&self.sink);
-                let id = task.id.clone();
-                context.on(toggle, move |_, _: &ToggleChanged, _| {
-                    sink(RoadmapMessage::ToggleTask(id.clone()))
-                })?;
-                self.task_toggles.insert(task.id.clone(), toggle);
-                toggle
-            };
-            task_order.push(toggle.stable_id());
-        }
-        let mut children = context
-            .world()
-            .node(self.root.stable_id())
-            .unwrap()
-            .children
-            .clone();
-        children.retain(|id| {
-            !self
-                .task_toggles
-                .values()
-                .any(|toggle| toggle.stable_id() == *id)
-        });
-        children.extend(task_order);
-        reconcile_children(context, self.root.stable_id(), &children)?;
+        context.flush_reactive()?;
+        self.rows = zip_buttons(context, self.list, &snapshot.cards, |card| card.id.as_str())
+            .into_iter()
+            .map(|(id, root)| (id, RoadmapRow { root }))
+            .collect();
+        self.task_toggles = zip_toggles(context, self.task_host, &snapshot.tasks);
         self.restore_focus |= self.suspended;
         self.suspended = false;
         Ok(())
@@ -403,18 +454,108 @@ impl RoadmapView {
     }
 }
 
-fn button(
-    context: &mut AppContext,
-    document: DocumentId,
+fn field(
     label: &str,
-    kind: ButtonKind,
-    message: RoadmapMessage,
-    sink: &Sink,
-) -> Result<Entity<Button>, FrameworkError> {
-    let button = context.create_detached_component(document, Button::new(label).kind(kind))?;
-    let sink = Arc::clone(sink);
-    context.on(button, move |_, _: &Activate, _| sink(message.clone()))?;
-    Ok(button)
+    control: impl nana_ui::runtime::view::IntoView,
+) -> impl nana_ui::runtime::view::IntoView {
+    widget(FormField::new(label)).child_slot(control, |field, id| field.control_child(id))
+}
+
+fn card_label(cards: &nana_ui::runtime::view::Signal<Vec<RoadmapCard>>, id: &str) -> String {
+    cards.with(|cards| {
+        cards
+            .iter()
+            .find(|card| card.id == id)
+            .map(|card| format!("{} · {}", card.title, card.subtitle))
+            .unwrap_or_default()
+    })
+}
+
+fn task_title(tasks: &nana_ui::runtime::view::Signal<Vec<RoadmapTask>>, id: &str) -> String {
+    tasks.with(|tasks| {
+        tasks
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| task.title.clone())
+            .unwrap_or_default()
+    })
+}
+
+fn task_linked(tasks: &nana_ui::runtime::view::Signal<Vec<RoadmapTask>>, id: &str) -> bool {
+    tasks.with(|tasks| {
+        tasks
+            .iter()
+            .find(|task| task.id == id)
+            .is_some_and(|task| task.linked)
+    })
+}
+
+fn only_child(context: &AppContext, parent: StableNodeId) -> Result<Entity<Stack>, FrameworkError> {
+    let id = context
+        .world()
+        .node(parent)
+        .and_then(|node| node.children.first().copied())
+        .ok_or(FrameworkError::InvalidInput)?;
+    Ok(Entity::from_stable_id(id))
+}
+
+fn zip_buttons(
+    context: &AppContext,
+    list: Entity<Stack>,
+    cards: &[RoadmapCard],
+    id_of: impl Fn(&RoadmapCard) -> &str,
+) -> HashMap<String, Entity<Button>> {
+    let children = context
+        .world()
+        .node(list.stable_id())
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut rows = HashMap::new();
+    let mut cursor = children.into_iter();
+    let mut seen = HashSet::new();
+    for card in cards {
+        let id = id_of(card);
+        if !seen.insert(id.to_owned()) {
+            continue;
+        }
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        rows.insert(id.to_owned(), Entity::from_stable_id(child));
+    }
+    rows
+}
+
+fn zip_toggles(
+    context: &AppContext,
+    host: Entity<Stack>,
+    tasks: &[RoadmapTask],
+) -> HashMap<String, Entity<Switch>> {
+    let Some(list) = context
+        .world()
+        .node(host.stable_id())
+        .and_then(|node| node.children.first().copied())
+    else {
+        return HashMap::new();
+    };
+    let children = context
+        .world()
+        .node(list)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut toggles = HashMap::new();
+    let mut cursor = children.into_iter();
+    let mut seen = HashSet::new();
+    for task in tasks {
+        if !seen.insert(task.id.clone()) {
+            continue;
+        }
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        toggles.insert(task.id.clone(), Entity::from_stable_id(child));
+    }
+    toggles
 }
 
 #[cfg(test)]
@@ -528,7 +669,7 @@ mod tests {
             ..Default::default()
         };
         view.sync(&mut context, document, &snapshot).unwrap();
-        let body = view.fields[1];
+        let body = view.description;
         let selection = TextSelection {
             anchor: 2,
             focus: 7,
@@ -556,7 +697,7 @@ mod tests {
             view.error.stable_id(),
             view.fields[0].stable_id(),
             body.stable_id(),
-            view.fields[2].stable_id(),
+            view.due.stable_id(),
             view.list.stable_id(),
         ];
         view.suspend(&mut context).unwrap();

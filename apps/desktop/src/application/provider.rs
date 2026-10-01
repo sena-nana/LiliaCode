@@ -611,17 +611,15 @@ mod tests {
         let service = app.provider_credential_service();
         drop(app);
         let initial = service.provider_snapshot();
-        assert!(
-            service
-                .login_provider_credential(DesktopProviderCredentialInput {
-                    provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
-                    kind: DesktopCredentialKind::ApiKey,
-                    secret: DesktopSecret::new(Vec::new()),
-                    account_label: None,
-                    source: None,
-                })
-                .is_err()
-        );
+        assert!(service
+            .login_provider_credential(DesktopProviderCredentialInput {
+                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
+                kind: DesktopCredentialKind::ApiKey,
+                secret: DesktopSecret::new(Vec::new()),
+                account_label: None,
+                source: None,
+            })
+            .is_err());
         assert!(events.try_recv().is_err());
         assert_eq!(service.provider_snapshot().revision, initial.revision);
         assert!(service.provider_snapshot().credentials.is_empty());
@@ -654,17 +652,15 @@ mod tests {
         let mut service = app.provider_credential_service();
         service.refresh = Arc::new(FailedRefresh);
         let before = service.provider_snapshot().revision;
-        assert!(
-            service
-                .login_provider_credential(DesktopProviderCredentialInput {
-                    provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
-                    kind: DesktopCredentialKind::ApiKey,
-                    secret: DesktopSecret::new(b"sk-committed-test-0123456789abcdef".to_vec()),
-                    account_label: None,
-                    source: None,
-                })
-                .is_err()
-        );
+        assert!(service
+            .login_provider_credential(DesktopProviderCredentialInput {
+                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.to_owned(),
+                kind: DesktopCredentialKind::ApiKey,
+                secret: DesktopSecret::new(b"sk-committed-test-0123456789abcdef".to_vec()),
+                account_label: None,
+                source: None,
+            })
+            .is_err());
         let committed = service.provider_snapshot();
         assert_eq!(committed.credentials.len(), 1);
         assert_eq!(
@@ -680,15 +676,13 @@ mod tests {
         );
         assert_eq!(changed.revision, committed.revision);
         assert!(events.try_recv().unwrap().is::<ProviderChanged>());
-        assert!(
-            service
-                .revoke_provider_credential(
-                    committed.credentials[0].credential_id.clone(),
-                    committed.credentials[0].revision,
-                    None
-                )
-                .is_err()
-        );
+        assert!(service
+            .revoke_provider_credential(
+                committed.credentials[0].credential_id.clone(),
+                committed.credentials[0].revision,
+                None
+            )
+            .is_err());
         assert_eq!(
             service.provider_snapshot().credentials[0].status,
             DesktopCredentialStatus::Revoked

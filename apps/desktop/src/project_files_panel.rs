@@ -1,6 +1,6 @@
 use crate::application::{ProjectFileEntry, ProjectFileKind, ProjectFilesSnapshot};
-use nana_ui::runtime::TreeView;
-use nana_ui::{Icon, TreeNode};
+use nana_ui::runtime::{TreeNode, TreeView};
+use nana_ui::Icon;
 
 use crate::target_ids;
 

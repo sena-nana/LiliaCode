@@ -1,6 +1,8 @@
+use crate::runtime_layout::Bound;
 use crate::runtime_shell::{emit, IntentSink, ShellIntent};
+use nana_ui::runtime::view::{entity_ref, signal, widget, with_refs, Signal};
 use nana_ui::runtime::{
-    AppContext, DocumentId, Entity, FormField, FrameworkError, StableNodeId, TextArea, TextChanged,
+    AppContext, DocumentId, Entity, FormField, FrameworkError, MountedView, StableNodeId, TextArea,
     TextInput,
 };
 use std::collections::{HashMap, HashSet};
@@ -37,6 +39,8 @@ pub(crate) struct ProductFields {
     sink: IntentSink,
     pub(crate) editors: HashMap<String, ProductField>,
     pub(crate) wrappers: HashMap<String, Entity<FormField>>,
+    signals: HashMap<String, Signal<String>>,
+    mounted: HashMap<String, MountedView>,
 }
 impl ProductFields {
     pub(crate) fn new(sink: IntentSink) -> Self {
@@ -44,6 +48,8 @@ impl ProductFields {
             sink,
             editors: HashMap::new(),
             wrappers: HashMap::new(),
+            signals: HashMap::new(),
+            mounted: HashMap::new(),
         }
     }
     pub(crate) fn retain(
@@ -58,10 +64,12 @@ impl ProductFields {
             .cloned()
             .collect();
         for key in stale {
-            if let Some(wrapper) = self.wrappers.remove(&key) {
-                context.remove_view(wrapper)?;
+            if let Some(mounted) = self.mounted.remove(&key) {
+                mounted.unmount(context)?;
             }
+            self.wrappers.remove(&key);
             self.editors.remove(&key);
+            self.signals.remove(&key);
         }
         Ok(())
     }
@@ -77,72 +85,96 @@ impl ProductFields {
     ) -> Result<(), FrameworkError> {
         keep.insert(id.to_owned());
         let label = settings_field_label(id);
-        let editor = if let Some(field) = self.editors.get(id).copied() {
-            match field {
-                ProductField::Single(field) => {
-                    context.update_component(field, |editor, _| {
-                        if editor.state.value != value {
-                            editor.state.replace_value(value.to_owned());
-                        }
-                    })?;
-                }
-                ProductField::Multiline(field) => {
-                    context.update_component(field, |editor, _| {
-                        if editor.state.value != value {
-                            editor.state.replace_value(value.to_owned());
-                        }
-                    })?;
-                }
-            }
-            field
+        if let Some(value_signal) = self.signals.get(id).copied() {
+            value_signal.set(value.to_owned());
+            context.flush_reactive()?;
         } else {
             let sink = Arc::clone(&self.sink);
-            let field = if matches!(
+            let multiline = matches!(
                 id,
                 "agent_instruction" | "mcp_args" | "worktree-instructions"
-            ) {
-                let field = context.create_detached_component(
-                    document_id,
-                    TextArea::new(value.to_owned()).height(120.0),
-                )?;
-                context.on(field, move |_, event: &TextChanged, _| {
-                    emit(&sink, intent(event.value.to_string()))
-                })?;
-                ProductField::Multiline(field)
+            );
+            let secure = id == "provider_secret";
+            let (mounted, wrapper, editor, value_signal) = if multiline {
+                mount_multiline(context, document_id, label, value, sink, intent)?
             } else {
-                let field = context.create_detached_component(
-                    document_id,
-                    TextInput::new(value.to_owned()).secure(id == "provider_secret"),
-                )?;
-                context.on(field, move |_, event: &TextChanged, _| {
-                    emit(&sink, intent(event.value.to_string()))
-                })?;
-                ProductField::Single(field)
+                mount_single(context, document_id, label, value, secure, sink, intent)?
             };
-            self.editors.insert(id.to_owned(), field);
-            field
-        };
-        let wrapper = if let Some(wrapper) = self.wrappers.get(id).copied() {
-            context.update_component(wrapper, |field, _| {
-                *field = FormField::new(label).control_child(editor.stable_id());
-            })?;
-            wrapper
-        } else {
-            let wrapper = context.create_detached_component(
-                document_id,
-                FormField::new(label).control_child(editor.stable_id()),
-            )?;
-            crate::runtime_layout::reconcile_children(
-                context,
-                wrapper.stable_id(),
-                &[editor.stable_id()],
-            )?;
+            self.mounted.insert(id.to_owned(), mounted);
             self.wrappers.insert(id.to_owned(), wrapper);
-            wrapper
-        };
-        order.push(wrapper.stable_id());
+            self.editors.insert(id.to_owned(), editor);
+            self.signals.insert(id.to_owned(), value_signal);
+        }
+        order.push(self.wrappers[id].stable_id());
         Ok(())
     }
+}
+
+fn mount_single(
+    context: &mut AppContext,
+    document_id: DocumentId,
+    label: &'static str,
+    value: &str,
+    secure: bool,
+    sink: IntentSink,
+    intent: impl Fn(String) -> ShellIntent + Send + Sync + 'static,
+) -> Result<(MountedView, Entity<FormField>, ProductField, Signal<String>), FrameworkError> {
+    let slot = Bound::new();
+    let installed = slot.clone();
+    let initial = value.to_owned();
+    let (mounted, (wrapper, editor)) = context.mount_view_detached(document_id, move || {
+        let value_signal = installed.install(signal(initial.clone()));
+        let editor = entity_ref();
+        let wrapper = entity_ref();
+        with_refs(
+            widget(FormField::new(label)).entity_ref(wrapper).control(
+                widget(TextInput::new(initial).secure(secure))
+                    .entity_ref(editor)
+                    .value(value_signal)
+                    .on_input(move |event| emit(&sink, intent(event.value.to_string()))),
+            ),
+            (wrapper, editor),
+        )
+    })?;
+    Ok((
+        mounted,
+        wrapper,
+        ProductField::Single(editor),
+        slot.signal(),
+    ))
+}
+
+fn mount_multiline(
+    context: &mut AppContext,
+    document_id: DocumentId,
+    label: &'static str,
+    value: &str,
+    sink: IntentSink,
+    intent: impl Fn(String) -> ShellIntent + Send + Sync + 'static,
+) -> Result<(MountedView, Entity<FormField>, ProductField, Signal<String>), FrameworkError> {
+    let slot = Bound::new();
+    let installed = slot.clone();
+    let initial = value.to_owned();
+    let (mounted, (wrapper, editor)) = context.mount_view_detached(document_id, move || {
+        let value_signal = installed.install(signal(initial.clone()));
+        let editor = entity_ref();
+        let wrapper = entity_ref();
+        with_refs(
+            widget(FormField::new(label)).entity_ref(wrapper).control(
+                widget(TextArea::new(initial).height(120.0))
+                    .entity_ref(editor)
+                    .value(value_signal)
+                    .on_input(move |event| emit(&sink, intent(event.value.to_string()))),
+            ),
+            (wrapper, editor),
+        )
+    })?;
+    Ok((
+        mounted,
+        wrapper,
+        ProductField::Multiline(editor),
+        slot.signal(),
+    ))
 }
 fn settings_field_label(id: &str) -> &'static str {
     match id {

@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AlignSpec, AppContext, Button, DocumentId, DonutChart, DonutSlice, Dropdown,
-    DropdownOption, Entity, FrameworkError, LengthSpec, NodeStyle, Progress, QrCode,
-    SemanticColorRole, SettingsCard, SettingsRow, StableNodeId, Stack, Switch, Text, TextArea,
-    TextChanged, TextInput, ToggleChanged, ValidationMessage,
+    DropdownEvent, DropdownOption, DropdownSelection, Entity, FrameworkError, LengthSpec,
+    NodeStyle, Progress, QrCode, SemanticColorRole, SettingsCard, SettingsRow, StableNodeId, Stack,
+    Switch, Text, TextArea, TextChanged, TextInput, ToggleChanged, ValidationMessage,
 };
-use nana_ui::{ButtonKind, DropdownEvent, DropdownSelection, ValidationIntent};
+use nana_ui::{ButtonKind, ValidationIntent};
 
 use crate::runtime_shell::ShellIntent;
 
@@ -320,6 +321,15 @@ impl SurfaceHandles {
         controls: &[SurfaceControl],
         sink: Sink,
     ) -> Result<Vec<StableNodeId>, FrameworkError> {
+        macro_rules! mount_view {
+            ($kind:ty, $view:expr) => {{
+                let (_, entity) = context.mount_view_detached(document, || {
+                    let entity = entity_ref::<$kind>();
+                    with_refs(widget($view).entity_ref(entity), entity)
+                })?;
+                entity
+            }};
+        }
         let stacked = self.settings_width.is_none_or(|width| width <= 900.0);
         let chart_size = if self.settings_width.is_some_and(|width| width <= 860.0) {
             74.0
@@ -333,12 +343,9 @@ impl SurfaceHandles {
             if !self.nodes.contains_key(&id) {
                 let node = match control {
                     SurfaceControl::Section { label, .. } => {
-                        let card = context.create_detached_component(
-                            document,
-                            SettingsCard::new(label.clone()),
-                        )?;
-                        let body =
-                            context.create_detached_component(document, Stack::column(12.0))?;
+                        let card_label = label.clone();
+                        let card = mount_view!(SettingsCard, SettingsCard::new(card_label));
+                        let body = mount_view!(Stack, Stack::column(12.0));
                         context.append_child(card, body)?;
                         SurfaceNode::Section(card, body)
                     }
@@ -348,10 +355,8 @@ impl SurfaceHandles {
                         intent,
                         ..
                     } => {
-                        let view = context.create_detached_component(
-                            document,
-                            Switch::new(label.clone(), *checked),
-                        )?;
+                        let switch_label = label.clone();
+                        let view = mount_view!(Switch, Switch::new(switch_label, *checked));
                         let binding = Arc::new(Mutex::new(intent.clone()));
                         let current = binding.clone();
                         let dispatch = sink.clone();
@@ -369,14 +374,16 @@ impl SurfaceHandles {
                         edit,
                         ..
                     } => {
-                        let editor = context.create_detached_component(
-                            document,
-                            Dropdown::single(Some(selected.clone()))
+                        let selected = selected.clone();
+                        let options = options.clone();
+                        let editor = mount_view!(
+                            Dropdown,
+                            Dropdown::single(Some(selected))
                                 .placeholder("自动选择")
                                 .options(options.iter().map(|(id, label)| {
                                     DropdownOption::new(id.clone(), label.clone())
-                                })),
-                        )?;
+                                }))
+                        );
                         let wrapper =
                             field_wrapper(context, document, label, editor.stable_id(), stacked)?;
                         let binding = Arc::new(Mutex::new(edit.clone()));
@@ -391,18 +398,20 @@ impl SurfaceHandles {
                         })?;
                         SurfaceNode::Choice(wrapper, editor, binding)
                     }
-                    SurfaceControl::Text { value, .. } => SurfaceNode::Text(
-                        context.create_detached_component(document, Text::new(value.clone()))?,
-                    ),
-                    SurfaceControl::Error { value, .. } => SurfaceNode::Error(
-                        context.create_detached_component(
-                            document,
-                            ValidationMessage::new(value.clone(), ValidationIntent::Danger),
-                        )?,
-                    ),
+                    SurfaceControl::Text { value, .. } => {
+                        let value = value.clone();
+                        SurfaceNode::Text(mount_view!(Text, Text::new(value)))
+                    }
+                    SurfaceControl::Error { value, .. } => {
+                        let value = value.clone();
+                        SurfaceNode::Error(mount_view!(
+                            ValidationMessage,
+                            ValidationMessage::new(value, ValidationIntent::Danger)
+                        ))
+                    }
                     SurfaceControl::Action { label, intent, .. } => {
-                        let view = context
-                            .create_detached_component(document, Button::new(label.clone()))?;
+                        let label = label.clone();
+                        let view = mount_view!(Button, Button::new(label));
                         let binding = Arc::new(Mutex::new(intent.clone()));
                         let current = binding.clone();
                         let dispatch = sink.clone();
@@ -420,8 +429,8 @@ impl SurfaceHandles {
                         edit,
                         ..
                     } => {
-                        let editor = context
-                            .create_detached_component(document, TextInput::new(value.clone()))?;
+                        let value = value.clone();
+                        let editor = mount_view!(TextInput, TextInput::new(value));
                         let wrapper =
                             field_wrapper(context, document, label, editor.stable_id(), stacked)?;
                         let binding = Arc::new(Mutex::new(edit.clone()));
@@ -441,14 +450,9 @@ impl SurfaceHandles {
                         edit,
                         ..
                     } => {
-                        let editor = context.create_detached_component(
-                            document,
-                            TextArea::new(value.clone()).height(if *multiline {
-                                128.0
-                            } else {
-                                40.0
-                            }),
-                        )?;
+                        let value = value.clone();
+                        let height = if *multiline { 128.0 } else { 40.0 };
+                        let editor = mount_view!(TextArea, TextArea::new(value).height(height));
                         let wrapper =
                             field_wrapper(context, document, label, editor.stable_id(), stacked)?;
                         let binding = Arc::new(Mutex::new(edit.clone()));
@@ -464,10 +468,8 @@ impl SurfaceHandles {
                     SurfaceControl::Secret {
                         label, value, edit, ..
                     } => {
-                        let editor = context.create_detached_component(
-                            document,
-                            TextInput::new(value.clone()).secure(true),
-                        )?;
+                        let value = value.clone();
+                        let editor = mount_view!(TextInput, TextInput::new(value).secure(true));
                         let wrapper =
                             field_wrapper(context, document, label, editor.stable_id(), stacked)?;
                         let binding = Arc::new(Mutex::new(edit.clone()));
@@ -482,53 +484,46 @@ impl SurfaceHandles {
                     }
                     SurfaceControl::Bar {
                         label, value, max, ..
-                    } => SurfaceNode::Bar(context.create_detached_component(
-                        document,
-                        Progress::new(*value, *max).label(label.clone()),
-                    )?),
+                    } => {
+                        let label = label.clone();
+                        SurfaceNode::Bar(mount_view!(
+                            Progress,
+                            Progress::new(*value, *max).label(label)
+                        ))
+                    }
                     SurfaceControl::Donut { .. } => {
-                        let root = context.create_detached_component(
-                            document,
-                            Stack::row(10.0).align(AlignSpec::Center),
-                        )?;
-                        let chart =
-                            context.create_detached_component(document, DonutChart::new([]))?;
-                        let legend = context.create_detached_component(
-                            document,
+                        let root = mount_view!(Stack, Stack::row(10.0).align(AlignSpec::Center));
+                        let chart = mount_view!(DonutChart, DonutChart::new([]));
+                        let legend = mount_view!(
+                            Stack,
                             Stack::column(5.0)
                                 .grow(1.0)
                                 .shrink(1.0)
-                                .min_width(LengthSpec::Px(0.0)),
-                        )?;
+                                .min_width(LengthSpec::Px(0.0))
+                        );
                         context.append_child(root, chart)?;
                         context.append_child(root, legend)?;
                         let mut rows = Vec::new();
                         for color in DONUT_COLORS {
-                            let row = context.create_detached_component(
-                                document,
-                                Stack::row(6.0).align(AlignSpec::Center),
-                            )?;
-                            let dot = context.create_detached_component(
-                                document,
+                            let row = mount_view!(Stack, Stack::row(6.0).align(AlignSpec::Center));
+                            let dot = mount_view!(
+                                Stack,
                                 Stack::column(0.0)
                                     .width(LengthSpec::Px(8.0))
                                     .height(LengthSpec::Px(8.0))
                                     .shrink(0.0)
                                     .radius(nana_ui::theme::RadiusTier::Xs)
-                                    .surface(color),
-                            )?;
-                            let name = context
-                                .create_detached_component(document, legend_text("", true))?;
-                            let value = context
-                                .create_detached_component(document, legend_text("", false))?;
+                                    .surface(color)
+                            );
+                            let name = mount_view!(Text, legend_text("", true));
+                            let value = mount_view!(Text, legend_text("", false));
                             context.append_child(row, dot)?;
                             context.append_child(row, name)?;
                             context.append_child(row, value)?;
                             context.append_child(legend, row)?;
                             rows.push((row, name, value));
                         }
-                        let empty = context
-                            .create_detached_component(document, legend_text("暂无数据", true))?;
+                        let empty = mount_view!(Text, legend_text("暂无数据", true));
                         context.append_child(legend, empty)?;
                         SurfaceNode::Donut(root, chart, empty, rows)
                     }
@@ -536,7 +531,7 @@ impl SurfaceHandles {
                         let Ok(qr) = QrCode::encode(payload.as_bytes(), 220.0) else {
                             continue;
                         };
-                        SurfaceNode::Qr(context.create_detached_component(document, qr)?)
+                        SurfaceNode::Qr(mount_view!(QrCode, qr))
                     }
                 };
                 self.nodes.insert(id.clone(), node);
@@ -629,11 +624,10 @@ impl SurfaceHandles {
                 (SurfaceNode::Text(view), SurfaceControl::Text { value, .. }) => {
                     context.update_component(*view, |text, _| *text = Text::new(value.clone()))?
                 }
-                (SurfaceNode::Error(view), SurfaceControl::Error { value, .. }) => {
-                    context.update_component(*view, |message, _| {
+                (SurfaceNode::Error(view), SurfaceControl::Error { value, .. }) => context
+                    .update_component(*view, |message, _| {
                         *message = ValidationMessage::new(value.clone(), ValidationIntent::Danger)
-                    })?
-                }
+                    })?,
                 (
                     SurfaceNode::Action(view, binding),
                     SurfaceControl::Action {
@@ -891,6 +885,14 @@ fn field_wrapper(
 ) -> Result<Entity<SettingsRow>, FrameworkError> {
     let row = context.mount_settings_leaf_row(document, label, None, editor)?;
     context.update_component(row, |row, _| row.stacked = stacked)?;
+    // `mount_settings_leaf_row` assembles the initial horizontal row.  The
+    // breakpoint flag is part of the row's layout contract, so re-run its
+    // assembler after changing `stacked`; otherwise the cached label/control
+    // slots keep their pre-breakpoint geometry.
+    context.assemble_settings_row(row)?;
+    // Re-project once more so the SettingsRowCopy slot receives the forced
+    // breakpoint state as well; the assembler only changes child ordering.
+    context.update_component(row, |row, _| row.stacked = stacked)?;
     Ok(row)
 }
 fn field_width(style: &mut NodeStyle, settings_width: Option<f32>, stacked: bool) {
@@ -903,6 +905,10 @@ fn field_width(style: &mut NodeStyle, settings_width: Option<f32>, stacked: bool
     layout.max_width = Some(LengthSpec::Percent(100.0));
     layout.flex_shrink = Some(if stacked { 1.0 } else { 0.0 });
     layout.flex_grow = Some(0.0);
+    // Keep the inline control visually to the right of the row copy even
+    // when the copy has no measured text height (for example during the
+    // first headless layout pass).
+    layout.margin_left = (!stacked).then_some(LengthSpec::Px(1.0));
 }
 fn legend_text(value: &str, grow: bool) -> Text {
     let mut text = Text::new(value);
@@ -922,8 +928,8 @@ mod tests {
 
     #[test]
     fn surface_editor_identity_preserves_echo_history_but_isolates_same_text_documents() {
-        use nana_ui::RuntimeInputAdapter;
-        use nana_ui_platform::{InputEvent, InputModifiers};
+        use crate::runtime_input::ScriptedInput;
+        use nana_ui_platform::InputModifiers;
         for multiline in [false, true] {
             let mut context = AppContext::new();
             let document = DocumentId::new(1).unwrap();
@@ -953,23 +959,18 @@ mod tests {
                 _ => panic!("editor"),
             };
             context.focus_node(document, node).unwrap();
-            let mut adapter = RuntimeInputAdapter::default();
+            let mut input = ScriptedInput::bind(&mut context, document);
             let mut dispatch = |context: &mut AppContext, key: &str, control: bool| {
-                adapter
-                    .dispatch(
+                input
+                    .press_text(
                         context,
-                        document,
-                        &InputEvent::Keyboard {
-                            key: key.into(),
-                            code: key.into(),
-                            text: (!control).then(|| key.into()),
-                            pressed: true,
-                            modifiers: InputModifiers {
-                                control,
-                                ..Default::default()
-                            },
-                            repeat: false,
+                        key,
+                        InputModifiers {
+                            control,
+                            ..Default::default()
                         },
+                        false,
+                        (!control).then_some(key),
                     )
                     .unwrap();
             };

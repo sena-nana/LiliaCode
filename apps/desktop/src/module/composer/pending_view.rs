@@ -1,12 +1,15 @@
-use crate::runtime_layout::{pending_actions_row, pending_interaction_card, reconcile_children};
+use crate::runtime_layout::{pending_actions_row, pending_interaction_card, Bound};
 use lilia_contracts::TaskId;
+use nana_ui::runtime::view::{entity_ref, signal, widget, with_refs, EachExt, IntoView, Signal};
+#[cfg(test)]
+use nana_ui::runtime::Activate;
 use nana_ui::runtime::{
-    Activate, AppContext, Button, Card, DocumentId, Entity, FormField, FrameworkError,
-    StableNodeId, Stack, Text, TextArea, TextChanged,
+    AppContext, Button, Card, ComponentView, DocumentId, Entity, FormField, FrameworkError,
+    MountedView, StableNodeId, Stack, Text, TextArea, TextChanged,
 };
 use nana_ui::{ButtonKind, ControlSize};
 use nana_ui_platform::WindowId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,6 +169,7 @@ type Sink = Arc<dyn Fn(PendingTarget, PendingAction) + Send + Sync>;
 
 pub(crate) struct PendingView {
     pub(crate) root: Entity<Card>,
+    mounted: Option<MountedView>,
     request: Option<RequestView>,
     sink: Sink,
 }
@@ -177,6 +181,49 @@ struct PendingButton {
     node: Entity<Button>,
     action: Arc<Mutex<PendingAction>>,
 }
+
+#[derive(Clone)]
+enum FieldRole {
+    Draft,
+    Ask,
+    Command,
+    Message,
+    Raw,
+    Mcp(String),
+}
+
+#[derive(Clone)]
+enum BodyContent {
+    Field {
+        label: String,
+        value: String,
+        role: FieldRole,
+    },
+    Button {
+        label: String,
+        kind: ButtonKind,
+        disabled: bool,
+        action: PendingAction,
+    },
+}
+
+#[derive(Clone)]
+struct BodyModel {
+    key: String,
+    visible: bool,
+    content: BodyContent,
+}
+
+#[derive(Clone)]
+struct ActionModel {
+    key: String,
+    label: String,
+    kind: ButtonKind,
+    disabled: bool,
+    visible: bool,
+    action: PendingAction,
+}
+
 struct RequestView {
     target: PendingTarget,
     kind: PendingKind,
@@ -186,7 +233,15 @@ struct RequestView {
     fields: HashMap<String, PendingField>,
     buttons: HashMap<String, PendingButton>,
     tool_draft: Arc<Mutex<(String, String)>>,
-    sink: Sink,
+    body_list: Entity<Stack>,
+    title_text: Bound<String>,
+    prompt_text: Bound<String>,
+    body: Bound<Vec<BodyModel>>,
+    action_rows: Bound<Vec<ActionModel>>,
+    show_body: Bound<bool>,
+    show_actions: Bound<bool>,
+    field_values: Arc<Mutex<HashMap<String, Signal<String>>>>,
+    button_actions: Arc<Mutex<HashMap<String, Arc<Mutex<PendingAction>>>>>,
 }
 impl PendingView {
     pub(crate) fn mount(
@@ -194,10 +249,16 @@ impl PendingView {
         document: DocumentId,
         sink: Sink,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, pending_interaction_card())?;
-        context.world_mut().register_focus_scope(root.stable_id())?;
+        let (_, root) = context.mount_view_detached(document, || {
+            let root = entity_ref::<Card>();
+            with_refs(widget(pending_interaction_card()).entity_ref(root), root)
+        })?;
+        context
+            .compat_world_mut()
+            .register_focus_scope(root.stable_id())?;
         Ok(Self {
             root,
+            mounted: None,
             request: None,
             sink,
         })
@@ -205,7 +266,7 @@ impl PendingView {
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
-        document: DocumentId,
+        _document: DocumentId,
         window_id: WindowId,
         task_id: Option<String>,
         pending: Option<&PendingSnapshot>,
@@ -215,33 +276,29 @@ impl PendingView {
             task_id,
             request_id: pending.request_id.clone(),
         });
-        let changed = self.request.as_ref().map(|r| (&r.target, r.kind))
-            != target.as_ref().zip(pending.map(|p| p.kind));
+        let changed = self
+            .request
+            .as_ref()
+            .map(|request| (&request.target, request.kind))
+            != target.as_ref().zip(pending.map(|pending| pending.kind));
         if changed {
-            if let Some(request) = self.request.take() {
-                request.dispose(context)?;
+            if let Some(mounted) = self.mounted.take() {
+                mounted.unmount(context)?;
             }
+            self.request = None;
         }
         let (Some(pending), Some(target)) = (pending, target) else {
-            return reconcile_children(context, self.root.stable_id(), &[]);
+            return Ok(());
         };
         if self.request.is_none() {
-            self.request = Some(RequestView {
-                target,
-                kind: pending.kind,
-                title: context.create_detached_component(document, Text::new(""))?,
-                prompt: context.create_detached_component(document, Text::new(""))?,
-                actions: context.create_detached_component(document, pending_actions_row())?,
-                fields: HashMap::new(),
-                buttons: HashMap::new(),
-                tool_draft: Arc::new(Mutex::new((String::new(), String::new()))),
-                sink: Arc::clone(&self.sink),
-            });
+            let sink = Arc::clone(&self.sink);
+            let (mounted, request) =
+                RequestView::mount(context, self.root.stable_id(), target, sink, pending)?;
+            self.mounted = Some(mounted);
+            self.request = Some(request);
+            return Ok(());
         }
-        self.request
-            .as_mut()
-            .unwrap()
-            .sync(context, document, self.root.stable_id(), pending)
+        self.request.as_mut().unwrap().apply(context, pending)
     }
     pub(crate) fn restore_focus(
         &self,
@@ -278,316 +335,709 @@ impl PendingView {
     }
 }
 impl RequestView {
-    fn field(
-        &mut self,
+    fn mount(
         context: &mut AppContext,
-        document: DocumentId,
-        key: &str,
-        label: &str,
-        value: &str,
-        action: impl Fn(String) -> PendingAction + Send + Sync + 'static,
-    ) -> Result<StableNodeId, FrameworkError> {
-        if let Some(field) = self.fields.get(key) {
-            context.update_component(field.editor, |editor, _| {
-                if editor.state.value != value {
-                    editor.state.replace_value(value.to_owned());
-                }
-            })?;
-            context.update_component(field.wrapper, |wrapper, _| {
-                *wrapper = FormField::new(label).control_child(field.editor.stable_id());
-            })?;
-            return Ok(field.wrapper.stable_id());
-        }
-        let editor =
-            context.create_detached_component(document, TextArea::new(value).height(48.0))?;
-        let sink = Arc::clone(&self.sink);
-        let target = self.target.clone();
-        context.on(editor, move |_, event: &TextChanged, _| {
-            sink(target.clone(), action(event.value.to_string()))
+        parent: StableNodeId,
+        target: PendingTarget,
+        sink: Sink,
+        pending: &PendingSnapshot,
+    ) -> Result<(MountedView, Self), FrameworkError> {
+        let title_text = Bound::new();
+        let prompt_text = Bound::new();
+        let body: Bound<Vec<BodyModel>> = Bound::new();
+        let action_rows: Bound<Vec<ActionModel>> = Bound::new();
+        let show_body = Bound::new();
+        let show_actions = Bound::new();
+        let field_values = Arc::new(Mutex::new(HashMap::<String, Signal<String>>::new()));
+        let button_actions = Arc::new(Mutex::new(
+            HashMap::<String, Arc<Mutex<PendingAction>>>::new(),
+        ));
+        let tool_draft = Arc::new(Mutex::new(tool_draft_of(pending)));
+        let initial_body = body_models(pending);
+        let initial_actions = action_models(pending);
+        let title_slot = title_text.clone();
+        let prompt_slot = prompt_text.clone();
+        let body_slot = body.clone();
+        let action_slot = action_rows.clone();
+        let show_body_slot = show_body.clone();
+        let show_actions_slot = show_actions.clone();
+        let values = Arc::clone(&field_values);
+        let slots = Arc::clone(&button_actions);
+        let draft = Arc::clone(&tool_draft);
+        let row_sink = Arc::clone(&sink);
+        let action_sink = Arc::clone(&sink);
+        let row_target = target.clone();
+        let action_target = target.clone();
+        let opening_title = pending.title.clone();
+        let opening_prompt = pending.prompt.clone();
+        let (mounted, (title, prompt)) = context.mount_view(parent, move || {
+            let title_text = title_slot.install(signal(opening_title));
+            let prompt_text = prompt_slot.install(signal(opening_prompt));
+            let body = body_slot.install(signal(initial_body));
+            let action_rows = action_slot.install(signal(initial_actions));
+            let show_body = show_body_slot
+                .install(signal(body.with(|rows| rows.iter().any(|row| row.visible))));
+            let show_actions = show_actions_slot.install(signal(
+                action_rows.with(|rows| rows.iter().any(|row| row.visible)),
+            ));
+            let title = entity_ref::<Text>();
+            let prompt = entity_ref::<Text>();
+            let values = Arc::clone(&values);
+            let slots = Arc::clone(&slots);
+            let draft = Arc::clone(&draft);
+            let row_sink = Arc::clone(&row_sink);
+            let action_sink = Arc::clone(&action_sink);
+            with_refs(
+                (
+                    widget(Text::new("")).entity_ref(title).value(title_text),
+                    widget(Text::new("")).entity_ref(prompt).value(prompt_text),
+                    body.each(|row| row.key.clone(), {
+                        let body = body;
+                        let values = Arc::clone(&values);
+                        let slots = Arc::clone(&slots);
+                        let draft = Arc::clone(&draft);
+                        let sink = Arc::clone(&row_sink);
+                        let target = row_target.clone();
+                        move |row| body_row(row, body, &values, &slots, &draft, &sink, &target)
+                    })
+                    .gap(8.0)
+                    .visible(show_body),
+                    action_rows
+                        .each(|row| row.key.clone(), {
+                            let action_rows = action_rows;
+                            let slots = Arc::clone(&slots);
+                            let sink = action_sink;
+                            let target = action_target;
+                            move |row| action_button(row, action_rows, &slots, &sink, &target)
+                        })
+                        .horizontal(6.0)
+                        .visible(show_actions),
+                ),
+                (title, prompt),
+            )
         })?;
-        let wrapper = context.create_detached_component(
-            document,
-            FormField::new(label).control_child(editor.stable_id()),
-        )?;
-        context.append_child(wrapper, editor)?;
-        let id = wrapper.stable_id();
-        self.fields
-            .insert(key.to_owned(), PendingField { editor, wrapper });
-        Ok(id)
-    }
-    fn button(
-        &mut self,
-        context: &mut AppContext,
-        document: DocumentId,
-        key: &str,
-        label: &str,
-        kind: ButtonKind,
-        action: PendingAction,
-        disabled: bool,
-    ) -> Result<StableNodeId, FrameworkError> {
-        let button = Button::new(label).kind(kind).size(ControlSize::Small);
-        if let Some(view) = self.buttons.get(key) {
-            context.update_component(view.node, |node, _| {
-                *node = button;
-                node.disabled = disabled;
-            })?;
-            if let Ok(mut current) = view.action.lock() {
-                *current = action;
-            }
-            return Ok(view.node.stable_id());
+        let root_ids = mounted.roots().to_vec();
+        if root_ids.len() != 4 {
+            mounted.unmount(context)?;
+            return Err(FrameworkError::InvalidInput);
         }
-        let node = context.create_detached_component(document, button)?;
-        context.update_component(node, |node, _| node.disabled = disabled)?;
-        let action = Arc::new(Mutex::new(action));
-        let current = Arc::clone(&action);
-        let sink = Arc::clone(&self.sink);
-        let target = self.target.clone();
-        context.on(node, move |_, _: &Activate, _| {
-            if let Ok(action) = current.lock() {
-                sink(target.clone(), action.clone());
-            }
+        let body_list = Entity::<Stack>::from_stable_id(root_ids[2]);
+        let actions = Entity::<Stack>::from_stable_id(root_ids[3]);
+        context.update_component(actions, |stack, _| {
+            let mut hidden = false;
+            stack.share_layouts(&mut |layout| hidden = layout.hidden);
+            *stack = pending_actions_row();
+            stack.share_layouts(&mut |layout| {
+                std::sync::Arc::make_mut(layout).hidden = hidden;
+            });
         })?;
-        self.buttons
-            .insert(key.to_owned(), PendingButton { node, action });
-        Ok(node.stable_id())
+        let mut request = Self {
+            target,
+            kind: pending.kind,
+            title,
+            prompt,
+            actions,
+            fields: HashMap::new(),
+            buttons: HashMap::new(),
+            tool_draft,
+            body_list,
+            title_text,
+            prompt_text,
+            body,
+            action_rows,
+            show_body,
+            show_actions,
+            field_values,
+            button_actions,
+        };
+        request.rebuild(context);
+        Ok((mounted, request))
     }
-    fn sync(
+
+    fn apply(
         &mut self,
         context: &mut AppContext,
-        document: DocumentId,
-        root: StableNodeId,
         pending: &PendingSnapshot,
     ) -> Result<(), FrameworkError> {
-        context.update_component(self.title, |text, _| {
-            *text = Text::new(pending.title.clone())
-        })?;
-        context.update_component(self.prompt, |text, _| {
-            *text = Text::new(pending.prompt.clone())
-        })?;
-        let mut order = vec![self.title.stable_id(), self.prompt.stable_id()];
-        let request = &pending.request_id;
-        match pending.kind {
-            PendingKind::PlanApproval => order.push(self.field(
-                context,
-                document,
-                "draft",
-                "补充说明",
-                &pending.draft,
-                |value| PendingAction::PendingDraftChanged { value },
-            )?),
-            PendingKind::AskUser => {
-                if let Some(ask) = &pending.ask {
-                    if ask.show_freeform {
-                        order.push(self.field(
-                            context,
-                            document,
-                            "ask",
-                            "补充说明",
-                            &ask.freeform,
-                            |value| PendingAction::AskUserPending {
-                                action: "freeform".into(),
-                                value,
-                            },
-                        )?);
-                    }
-                }
+        if pending.kind == PendingKind::ToolConsent {
+            if let Ok(mut draft) = self.tool_draft.lock() {
+                *draft = tool_draft_of(pending);
             }
-            PendingKind::ToolConsent => {
-                if let Some(tool) = &pending.tool {
-                    if let Ok(mut draft) = self.tool_draft.lock() {
-                        *draft = (tool.command.clone(), tool.message.clone());
-                    }
-                    if tool.command_editable {
-                        let draft = Arc::clone(&self.tool_draft);
-                        order.push(self.field(
-                            context,
-                            document,
-                            "command",
-                            "确认执行的命令",
-                            &tool.command,
-                            move |value| {
-                                let mut draft = draft.lock().unwrap();
-                                draft.0 = value;
-                                PendingAction::ToolConsentDraftChanged {
-                                    command: draft.0.clone(),
-                                    message: draft.1.clone(),
-                                }
-                            },
-                        )?);
-                    }
-                    let draft = Arc::clone(&self.tool_draft);
-                    order.push(self.field(
-                        context,
-                        document,
-                        "message",
-                        "拒绝理由",
-                        &tool.message,
-                        move |value| {
-                            let mut draft = draft.lock().unwrap();
-                            draft.1 = value;
-                            PendingAction::ToolConsentDraftChanged {
-                                command: draft.0.clone(),
-                                message: draft.1.clone(),
-                            }
+        }
+        self.title_text.set(pending.title.clone());
+        self.prompt_text.set(pending.prompt.clone());
+        let body = keep_hidden(&self.body.signal().get(), body_models(pending));
+        let actions = keep_hidden_actions(&self.action_rows.signal().get(), action_models(pending));
+        let updates = self
+            .field_values
+            .lock()
+            .map(|values| {
+                body.iter()
+                    .filter_map(|row| {
+                        let BodyContent::Field { value, .. } = &row.content else {
+                            return None;
+                        };
+                        values
+                            .get(&row.key)
+                            .copied()
+                            .map(|slot| (slot, value.clone()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for (slot, value) in updates {
+            slot.set(value);
+        }
+        self.show_body.set(body.iter().any(|row| row.visible));
+        self.show_actions.set(actions.iter().any(|row| row.visible));
+        self.body.set(body);
+        self.action_rows.set(actions);
+        context.flush_reactive()?;
+        self.rebuild(context);
+        Ok(())
+    }
+
+    fn rebuild(&mut self, context: &AppContext) {
+        let body = self.body.signal().get();
+        let actions = self.action_rows.signal().get();
+        let body_children = context
+            .world()
+            .node(self.body_list.stable_id())
+            .map(|node| node.children.clone())
+            .unwrap_or_default();
+        let action_children = context
+            .world()
+            .node(self.actions.stable_id())
+            .map(|node| node.children.clone())
+            .unwrap_or_default();
+        let slots = self
+            .button_actions
+            .lock()
+            .map(|slots| slots.clone())
+            .unwrap_or_default();
+        let mut fields = HashMap::new();
+        let mut buttons = HashMap::new();
+        for (row, child) in body.iter().zip(body_children) {
+            match &row.content {
+                BodyContent::Field { .. } => {
+                    let wrapper = Entity::<FormField>::from_stable_id(child);
+                    let Some(editor) = context.read(wrapper, |field| field.control).ok().flatten()
+                    else {
+                        continue;
+                    };
+                    fields.insert(
+                        row.key.clone(),
+                        PendingField {
+                            editor: Entity::from_stable_id(editor),
+                            wrapper,
                         },
-                    )?);
+                    );
+                }
+                BodyContent::Button { action, .. } => {
+                    let action = slots
+                        .get(&row.key)
+                        .cloned()
+                        .unwrap_or_else(|| Arc::new(Mutex::new(action.clone())));
+                    buttons.insert(
+                        row.key.clone(),
+                        PendingButton {
+                            node: Entity::from_stable_id(child),
+                            action,
+                        },
+                    );
                 }
             }
-            PendingKind::McpElicitation => {
-                if let Some(mcp) = &pending.mcp {
-                    if let Some(url) = &mcp.url {
-                        order.push(self.button(
-                            context,
-                            document,
-                            &format!("pending-mcp-url-{request}"),
-                            "打开链接",
-                            ButtonKind::Subtle,
-                            PendingAction::OpenMarkdownLink(url.clone()),
-                            false,
-                        )?);
+        }
+        for (row, child) in actions.iter().zip(action_children) {
+            let action = slots
+                .get(&row.key)
+                .cloned()
+                .unwrap_or_else(|| Arc::new(Mutex::new(row.action.clone())));
+            buttons.insert(
+                row.key.clone(),
+                PendingButton {
+                    node: Entity::from_stable_id(child),
+                    action,
+                },
+            );
+        }
+        self.fields = fields;
+        self.buttons = buttons;
+    }
+}
+
+fn body_row(
+    row: BodyModel,
+    body: Signal<Vec<BodyModel>>,
+    values: &Mutex<HashMap<String, Signal<String>>>,
+    slots: &Mutex<HashMap<String, Arc<Mutex<PendingAction>>>>,
+    draft: &Arc<Mutex<(String, String)>>,
+    sink: &Sink,
+    target: &PendingTarget,
+) -> nana_ui::runtime::view::AnyView {
+    let key = row.key;
+    match row.content {
+        BodyContent::Field { label, value, role } => {
+            let value_signal = field_signal(values, &key, value);
+            let sink = Arc::clone(sink);
+            let target = target.clone();
+            let draft = Arc::clone(draft);
+            let show = body;
+            let label_rows = body;
+            let show_key = key.clone();
+            let label_key = key;
+            widget(FormField::new(label))
+                .bind(move |field| {
+                    if let Some(label) = label_rows.with(|rows| field_label(rows, &label_key)) {
+                        field.label = std::sync::Arc::from(label);
                     }
-                    if let Some(raw) = &mcp.raw_json {
-                        order.push(self.field(
-                            context,
-                            document,
-                            "raw",
-                            "原始 JSON",
-                            raw,
-                            |value| PendingAction::McpRawJsonChanged { value },
-                        )?);
-                    }
-                    for field in &mcp.fields {
-                        if field.options.is_empty() && field.kind != "boolean" {
-                            let field_key = field.key.clone();
-                            order.push(self.field(
-                                context,
-                                document,
-                                &format!("mcp-{}", field.key),
-                                &field.label,
-                                &field.value,
-                                move |value| PendingAction::McpFieldChanged {
-                                    field_key: field_key.clone(),
-                                    value,
-                                },
-                            )?);
-                        } else if field.kind == "boolean" {
-                            order.push(self.button(
-                                context,
-                                document,
-                                &format!("pending-mcp-bool-{request}-{}", field.key),
-                                &format!(
-                                    "{} · {}",
-                                    field.label,
-                                    if field.enabled {
-                                        "已开启"
-                                    } else {
-                                        "已关闭"
-                                    }
-                                ),
+                })
+                .visible(move || show.with(|rows| row_shown(rows, &show_key)))
+                .control(
+                    widget(TextArea::new("").height(48.0))
+                        .value(value_signal)
+                        .on_input(move |event: &TextChanged| {
+                            sink(
+                                target.clone(),
+                                field_change(&role, &draft, event.value.to_string()),
+                            )
+                        }),
+                )
+                .into_any()
+        }
+        BodyContent::Button {
+            label,
+            kind,
+            disabled,
+            action,
+        } => {
+            let face = ButtonFace {
+                label,
+                kind,
+                disabled,
+                visible: true,
+                action,
+            };
+            let rows = body;
+            let lookup_key = key.clone();
+            wire_button(
+                key,
+                face,
+                move || rows.with(|rows| button_face(rows, &lookup_key)),
+                slots,
+                sink,
+                target,
+            )
+            .into_any()
+        }
+    }
+}
+
+fn action_button(
+    row: ActionModel,
+    rows: Signal<Vec<ActionModel>>,
+    slots: &Mutex<HashMap<String, Arc<Mutex<PendingAction>>>>,
+    sink: &Sink,
+    target: &PendingTarget,
+) -> nana_ui::runtime::view::El<Button> {
+    let key = row.key.clone();
+    let face = ButtonFace {
+        label: row.label,
+        kind: row.kind,
+        disabled: row.disabled,
+        visible: row.visible,
+        action: row.action,
+    };
+    let lookup_key = key.clone();
+    wire_button(
+        key,
+        face,
+        move || rows.with(|rows| action_face(rows, &lookup_key)),
+        slots,
+        sink,
+        target,
+    )
+}
+
+struct ButtonFace {
+    label: String,
+    kind: ButtonKind,
+    disabled: bool,
+    visible: bool,
+    action: PendingAction,
+}
+
+fn wire_button(
+    key: String,
+    face: ButtonFace,
+    refresh: impl Fn() -> Option<ButtonFace> + Send + Sync + 'static,
+    slots: &Mutex<HashMap<String, Arc<Mutex<PendingAction>>>>,
+    sink: &Sink,
+    target: &PendingTarget,
+) -> nana_ui::runtime::view::El<Button> {
+    let slot = Arc::new(Mutex::new(face.action));
+    if let Ok(mut slots) = slots.lock() {
+        slots.insert(key, Arc::clone(&slot));
+    }
+    let refresh = Arc::new(refresh);
+    let show = Arc::clone(&refresh);
+    let press = Arc::clone(&slot);
+    let sink = Arc::clone(sink);
+    let target = target.clone();
+    widget(
+        Button::new(face.label)
+            .kind(face.kind)
+            .size(ControlSize::Small),
+    )
+    .disabled(face.disabled)
+    .visible(move || (show.as_ref())().is_some_and(|face| face.visible))
+    .bind(move |button| {
+        let Some(face) = (refresh.as_ref())() else {
+            return;
+        };
+        button.label = face.label;
+        button.kind = face.kind;
+        button.disabled = face.disabled;
+        button.size = ControlSize::Small;
+        if let Ok(mut action) = slot.lock() {
+            *action = face.action;
+        }
+    })
+    .on_activate(move || {
+        if let Ok(action) = press.lock() {
+            sink(target.clone(), action.clone());
+        }
+    })
+}
+
+fn field_signal(
+    values: &Mutex<HashMap<String, Signal<String>>>,
+    key: &str,
+    value: String,
+) -> Signal<String> {
+    let mut values = values.lock().unwrap();
+    if let Some(existing) = values.get(key).copied() {
+        return existing;
+    }
+    let created = signal(value);
+    values.insert(key.to_owned(), created);
+    created
+}
+
+fn field_change(role: &FieldRole, draft: &Mutex<(String, String)>, value: String) -> PendingAction {
+    match role {
+        FieldRole::Draft => PendingAction::PendingDraftChanged { value },
+        FieldRole::Ask => PendingAction::AskUserPending {
+            action: "freeform".into(),
+            value,
+        },
+        FieldRole::Command => {
+            let mut draft = draft.lock().unwrap();
+            draft.0 = value;
+            PendingAction::ToolConsentDraftChanged {
+                command: draft.0.clone(),
+                message: draft.1.clone(),
+            }
+        }
+        FieldRole::Message => {
+            let mut draft = draft.lock().unwrap();
+            draft.1 = value;
+            PendingAction::ToolConsentDraftChanged {
+                command: draft.0.clone(),
+                message: draft.1.clone(),
+            }
+        }
+        FieldRole::Raw => PendingAction::McpRawJsonChanged { value },
+        FieldRole::Mcp(field_key) => PendingAction::McpFieldChanged {
+            field_key: field_key.clone(),
+            value,
+        },
+    }
+}
+
+fn field_label(rows: &[BodyModel], key: &str) -> Option<String> {
+    rows.iter().find_map(|row| match &row.content {
+        BodyContent::Field { label, .. } if row.key == key => Some(label.clone()),
+        _ => None,
+    })
+}
+
+fn row_shown(rows: &[BodyModel], key: &str) -> bool {
+    rows.iter()
+        .find(|row| row.key == key)
+        .is_some_and(|row| row.visible)
+}
+
+fn button_face(rows: &[BodyModel], key: &str) -> Option<ButtonFace> {
+    rows.iter().find(|row| row.key == key).and_then(|row| {
+        let BodyContent::Button {
+            label,
+            kind,
+            disabled,
+            action,
+        } = &row.content
+        else {
+            return None;
+        };
+        Some(ButtonFace {
+            label: label.clone(),
+            kind: *kind,
+            disabled: *disabled,
+            visible: row.visible,
+            action: action.clone(),
+        })
+    })
+}
+
+fn action_face(rows: &[ActionModel], key: &str) -> Option<ButtonFace> {
+    rows.iter()
+        .find(|row| row.key == key)
+        .map(|row| ButtonFace {
+            label: row.label.clone(),
+            kind: row.kind,
+            disabled: row.disabled,
+            visible: row.visible,
+            action: row.action.clone(),
+        })
+}
+
+fn tool_draft_of(pending: &PendingSnapshot) -> (String, String) {
+    pending
+        .tool
+        .as_ref()
+        .map(|tool| (tool.command.clone(), tool.message.clone()))
+        .unwrap_or_default()
+}
+
+fn body_models(pending: &PendingSnapshot) -> Vec<BodyModel> {
+    let mut rows = Vec::new();
+    let request = &pending.request_id;
+    match pending.kind {
+        PendingKind::PlanApproval => rows.push(field_model(
+            "draft",
+            "补充说明",
+            &pending.draft,
+            true,
+            FieldRole::Draft,
+        )),
+        PendingKind::AskUser => {
+            if let Some(ask) = &pending.ask {
+                rows.push(field_model(
+                    "ask",
+                    "补充说明",
+                    &ask.freeform,
+                    ask.show_freeform,
+                    FieldRole::Ask,
+                ));
+            }
+        }
+        PendingKind::ToolConsent => {
+            if let Some(tool) = &pending.tool {
+                if tool.command_editable {
+                    rows.push(field_model(
+                        "command",
+                        "确认执行的命令",
+                        &tool.command,
+                        true,
+                        FieldRole::Command,
+                    ));
+                }
+                rows.push(field_model(
+                    "message",
+                    "拒绝理由",
+                    &tool.message,
+                    true,
+                    FieldRole::Message,
+                ));
+            }
+        }
+        PendingKind::McpElicitation => {
+            if let Some(mcp) = &pending.mcp {
+                if let Some(url) = &mcp.url {
+                    rows.push(button_model(
+                        format!("pending-mcp-url-{request}"),
+                        "打开链接",
+                        ButtonKind::Subtle,
+                        PendingAction::OpenMarkdownLink(url.clone()),
+                    ));
+                }
+                if let Some(raw) = &mcp.raw_json {
+                    rows.push(field_model("raw", "原始 JSON", raw, true, FieldRole::Raw));
+                }
+                for field in &mcp.fields {
+                    if field.options.is_empty() && field.kind != "boolean" {
+                        rows.push(field_model(
+                            format!("mcp-{}", field.key),
+                            &field.label,
+                            &field.value,
+                            true,
+                            FieldRole::Mcp(field.key.clone()),
+                        ));
+                    } else if field.kind == "boolean" {
+                        rows.push(button_model(
+                            format!("pending-mcp-bool-{request}-{}", field.key),
+                            format!(
+                                "{} · {}",
+                                field.label,
                                 if field.enabled {
+                                    "已开启"
+                                } else {
+                                    "已关闭"
+                                }
+                            ),
+                            if field.enabled {
+                                ButtonKind::Primary
+                            } else {
+                                ButtonKind::Subtle
+                            },
+                            PendingAction::McpToggleBoolean {
+                                field_key: field.key.clone(),
+                            },
+                        ));
+                    } else {
+                        for option in &field.options {
+                            rows.push(button_model(
+                                format!("pending-mcp-opt-{request}-{}-{}", field.key, option.value),
+                                format!("{} · {}", field.label, option.label),
+                                if option.selected {
                                     ButtonKind::Primary
                                 } else {
                                     ButtonKind::Subtle
                                 },
-                                PendingAction::McpToggleBoolean {
+                                PendingAction::McpToggleOption {
                                     field_key: field.key.clone(),
+                                    value: option.value.clone(),
+                                    multi: option.multi,
                                 },
-                                false,
-                            )?);
-                        } else {
-                            for option in &field.options {
-                                order.push(self.button(
-                                    context,
-                                    document,
-                                    &format!(
-                                        "pending-mcp-opt-{request}-{}-{}",
-                                        field.key, option.value
-                                    ),
-                                    &format!("{} · {}", field.label, option.label),
-                                    if option.selected {
-                                        ButtonKind::Primary
-                                    } else {
-                                        ButtonKind::Subtle
-                                    },
-                                    PendingAction::McpToggleOption {
-                                        field_key: field.key.clone(),
-                                        value: option.value.clone(),
-                                        multi: option.multi,
-                                    },
-                                    false,
-                                )?);
-                            }
+                            ));
                         }
                     }
                 }
             }
-            _ => {}
         }
-        for option in &pending.options {
-            order.push(self.button(
-                context,
-                document,
-                &format!("pending-opt-{request}-{}", option.id),
-                &option.label,
-                if option.selected {
+        _ => {}
+    }
+    for option in &pending.options {
+        rows.push(button_model(
+            format!("pending-opt-{request}-{}", option.id),
+            option.label.clone(),
+            if option.selected {
+                ButtonKind::Primary
+            } else if option.danger {
+                ButtonKind::Danger
+            } else {
+                ButtonKind::Subtle
+            },
+            PendingAction::SelectPendingOption {
+                option_id: option.id.clone(),
+            },
+        ));
+    }
+    if let Some(ask) = &pending.ask {
+        if ask.show_other {
+            rows.push(button_model(
+                format!("pending-ask-other-{request}"),
+                if ask.other_selected {
+                    "✓ 其他".to_owned()
+                } else {
+                    "其他".to_owned()
+                },
+                if ask.other_selected {
                     ButtonKind::Primary
-                } else if option.danger {
-                    ButtonKind::Danger
                 } else {
                     ButtonKind::Subtle
                 },
-                PendingAction::SelectPendingOption {
-                    option_id: option.id.clone(),
+                PendingAction::AskUserPending {
+                    action: "select".into(),
+                    value: "other".into(),
                 },
-                false,
-            )?);
+            ));
         }
-        if let Some(ask) = &pending.ask {
-            if ask.show_other {
-                order.push(self.button(
-                    context,
-                    document,
-                    &format!("pending-ask-other-{request}"),
-                    if ask.other_selected {
-                        "✓ 其他"
-                    } else {
-                        "其他"
-                    },
-                    if ask.other_selected {
-                        ButtonKind::Primary
-                    } else {
-                        ButtonKind::Subtle
-                    },
-                    PendingAction::AskUserPending {
-                        action: "select".into(),
-                        value: "other".into(),
-                    },
-                    false,
-                )?);
-            }
-        }
-        let mut actions = Vec::new();
-        for (id, label, kind, action, disabled) in action_specs(pending) {
-            actions.push(self.button(context, document, &id, &label, kind, action, disabled)?);
-        }
-        reconcile_children(context, self.actions.stable_id(), &actions)?;
-        if !actions.is_empty() {
-            order.push(self.actions.stable_id());
-        }
-        reconcile_children(context, root, &order)
     }
-    fn dispose(self, context: &mut AppContext) -> Result<(), FrameworkError> {
-        for (_, field) in self.fields {
-            context.remove_view(field.wrapper)?;
-        }
-        for (_, button) in self.buttons {
-            context.remove_view(button.node)?;
-        }
-        context.remove_view(self.title)?;
-        context.remove_view(self.prompt)?;
-        context.remove_view(self.actions)?;
-        Ok(())
+    rows
+}
+
+fn action_models(pending: &PendingSnapshot) -> Vec<ActionModel> {
+    action_specs(pending)
+        .into_iter()
+        .map(|(key, label, kind, action, disabled)| ActionModel {
+            key,
+            label,
+            kind,
+            disabled,
+            visible: true,
+            action,
+        })
+        .collect()
+}
+
+fn field_model(
+    key: impl Into<String>,
+    label: impl Into<String>,
+    value: &str,
+    visible: bool,
+    role: FieldRole,
+) -> BodyModel {
+    BodyModel {
+        key: key.into(),
+        visible,
+        content: BodyContent::Field {
+            label: label.into(),
+            value: value.to_owned(),
+            role,
+        },
     }
+}
+
+fn button_model(
+    key: impl Into<String>,
+    label: impl Into<String>,
+    kind: ButtonKind,
+    action: PendingAction,
+) -> BodyModel {
+    BodyModel {
+        key: key.into(),
+        visible: true,
+        content: BodyContent::Button {
+            label: label.into(),
+            kind,
+            disabled: false,
+            action,
+        },
+    }
+}
+
+fn keep_hidden(previous: &[BodyModel], mut current: Vec<BodyModel>) -> Vec<BodyModel> {
+    let seen = current
+        .iter()
+        .map(|row| row.key.clone())
+        .collect::<HashSet<_>>();
+    for old in previous {
+        if !seen.contains(&old.key) {
+            let mut hidden = old.clone();
+            hidden.visible = false;
+            current.push(hidden);
+        }
+    }
+    current
+}
+
+fn keep_hidden_actions(
+    previous: &[ActionModel],
+    mut current: Vec<ActionModel>,
+) -> Vec<ActionModel> {
+    let seen = current
+        .iter()
+        .map(|row| row.key.clone())
+        .collect::<HashSet<_>>();
+    for old in previous {
+        if !seen.contains(&old.key) {
+            let mut hidden = old.clone();
+            hidden.visible = false;
+            current.push(hidden);
+        }
+    }
+    current
 }
 
 fn action_specs(

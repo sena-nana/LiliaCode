@@ -3,7 +3,7 @@ use crate::application::{
     DesktopFileDialogRequest, DesktopHost, DesktopHostAction, DesktopHostContext, DesktopHostError,
     DesktopHostResult, DesktopSecret, DesktopUpdateAction,
 };
-use lilia_platform::{CredentialEntry, PlatformError, clipboard, dialog, launcher, power};
+use lilia_platform::{clipboard, dialog, launcher, power, CredentialEntry, PlatformError};
 
 const LEGACY_AI_CREDENTIAL_SERVICE: &str = "com.lilia.desktop.ai";
 const LEGACY_ASSISTANT_AI_ACCOUNT: &str = "assistant-ai";
@@ -461,11 +461,9 @@ mod tests {
                 target_key: "agentkit.provider-secret".to_owned(),
             },
         ];
-        assert!(
-            valid
-                .iter()
-                .all(|entry| valid_import_credential_entry(source_identity, entry))
-        );
+        assert!(valid
+            .iter()
+            .all(|entry| valid_import_credential_entry(source_identity, entry)));
 
         let arbitrary_source = DesktopCredentialImportEntry {
             source_service: "untrusted.service".to_owned(),

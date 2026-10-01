@@ -2,11 +2,12 @@ use crate::module::composer::pending_view::{PendingSnapshot, PendingView};
 use crate::module::composer::view::{ComposerView, ComposerViewSnapshot};
 use crate::module::timeline::view::{TimelineView, TimelineViewSnapshot};
 use crate::runtime_layout::{headline_slot, reconcile_children};
-use crate::runtime_shell::{IntentSink, ShellIntent, emit};
-use nana_ui::Icon;
+use crate::runtime_shell::{emit, IntentSink, ShellIntent};
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     AppContext, DocumentId, EmptyState, Entity, FrameworkError, LengthSpec, Stack, Text,
 };
+use nana_ui::Icon;
 use std::sync::Arc;
 
 pub(crate) const CHAT_CONTENT_MAX_WIDTH: f32 = 860.0;
@@ -38,24 +39,43 @@ impl TaskView {
         input: TaskViewInput<'_>,
         sink: IntentSink,
     ) -> Result<Self, FrameworkError> {
-        let conversation_column = context.create_detached_component(
-            document,
-            Stack::fill_column(12.0)
-                .max_width(CHAT_CONTENT_MAX_WIDTH)
-                .with_layout(|layout| {
-                    layout.margin_left = Some(LengthSpec::Auto);
-                    layout.margin_right = Some(LengthSpec::Auto);
-                }),
-        )?;
-        let conversation_body =
-            context.create_detached_component(document, Stack::fill_column(12.0))?;
-        let heading_slot = context.create_detached_component(document, headline_slot(false))?;
-        let heading = context.create_detached_component(
-            document,
-            EmptyState::new(input.heading).icon(Icon::MessageSquarePlus),
-        )?;
-        let error = context
-            .create_detached_component(document, Text::new(input.error.unwrap_or_default()))?;
+        let (_, (conversation_column, conversation_body, heading_slot, heading, error)) =
+            context.mount_view_detached(document, move || {
+                let conversation_column = entity_ref::<Stack>();
+                let conversation_body = entity_ref::<Stack>();
+                let heading_slot = entity_ref::<Stack>();
+                let heading = entity_ref::<EmptyState>();
+                let error = entity_ref::<Text>();
+                with_refs(
+                    (
+                        widget(
+                            Stack::fill_column(12.0)
+                                .max_width(CHAT_CONTENT_MAX_WIDTH)
+                                .with_layout(|layout| {
+                                    layout.margin_left = Some(LengthSpec::Auto);
+                                    layout.margin_right = Some(LengthSpec::Auto);
+                                }),
+                        )
+                        .entity_ref(conversation_column),
+                        widget(Stack::fill_column(12.0))
+                            .entity_ref(conversation_body)
+                            .children((
+                                widget(headline_slot(false)).entity_ref(heading_slot),
+                                widget(Text::new(input.error.unwrap_or_default()))
+                                    .entity_ref(error),
+                            )),
+                        widget(EmptyState::new(input.heading).icon(Icon::MessageSquarePlus))
+                            .entity_ref(heading),
+                    ),
+                    (
+                        conversation_column,
+                        conversation_body,
+                        heading_slot,
+                        heading,
+                        error,
+                    ),
+                )
+            })?;
         let timeline_sink = Arc::clone(&sink);
         let timeline_view = TimelineView::mount(
             context,

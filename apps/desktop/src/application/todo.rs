@@ -4,9 +4,10 @@ use crate::application::composer::DesktopComposerTurnRequest;
 use crate::application::{DesktopApplication, DesktopApplicationError, TodosChanged};
 
 pub use lilia_feature_agent_session::{
-    DesktopGuideDispatchResult, DesktopGuideDispatchWindow, DesktopTaskTodo, DesktopTodoCreate,
-    DesktopTodoError, DesktopTodoGuideStatus, DesktopTodoPriority, DesktopTodoSource,
-    DesktopTodoStore, DesktopTodoUpdate, guide_message, merge_todos_with_latest_projection,
+    guide_message, merge_todos_with_latest_projection, DesktopGuideDispatchResult,
+    DesktopGuideDispatchWindow, DesktopTaskTodo, DesktopTodoCreate, DesktopTodoError,
+    DesktopTodoGuideStatus, DesktopTodoPriority, DesktopTodoSource, DesktopTodoStore,
+    DesktopTodoUpdate,
 };
 
 use lilia_kernel::{
@@ -312,27 +313,23 @@ mod service_tests {
             tx.send(reader.list_task_todos(&event.task_id).unwrap())
                 .unwrap();
         });
-        assert!(
-            mounted
-                .create_task_todo(input(TaskId::new("missing").unwrap()))
-                .is_err()
-        );
+        assert!(mounted
+            .create_task_todo(input(TaskId::new("missing").unwrap()))
+            .is_err());
         assert!(rx.try_recv().is_err());
         let orphan = service
             .store
             .create(input(TaskId::new("deleted-task").unwrap()))
             .unwrap();
-        assert!(
-            mounted
-                .update_task_todo(
-                    &orphan.id,
-                    DesktopTodoUpdate {
-                        done: Some(true),
-                        ..Default::default()
-                    }
-                )
-                .is_err()
-        );
+        assert!(mounted
+            .update_task_todo(
+                &orphan.id,
+                DesktopTodoUpdate {
+                    done: Some(true),
+                    ..Default::default()
+                }
+            )
+            .is_err());
         assert!(mounted.delete_task_todo(&orphan.id).is_err());
         assert_eq!(
             DesktopTodoStore::get_from(&service.store.connection(), &orphan.id).unwrap(),
@@ -362,17 +359,15 @@ mod service_tests {
                 .1
         );
         assert!(rx.try_recv().is_err());
-        assert!(
-            mounted
-                .update_task_todo(
-                    &created.id,
-                    DesktopTodoUpdate {
-                        text: Some(" ".into()),
-                        ..Default::default()
-                    }
-                )
-                .is_err()
-        );
+        assert!(mounted
+            .update_task_todo(
+                &created.id,
+                DesktopTodoUpdate {
+                    text: Some(" ".into()),
+                    ..Default::default()
+                }
+            )
+            .is_err());
         assert!(rx.try_recv().is_err());
         assert_eq!(
             service.list_task_todos(&task).unwrap(),
@@ -393,16 +388,14 @@ mod service_tests {
                 Some(&guide.id),
                 DesktopGuideDispatchWindow::User,
                 |selected| {
-                    assert!(
-                        service
-                            .dispatch_guide(
-                                &task,
-                                Some(&selected.id),
-                                DesktopGuideDispatchWindow::User,
-                                |_| Ok(())
-                            )
-                            .is_err()
-                    );
+                    assert!(service
+                        .dispatch_guide(
+                            &task,
+                            Some(&selected.id),
+                            DesktopGuideDispatchWindow::User,
+                            |_| Ok(())
+                        )
+                        .is_err());
                     service.update_task_todo(
                         &selected.id,
                         DesktopTodoUpdate {
@@ -414,16 +407,14 @@ mod service_tests {
             )
             .unwrap();
         assert!(result.unwrap().is_some());
-        assert!(
-            service
-                .dispatch_guide(
-                    &task,
-                    Some(&guide.id),
-                    DesktopGuideDispatchWindow::User,
-                    |_| Ok(())
-                )
-                .unwrap()
-                .is_none()
-        );
+        assert!(service
+            .dispatch_guide(
+                &task,
+                Some(&guide.id),
+                DesktopGuideDispatchWindow::User,
+                |_| Ok(())
+            )
+            .unwrap()
+            .is_none());
     }
 }

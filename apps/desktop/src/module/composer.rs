@@ -689,7 +689,7 @@ mod tests {
 
     use super::*;
     use crate::application::ApplicationWorkspaceSurface;
-    use crate::runtime_shell::{ShellProjectPage, empty_snapshot};
+    use crate::runtime_shell::{empty_snapshot, ShellProjectPage};
 
     fn loaded_draft() -> ComposerModule {
         let mut module = ComposerModule::default();

@@ -1,18 +1,19 @@
 use std::time::Duration;
 
 use lilia_contracts::{
-    LiliaAgentWorkflow, prompt_optimize_request_instruction, prompt_optimize_requirements,
+    prompt_optimize_request_instruction, prompt_optimize_requirements,
     prompt_optimize_system_instruction, prompt_router_request_instruction,
     prompt_router_requirements, prompt_router_scenarios, prompt_router_system_instruction,
+    LiliaAgentWorkflow,
 };
 use serde::Deserialize;
-use serde_json::{Value as JsonValue, json};
+use serde_json::{json, Value as JsonValue};
 
 use crate::application::auxiliary_model::{
-    DesktopAuxiliaryModelRequest, request_auxiliary_model_text,
+    request_auxiliary_model_text, DesktopAuxiliaryModelRequest,
 };
 use crate::application::{
-    ASSISTANT_AI_CREDENTIAL_KEY, DesktopApplication, DesktopApplicationError,
+    DesktopApplication, DesktopApplicationError, ASSISTANT_AI_CREDENTIAL_KEY,
 };
 
 const PROMPT_OPTIMIZE_TIMEOUT: Duration = Duration::from_secs(12);

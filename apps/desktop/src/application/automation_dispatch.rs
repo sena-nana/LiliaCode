@@ -1,15 +1,15 @@
 use std::cell::Cell;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lilia_contracts::{PageRequest, PendingProjectionStatus, ProductEventSequence, TaskId};
 use lilia_feature_automation::{
-    AutomationBeginRunInput, AutomationRunStatus, AutomationSignalEnvelope, AutomationStoreError,
-    DesktopAutomationError, automation_signal_matches,
+    automation_signal_matches, AutomationBeginRunInput, AutomationRunStatus,
+    AutomationSignalEnvelope, AutomationStoreError, DesktopAutomationError,
 };
 use lilia_kernel::{EventBus, SubscriptionId};
 use lilia_storage::SqliteAgentRuntimeStateStore;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::{
     DesktopApplication, DesktopApplicationError, DesktopEvent, TimelineChanged, TodosChanged,
@@ -921,15 +921,14 @@ mod tests {
                 app.list_task_todos(&task_id).unwrap().len(),
                 usize::from(status == "completed")
             );
-            assert!(
-                app.inner
-                    .turn_submissions
-                    .queue()
-                    .unwrap()
-                    .list(&task_id)
-                    .unwrap()
-                    .is_empty()
-            );
+            assert!(app
+                .inner
+                .turn_submissions
+                .queue()
+                .unwrap()
+                .list(&task_id)
+                .unwrap()
+                .is_empty());
         }
     }
 
@@ -951,15 +950,14 @@ mod tests {
             AutomationRunStatus::Running
         );
         assert!(app.list_task_todos(&task.id).unwrap().is_empty());
-        assert!(
-            app.inner
-                .turn_submissions
-                .queue()
-                .unwrap()
-                .list(&task.id)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .inner
+            .turn_submissions
+            .queue()
+            .unwrap()
+            .list(&task.id)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1134,15 +1132,14 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(first.len(), 1);
-        assert!(
-            app.dispatch_automation_signal(signal(
+        assert!(app
+            .dispatch_automation_signal(signal(
                 "busy-second".into(),
                 "task_changed",
                 task.id.clone()
             ))
             .unwrap()
-            .is_empty()
-        );
+            .is_empty());
         assert_eq!(app.inner.automation_inbox.pending(None).unwrap().len(), 1);
         app.resume_automation_run(
             &first[0],
@@ -1238,15 +1235,14 @@ mod tests {
                 "original-run",
             )
             .unwrap();
-        assert!(
-            app.inner
-                .turn_submissions
-                .queue()
-                .unwrap()
-                .list(&task.id)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(app
+            .inner
+            .turn_submissions
+            .queue()
+            .unwrap()
+            .list(&task.id)
+            .unwrap()
+            .is_empty());
         append_source_row(&app, &task.id, "completed-agent", 1, "assistant_message");
         app.capture_automation_task_sources(&task.id, false)
             .unwrap();

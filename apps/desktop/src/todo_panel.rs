@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, Entity, FrameworkError, LengthSpec, ScrollAxes,
     ScrollView, Stack, Text, TextArea, TextChanged,
@@ -88,32 +89,49 @@ impl TodoPanel {
         sink: Arc<dyn Fn(ShellIntent) + Send + Sync>,
         window_id: HostedWindowId,
     ) -> Result<Self, FrameworkError> {
-        let root = context.create_detached_component(document, Stack::column(4.0))?;
-        let toolbar = context.create_detached_component(document, Stack::bar(6.0))?;
-        let rows = context.create_detached_component(document, Stack::column(4.0))?;
-        let scroll = context.create_detached_component(
-            document,
-            ScrollView::new(ScrollAxes::Vertical).style(
-                Stack::column(0.0)
-                    .with_layout(|layout| layout.max_height = Some(LengthSpec::Px(144.0)))
-                    .shrink(1.0)
-                    .node_style(),
-            ),
-        )?;
-        context.append_child(scroll, rows)?;
-        let editor = context.create_detached_component(document, Stack::column(4.0))?;
-        let input = context.create_detached_component(document, TextArea::new("").height(64.0))?;
         let input_sink = sink.clone();
-        context.on(input, move |_, event: &TextChanged, _| {
-            input_sink(ShellIntent::Todo {
-                window_id,
-                action: TodoAction::TextChanged(event.value.to_string()),
-            })
-        })?;
-        context.append_child(editor, input)?;
-        let actions = context.create_detached_component(document, Stack::bar(6.0))?;
-        context.append_child(editor, actions)?;
-        let error = context.create_detached_component(document, Text::new(""))?;
+        let (_, (root, toolbar, rows, scroll, editor, input, actions, error)) = context
+            .mount_view_detached(document, move || {
+                let root = entity_ref::<Stack>();
+                let toolbar = entity_ref::<Stack>();
+                let rows = entity_ref::<Stack>();
+                let scroll = entity_ref::<ScrollView>();
+                let editor = entity_ref::<Stack>();
+                let input = entity_ref::<TextArea>();
+                let actions = entity_ref::<Stack>();
+                let error = entity_ref::<Text>();
+                with_refs(
+                    (
+                        widget(Stack::column(4.0)).entity_ref(root),
+                        widget(Stack::bar(6.0)).entity_ref(toolbar),
+                        widget(
+                            ScrollView::new(ScrollAxes::Vertical).style(
+                                Stack::column(0.0)
+                                    .with_layout(|layout| {
+                                        layout.max_height = Some(LengthSpec::Px(144.0))
+                                    })
+                                    .shrink(1.0)
+                                    .node_style(),
+                            ),
+                        )
+                        .entity_ref(scroll)
+                        .children(widget(Stack::column(4.0)).entity_ref(rows)),
+                        widget(Stack::column(4.0)).entity_ref(editor).children((
+                            widget(TextArea::new("").height(64.0)).entity_ref(input).on(
+                                move |event: &TextChanged| {
+                                    input_sink(ShellIntent::Todo {
+                                        window_id,
+                                        action: TodoAction::TextChanged(event.value.to_string()),
+                                    })
+                                },
+                            ),
+                            widget(Stack::bar(6.0)).entity_ref(actions),
+                        )),
+                        widget(Text::new("")).entity_ref(error),
+                    ),
+                    (root, toolbar, rows, scroll, editor, input, actions, error),
+                )
+            })?;
         let mut panel = Self {
             root,
             toolbar,
@@ -177,20 +195,21 @@ impl TodoPanel {
         action: TodoAction,
         enabled: bool,
     ) -> Result<(), FrameworkError> {
-        let button = context.create_detached_component(
-            document,
-            Button::new(label).disabled(!enabled).layout(
-                Stack::row(0.0)
-                    .width(LengthSpec::Px(if label.chars().count() > 3 {
-                        76.0
-                    } else {
-                        52.0
-                    }))
-                    .height(LengthSpec::Px(28.0))
-                    .node_style()
-                    .layout,
-            ),
-        )?;
+        let view = Button::new(label).disabled(!enabled).layout(
+            Stack::row(0.0)
+                .width(LengthSpec::Px(if label.chars().count() > 3 {
+                    76.0
+                } else {
+                    52.0
+                }))
+                .height(LengthSpec::Px(28.0))
+                .node_style()
+                .layout,
+        );
+        let (_, button) = context.mount_view_detached(document, move || {
+            let button = entity_ref::<Button>();
+            with_refs(widget(view).entity_ref(button), button)
+        })?;
         context.append_child(parent, button)?;
         let sink = self.sink.clone();
         let window_id = self.window_id;
@@ -218,11 +237,15 @@ impl TodoPanel {
             self.controls
                 .retain(|(id, _)| matches!(id.as_str(), "new" | "goal-edit" | "save" | "cancel"));
             if let Some(goal) = &state.goal {
-                let row = context.create_detached_component(document, Stack::column(3.0))?;
-                let label = context.create_detached_component(
-                    document,
-                    Text::new(format!("目标 · {}", goal.objective)),
-                )?;
+                let (_, row) = context.mount_view_detached(document, || {
+                    let row = entity_ref::<Stack>();
+                    with_refs(widget(Stack::column(3.0)).entity_ref(row), row)
+                })?;
+                let goal_label = format!("目标 · {}", goal.objective);
+                let (_, label) = context.mount_view_detached(document, move || {
+                    let label = entity_ref::<Text>();
+                    with_refs(widget(Text::new(goal_label)).entity_ref(label), label)
+                })?;
                 context.append_child(row, label)?;
                 let status = match goal.status {
                     DesktopGoalStatus::Active => "进行中",
@@ -236,12 +259,16 @@ impl TodoPanel {
                     .token_budget
                     .map(|value| format!("/{value}"))
                     .unwrap_or_default();
-                let meta = context.create_detached_component(
-                    document,
-                    Text::new(format!("{status} · {}{budget} tokens", goal.tokens_used)),
-                )?;
+                let meta_text = format!("{status} · {}{budget} tokens", goal.tokens_used);
+                let (_, meta) = context.mount_view_detached(document, move || {
+                    let meta = entity_ref::<Text>();
+                    with_refs(widget(Text::new(meta_text)).entity_ref(meta), meta)
+                })?;
                 context.append_child(row, meta)?;
-                let actions = context.create_detached_component(document, Stack::bar(6.0))?;
+                let (_, actions) = context.mount_view_detached(document, || {
+                    let actions = entity_ref::<Stack>();
+                    with_refs(widget(Stack::bar(6.0)).entity_ref(actions), actions)
+                })?;
                 context.append_child(row, actions)?;
                 self.button(
                     context,
@@ -264,7 +291,10 @@ impl TodoPanel {
                 self.row_nodes.push(row);
             }
             for todo in state.todos.iter().filter(|todo| visible_todo(todo)) {
-                let row = context.create_detached_component(document, Stack::column(2.0))?;
+                let (_, row) = context.mount_view_detached(document, || {
+                    let row = entity_ref::<Stack>();
+                    with_refs(widget(Stack::column(2.0)).entity_ref(row), row)
+                })?;
                 let priority = match todo.priority {
                     DesktopTodoPriority::High => "高优先级",
                     DesktopTodoPriority::Normal => "普通",
@@ -277,13 +307,17 @@ impl TodoPanel {
                 } else {
                     "待发送引导"
                 };
-                let label = context.create_detached_component(
-                    document,
-                    Text::new(format!("{source} · {priority} · {}", todo.text)),
-                )?;
+                let todo_label = format!("{source} · {priority} · {}", todo.text);
+                let (_, label) = context.mount_view_detached(document, move || {
+                    let label = entity_ref::<Text>();
+                    with_refs(widget(Text::new(todo_label)).entity_ref(label), label)
+                })?;
                 context.append_child(row, label)?;
                 if todo.source == DesktopTodoSource::Lilia {
-                    let actions = context.create_detached_component(document, Stack::bar(4.0))?;
+                    let (_, actions) = context.mount_view_detached(document, || {
+                        let actions = entity_ref::<Stack>();
+                        with_refs(widget(Stack::bar(4.0)).entity_ref(actions), actions)
+                    })?;
                     context.append_child(row, actions)?;
                     let enabled = editable_guide(todo) && !state.locked;
                     for (key, label, action) in [

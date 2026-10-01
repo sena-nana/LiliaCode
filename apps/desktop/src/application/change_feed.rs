@@ -563,28 +563,25 @@ mod tests {
 
         app.start_product_change_feed_with_interval(Duration::from_millis(100))
             .unwrap();
-        assert!(
-            app.product_change_feed_service()
-                .state
-                .running
-                .load(Ordering::SeqCst)
-        );
+        assert!(app
+            .product_change_feed_service()
+            .state
+            .running
+            .load(Ordering::SeqCst));
         app.stop_product_change_feed();
-        assert!(
-            !app.product_change_feed_service()
-                .state
-                .running
-                .load(Ordering::SeqCst)
-        );
+        assert!(!app
+            .product_change_feed_service()
+            .state
+            .running
+            .load(Ordering::SeqCst));
 
         app.start_product_change_feed_with_interval(Duration::from_millis(100))
             .unwrap();
-        assert!(
-            app.product_change_feed_service()
-                .state
-                .running
-                .load(Ordering::SeqCst)
-        );
+        assert!(app
+            .product_change_feed_service()
+            .state
+            .running
+            .load(Ordering::SeqCst));
         app.stop_product_change_feed();
     }
 }
