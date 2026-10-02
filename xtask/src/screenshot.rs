@@ -22,21 +22,12 @@ pub fn run(arguments: &[String]) -> Result {
         Some(path) => repo_root()?.join(path),
         None => repo_root()?.join("target/offscreen-screenshots/product.png"),
     };
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            XtaskError::io(
-                "screenshot_directory_failed",
-                "create screenshot directory",
-                error,
-            )
-        })?;
-    }
     render_product(&output, "light", 1180, 760)?;
     println!("screenshot: ok ({})", output.display());
     Ok(())
 }
 
-fn render_product(output: &PathBuf, theme: &str, width: u32, height: u32) -> Result {
+fn render_product(output: &Path, theme: &str, width: u32, height: u32) -> Result {
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             XtaskError::io(
