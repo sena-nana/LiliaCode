@@ -3219,6 +3219,9 @@ pub fn mount_primary_shell(
         .title_window_controls(false)
         .title_trailing(title_trailing.stable_id())
         .navigation(navigation)
+        // The composer owns the conversation surface.  Rounded workspace
+        // corners would make the whole chat read as a second outer dialog.
+        .workspace_corners(false)
         .primary(primary);
     if !snapshot.inspector_title.is_empty() {
         shell_builder = shell_builder.inspector(inspector.stable_id());
@@ -3467,11 +3470,10 @@ fn pane_has_resource(pane: &ShellPaneRow) -> bool {
 }
 
 fn conversation_root() -> Stack {
-    // 每帧整体重投影会抹掉 Primary 区域涂在节点上的底色，因此自带 Background。
-    Stack::fill_column(0.0)
-        .padding_xy(24.0, 20.0)
-        .radius(nana_ui::theme::RadiusTier::Lg)
-        .surface(SemanticColorRole::Background)
+    // Keep the conversation surface flat so the composer is the only visible
+    // input card.  A filled, rounded root here creates a second panel behind
+    // the composer and makes the dialog read as nested cards.
+    Stack::fill_column(0.0).padding_xy(24.0, 20.0)
 }
 
 fn assemble_conversation_workspace(
@@ -7057,7 +7059,7 @@ mod tests {
                 .world()
                 .node(handles.task_view.composer_view.composer_toolbar.stable_id())
                 .and_then(|node| node.parent),
-            Some(dock)
+            Some(handles.task_view.composer_view.stage.stable_id())
         );
         let dock_layout = &document
             .context()
@@ -7096,7 +7098,10 @@ mod tests {
                 .world()
                 .node(handles.task_view.conversation_column.stable_id())
                 .map(|node| node.children),
-            Some(vec![body, dock])
+            Some(vec![
+                body,
+                handles.task_view.composer_view.stage.stable_id()
+            ])
         );
         assert_eq!(
             dock,
@@ -7145,7 +7150,7 @@ mod tests {
                 .world()
                 .node(dock)
                 .and_then(|node| node.parent),
-            None
+            Some(handles.task_view.composer_view.stage.stable_id())
         );
         assert_eq!(
             document
@@ -7918,10 +7923,7 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(
             actions,
-            vec![
-                handles.task_view.composer_view.browser_open.stable_id(),
-                handles.task_view.composer_view.send.stable_id()
-            ]
+            vec![handles.task_view.composer_view.send.stable_id()]
         );
         assert!(handles.task_view.timeline_view.load_earlier.is_none());
         let body = document
@@ -7976,8 +7978,20 @@ mod tests {
                 .map(|node| node.children.clone())
                 .unwrap_or_default(),
             vec![
-                handles.task_view.composer_view.completion_slot.stable_id(),
                 handles.task_view.composer_view.composer.stable_id(),
+                handles.task_view.composer_view.composer_actions.stable_id(),
+            ]
+        );
+        assert_eq!(
+            document
+                .context()
+                .world()
+                .node(handles.task_view.composer_view.stage.stable_id())
+                .map(|node| node.children.clone())
+                .unwrap_or_default(),
+            vec![
+                handles.task_view.composer_view.completion_slot.stable_id(),
+                handles.task_view.composer_view.composer_dock.stable_id(),
                 handles.task_view.composer_view.composer_toolbar.stable_id(),
             ]
         );

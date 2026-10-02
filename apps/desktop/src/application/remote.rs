@@ -3,16 +3,18 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
 
-use lilia_contracts::{PendingProjection, ProductTask, TaskId, TimelineProjectionEvent};
+use lilia_contracts::{
+    PendingProjection, ProductTask, ProductTaskStatus, TaskId, TimelineProjectionEvent,
+};
 use mutsuki_agent_contracts::AgentWireRequestEnvelope;
 use serde_json::{json, Value};
 
 use crate::application::{
     timeline_retry_context, DesktopApplication, DesktopApplicationError,
     DesktopArchitectureInteractionDecision, DesktopExecutionPermission, DesktopHost,
-    DesktopHostAction, DesktopHostContext, DesktopTerminalCommand, DesktopTerminalLaunch,
-    DesktopTerminalProcessState, DesktopTerminalScope, DesktopTerminalSessionId,
-    DesktopTurnRequest, ProjectQuery, TaskQuery,
+    DesktopHostAction, DesktopHostContext, DesktopTaskPatch, DesktopTerminalCommand,
+    DesktopTerminalLaunch, DesktopTerminalProcessState, DesktopTerminalScope,
+    DesktopTerminalSessionId, DesktopTurnRequest, ProjectQuery, TaskQuery,
 };
 
 pub use lilia_feature_remote::{

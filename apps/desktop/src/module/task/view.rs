@@ -10,7 +10,7 @@ use nana_ui::runtime::{
 use nana_ui::Icon;
 use std::sync::Arc;
 
-pub(crate) const CHAT_CONTENT_MAX_WIDTH: f32 = 860.0;
+pub(crate) const CHAT_CONTENT_MAX_WIDTH: f32 = 760.0;
 
 pub(crate) struct TaskViewInput<'a> {
     pub heading: &'a str,
@@ -155,7 +155,9 @@ impl TaskView {
         if input.pending.is_some() {
             children.push(self.pending_view.root.stable_id());
         } else {
-            children.push(self.composer_view.composer_dock.stable_id());
+            // ComposerView owns a single stage so the card and its external
+            // compact controls are reconciled atomically.
+            children.push(self.composer_view.stage.stable_id());
         }
         reconcile_children(context, self.conversation_column.stable_id(), &children)?;
         self.pending_view.restore_focus(context, document)

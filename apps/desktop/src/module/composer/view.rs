@@ -25,7 +25,16 @@ const PLUS_SLOT_SIZE: f32 = UI_METRICS.icon_button_size;
 const COMPOSER_MIN_HEIGHT: f32 = UI_METRICS.control_height;
 const COMPOSER_MAX_HEIGHT: f32 = 72.0;
 fn extra_button(label: &str, kind: ButtonKind) -> Button {
-    crate::runtime_layout::pill_button(label, kind)
+    let mut button = crate::runtime_layout::pill_button(label, kind);
+    if kind == ButtonKind::Text {
+        // The toolbar lives directly on the conversation surface. Disabled
+        // text actions keep their muted label, but must not reintroduce a
+        // second filled control surface through Button's default disabled
+        // paint.
+        button.style.interaction.disabled.background = None;
+        button.style.interaction.disabled.border = None;
+    }
+    button
 }
 
 #[derive(Clone, Debug)]
@@ -365,7 +374,14 @@ pub(crate) fn composer_atom_chips(
 }
 
 fn composer_plus_menu(open: bool) -> ActionMenu {
-    ActionMenu::new().trigger_icon(Icon::Add, "添加").open(open)
+    // Keep the attachment/action affordance in the same lightweight chrome as
+    // the text controls below the composer.  `bare_trigger` removes the
+    // resting fill and border while preserving the real menu hit target and
+    // hover/pressed feedback.
+    ActionMenu::new()
+        .trigger_icon(Icon::Add, "添加")
+        .bare_trigger(true)
+        .open(open)
 }
 
 /// 输入条贴着窗口底部，菜单必须向上展开。
@@ -373,6 +389,7 @@ fn composer_menu(label: &str, open: bool) -> ActionMenu {
     ActionMenu::new()
         .trigger(label.to_owned())
         .placement(PopoverPlacement::Top)
+        .bare_trigger(true)
         .open(open)
 }
 
@@ -391,9 +408,9 @@ fn composer_model_dropdown(snapshot: &ComposerViewSnapshot) -> Dropdown {
         }));
     field.disabled = snapshot.composer_disabled;
     let width = if snapshot.window_id == HostedWindowId::PRIMARY {
-        204.0
+        160.0
     } else {
-        150.0
+        132.0
     };
     let layout = Arc::make_mut(&mut field.style.layout);
     layout.width = Some(LengthSpec::Px(width));
@@ -582,7 +599,7 @@ fn extra_rows(snapshot: &ComposerViewSnapshot) -> Vec<ExtraRow> {
         rows.push(ExtraRow::Dynamic {
             id: "branch-clear".into(),
             label: format!("{label} · 取消"),
-            kind: ButtonKind::Subtle,
+            kind: ButtonKind::Text,
             action: ComposerInputAction::ClearBranch,
         });
     }
@@ -590,7 +607,7 @@ fn extra_rows(snapshot: &ComposerViewSnapshot) -> Vec<ExtraRow> {
         rows.push(ExtraRow::Dynamic {
             id: "refresh-suggestions".into(),
             label: "刷新建议".into(),
-            kind: ButtonKind::Subtle,
+            kind: ButtonKind::Text,
             action: ComposerInputAction::RefreshSuggestions,
         });
     }
@@ -598,7 +615,7 @@ fn extra_rows(snapshot: &ComposerViewSnapshot) -> Vec<ExtraRow> {
         rows.push(ExtraRow::Dynamic {
             id: suggestion.id.clone(),
             label: suggestion.label.clone(),
-            kind: ButtonKind::Subtle,
+            kind: ButtonKind::Text,
             action: ComposerInputAction::ApplySuggestion(suggestion.prompt.clone()),
         });
     }
@@ -606,7 +623,7 @@ fn extra_rows(snapshot: &ComposerViewSnapshot) -> Vec<ExtraRow> {
         rows.push(ExtraRow::Dynamic {
             id: attachment.id.clone(),
             label: attachment.label.clone(),
-            kind: ButtonKind::Ghost,
+            kind: ButtonKind::Text,
             action: ComposerInputAction::RemoveAttachment(attachment.id.clone()),
         });
     }
@@ -1056,9 +1073,14 @@ pub struct ComposerView {
     pub(crate) composer_generation: ComposerGeneration,
     pub(crate) composer_binding: Arc<Mutex<ComposerBinding>>,
     pub(crate) browser_open: Entity<Button>,
+    /// Retained composer surface: suggestions/review, input card, and the
+    /// small controls row all live under one stage, while the card itself
+    /// remains limited to the editor and send/stop action.
+    pub(crate) stage: Entity<Stack>,
     pub(crate) composer_dock: Entity<Card>,
     pub(crate) composer: Entity<TextArea>,
     pub(crate) composer_toolbar: Entity<Stack>,
+    pub(crate) toolbar_actions: Entity<Stack>,
     pub(crate) extras: Entity<Stack>,
     pub(crate) extra_buttons: HashMap<String, Entity<Button>>,
     pub(crate) completion_slot: Entity<Stack>,
@@ -1159,15 +1181,25 @@ impl ComposerView {
         let (
             mounted,
             (
-                (composer_dock, composer, composer_toolbar, composer_actions, browser_open),
+                (
+                    _stage,
+                    composer_dock,
+                    composer,
+                    composer_toolbar,
+                    composer_actions,
+                    browser_open,
+                    toolbar_actions,
+                ),
                 (send, interrupt, model, reasoning),
                 (review_slot, review_target, review_value, review_submit, review_cancel),
             ),
         ) = context.mount_view_detached(document_id, move || {
             let dock_ref = entity_ref::<Card>();
+            let stage_ref = entity_ref::<Stack>();
             let composer_ref = entity_ref::<TextArea>();
             let toolbar_ref = entity_ref::<Stack>();
             let actions_ref = entity_ref::<Stack>();
+            let toolbar_actions_ref = entity_ref::<Stack>();
             let browser_ref = entity_ref::<Button>();
             let send_ref = entity_ref::<IconButton>();
             let interrupt_ref = entity_ref::<IconButton>();
@@ -1285,6 +1317,15 @@ impl ComposerView {
             let review_cancel_binding = Arc::clone(&view_binding);
             let completion_sink = Arc::clone(&view_sink);
             let completion_binding = Arc::clone(&view_binding);
+            let interrupt = widget(composer_interrupt_button(true))
+                .entity_ref(interrupt_ref)
+                .on_activate(move || {
+                    dispatch(
+                        &interrupt_sink,
+                        &interrupt_binding,
+                        ComposerInputAction::Interrupt,
+                    )
+                });
             let row_chrome = chrome.clone();
             let extras_each = rows
                 .each(
@@ -1324,34 +1365,21 @@ impl ComposerView {
                     text.set(event.value.to_string());
                     edit_composer(&editor_binding, &editor_sink, event.value.to_string());
                 }),
-                widget(Stack::bar(8.0).justify(JustifySpec::SpaceBetween))
-                    .entity_ref(toolbar_ref)
-                    .children((
-                        extras_each,
-                        widget(Stack::row(6.0)).entity_ref(actions_ref).children((
-                            widget(extra_button("浏览器", ButtonKind::Subtle))
-                                .entity_ref(browser_ref)
-                                .disabled(browser_off)
-                                .on_activate(move || {
-                                    let target = browser_binding.lock().unwrap().target.clone();
-                                    if let Some(task_id) = target.task_id {
-                                        emit(
-                                            &browser_sink,
-                                            ShellIntent::OpenBrowser {
-                                                window_id: target.window_id,
-                                                task_id,
-                                            },
-                                        );
-                                    }
-                                }),
-                            widget(composer_send_button(true))
-                                .entity_ref(send_ref)
-                                .disabled(send_off)
-                                .on_activate(move || {
-                                    dispatch(&send_sink, &send_binding, ComposerInputAction::Submit)
-                                }),
-                        )),
-                    )),
+                widget(
+                    Stack::row(6.0)
+                        .width(LengthSpec::Percent(100.0))
+                        .justify(JustifySpec::End),
+                )
+                .entity_ref(actions_ref)
+                .children((
+                    widget(composer_send_button(true))
+                        .entity_ref(send_ref)
+                        .disabled(send_off)
+                        .on_activate(move || {
+                            dispatch(&send_sink, &send_binding, ComposerInputAction::Submit)
+                        }),
+                    interrupt,
+                )),
             ));
             let review = widget(Stack::row(6.0))
                 .entity_ref(review_slot_ref)
@@ -1406,15 +1434,6 @@ impl ComposerView {
                             )
                         }),
                 ));
-            let interrupt = widget(composer_interrupt_button(true))
-                .entity_ref(interrupt_ref)
-                .on_activate(move || {
-                    dispatch(
-                        &interrupt_sink,
-                        &interrupt_binding,
-                        ComposerInputAction::Interrupt,
-                    )
-                });
             let model = widget(composer_model_dropdown(snapshot))
                 .entity_ref(model_ref)
                 .bind(move |field| {
@@ -1450,15 +1469,49 @@ impl ComposerView {
                     );
                 }
             });
+            let toolbar = widget(Stack::bar(8.0).justify(JustifySpec::SpaceBetween))
+                .entity_ref(toolbar_ref)
+                .children((
+                    extras_each,
+                    widget(Stack::row(6.0))
+                        .entity_ref(toolbar_actions_ref)
+                        .children((
+                            widget(extra_button("浏览器", ButtonKind::Text))
+                                .entity_ref(browser_ref)
+                                .disabled(browser_off)
+                                .on_activate(move || {
+                                    let target = browser_binding.lock().unwrap().target.clone();
+                                    if let Some(task_id) = target.task_id {
+                                        emit(
+                                            &browser_sink,
+                                            ShellIntent::OpenBrowser {
+                                                window_id: target.window_id,
+                                                task_id,
+                                            },
+                                        );
+                                    }
+                                }),
+                            model,
+                            reasoning,
+                        )),
+                ));
             with_refs(
-                (dock, completion_each, review, interrupt, model, reasoning),
+                widget(
+                    Stack::column(8.0)
+                        .align(nana_ui::runtime::AlignSpec::Stretch)
+                        .width(LengthSpec::Percent(100.0)),
+                )
+                .entity_ref(stage_ref)
+                .children((completion_each, review, dock, toolbar)),
                 (
                     (
+                        stage_ref,
                         dock_ref,
                         composer_ref,
                         toolbar_ref,
                         actions_ref,
                         browser_ref,
+                        toolbar_actions_ref,
                     ),
                     (send_ref, interrupt_ref, model_ref, reasoning_ref),
                     (
@@ -1472,11 +1525,16 @@ impl ComposerView {
             )
         })?;
         let roots = mounted.roots().to_vec();
-        if roots.len() != 6 {
+        if roots.len() != 1 {
             mounted.unmount(context)?;
             return Err(FrameworkError::InvalidInput);
         }
-        let completion_slot = Entity::<Stack>::from_stable_id(roots[1]);
+        let stage = Entity::<Stack>::from_stable_id(roots[0]);
+        let completion_slot = node_children(context, stage.stable_id())
+            .into_iter()
+            .next()
+            .map(Entity::<Stack>::from_stable_id)
+            .ok_or(FrameworkError::InvalidInput)?;
         drop(mounted);
         let extras_id = node_children(context, composer_toolbar.stable_id())
             .into_iter()
@@ -1550,9 +1608,11 @@ impl ComposerView {
             composer_generation: ComposerGeneration::default(),
             composer_binding,
             browser_open,
+            stage,
             composer_dock,
             composer,
             composer_toolbar,
+            toolbar_actions,
             extras: Entity::from_stable_id(extras_id),
             extra_buttons: HashMap::new(),
             completion_slot,
@@ -1751,16 +1811,9 @@ impl ComposerView {
         context: &mut AppContext,
         snapshot: &ComposerViewSnapshot,
     ) -> Result<(), FrameworkError> {
-        let mut dock = Vec::new();
-        if !self.completion_rows.signal().get_untracked().is_empty() {
-            dock.push(self.completion_slot.stable_id());
-        }
-        dock.push(self.composer.stable_id());
-        if snapshot.review_target.is_some() {
-            dock.push(self.review_slot.stable_id());
-        }
-        dock.push(self.composer_toolbar.stable_id());
-        reconcile_children(context, self.composer_dock.stable_id(), &dock)?;
+        // The outlined card intentionally contains only the editor and its
+        // submit/stop action. Suggestions, review controls, and the small
+        // action toolbar are siblings in `stage`, outside the card.
         let review_children = match snapshot.review_target.as_deref() {
             None => Vec::new(),
             Some("changes") => vec![
@@ -1787,9 +1840,34 @@ impl ComposerView {
         };
         reconcile_children(
             context,
-            self.composer_actions.stable_id(),
-            &[self.browser_open.stable_id(), second],
-        )
+            self.composer_toolbar.stable_id(),
+            &[self.extras.stable_id(), self.toolbar_actions.stable_id()],
+        )?;
+        reconcile_children(
+            context,
+            self.toolbar_actions.stable_id(),
+            &[
+                self.browser_open.stable_id(),
+                self.model.stable_id(),
+                self.reasoning.stable_id(),
+            ],
+        )?;
+        reconcile_children(
+            context,
+            self.composer_dock.stable_id(),
+            &[self.composer.stable_id(), self.composer_actions.stable_id()],
+        )?;
+        reconcile_children(context, self.composer_actions.stable_id(), &[second])?;
+        let mut stage = Vec::with_capacity(4);
+        if !self.completion_rows.signal().get_untracked().is_empty() {
+            stage.push(self.completion_slot.stable_id());
+        }
+        if snapshot.review_target.is_some() {
+            stage.push(self.review_slot.stable_id());
+        }
+        stage.push(self.composer_dock.stable_id());
+        stage.push(self.composer_toolbar.stable_id());
+        reconcile_children(context, self.stage.stable_id(), &stage)
     }
 }
 
@@ -1856,6 +1934,13 @@ mod tests {
     }
 
     #[test]
+    fn text_toolbar_buttons_stay_flat_when_disabled() {
+        let button = extra_button("浏览器", ButtonKind::Text);
+        assert_eq!(button.style.interaction.disabled.background, None);
+        assert_eq!(button.style.interaction.disabled.border, None);
+    }
+
+    #[test]
     fn focused_pending_edits_survive_an_unchanged_projection_and_blocked_send_keeps_stop() {
         let mut context = AppContext::new();
         let document = DocumentId::new(311).unwrap();
@@ -1865,7 +1950,7 @@ mod tests {
         let mut snapshot = snapshot(nana_ui_platform::WindowId(42), "task");
         let mut view =
             ComposerView::mount(&mut context, document, &snapshot, Arc::new(|_| {})).unwrap();
-        context.append_child(host, view.composer_dock).unwrap();
+        context.append_child(host, view.stage).unwrap();
         context
             .focus_node(document, view.composer.stable_id())
             .unwrap();
@@ -1915,7 +2000,7 @@ mod tests {
         let mut snapshot = snapshot(nana_ui_platform::WindowId(42), "task");
         let mut view =
             ComposerView::mount(&mut context, document, &snapshot, Arc::new(|_| {})).unwrap();
-        context.append_child(host, view.composer_dock).unwrap();
+        context.append_child(host, view.stage).unwrap();
         context
             .focus_node(document, view.composer.stable_id())
             .unwrap();
@@ -2309,7 +2394,7 @@ mod tests {
             Arc::new(move |event| received.lock().unwrap().push(event)),
         )
         .unwrap();
-        context.append_child(host, view.composer_dock).unwrap();
+        context.append_child(host, view.stage).unwrap();
         assert!(context
             .focus_node(document, view.composer.stable_id())
             .unwrap());

@@ -1,55 +1,26 @@
 use std::fs;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
-use crate::agent_debug::{
-    capture_window, require_interactive_desktop_session, require_ok, Session,
-};
 use crate::{repo_root, Result, XtaskError};
 
-/// The window reports ready before the first frames settle, so the capture waits
-/// out the opening layout instead of photographing a half-built shell.
-const SETTLE: Duration = Duration::from_millis(1_200);
-
 pub fn run(arguments: &[String]) -> Result {
-    if !cfg!(any(target_os = "windows", target_os = "macos")) {
-        return Err(XtaskError::blocker(
-            "desktop_required",
-            "desktop screenshots require macOS or Windows with a real WGPU desktop",
-        ));
-    }
-    require_interactive_desktop_session()?;
     if arguments == ["--matrix"] {
         for (width, height) in [(960, 600), (1440, 900)] {
             for theme in ["light", "dark"] {
-                let session =
-                    Session::start_with_viewport("screenshot", Some((width, height, theme)))?;
-                require_ok(
-                    &session.request(&serde_json::json!({"command": "observe"}))?,
-                    "observe",
-                )?;
-                thread::sleep(SETTLE);
-                let output = session
-                    .run_dir
-                    .join(format!("desktop-{width}x{height}-{theme}.png"));
-                capture_window(session.pid(), &output)?;
+                let output = repo_root()?.join(format!(
+                    "target/offscreen-screenshots/product-{width}x{height}-{theme}.png"
+                ));
+                render_product(&output, theme, width, height)?;
                 println!("screenshot: ok ({})", output.display());
             }
         }
         return Ok(());
     }
     let output = parse_output(arguments)?;
-    let session = Session::start("screenshot")?;
-    require_ok(
-        &session.request(&serde_json::json!({ "command": "observe" }))?,
-        "observe",
-    )?;
-    thread::sleep(SETTLE);
     let output = match output {
         Some(path) if path.is_absolute() => path,
         Some(path) => repo_root()?.join(path),
-        None => session.run_dir.join("desktop.png"),
+        None => repo_root()?.join("target/offscreen-screenshots/product.png"),
     };
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -60,9 +31,73 @@ pub fn run(arguments: &[String]) -> Result {
             )
         })?;
     }
-    capture_window(session.pid(), &output)?;
+    render_product(&output, "light", 1180, 760)?;
     println!("screenshot: ok ({})", output.display());
     Ok(())
+}
+
+fn render_product(output: &PathBuf, theme: &str, width: u32, height: u32) -> Result {
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            XtaskError::io(
+                "screenshot_directory_failed",
+                "create screenshot directory",
+                error,
+            )
+        })?;
+    }
+    let root = repo_root()?;
+    let mut command = crate::command("cargo");
+    command
+        .current_dir(&root)
+        .env("LILIA_OFFSCREEN_OUTPUT", output)
+        .env("LILIA_OFFSCREEN_THEME", theme)
+        .env("LILIA_OFFSCREEN_WIDTH", width.to_string())
+        .env("LILIA_OFFSCREEN_HEIGHT", height.to_string())
+        .args([
+            "test",
+            "--locked",
+            "-p",
+            "lilia-desktop",
+            "product_shell_paints_offscreen",
+            "--lib",
+            "--",
+            "--nocapture",
+        ]);
+    configure_headless_gpu(&mut command);
+    crate::run(&mut command, "render product shell offscreen")?;
+    if !output.is_file() || output.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
+        return Err(XtaskError::failure(
+            "screenshot_missing",
+            format!("offscreen renderer did not create {}", output.display()),
+        ));
+    }
+    Ok(())
+}
+
+/// llvmpipe's GL adapter cannot render NanaUI's optional motion-evaluation
+/// target (`Rgba32Float`). Chromium's bundled SwiftShader Vulkan adapter can,
+/// and remains fully headless, so prefer it when this Linux environment ships
+/// the ICD. Existing caller overrides are respected.
+fn configure_headless_gpu(command: &mut std::process::Command) {
+    if !cfg!(target_os = "linux") || std::env::var_os("WGPU_BACKEND").is_some() {
+        return;
+    }
+    if std::env::var_os("VK_ICD_FILENAMES").is_some() {
+        command.env("WGPU_BACKEND", "vulkan");
+        return;
+    }
+    for candidate in [
+        "/usr/lib/chromium/vk_swiftshader_icd.json",
+        "/usr/lib/chromium-browser/vk_swiftshader_icd.json",
+    ] {
+        if Path::new(candidate).is_file() {
+            command
+                .env("WGPU_BACKEND", "vulkan")
+                .env("VK_ICD_FILENAMES", candidate);
+            return;
+        }
+    }
 }
 
 fn parse_output(arguments: &[String]) -> Result<Option<PathBuf>> {
