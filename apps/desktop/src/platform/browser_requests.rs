@@ -31,6 +31,21 @@ fn epoch(tab: &Tab, kind: &BrowserHostRequestKind) -> u64 {
 
 impl Drop for Pending {
     fn drop(&mut self) {
+        if let Payload::Upload { node, .. } = &self.payload {
+            // With Page.setInterceptFileChooserDialog enabled, the page is
+            // paused until the chooser is completed.  Dropping the host
+            // ticket must explicitly finish that chooser; otherwise reject,
+            // timeout, navigation, and tab close can leave the document
+            // waiting forever for file input.
+            let token = BrowserCancellation::default();
+            cdp(
+                &self.tab.view,
+                "DOM.setFileInputFiles",
+                json!({"backendNodeId": node, "files": []}),
+                &token,
+                Box::new(|_| {}),
+            );
+        }
         if let Some(deferral) = self.deferral.take() {
             unsafe {
                 match &self.payload {
