@@ -145,6 +145,10 @@ fn merge_legacy_into_product(paths: &LiliaDataPaths) -> Result<(), String> {
     if !legacy.is_file() {
         return Ok(());
     }
+    if let Some(parent) = paths.product_db().parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create staged product database directory: {error}"))?;
+    }
     let product = paths.product_db();
     let connection = Connection::open(&product)
         .map_err(|error| format!("cannot open staged product database: {error}"))?;
@@ -839,6 +843,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(draft, "draft");
+        drop(merged);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn scheduling_legacy_only_import_creates_product_database_before_merge() {
+        let home = temporary_home("merge-legacy-only");
+        let staging = create_staging_home(&home).unwrap();
+        let paths = LiliaDataPaths::from_home(&staging);
+        let legacy = Connection::open(paths.legacy_desktop_db()).unwrap();
+        legacy
+            .execute_batch(
+                "CREATE TABLE tasks (id TEXT PRIMARY KEY); INSERT INTO tasks VALUES ('legacy-task');",
+            )
+            .unwrap();
+        drop(legacy);
+
+        let report = DesktopImportReport {
+            plan_id: "plan-merge-legacy-only".to_owned(),
+            source_home: home.join("preview"),
+            target_home: staging.clone(),
+            status: DesktopImportReportStatus::Completed,
+            items: vec![DesktopImportReportItem {
+                kind: DesktopImportItemKind::Database(DesktopDatabaseKind::LegacyDesktop),
+                status: DesktopImportReportItemStatus::Copied,
+                files: vec![paths.legacy_desktop_db()],
+                error: None,
+            }],
+        };
+
+        assert!(schedule(&home, &report).unwrap());
+        assert!(paths.product_db().is_file());
+        assert!(!paths.legacy_desktop_db().exists());
+        let merged = Connection::open(paths.product_db()).unwrap();
+        let id: String = merged
+            .query_row("SELECT id FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(id, "legacy-task");
         drop(merged);
         fs::remove_dir_all(home).unwrap();
     }

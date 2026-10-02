@@ -51,7 +51,7 @@ cargo xtask performance
 
 Agent Debug 只连接 Native/WGPU 开发态结构化 TCP 协议，执行 observe/act 并生成真实 GPU 截图、回放、错误和 secret canary 结果。证据写入 `agent-debug-runs/lilia-*`；发布二进制必须排除调试标记。
 
-性能门禁使用固定 Native corpus，分别检查 Composer、resize、千条时间线、冷启动、空闲 CPU 与 RSS 的绝对阈值和历史基线。
+性能门禁使用固定 Native corpus，分别检查 Composer、resize、千条时间线、冷启动、空闲 CPU 与 RSS 的绝对阈值和历史基线。Issue82 的入口矩阵见 [`docs/design/issue82-acceptance-matrix.md`](../design/issue82-acceptance-matrix.md)；每份报告必须明确历史基线是否与当前平台、测量契约和 NanaUI 依赖可比。
 
 ## Android
 

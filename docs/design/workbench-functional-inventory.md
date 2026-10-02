@@ -1,6 +1,6 @@
 # 工作台功能与所有权清单
 
-2026-09-06 实施中清点。此表记录当前入口和迁移验收单位，不是改动前截图或性能基线，也不代表每项已通过运行验收。源头为 desktop 的 Message/各子消息、module 清单、KernelServices/Feature 清单、application 服务及 contracts；后续新增入口必须同步对应行。
+2026-09-06 实施中清点。此表记录当前入口和迁移验收单位，不是改动前截图或性能基线，也不代表每项已通过运行验收。Issue82 的证据状态和命令级验收以 [`issue82-acceptance-matrix.md`](issue82-acceptance-matrix.md) 为准；本表中的“已有”只表示代码入口存在，不能替代行为测试或真实窗口证据。源头为 desktop 的 Message/各子消息、module 清单、KernelServices/Feature 清单、application 服务及 contracts；后续新增入口必须同步对应行。
 
 ## 桌面入口与行为
 
