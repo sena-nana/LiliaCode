@@ -64,7 +64,7 @@ pub(crate) fn view_bar(gap: f32) -> El<Stack> {
 
 const COMPOSER_SEND_SIZE: f32 = 30.0;
 const PILL_RADIUS: f32 = 999.0;
-pub(crate) const COMPOSER_CARD_RADIUS: f32 = 8.0;
+pub(crate) const COMPOSER_CARD_RADIUS: f32 = UI_METRICS.radius_lg;
 
 pub(crate) fn wrapping_controls_row(gap: f32) -> Stack {
     Stack::row(gap)
@@ -320,6 +320,28 @@ mod tests {
         let pending = pending_interaction_card();
         assert_eq!(pending.kind, CardKind::Outlined);
     }
+
+    #[test]
+    fn composer_textarea_has_no_inner_surface_when_disabled() {
+        let area = flatten_composer_textarea(TextArea::new(""));
+        assert_eq!(area.style.background, None);
+        assert_eq!(area.style.border, None);
+        assert_eq!(area.style.interaction.disabled.background, None);
+        assert_eq!(area.style.interaction.disabled.border, None);
+        assert_eq!(
+            area.style.layout.line_height,
+            Some(nana_ui_core::LineHeightSpec::Absolute(
+                ControlSize::Medium.line_height(),
+            ))
+        );
+        assert_eq!(area.style.control_padding_y, None);
+        assert_eq!(
+            area.style.layout.padding_top,
+            Some(LengthSpec::Px(
+                ControlSize::Medium.vertical_padding(UI_METRICS)
+            ))
+        );
+    }
 }
 
 pub(crate) fn flatten_composer_textarea(area: TextArea) -> TextArea {
@@ -328,9 +350,29 @@ pub(crate) fn flatten_composer_textarea(area: TextArea) -> TextArea {
     style.border = None;
     style.interaction.hovered.border = None;
     style.interaction.focused.border = None;
+    // `TextArea::disabled` applies the field's default Subtle fill. The
+    // composer card already owns the only surface, so preserve the muted
+    // disabled text while removing that second inner panel as well.
+    style.interaction.disabled.background = None;
+    style.interaction.disabled.border = None;
+    // TextArea::new marks multiline fields with the theme's `Field` vertical
+    // padding (10px in the desktop theme). The composer owns its compact
+    // 32px line box, whose 8px insets are already authored below; clear the
+    // intent token so style resolution does not overwrite those insets and
+    // leave only enough room for the full placeholder glyph line.
+    style.control_padding_y = None;
     let layout = Arc::make_mut(&mut style.layout);
     layout.border_width = Some(0.0);
     layout.border_radius = Some(0.0);
+    // A multiline TextArea defaults to a relative 1.45 line height. The
+    // composer starts at the compact one-line height, so that relative value
+    // leaves less content space than the line needs and clips the placeholder
+    // to its upper half. Use the shared medium control line instead; the
+    // height signal still grows by one visible line step for each explicit
+    // newline.
+    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(
+        ControlSize::Medium.line_height(),
+    ));
     layout.min_height = Some(LengthSpec::Px(ControlSize::Medium.height_in(UI_METRICS)));
     layout.padding_left = Some(LengthSpec::Px(UI_METRICS.field_padding_x));
     layout.padding_right = Some(LengthSpec::Px(UI_METRICS.field_padding_x));

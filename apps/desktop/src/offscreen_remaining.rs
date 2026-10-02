@@ -49,8 +49,16 @@ mod tests {
     ) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut shaper = NanaTextShaper::default();
         document.context_mut().set_theme(theme).expect("theme");
+        let width = std::env::var("LILIA_OFFSCREEN_WIDTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(WIDTH);
+        let height = std::env::var("LILIA_OFFSCREEN_HEIGHT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(HEIGHT);
         document.flush(
-            LayoutViewport::new(WIDTH as f32, HEIGHT as f32),
+            LayoutViewport::new(width as f32, height as f32),
             &mut shaper,
         )?;
         let Some(mut gpu) = offscreen::optional() else {
@@ -63,14 +71,16 @@ mod tests {
             .style_model()
             .color(SemanticColorRole::Background);
         let clear = [color.r, color.g, color.b, color.a];
-        let size = Size::new(WIDTH, HEIGHT);
+        let size = Size::new(width, height);
         let pixels = gpu.paint(document.scene(), size, clear, None, Some(&renderers))?;
         let colors = unique_colors(&pixels);
         assert!(
             colors > 8,
             "{name} painted {colors} unique colours (flat clear)"
         );
-        let path = out_dir().join(format!("{name}.png"));
+        let path = std::env::var_os("LILIA_OFFSCREEN_OUTPUT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| out_dir().join(format!("{name}.png")));
         offscreen::write_png(&path, size, &pixels)?;
         Ok(path)
     }
@@ -248,5 +258,29 @@ mod tests {
             .unwrap();
         capture(&mut document, "roadmap-light", ThemeMode::Light).unwrap();
         capture(&mut document, "roadmap-dark", ThemeMode::Dark).unwrap();
+    }
+
+    /// Render the real primary product shell scene without constructing a native
+    /// window. `mount_primary_shell` is the same composition entry used by the
+    /// running desktop host; only the GPU egress is replaced by OffscreenSnapshots.
+    #[test]
+    fn product_shell_paints_offscreen() {
+        if !offscreen::pixels_available() {
+            return;
+        }
+        let snapshot = crate::runtime_shell::empty_snapshot();
+        let mut document = crate::runtime_shell::mount_primary_shell(&snapshot, Arc::new(|_| {}))
+            .expect("mount product shell")
+            .0;
+        let theme = match std::env::var("LILIA_OFFSCREEN_THEME").as_deref() {
+            Ok("dark") => ThemeMode::Dark,
+            _ => ThemeMode::Light,
+        };
+        let name = if theme == ThemeMode::Dark {
+            "product-shell-dark"
+        } else {
+            "product-shell-light"
+        };
+        capture(&mut document, name, theme).expect("paint product shell");
     }
 }
