@@ -91,6 +91,7 @@ pub struct ActiveTurn {
     turn_id: String,
     request: DesktopTurnRequest,
     claim_token: Option<String>,
+    session_version: Option<u64>,
     session_id: Option<String>,
     cancellation_mode: Option<TurnCancellationMode>,
     submitted: bool,
@@ -169,6 +170,7 @@ impl DesktopAgentRuntime {
             turn_id: turn_id.clone(),
             request,
             claim_token: None,
+            session_version: None,
             session_id: None,
             cancellation_mode: None,
             submitted: false,
@@ -187,10 +189,11 @@ impl DesktopAgentRuntime {
     pub fn active(&self, task_id: &TaskId, turn_id: &str) -> Option<ActiveTurnSnapshot> {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let active = state.tasks.get(task_id.as_str())?.active.as_ref()?;
-        (active.turn_id == turn_id).then(|| ActiveTurnSnapshot {
+        (active.turn_id == turn_id && !active.acked).then(|| ActiveTurnSnapshot {
             request: active.request.clone(),
             cancellation_mode: active.cancellation_mode,
             claim_token: active.claim_token.clone(),
+            session_version: active.session_version,
         })
     }
 
@@ -200,15 +203,28 @@ impl DesktopAgentRuntime {
         turn_id: &str,
         request: DesktopTurnRequest,
     ) -> bool {
+        self.replace_active_request_with_claim(task_id, turn_id, request, None)
+    }
+
+    pub fn replace_active_request_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        request: DesktopTurnRequest,
+        expected_claim_token: Option<&str>,
+    ) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let Some(active) = state
             .tasks
             .get_mut(task_id.as_str())
             .and_then(|task| task.active.as_mut())
-            .filter(|active| active.turn_id == turn_id)
+            .filter(|active| active.turn_id == turn_id && !active.acked)
         else {
             return false;
         };
+        if expected_claim_token.is_some() && active.claim_token.as_deref() != expected_claim_token {
+            return false;
+        }
         active.request = request;
         true
     }
@@ -218,7 +234,7 @@ impl DesktopAgentRuntime {
         let task = state.tasks.get(task_id.as_str())?;
         task.active
             .as_ref()
-            .filter(|active| active.turn_id == turn_id)
+            .filter(|active| active.turn_id == turn_id && !active.acked)
             .map(|active| active.request.clone())
             .or_else(|| {
                 task.queue
@@ -243,6 +259,7 @@ impl DesktopAgentRuntime {
             turn_id: next.turn_id,
             request: next.request,
             claim_token: None,
+            session_version: None,
             session_id: None,
             cancellation_mode: None,
             submitted: false,
@@ -252,17 +269,62 @@ impl DesktopAgentRuntime {
     }
 
     pub fn attach_session(&self, task_id: &TaskId, turn_id: &str, session_id: String) -> bool {
+        self.attach_session_with_claim(task_id, turn_id, session_id, None)
+    }
+
+    pub fn attach_session_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        session_id: String,
+        expected_claim_token: Option<&str>,
+    ) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let Some(active) = state
             .tasks
             .get_mut(task_id.as_str())
             .and_then(|task| task.active.as_mut())
-            .filter(|active| active.turn_id == turn_id)
+            .filter(|active| active.turn_id == turn_id && !active.acked)
         else {
             return false;
         };
+        if expected_claim_token.is_some() && active.claim_token.as_deref() != expected_claim_token {
+            return false;
+        }
         active.session_id = Some(session_id);
         active.cancellation_mode.is_some()
+    }
+
+    /// Records the AgentKit version observed by this turn owner. The value is
+    /// used as the expected version when the durable queue is acknowledged.
+    pub fn bind_session_version(&self, task_id: &TaskId, turn_id: &str, version: u64) -> bool {
+        self.bind_session_version_with_claim(task_id, turn_id, version, None)
+    }
+
+    pub fn bind_session_version_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        version: u64,
+        expected_claim_token: Option<&str>,
+    ) -> bool {
+        if version == 0 {
+            return false;
+        }
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(active) = state
+            .tasks
+            .get_mut(task_id.as_str())
+            .and_then(|task| task.active.as_mut())
+            .filter(|active| active.turn_id == turn_id && !active.acked)
+        else {
+            return false;
+        };
+        if expected_claim_token.is_some() && active.claim_token.as_deref() != expected_claim_token {
+            return false;
+        }
+        active.session_version = Some(version);
+        true
     }
 
     pub fn restore_active_slot(&self, task_id: &TaskId, turn_id: &str, session_id: &str) -> bool {
@@ -275,6 +337,7 @@ impl DesktopAgentRuntime {
             turn_id: turn_id.to_owned(),
             request: DesktopTurnRequest::new(task_id.clone(), ""),
             claim_token: None,
+            session_version: None,
             session_id: Some(session_id.to_owned()),
             cancellation_mode: None,
             submitted: true,
@@ -290,6 +353,7 @@ impl DesktopAgentRuntime {
         Some(CancelSnapshot {
             turn_id: active.turn_id.clone(),
             session_id: active.session_id.clone(),
+            claim_token: active.claim_token.clone(),
         })
     }
 
@@ -307,6 +371,7 @@ impl DesktopAgentRuntime {
         Some(CancelSnapshot {
             turn_id: active.turn_id.clone(),
             session_id: active.session_id.clone(),
+            claim_token: active.claim_token.clone(),
         })
     }
 
@@ -326,16 +391,24 @@ impl DesktopAgentRuntime {
         Some(CancelSnapshot {
             turn_id: active.turn_id.clone(),
             session_id: active.session_id.clone(),
+            claim_token: active.claim_token.clone(),
         })
     }
 
-    pub fn revert_automation_cancel(&self, task_id: &TaskId, turn_id: &str) {
+    pub fn revert_cancel_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        expected_claim_token: Option<&str>,
+    ) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(active) = state
             .tasks
             .get_mut(task_id.as_str())
             .and_then(|task| task.active.as_mut())
-            .filter(|active| active.turn_id == turn_id)
+            .filter(|active| {
+                active.turn_id == turn_id && active.claim_token.as_deref() == expected_claim_token
+            })
         {
             active.cancellation_mode = None;
         }
@@ -370,13 +443,27 @@ impl DesktopAgentRuntime {
     }
 
     pub fn cancel_requested(&self, task_id: &TaskId, turn_id: &str) -> bool {
+        self.cancel_requested_with_claim(task_id, turn_id, None)
+    }
+
+    pub fn cancel_requested_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        expected_claim_token: Option<&str>,
+    ) -> bool {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .tasks
             .get(task_id.as_str())
             .and_then(|task| task.active.as_ref())
-            .is_some_and(|active| active.turn_id == turn_id && active.cancellation_mode.is_some())
+            .is_some_and(|active| {
+                active.turn_id == turn_id
+                    && active.cancellation_mode.is_some()
+                    && expected_claim_token
+                        .is_none_or(|expected| active.claim_token.as_deref() == Some(expected))
+            })
     }
 
     pub fn claim_worker_start(&self, task_id: &TaskId, turn_id: &str, claim_token: String) -> bool {
@@ -408,19 +495,39 @@ impl DesktopAgentRuntime {
             .tasks
             .get_mut(task_id.as_str())
             .and_then(|task| task.active.as_mut())
-            .filter(|active| active.turn_id == turn_id)
+            .filter(|active| active.turn_id == turn_id && !active.acked)
         else {
             return false;
         };
         active.request = request;
         active.claim_token = Some(claim_token);
+        active.session_version = None;
+        active.cancellation_mode = None;
+        active.submitted = true;
         true
     }
 
     pub fn begin_finish(&self, task_id: &TaskId, turn_id: &str) -> Option<ActiveTurnSnapshot> {
+        self.begin_finish_with_claim(task_id, turn_id, None)
+    }
+
+    /// Marks a turn as finishing only when its captured durable claim still
+    /// owns the in-memory active slot. A worker that survives recovery must
+    /// never mark the replacement owner (which may reuse the same turn id) as
+    /// acknowledged.
+    pub fn begin_finish_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        expected_claim_token: Option<&str>,
+    ) -> Option<ActiveTurnSnapshot> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let active = state.tasks.get_mut(task_id.as_str())?.active.as_mut()?;
-        if active.turn_id != turn_id || active.acked {
+        if active.turn_id != turn_id
+            || active.acked
+            || expected_claim_token
+                .is_some_and(|expected| active.claim_token.as_deref() != Some(expected))
+        {
             return None;
         }
         active.acked = true;
@@ -428,6 +535,7 @@ impl DesktopAgentRuntime {
             request: active.request.clone(),
             cancellation_mode: active.cancellation_mode,
             claim_token: active.claim_token.clone(),
+            session_version: active.session_version,
         })
     }
 
@@ -500,6 +608,29 @@ impl DesktopAgentRuntime {
         true
     }
 
+    /// Clears a turn only when the caller still owns the captured claim.
+    /// Recovery may reuse the same turn id for a replacement active slot, so
+    /// a turn-id-only cleanup would otherwise delete the new owner.
+    pub fn finish_without_next_with_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        expected_claim_token: Option<&str>,
+    ) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(task) = state.tasks.get_mut(task_id.as_str()) else {
+            return false;
+        };
+        let Some(active) = task.active.as_ref() else {
+            return false;
+        };
+        if active.turn_id != turn_id || active.claim_token.as_deref() != expected_claim_token {
+            return false;
+        }
+        task.active = None;
+        true
+    }
+
     pub fn queued_front(&self, task_id: &TaskId) -> Option<QueuedTurn> {
         self.state
             .lock()
@@ -536,6 +667,7 @@ fn prepared_active_turn(next: QueuedTurn) -> ActiveTurn {
         turn_id: next.turn_id,
         request: next.request,
         claim_token: None,
+        session_version: None,
         session_id: None,
         cancellation_mode: None,
         submitted: false,
@@ -547,11 +679,13 @@ pub struct ActiveTurnSnapshot {
     pub request: DesktopTurnRequest,
     pub cancellation_mode: Option<TurnCancellationMode>,
     pub claim_token: Option<String>,
+    pub session_version: Option<u64>,
 }
 
 pub struct CancelSnapshot {
     pub turn_id: String,
     pub session_id: Option<String>,
+    pub claim_token: Option<String>,
 }
 
 #[cfg(test)]
@@ -636,7 +770,59 @@ mod tests {
         assert_eq!(first.claim_token.as_deref(), Some("single-finish-claim"));
         assert!(runtime.begin_finish(&task_id, &turn_id).is_none());
         assert_eq!(runtime.snapshot(&task_id).phase, "running");
-        assert!(runtime.active(&task_id, &turn_id).is_some());
+        assert!(runtime.active(&task_id, &turn_id).is_none());
+    }
+
+    #[test]
+    fn session_version_is_carried_to_the_finish_snapshot() {
+        let runtime = DesktopAgentRuntime::default();
+        let task_id = TaskId::new("session-version-task").unwrap();
+        let turn_id = "session-version-turn".to_owned();
+        let (_, should_start, _) = runtime.enqueue_idempotent(
+            DesktopTurnRequest::new(task_id.clone(), "bind version"),
+            turn_id.clone(),
+        );
+        assert!(should_start);
+        assert!(runtime.claim_worker_start(&task_id, &turn_id, "session-version-claim".into()));
+        assert!(runtime.bind_session_version(&task_id, &turn_id, 11));
+        assert_eq!(
+            runtime.active(&task_id, &turn_id).unwrap().session_version,
+            Some(11)
+        );
+        assert_eq!(
+            runtime
+                .begin_finish(&task_id, &turn_id)
+                .unwrap()
+                .session_version,
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn hydrating_a_recovered_claim_clears_old_cancel_and_session_version() {
+        let runtime = DesktopAgentRuntime::default();
+        let task_id = TaskId::new("rehydrate-claim-task").unwrap();
+        let turn_id = "rehydrate-claim-turn";
+        let (_, should_start, _) = runtime.enqueue_idempotent(
+            DesktopTurnRequest::new(task_id.clone(), "recover"),
+            turn_id.to_owned(),
+        );
+        assert!(should_start);
+        assert!(runtime.claim_worker_start(&task_id, turn_id, "old-claim".to_owned()));
+        assert!(runtime.bind_session_version(&task_id, turn_id, 7));
+        assert!(runtime.request_cancel_at(&task_id, turn_id).is_some());
+
+        assert!(runtime.hydrate_restored_active(
+            &task_id,
+            turn_id,
+            DesktopTurnRequest::new(task_id.clone(), "recovered"),
+            "new-claim".to_owned(),
+        ));
+        assert!(!runtime.cancel_requested_with_claim(&task_id, turn_id, Some("new-claim")));
+        assert_eq!(
+            runtime.active(&task_id, turn_id).unwrap().session_version,
+            None
+        );
     }
 
     #[test]

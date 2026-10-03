@@ -103,13 +103,16 @@ pub use turn::{
     DesktopSessionBranchMode, DesktopTurnDispatch, DesktopTurnDispatchKind, DesktopTurnRequest,
 };
 pub use turn_page::{
-    handle_observed_page, supported_pending_interaction_kind, TurnFinishKind, TurnPageHost,
+    handle_observed_page, handle_observed_page_with_claim, supported_pending_interaction_kind,
+    TurnFinishKind, TurnPageHost,
 };
 pub use turn_resume::{
-    run_approval_resume, run_interaction_resume, InteractionResumeSpec, TurnResumeHost,
+    run_approval_resume, run_approval_resume_with_claim, run_interaction_resume,
+    run_interaction_resume_with_claim, InteractionResumeSpec, TurnResumeHost,
 };
 pub use turn_run::{
-    run_prepared_turn, AgentTurnError, AgentTurnHost, ObservedTurnOutcome, TurnSubmitSpec,
+    run_prepared_turn, run_prepared_turn_with_claim, AgentTurnError, AgentTurnHost,
+    ObservedTurnOutcome, TurnSubmitSpec,
 };
 pub use turn_start::{accept_persisted_turn, prepare_turn_request, TurnStartHost};
 

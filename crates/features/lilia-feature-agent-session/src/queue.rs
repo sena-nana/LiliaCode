@@ -339,10 +339,16 @@ impl DesktopTurnQueueStore {
         Ok(false)
     }
 
+    /// Refine a queued request while preserving the claim fence.
+    ///
+    /// Queued rows have no owner. Claimed rows must be updated with the
+    /// current claim token so a worker left behind by a restart cannot mutate
+    /// the replacement worker's payload.
     pub fn update_request(
         &self,
         turn_id: &str,
         request: &DesktopTurnRequest,
+        claim_token: Option<&str>,
     ) -> Result<(), DesktopTurnQueueError> {
         let request_json = serde_json::to_string(request).map_err(|error| {
             DesktopTurnQueueError::Serialization {
@@ -357,7 +363,8 @@ impl DesktopTurnQueueStore {
                    SET request_json = ?3, guide_id = ?4,
                        automation_run_id = ?5, automation_node_id = ?6
                    WHERE task_id = ?1 AND turn_id = ?2
-                     AND state IN ('queued', 'claimed')"#,
+                     AND ((state = 'queued' AND ?7 IS NULL)
+                          OR (state = 'claimed' AND claim_token = ?7))"#,
                 params![
                     request.task_id.as_str(),
                     turn_id,
@@ -371,6 +378,7 @@ impl DesktopTurnQueueStore {
                         .automation
                         .as_ref()
                         .map(|value| value.node_id.as_str()),
+                    claim_token,
                 ],
             )
             .map_err(|error| DesktopTurnQueueError::Storage {
@@ -378,6 +386,11 @@ impl DesktopTurnQueueStore {
                 message: error.to_string(),
             })?;
         if changed != 1 {
+            if claim_token.is_some() {
+                return Err(DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                });
+            }
             return Err(DesktopTurnQueueError::InvalidTransition {
                 turn_id: turn_id.to_owned(),
                 state: "missing_or_terminal".to_owned(),
@@ -467,6 +480,58 @@ impl DesktopTurnQueueStore {
             claim_epoch: None,
             claim_attempts: claim_attempts.saturating_add(1),
         }))
+    }
+
+    /// Checks that a worker still owns the durable claim before it talks to
+    /// AgentKit. This is deliberately read-only so a stale worker can be
+    /// discarded without changing the replacement owner's row.
+    pub fn owns_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        claim_token: &str,
+    ) -> Result<bool, DesktopTurnQueueError> {
+        self.connection()
+            .query_row(
+                r#"SELECT EXISTS(
+                       SELECT 1 FROM desktop_pending_turns
+                       WHERE task_id = ?1 AND turn_id = ?2
+                         AND state = 'claimed' AND claim_token = ?3
+                   )"#,
+                params![task_id.as_str(), turn_id, claim_token],
+                |row| row.get(0),
+            )
+            .map_err(|error| storage_error("verify pending turn claim", error))
+    }
+
+    /// Checks a claim together with the AgentKit session version observed by
+    /// its worker. This read-only fence must run before terminal product side
+    /// effects; a token alone is insufficient when the same claim has already
+    /// observed a different session version.
+    pub fn owns_claim_at_session_version(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        claim_token: &str,
+        expected_session_version: Option<u64>,
+    ) -> Result<bool, DesktopTurnQueueError> {
+        let stored_epoch = self
+            .connection()
+            .query_row(
+                r#"SELECT claim_epoch FROM desktop_pending_turns
+                   WHERE task_id = ?1 AND turn_id = ?2
+                     AND state = 'claimed' AND claim_token = ?3"#,
+                params![task_id.as_str(), turn_id, claim_token],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| storage_error("verify pending turn session version", error))?;
+        Ok(match stored_epoch {
+            None => false,
+            Some(stored_epoch) => expected_session_version.is_none_or(|expected| {
+                parse_session_version_epoch(stored_epoch.as_deref()) == Some(expected)
+            }),
+        })
     }
 
     pub fn quarantine_invalid_rows(
@@ -575,26 +640,41 @@ impl DesktopTurnQueueStore {
             })
     }
 
+    /// Bind AgentKit's session version to the durable claim that submitted it.
+    /// The token is part of the update predicate; a stale worker therefore
+    /// cannot replace the epoch after recovery has assigned a new owner.
     pub fn bind_session_version(
         &self,
         turn_id: &str,
+        claim_token: Option<&str>,
         version: u64,
     ) -> Result<bool, DesktopTurnQueueError> {
         if version == 0 {
             return Ok(false);
         }
-        self.connection()
+        let Some(claim_token) = claim_token else {
+            return Err(DesktopTurnQueueError::ClaimOwnership {
+                turn_id: turn_id.to_owned(),
+            });
+        };
+        let changed = self
+            .connection()
             .execute(
                 r#"UPDATE desktop_pending_turns
                    SET claim_epoch = ?2
-                   WHERE turn_id = ?1 AND state = 'claimed'"#,
-                params![turn_id, session_version_epoch(version)],
+                   WHERE turn_id = ?1 AND state = 'claimed' AND claim_token = ?3"#,
+                params![turn_id, session_version_epoch(version), claim_token],
             )
-            .map(|changed| changed == 1)
             .map_err(|error| DesktopTurnQueueError::Storage {
                 operation: "bind AgentKit session version",
                 message: error.to_string(),
-            })
+            })?;
+        if changed != 1 {
+            return Err(DesktopTurnQueueError::ClaimOwnership {
+                turn_id: turn_id.to_owned(),
+            });
+        }
+        Ok(true)
     }
 
     pub fn ack_and_claim_next(
@@ -623,12 +703,10 @@ impl DesktopTurnQueueStore {
             });
         };
         if let Some(expected) = expected_session_version {
-            if let Some(stored) = parse_session_version_epoch(stored_epoch.as_deref()) {
-                if stored != expected {
-                    return Err(DesktopTurnQueueError::ClaimOwnership {
-                        turn_id: turn_id.to_owned(),
-                    });
-                }
+            if parse_session_version_epoch(stored_epoch.as_deref()) != Some(expected) {
+                return Err(DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                });
             }
         }
         let changed = transaction
@@ -730,7 +808,8 @@ impl DesktopTurnQueueStore {
         transaction
             .execute(
                 r#"UPDATE desktop_pending_turns
-                   SET state = 'queued', claimed_at = NULL, claim_token = NULL
+                   SET state = 'queued', claimed_at = NULL, claim_token = NULL,
+                       claim_epoch = NULL
                    WHERE task_id = ?1 AND state = 'claimed'"#,
                 params![task_id.as_str()],
             )
@@ -742,7 +821,7 @@ impl DesktopTurnQueueStore {
                 .execute(
                     r#"UPDATE desktop_pending_turns
                        SET state = 'claimed', claimed_at = ?3, claim_token = ?4,
-                           claim_attempts = claim_attempts + 1
+                           claim_epoch = NULL, claim_attempts = claim_attempts + 1
                        WHERE task_id = ?1 AND turn_id = ?2"#,
                     params![
                         task_id.as_str(),
@@ -1507,12 +1586,14 @@ mod tests {
         let task_id = TaskId::new("refined-queue-task").unwrap();
         let request = DesktopTurnRequest::new(task_id.clone(), "original");
         store.enqueue("turn-refined", &request).unwrap();
-        store.claim("turn-refined").unwrap().unwrap();
+        let claim = store.claim("turn-refined").unwrap().unwrap();
 
         let mut refined = request;
         refined.model = Some("gpt-5.5".into());
         refined.auto_turn_decision_applied = true;
-        store.update_request("turn-refined", &refined).unwrap();
+        store
+            .update_request("turn-refined", &refined, claim.claim_token.as_deref())
+            .unwrap();
 
         let restored = store.list(&task_id).unwrap().pop().unwrap();
         assert_eq!(restored.request.model.as_deref(), Some("gpt-5.5"));
@@ -1539,7 +1620,9 @@ mod tests {
         assert_eq!(first.state, PersistedDesktopTurnState::Claimed);
         assert_eq!(first.claim_epoch, None);
         assert_eq!(first.claim_attempts, 1);
-        store.bind_session_version("turn-1", 2).unwrap();
+        store
+            .bind_session_version("turn-1", first.claim_token.as_deref(), 2)
+            .unwrap();
         assert!(store.claim("turn-1").unwrap().is_none());
         assert!(matches!(
             store.ack_and_claim_next(&task_id, "turn-1", "wrong-token", Some(2)),
@@ -1606,6 +1689,7 @@ mod tests {
         let released = restarted.list(&task_id).unwrap();
         assert_eq!(released[0].state, PersistedDesktopTurnState::Queued);
         assert!(released[0].claim_token.is_none());
+        assert!(released[0].claim_epoch.is_none());
         let replay = restarted.claim("turn-before-crash").unwrap().unwrap();
         assert_eq!(replay.turn_id, "turn-before-crash");
         assert_eq!(replay.claim_attempts, 2);
@@ -1626,18 +1710,114 @@ mod tests {
         assert_eq!(still_claimed[0].state, PersistedDesktopTurnState::Claimed);
         assert_eq!(still_claimed[0].claim_token, replay.claim_token);
 
-        restarted
-            .bind_session_version("turn-before-crash", 4)
-            .unwrap();
         let rebound = restarted
             .prepare_recovery(&task_id, Some("turn-before-crash"))
             .unwrap()
             .expect("projected wait claim");
+        restarted
+            .bind_session_version("turn-before-crash", Some(rebound.as_str()), 4)
+            .unwrap();
         let projected = restarted.list(&task_id).unwrap();
         assert_eq!(projected[0].state, PersistedDesktopTurnState::Claimed);
         assert_eq!(projected[0].claim_token.as_deref(), Some(rebound.as_str()));
         assert_eq!(projected[0].claim_epoch.as_deref(), Some("sv:4"));
         assert_eq!(projected[0].claim_attempts, 3);
+    }
+
+    #[test]
+    fn stale_claim_cannot_refine_or_bind_after_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("desktop.db");
+        let task_id = TaskId::new("stale-worker-fence-task").unwrap();
+        let old_token = {
+            let mut store = DesktopTurnQueueStore::open(&path).unwrap();
+            let request = DesktopTurnRequest::new(task_id.clone(), "original");
+            store.enqueue("turn-fenced", &request).unwrap();
+            store
+                .claim("turn-fenced")
+                .unwrap()
+                .unwrap()
+                .claim_token
+                .unwrap()
+        };
+
+        let mut store = DesktopTurnQueueStore::open(&path).unwrap();
+        store.prepare_recovery(&task_id, None).unwrap();
+        let replacement = store.claim("turn-fenced").unwrap().unwrap();
+        assert!(!store
+            .owns_claim(&task_id, "turn-fenced", &old_token)
+            .unwrap());
+        assert!(store
+            .owns_claim(
+                &task_id,
+                "turn-fenced",
+                replacement.claim_token.as_deref().unwrap(),
+            )
+            .unwrap());
+        let mut stale_request = replacement.request.clone();
+        stale_request.content = "stale worker must not win".to_owned();
+        assert!(matches!(
+            store.update_request("turn-fenced", &stale_request, Some(old_token.as_str())),
+            Err(DesktopTurnQueueError::InvalidTransition { .. })
+                | Err(DesktopTurnQueueError::ClaimOwnership { .. })
+        ));
+        assert!(matches!(
+            store.bind_session_version("turn-fenced", Some(old_token.as_str()), 7),
+            Err(DesktopTurnQueueError::ClaimOwnership { .. })
+        ));
+        let current = store.list(&task_id).unwrap().pop().unwrap();
+        assert_eq!(current.claim_token, replacement.claim_token);
+        assert_eq!(current.request.content, "original");
+        assert!(current.claim_epoch.is_none());
+    }
+
+    #[test]
+    fn expected_session_version_requires_a_bound_epoch() {
+        let mut store = DesktopTurnQueueStore::in_memory().unwrap();
+        let task_id = TaskId::new("missing-session-version-task").unwrap();
+        store
+            .enqueue(
+                "turn-unbound",
+                &DesktopTurnRequest::new(task_id.clone(), "run"),
+            )
+            .unwrap();
+        let claimed = store.claim("turn-unbound").unwrap().unwrap();
+        assert!(matches!(
+            store.ack_and_claim_next(
+                &task_id,
+                "turn-unbound",
+                claimed.claim_token.as_deref().unwrap(),
+                Some(1),
+            ),
+            Err(DesktopTurnQueueError::ClaimOwnership { .. })
+        ));
+        assert_eq!(store.list(&task_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn claim_session_version_fence_is_read_only_and_exact() {
+        let mut store = DesktopTurnQueueStore::in_memory().unwrap();
+        let task_id = TaskId::new("session-version-fence-task").unwrap();
+        store
+            .enqueue(
+                "turn-fence",
+                &DesktopTurnRequest::new(task_id.clone(), "run"),
+            )
+            .unwrap();
+        let claimed = store.claim("turn-fence").unwrap().unwrap();
+        let token = claimed.claim_token.as_deref().unwrap();
+        assert!(!store
+            .owns_claim_at_session_version(&task_id, "turn-fence", token, Some(3))
+            .unwrap());
+        store
+            .bind_session_version("turn-fence", Some(token), 3)
+            .unwrap();
+        assert!(store
+            .owns_claim_at_session_version(&task_id, "turn-fence", token, Some(3))
+            .unwrap());
+        assert!(!store
+            .owns_claim_at_session_version(&task_id, "turn-fence", token, Some(4))
+            .unwrap());
     }
 
     #[test]

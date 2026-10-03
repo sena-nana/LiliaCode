@@ -1,87 +1,100 @@
-# Agent 回合权威对照：LiliaCode 自建 FSM ↔ Mutsuki AgentKit
+# Agent 回合权威对照：LiliaCode 与 Mutsuki AgentKit
 
-本文是 Agent 权威下沉 Mutsuki 的前置勘定。目标是把 `crates/lilia-desktop-application/src/agent.rs`（3824 行）里的自建 turn 状态机逐项映射到 Mutsuki AgentKit，明确哪些直接删除、哪些改成 Agent 插件、哪些必须留在 LiliaCode 侧。
+本文记录 Issue #69 的迁移边界和当前接线状态。它不是验收结论，也不表示 Issue 已关闭。当前实现中的应用入口是
+`apps/desktop/src/application/agent.rs`；回合队列和内存协调器在
+`crates/features/lilia-feature-agent-session/src/queue.rs` 与 `runtime.rs`，不再是旧的
+`crates/lilia-desktop-application/src/agent.rs` 路径。
 
 对照基准：Mutsuki pin rev `bb728d20`（见 [mutsuki-dependency-pin.md](mutsuki-dependency-pin.md)）。
 
-## 结论
+## 当前结论
 
-AgentKit 已经拥有**回合执行**的全部权威：session 事务、turn 租约、审批与交互的版本化等待/恢复、会话分叉、工具路由、事件序列与订阅、回合内上下文压缩。这些在 LiliaCode 侧全部删除。
+AgentKit 已成为单个 session 的回合事实来源：AgentKit session 事件、审批/交互等待 checkpoint、带版本的审批/交互恢复、取消入口，以及事件序列和订阅，都由
+`crates/lilia-agent` 提供。LiliaCode 应用层不再有 `ActiveTurnPhase`，也不再为每个回合、审批或交互创建裸线程。
 
-AgentKit **没有**的都不是回合状态机，而是回合之外的产品编排：**多回合排队**、**失败回合重试**、**会话标题生成**、**auto-turn 档位决策**、**automation 关联**，以及三个把产品载荷翻译成 AgentKit 载荷的适配器（`tool_consent`、`mcp_elicitation`、architecture 交互的图应用）。它们留在 LiliaCode，但必须建立在 AgentKit 的 session 之上，不得再自建第二套 turn 状态。
+LiliaCode 仍然有产品层的跨回合职责：SQLite FIFO 队列、claim 所有权和恢复、失败重试、标题生成、auto-turn 档位、automation 关联、产品闸门和 payload 适配。`DesktopAgentRuntime` 是队列协调器，不是 AgentKit 回合状态机；它仍持有本地 claim 生命周期和终态后出队逻辑。
 
-删除的主体是 `agent.rs` 约 292–862 行：`DesktopAgentRuntime` / `AgentRuntimeState` / `TaskRuntimeState` / `ActiveTurn` / `ActiveTurnPhase` / `QueuedTurn` 及其全部相位迁移方法。
+下列项目仍是未闭合缺口，不能据此宣称 Issue #69 已验收：
+
+- `claim_token`/`claim_epoch` 仍是队列 ack 的所有权保护。当前代码把 worker 观测到的 `SessionVersion` 绑定到 claim，并在同一进程的 finish ack 校验 token+version；但恢复后的 version 仍来自 projection，AgentKit 尚未为 approval/interaction/restart 提供统一的 SessionVersion，因此上游权威没有完全闭合。
+- Kernel Job payload 携带提交时捕获的不可变 `claim_token`。turn、审批、交互和 compaction 在触碰 AgentKit 前及页面/终态路径都会用该 token 复核 durable claim；发现旧 token 时丢弃旧 worker 结果，不发终态或恢复错误，也不清理新 owner，让恢复后的 owner 继续处理。缺少 token 的旧 Job 会被拒绝。
+- AgentKit 的 `AgentSessionCoordinator` 尚未接入 loop plugin；`PermissionRequest.version` 仍可能来自 transcript message 长度，而不是 session version。恢复审批时必须透传请求携带的 version，不能由 LiliaCode 推导。
+- 事件投影已经有 `AgentEventEnvelope.sequence` 增量路径，但取消、恢复和部分审批/交互回调仍发 `TimelineChanged { cursor: None }`。
+- session branch/fork 仍由 `feature-agent-session::turn_run` 通过 `AgentTurnHost` 编排，尚未全部变成 AgentKit fork 请求。
+- `LiliaCompact` 是 LiliaCode 保留的显式产品工作流；它仍调用应用侧 compaction，不应描述成 AgentKit 已接管所有回合内压缩。
+- 当前工作区记录的 `cargo xtask agent-debug` 在 Darwin 上因 `windows_required` 未运行，未产生 debug artifact；因此验证证据不足以关闭 Issue。
 
 ## 逐项对照
 
-| # | 能力 | LiliaCode 现状 | Mutsuki AgentKit | 处置 |
-|---|------|----------------|------------------|------|
-| 1 | 回合状态机 | `ActiveTurnPhase`（`Starting`/`Running`/`WaitingApproval`/`ResolvingApproval`/`WaitingInteraction`/`ResolvingInteraction`/`Finishing`），`agent.rs:329` | `AgentRunStatus`（`Completed`/`WaitingApproval`/`WaitingInteraction`/`BudgetExceeded`/`Cancelled`/`Failed`）由 `mutsuki-plugin-agent-loop` 驱动 | **删除**。`DesktopTurnState` 改为 `AgentEvent::TurnState` 的投影 |
-| 2 | 单回合互斥 | `TaskRuntimeState.active` + `claim_token` + `worker_started` | `AgentLoop::acquire_turn` 返回 `AgentTurnLease`，重复进入报 `agent.turn.already_active` | **删除**，依赖 AgentKit 租约 |
-| 3 | 回合排队 | 双层：SQLite `desktop_pending_turns` FIFO + 内存 `VecDeque`，`turn_queue.rs` | **不提供**。一个 session 同时只有一个非终态 turn | **保留**，但降级为纯队列：只负责"下一个提交什么"，不再持有 turn 生命周期 |
-| 4 | 幂等提交 | `enqueue_idempotent` 的 `ON CONFLICT(turn_id) DO NOTHING`；automation 用 `automation-turn:{key}` | wire `SubmitTurn { idempotency_key }`，同键同载荷重放既有结果，异载荷报 `agent.approval.idempotency_conflict` 类错误 | **改接**：队列只做本地去重，权威幂等交给 wire |
-| 5 | 显式取消 | `interrupt_task_turn` + `TurnCancellationMode::User` + 队列清空，`agent.rs:1885` | `CancelTurn { session_id, turn_id, expected_version }`；`local_runtime` 转 `runtime.cancel_task` | **删除**取消状态机，保留"取消同时清空本地队列"的产品语义 |
-| 6 | 中断（回合中新输入） | 默认排队不抢占；`non_interrupt_mode` 只在 UI 层生效 | 明确拒绝：waiting turn 追加 user message 报 `agent.run.resume_messages_not_allowed` | **对齐**。LiliaCode 的"排队不抢占"与 AgentKit 语义一致，实现改为队列驱动 |
-| 7 | 失败重试 | 无自动重试。`timeline_retry.rs` 用 `retryContext` 重建请求并以**新 turn id** 重投 | **不提供** `RetryTurn`。只有 wire 幂等重放与回合内 `RetryableFailure` 步骤重试 | **保留** LiliaCode 的"重建请求 + 新 turn"，它本来就不是状态机 |
-| 8 | 审批 | `WaitingApproval` 相位 + `pending_projections` 表 + `respond_task_approval`，`agent.rs:1921` | `PermissionRequest`/`PermissionDecision`（带 `version`），wire `ApproveAction`/`RejectAction`，空 `messages` + `permission_decisions` 恢复同一 turn | **删除**自建相位与 worker，直接透传带版本的 decision |
-| 9 | 交互 | `WaitingInteraction` 相位 + 五种 kind 的手工归一化，`agent.rs:895` | `InteractionRequest`/`InteractionResolution`（带 `version`），陈旧解析报 `agent.interaction.stale` | **删除**相位。`architecture_change` 这类产品交互改成 `AgentToolExecution::Interaction` 工具 |
-| 10 | 上下文压缩（回合内） | `LiliaCompact` workflow turn 走自建相位（`run_context_compaction_turn`） | profile 的 `context.compaction_service` 在 `AgentContextBuildProtocol` 内联触发，durable transcript 原文不被摘要覆盖 | **删除**自建压缩相位，改为配置 AgentKit 压缩策略 |
-| 10b | 上下文压缩（显式换会话） | `context_compaction.rs`：控制模型生成摘要 → `create_compacted_product_session` → `replace_session_binding` | **不提供**。AgentKit 的压缩是回合内的，不换 session | **保留**。这是操作者显式触发的产品工作流，与 10 不是同一件事 |
-| 11 | 自动续回合 | `finish_turn` → `finish_and_activate_next`（纯队列出队），`agent.rs:3112`；`auto_turn.rs` 只做模型/档位选择 | 回合内多步自动推进（`max_steps`，默认 8）；跨回合只有 `ProactiveScheduleService::due()` | **保留**队列出队与模型选择，二者都在 turn 之外 |
-| 12 | 标题更新 | `title_update.rs`：2 线程池 + generation 去重 + 人工复核 | **不提供**任何标题生成。`AgentSession.title` 只在 create/fork 时可写 | **保留**，改为 Kernel Job（协议 `lilia.agent/title@1`），删除私有线程池 |
-| 13 | 事件投影 | `submit_agent_task_turn_observed` 回调 → 粗粒度 `TimelineChanged { cursor }` 整片 refresh | `AgentEventEnvelope { session_id, sequence, meta, event }`，`subscribe_events(session_id, after_sequence)` 增量推送 | **改接**订阅式增量投影，删除整片 refresh |
-| 14 | 工具注册 | bespoke wire dispatch | `AgentPluginRegistrar::new(plugin_id, generation).tool(AgentToolDescriptor)`，`Routed` 走 `target_protocol_id`，`Interaction` 交回 loop | **改造**：worktree / architecture / memory / todo / automation 全部注册为工具描述符 |
-| 15 | 持久化 | `desktop_pending_turns`、`desktop_quarantined_turns`、`pending_projections`、`agent_session_bindings` | `SessionPersistence`（transcript）、`AgentSessionStore`（checkpoint + 事件流） | **收敛**：审批/交互不再另存 `pending_projections`，改读 AgentKit checkpoint；只保留队列表 |
-| 16 | 线程 | 每回合一条 `lilia-native-turn-*`，另有 approval / interaction / title 线程 | 回合本身就是一个 `Task`，由 `TaskPool` 调度 | **删除**全部裸线程，改 Kernel `Jobs` → `HostRuntime::submit_task` |
-| 17 | 会话分叉 | `DesktopSessionBranchAnchor`（`Continue`/`Fork` + `source_turn_id`）与 `session_fork` 标志，在 `run_turn_worker` 里编排（`agent.rs:2497`） | `AgentSessionForkRequest.through_turn_id` 按回合边界复制 messages/events，协议 `mutsuki.agent.session/fork@1` | **删除**编排，直接提交 fork 请求；保留 task↔session 绑定替换与 auto-turn 的 `session_fork` 判定 |
+| # | 能力 | 当前代码与边界 | 处置/状态 |
+|---|------|----------------|------|
+| 1 | 回合状态机 | `ActiveTurnPhase` 已从仓库移除。`feature-agent-session::runtime::DesktopAgentRuntime` 只记录 active/queue、提交和 claim；应用快照只保留 `idle`/`starting`/`running`，再用 `lilia-agent::projection::AgentTurnCheckpoint` 投影 `waiting_approval`/`waiting_interaction`。 | **已拆除本地 FSM；持续检查投影一致性**。 |
+| 2 | 单回合互斥 | `desktop_pending_turns` 的 `claim_token`、`claim_epoch` 以及内存 active 记录仍由 `queue.rs`/`runtime.rs` 使用。worker 观测到的 AgentKit `SessionVersion` 会在 claim 后写入 `sv:{n}`，同一进程 finish ack 校验 token+version；恢复后的 version 仍来自 projection，跨 approval/interaction/restart 的统一 SessionVersion 尚未由 AgentKit 提供。 | **保留**，直到上游提供统一的 ack fence；不得提前删除。 |
+| 3 | 回合排队 | `crates/features/lilia-feature-agent-session/src/queue.rs` 提供 SQLite FIFO；`runtime.rs` 负责内存中的 active 与下一个 turn 晋级。 | **保留**，只负责跨回合提交顺序，不拥有 AgentKit 等待状态。 |
+| 4 | 幂等提交 | 队列的 `enqueue_idempotent` 负责本地去重；automation key 也仍在队列行中。AgentKit wire 层负责 session 内提交的幂等语义。 | **部分改接**；需继续确保队列重放与 wire 幂等键一致。 |
+| 5 | 显式取消 | `apps/desktop/src/application/agent.rs` 通过 `cancel_session_turn` 请求 AgentKit 取消，同时由本地 runtime/queue 清理或完成当前 claim。 | **AgentKit 负责回合取消；LiliaCode 保留队列清理语义**。 |
+| 6 | 中断（回合中新输入） | 默认新输入进入 FIFO，不抢占 active turn；等待中的恢复仍走 AgentKit wire 的版本检查。 | **对齐**，但应继续验证 waiting turn 的陈旧恢复错误不会被本地队列吞掉。 |
+| 7 | 失败重试 | `timeline_retry.rs` 读取 `retryContext`，用新的 turn id 重建请求；AgentKit 没有跨回合 `RetryTurn` API。 | **保留**，不引入第二套状态机。 |
+| 8 | 审批 | `AgentTurnCheckpoint` 从 AgentKit 事件重建 AgentKit-owned pending；`agent.rs` 的审批入口把带 `action_revision` 的 decision 交给 AgentKit resume。产品 pending 表仍可作为可重建缓存。远程审批、交互和中断入口没有 durable claim 时必须先完成队列恢复，不再回退到 projection-only AgentKit 调用；保留的 projected 兼容方法也只转发到带 claim fence 的入口。 | **本地等待相位已删除；payload/版本适配仍在 LiliaCode**。 |
+| 9 | 交互 | `waiting_interaction` 与 pending 同样来自 checkpoint；`tool_consent`、`mcp_elicitation`、`architecture_change` 由 LiliaCode 适配并在必要时先应用产品图。架构图 apply 与恢复提交都在 claim fence 下执行，旧 owner 不再发布等待或交互变化。 | **本地相位已删除；适配器和图应用保留**。 |
+| 10 | 回合内上下文压缩 | `turn_run.rs` 仍把 `LiliaCompact` 交给 `AgentTurnHost::run_compaction`，最终由 `agent.rs::run_context_compaction_turn` 执行产品 compaction。 | **显式产品工作流保留**；AgentKit profile compaction 尚未替代此路径。 |
+| 10b | 显式换会话压缩 | `context_compaction.rs` 生成摘要并替换 task/session binding。 | **保留**，这是产品工作流，不是 AgentKit 单回合状态。 |
+| 11 | 自动续回合 | `finish_turn` 调用 feature queue 的 `ack_and_claim_next`；`auto_turn.rs` 仅作模型/档位选择。 | **保留**，属于跨回合产品编排。 |
+| 12 | 标题更新 | `title_update.rs` 通过 `lilia.agent/title@1` Kernel Job 调度，启动时由 `desktop.rs` 安装 `QueuedTitleScheduler`。 | **已接 Kernel Job；不应恢复私有标题线程池**。 |
+| 13 | 事件投影 | `agent_turn_host.rs` 的 observed 路径使用 `AgentEventEnvelope.sequence`；`agent.rs` 的取消、恢复及部分响应路径仍使用 `TimelineChanged { cursor: None }`。 | **部分增量化**；仍需收敛剩余整片 refresh。 |
+| 14 | 工具注册 | 当前仍有 LiliaCode bespoke wire/host adapters；尚未看到 worktree、architecture、memory、todo、automation 全部通过 `AgentPluginRegistrar` 注册的实现。 | **未闭合**；继续保留适配边界，不宣称已完成插件化。 |
+| 15 | 持久化 | AgentKit transcript/checkpoint 是审批与交互事实；`desktop_pending_turns` 是跨回合队列，`pending_projections` 仍是可重建的产品/UI 缓存，`agent_session_bindings` 保留 task↔session 绑定。 | **收敛中**；不得把缓存表当恢复权威。 |
+| 16 | 线程与执行 | 生产启动在 `desktop.rs` 安装 `QueuedTurnExecutor`，发 `Message::RequestTurnJob`/`RequestApprovalJob`/`RequestInteractionJob`，再由 Kernel Job 调用 `DesktopTurnPort::execute_*_job`。`agent.rs` 不再 spawn 回合/审批/交互线程；未安装 executor 的测试/无 host 路径是 caller-thread fallback。 | **生产接线已完成；Job 缺少 claim token 时拒绝执行**。 |
+| 17 | 会话分叉 | `crates/features/lilia-feature-agent-session/src/turn_run.rs` 仍调用 `AgentTurnHost::fork_through_turn`/`fork_session`，由应用侧 `agent_turn_host.rs` 访问 AgentKit wire；完成后再更新 task binding。 | **部分接线**；仍有 LiliaCode fork orchestration 缺口。 |
 
 ## 留在 LiliaCode 的产品语义
 
-以下与 turn 状态机无关，迁移后仍属产品 Feature：
+以下不属于 AgentKit 单回合事实，迁移后仍由产品 feature 负责：
 
-- **worktree 闸门**：`ensure_initial_worktree_ready` 阻止未就绪任务发起回合（`worktree.rs:378`）。
-- **worktree 上下文注入**：`worktree_auto_instructions_for_task` 作为 `additionalContext`（`agent.rs:3265`）。
-- **hooks**：提交与停止两个时机执行用户/项目/插件 hook（`hooks.rs:430`）。
-- **Guide/todo 派发**：`dispatch_next_task_guide` 在 Tool/User/Idle 窗口自动发起 Guide 回合（`todo.rs:674`）。
-- **automation 关联**：`DesktopAutomationTurnCorrelation` 在回合终态完成 automation 节点（`agent.rs:2995`）。
-- **auto-turn 档位决策**：`apply_automatic_turn_selection` 基于上下文占用选模型（`auto_turn.rs:45`）。
-- **任务运行闸门**：`ensure_task_runnable` 的 run block（`product_management.rs:171`）。
-- **slash command 本地执行**：不进 Agent 的本地路径（`composer.rs:584`）。
-- **载荷适配器**：`tool_consent.rs` 归一化 allow/deny 与可编辑命令，`mcp_elicitation.rs` 解析并校验表单/URL。AgentKit 只认 `PermissionDecision` 与 `InteractionResolution.response`，这两层翻译删不掉。
-- **architecture 交互的图应用**：`respond_task_architecture_interaction` 必须先改产品图再恢复回合；AgentKit 不知道这张图。
-- **事件投影**：`projection.rs` 把 `AgentEventEnvelope` 翻成产品 timeline/pending 命令，本身不写库。这是有意的适配边界，保留。
+- worktree 闸门和上下文注入（`worktree.rs`、`agent.rs`）。
+- 提交/停止 hooks、任务运行闸门、slash command 本地执行。
+- Guide/todo 派发、auto-turn 档位选择和 automation 节点关联。
+- `timeline_retry.rs` 的失败重试（新 turn id）。
+- `title_update.rs` 的标题生成 Kernel Job（`lilia.agent/title@1`）。
+- `tool_consent.rs`、`mcp_elicitation.rs` 的载荷校验，以及 architecture interaction 的图应用后再恢复。
+- `projection.rs` 的 AgentKit event → timeline/todo/artifact/pending 投影。它不写事实库，产品存储只能保存可重建缓存。
+
+## 当前代码路径与接线
+
+生产路径的协议定义在
+`crates/features/lilia-feature-agent-session/src/execution.rs`：
+
+- `lilia.agent/turn@1`
+- `lilia.agent/approval@1`
+- `lilia.agent/interaction@1`
+- task slot `lilia.agent.turn.{task_id}`
+
+`AgentSessionFeature`（`crates/features/lilia-feature-agent-session/src/lib.rs`）注册上述协议；`apps/desktop/src/kernel_host.rs` 挂载 feature 和 `TurnPort`。桌面启动在 `apps/desktop/src/desktop.rs` 安装 `QueuedTurnExecutor`，它只发 `Message::Request*Job`；`DesktopTurnPort` 在 Job worker 回调 `apps/desktop/src/application/agent.rs::execute_*_job`。这些执行入口再调用 `run_turn_worker`、`run_approval_worker` 或 `run_interaction_worker`，这里的 “worker” 是回调名称，不是裸线程。
+
+恢复/投影路径为：`agent.rs::task_turn_checkpoint` →
+`lilia-agent::checkpoint_from_session` → `task_runtime_snapshot` 与
+`merge_task_pending`。AgentKit-owned pending kind（permission、ask-user、plan、tool consent、MCP elicitation、architecture change）由 checkpoint 重建，产品 pending 行不能覆盖仍开放的 AgentKit 请求。
 
 ## 缺口与补法
 
-| 缺口 | 补法 | 归属 |
-|------|------|------|
-| AgentKit 无多回合队列 | `feature-agent-session` 保留 `desktop_pending_turns`，只在上一回合终态事件到达后提交下一回合 | LiliaCode |
-| AgentKit 无失败重试 API | 沿用"读取 `retryContext` 重建请求 + 新 turn id"，不引入状态机 | LiliaCode |
-| AgentKit 无标题生成 | Kernel Job 协议 `lilia.agent/title@1`，结果写回 `AgentSession.title` | LiliaCode |
-| AgentKit 无 automation 节点关联 | `DesktopAutomationTurnCorrelation` 留在请求与队列行上，终态时完成 automation 节点 | LiliaCode |
-| `AgentSessionCoordinator` 未接入 loop 插件 | 采用 loop 插件路径，不引用 coordinator，避免第二套状态机 | 记为 Mutsuki 待办 |
-| 审批 `version` 绑定的是 transcript 长度而非 session 版本 | 恢复决策时原样回传 `PermissionRequest.version`，不自行推导 | 记为 Mutsuki 待办 |
+| 缺口 | 现状与补法 | 归属 |
+|------|------------|------|
+| 陈旧 worker ack | 当前代码把 worker 观测到的 version 绑定到 claim，同一进程 finish ack 校验 `claim_token`+version；`prepare_recovery` 必须换 token。恢复后的 version 仍来自 projection，跨 approval/interaction/restart 的统一 SessionVersion 尚未由 AgentKit 提供，因此本地 epoch/token 仍不能删除。 | LiliaCode + Mutsuki 协作 |
+| 增量时间线未全覆盖 | 保留 `AgentEventEnvelope.sequence`/`subscribe_events(after_sequence)` 主路径，逐步替换 `agent.rs` 中取消、恢复、响应场景的 `cursor: None`。 | LiliaCode |
+| AgentKit 无跨回合队列 | `feature-agent-session` 保留 SQLite FIFO，在上一回合终态后提交下一回合。 | LiliaCode |
+| AgentKit 无失败重试 API | 沿用读取 `retryContext`、重建请求并创建新 turn id。 | LiliaCode |
+| AgentKit 无标题生成 | 通过 `lilia.agent/title@1` Kernel Job 更新 `AgentSession.title`。 | LiliaCode |
+| AgentKit 无 automation 关联 | 在请求/队列行保留 correlation，终态时完成 automation 节点。 | LiliaCode |
+| AgentPluginRegistrar 尚未覆盖产品工具 | 盘点各 bespoke host adapter，补齐工具描述符、generation 和 target protocol 后再移除重复 dispatch。 | LiliaCode + Mutsuki |
+| Fork orchestration 仍在 host | 将 branch/fork 的 session 创建、through-turn 复制和 binding 更新拆分成 AgentKit fork 请求与明确的产品 binding 步骤。 | LiliaCode + Mutsuki |
+| 回合内 compaction 路径未统一 | 明确 AgentKit profile compaction 与 `LiliaCompact` 产品工作流的边界；在替代实现和恢复测试完成前保留现有 host 路径。 | LiliaCode + Mutsuki |
 
-## 拆除顺序上的一个正确性约束
+## 拆除顺序上的正确性约束
 
-队列 ack 用 `claim_token` 保证所有权：重启后 `prepare_recovery` 会换新 token，陈旧 worker 不能确认已被新进程重投的回合。AgentKit `SessionVersion` 在 claim 之后写入 `claim_epoch = sv:{n}`，ack 可带 `expected_session_version` 做前置校验。不得同时删掉 token 与版本绑定。
+队列 ack 用 `claim_token` 保证所有权：重启后的 `prepare_recovery` 会换新 token，陈旧 worker 不能确认已被新进程重投的回合。当前代码把 worker 观测到的 AgentKit `SessionVersion` 写入 `claim_epoch = sv:{n}`，并在同一进程 finish ack 校验 token+version；但恢复后的 version 仍来自 projection，AgentKit 尚未为 approval/interaction/restart 提供统一 SessionVersion。不得在这项上游能力落地前同时删掉 token 与 epoch。
 
-## 硬约束
+## 验证记录
 
-不得保留第二套 turn 状态机。任何"AgentKit 缺这个能力"的结论，只能落在**队列、重试触发、标题、auto-turn 决策、automation 关联、载荷适配**六处；其余一律改为 Agent 插件或直接删除。
+本次验证通过临时解包的 Debian 13 GTK/GLib sysroot 完成了 desktop crate 的完整库检查；该 sysroot 位于 `/tmp`，没有写入仓库。`cargo xtask verify` 的 boundary-check 与 pin-check 通过，workspace 测试编译出 632 个 desktop 测试并运行了 632 项，其中 630 项通过；自动化 controller 测试重跑后通过，offscreen 测试仍因当前 Linux WGPU adapter 不支持 `Rgba32Float` 而失败。该失败不触及 Issue #69 改动，但因此不能把本次 workspace 门禁记为全绿。feature-agent-session 测试 55/55、lilia-agent 测试 94 通过（1 ignored），desktop `cargo check --locked -p lilia-desktop --lib` 通过。`cargo xtask agent-debug` 在当前 Linux 环境返回 `desktop_required`，没有 `agent-debug-runs/lilia-*` artifact；该 harness 要求 macOS 或 Windows 的真实 WGPU 桌面。后续验收仍需在支持的平台生成 debug artifact，并覆盖陈旧 claim ack、重启恢复、审批/交互版本和增量事件游标。
 
-## 壳层已接线
-
-`LiliaShell` 按标题调度器同一模式接入回合 job，application 不持有 kernel。
-
-1. **安装回合执行器**  
-   `install_title_update_scheduler` 之后、`restore_persisted_turn_queue` 之前安装 `QueuedTurnExecutor`。它只发顶层 `Message::RequestTurnJob` / `RequestApprovalJob` / `RequestInteractionJob`；壳层再 `jobs().submit` 到 `lilia.agent/turn@1` / `approval@1` / `interaction@1`，槽位 `lilia.agent.turn.{task_id}`。`DesktopTurnPort` 在 job 线程回调 `execute_*_job`。未安装执行器时 application 仍会自建私有 `LiliaJobRuntime`，仅测试路径使用。
-
-2. **快照相位不再出现 resolving / finishing**  
-   `task_runtime_snapshot().phase` 只投影 `idle` / `starting` / `running` / `waiting_approval` / `waiting_interaction`。`restored_turn_state` 已去掉 `resolving_*` 分支。`DesktopTurnState::Resolving*` 事件仍会发出，UI 继续用事件而不是 snapshot 相位。
-
-3. **时间线改为增量 cursor**  
-   回合主路径不再在 `handle_turn_page` 里发 `TimelineChanged { cursor: None }`。观察者按 `AgentEventEnvelope.sequence` 推增量。整片 refresh 只留在取消、隔离恢复等没有增量流的路径。
-
-4. **壳层不再 spawn 回合 / 审批 / 交互线程**  
-   `lilia-native-turn-*` / `lilia-native-approval-*` / `lilia-native-interaction-*` 已从 `agent.rs` 删除。生产路径只走内核 job。
+本文只同步当前路径、接线和未完成缺口，不宣称 Issue #69 已验收或关闭。

@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::runtime::DesktopAgentRuntime;
 use crate::turn::{DesktopSessionBranchMode, DesktopTurnRequest};
-use crate::turn_page::{handle_observed_page, TurnPageHost};
+use crate::turn_page::{handle_observed_page_with_claim, TurnPageHost};
 use crate::DesktopTurnQueueError;
 
 #[derive(Debug, Error)]
@@ -31,6 +31,18 @@ pub enum AgentTurnError {
     Product(#[from] lilia_contracts::ProductError),
 }
 
+impl AgentTurnError {
+    /// A worker can outlive its durable claim across recovery. Such a result
+    /// must be dropped instead of turning the replacement owner into a local
+    /// failure or showing a stale pending error.
+    pub fn is_stale_claim(&self) -> bool {
+        matches!(
+            self,
+            Self::NoActiveTurn(_) | Self::Queue(DesktopTurnQueueError::ClaimOwnership { .. })
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ObservedTurnOutcome {
     pub session_id: String,
@@ -47,6 +59,7 @@ pub struct TurnSubmitSpec {
     pub turn_id: String,
     pub session_id: String,
     pub request: DesktopTurnRequest,
+    pub claim_token: Option<String>,
 }
 
 /// Host I/O for one prepared turn. Does not hold Jobs.
@@ -59,6 +72,7 @@ pub trait AgentTurnHost: TurnPageHost {
         &self,
         turn_id: &str,
         request: &DesktopTurnRequest,
+        claim_token: Option<&str>,
     ) -> Result<(), AgentTurnError>;
     fn mark_guide_sent(&self, guide_id: &str) -> Result<(), AgentTurnError>;
     fn run_compaction(
@@ -66,6 +80,7 @@ pub trait AgentTurnHost: TurnPageHost {
         task_id: &TaskId,
         turn_id: &str,
         request: &DesktopTurnRequest,
+        claim_token: Option<&str>,
     ) -> Result<(), AgentTurnError>;
     fn load_task(&self, task_id: &TaskId) -> Result<(String, Option<ProjectId>), AgentTurnError>;
     fn refresh_profile(&self) -> Result<String, AgentTurnError>;
@@ -109,25 +124,51 @@ pub fn run_prepared_turn(
     task_id: &TaskId,
     turn_id: &str,
 ) -> Result<(), AgentTurnError> {
+    run_prepared_turn_with_claim(runtime, host, task_id, turn_id, None)
+}
+
+pub fn run_prepared_turn_with_claim(
+    runtime: &DesktopAgentRuntime,
+    host: &dyn AgentTurnHost,
+    task_id: &TaskId,
+    turn_id: &str,
+    expected_claim_token: Option<&str>,
+) -> Result<(), AgentTurnError> {
     let mut active = runtime
         .active(task_id, turn_id)
         .ok_or_else(|| AgentTurnError::NoActiveTurn(task_id.clone()))?;
+    if let Some(expected) = expected_claim_token {
+        if active.claim_token.as_deref() != Some(expected) {
+            return Err(AgentTurnError::Queue(
+                DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ));
+        }
+    }
+    let claim_token = expected_claim_token.or(active.claim_token.as_deref());
     let prepared_request = host.apply_automatic_selection(active.request.clone())?;
     if prepared_request != active.request {
-        host.persist_request(turn_id, &prepared_request)?;
-        if !runtime.replace_active_request(task_id, turn_id, prepared_request.clone()) {
+        host.persist_request(turn_id, &prepared_request, claim_token)?;
+        if !runtime.replace_active_request_with_claim(
+            task_id,
+            turn_id,
+            prepared_request.clone(),
+            expected_claim_token,
+        ) {
             return Err(AgentTurnError::NoActiveTurn(task_id.clone()));
         }
         active.request = prepared_request;
     }
     if let Some(guide_id) = active.request.guide_id.as_deref() {
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         host.mark_guide_sent(guide_id)?;
     }
     if matches!(
         active.request.workflow.as_ref(),
         Some(LiliaAgentWorkflow::LiliaCompact)
     ) {
-        return host.run_compaction(task_id, turn_id, &active.request);
+        return host.run_compaction(task_id, turn_id, &active.request, claim_token);
     }
     let (title, _project_id) = host.load_task(task_id)?;
     let profile_id = host.refresh_profile()?;
@@ -170,10 +211,28 @@ pub fn run_prepared_turn(
     } else {
         host.persist_binding(task_id, &session_id, &profile_id, false)?;
     }
-    let cancel_requested = runtime.attach_session(task_id, turn_id, session_id.clone());
+    let cancel_requested = runtime.attach_session_with_claim(
+        task_id,
+        turn_id,
+        session_id.clone(),
+        expected_claim_token,
+    );
+    if expected_claim_token.is_some()
+        && runtime
+            .active(task_id, turn_id)
+            .is_none_or(|active| active.claim_token.as_deref() != expected_claim_token)
+    {
+        return Err(AgentTurnError::Queue(
+            DesktopTurnQueueError::ClaimOwnership {
+                turn_id: turn_id.to_owned(),
+            },
+        ));
+    }
     if cancel_requested || active.cancellation_mode.is_some() {
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         host.cancel_session_turn(&session_id, turn_id)?;
     }
+    host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
     host.emit_running(task_id, turn_id);
     host.execute_prompt_hooks(
         task_id,
@@ -186,6 +245,8 @@ pub fn run_prepared_turn(
         turn_id: turn_id.to_owned(),
         session_id,
         request: active.request,
+        claim_token: claim_token.map(str::to_owned),
     })?;
-    handle_observed_page(runtime, host, task_id, turn_id, page)
+    handle_observed_page_with_claim(runtime, host, task_id, turn_id, expected_claim_token, page)
+        .map(|_| ())
 }

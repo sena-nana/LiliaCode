@@ -9,7 +9,7 @@ use super::*;
 use crate::application::{
     ArchitectureChanged, DesktopApplication, DesktopApplicationConfig, DesktopHost,
     DesktopHostAction, DesktopHostContext, DesktopHostError, DesktopHostResult,
-    DesktopProjectCreate, DesktopTaskCreate,
+    DesktopProjectCreate, DesktopTaskCreate, DesktopTurnRequest,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -136,6 +136,16 @@ fn architecture_interaction_applies_authoritative_scope_and_resumes_the_same_tur
             "Architecture approval",
         ))
         .unwrap();
+    application
+        .inner
+        .turn_submissions
+        .queue()
+        .unwrap()
+        .enqueue(
+            "architecture-turn",
+            &DesktopTurnRequest::new(task.id.clone(), "debug architecture interaction"),
+        )
+        .unwrap();
     let runtime = application.authority().shared_runtime();
     runtime
         .inner()
@@ -182,6 +192,7 @@ fn architecture_interaction_applies_authoritative_scope_and_resumes_the_same_tur
             .phase,
         "waiting_interaction"
     );
+    application.restore_persisted_turn_queue().unwrap();
 
     let response = application
         .respond_task_architecture_interaction(

@@ -365,9 +365,7 @@ impl RemoteHost for DesktopApplication {
     }
 
     fn interrupt(&self, task_id: &TaskId) -> Result<Value, DesktopRemoteControlError> {
-        let result = self
-            .interrupt_task_turn(task_id)
-            .or_else(|_| self.interrupt_projected_task_turn(task_id))?;
+        let result = self.interrupt_task_turn(task_id)?;
         serde_json::to_value(result)
             .map_err(|error| DesktopRemoteControlError::internal(error.to_string()))
     }
@@ -408,7 +406,6 @@ impl RemoteHost for DesktopApplication {
         approved: bool,
     ) -> Result<(), DesktopRemoteControlError> {
         self.respond_task_approval(task_id, request_id, approved)
-            .or_else(|_| self.respond_projected_task_approval(task_id, request_id, approved))
             .map(|_| ())
             .map_err(DesktopRemoteControlError::from)
     }
@@ -420,10 +417,7 @@ impl RemoteHost for DesktopApplication {
         accepted: bool,
         result: Value,
     ) -> Result<(), DesktopRemoteControlError> {
-        self.respond_task_interaction(task_id, request_id, accepted, result.clone())
-            .or_else(|_| {
-                self.respond_projected_task_interaction(task_id, request_id, accepted, result)
-            })
+        self.respond_task_interaction(task_id, request_id, accepted, result)
             .map(|_| ())
             .map_err(DesktopRemoteControlError::from)
     }
@@ -624,8 +618,9 @@ mod tests {
     use super::*;
     use crate::application::{
         DesktopApplicationConfig, DesktopHostError, DesktopHostResult, DesktopProjectCreate,
-        DesktopTaskCreate,
+        DesktopTaskCreate, DesktopTaskPatch,
     };
+    use lilia_contracts::ProductTaskStatus;
     use uuid::Uuid;
 
     #[derive(Default)]
@@ -1057,6 +1052,16 @@ mod tests {
             ))
             .unwrap();
         application
+            .inner
+            .turn_submissions
+            .queue()
+            .unwrap()
+            .enqueue(
+                "remote-architecture-turn",
+                &DesktopTurnRequest::new(task.id.clone(), "debug remote architecture interaction"),
+            )
+            .unwrap();
+        application
             .authority()
             .shared_runtime()
             .inner()
@@ -1092,6 +1097,7 @@ mod tests {
         application
             .restore_task_runtime_from_projection(&task.id)
             .unwrap();
+        application.restore_persisted_turn_queue().unwrap();
 
         let response = lilia_feature_remote::remote_interaction_respond(
             &application,

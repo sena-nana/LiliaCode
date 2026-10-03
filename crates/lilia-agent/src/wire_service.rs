@@ -245,6 +245,22 @@ fn session_state_from_snapshot(session: AgentSession) -> AgentSessionState {
             AgentEvent::InteractionResolved { resolution, .. } => {
                 interactions.remove(&resolution.interaction_id);
             }
+            AgentEvent::ToolCallStarted {
+                call_id, turn_id, ..
+            }
+            | AgentEvent::ToolCallCompleted {
+                call_id, turn_id, ..
+            } => {
+                // A resumed tool call consumes its approval.  The approval
+                // request may have been emitted in an earlier page, so fold
+                // both start and completion events when rebuilding state.
+                if approvals
+                    .get(call_id)
+                    .is_some_and(|pending| pending.request.turn_id.as_str() == turn_id.as_str())
+                {
+                    approvals.remove(call_id);
+                }
+            }
             _ => {}
         }
     }
@@ -267,12 +283,7 @@ fn session_state_from_snapshot(session: AgentSession) -> AgentSessionState {
         .unwrap_or(AgentSessionStatus::Active);
     let waiting_turns = turns
         .iter()
-        .filter(|turn| {
-            matches!(
-                turn.status,
-                AgentTurnStatus::WaitingApproval | AgentTurnStatus::Generating
-            )
-        })
+        .filter(|turn| is_waiting_turn(&turn.status))
         .map(|turn| turn.turn_id.as_str())
         .collect::<BTreeSet<_>>();
     let pending_approvals = approvals
@@ -305,13 +316,26 @@ fn turn_status(status: &str) -> AgentTurnStatus {
     match status {
         "collecting_context" | "starting" => AgentTurnStatus::CollectingContext,
         "running_tools" => AgentTurnStatus::RunningTools,
-        "waiting_approval" | "waiting_interaction" => AgentTurnStatus::WaitingApproval,
+        "waiting_approval" => AgentTurnStatus::WaitingApproval,
+        // AgentKit represents an interaction pause as a tool-run suspension.
+        // Keep this distinct from permission approval so pending interactions
+        // remain available through the wire session state.
+        "waiting_interaction" => AgentTurnStatus::RunningTools,
         "completed" => AgentTurnStatus::Completed,
         "cancelled" => AgentTurnStatus::Cancelled,
         "failed" => AgentTurnStatus::Failed,
         "running" | "resumed" => AgentTurnStatus::Generating,
         _ => AgentTurnStatus::Created,
     }
+}
+
+fn is_waiting_turn(status: &AgentTurnStatus) -> bool {
+    matches!(
+        status,
+        AgentTurnStatus::WaitingApproval
+            | AgentTurnStatus::Generating
+            | AgentTurnStatus::RunningTools
+    )
 }
 
 fn session_status(status: &AgentTurnStatus) -> AgentSessionStatus {
@@ -573,7 +597,14 @@ mod tests {
     use super::*;
     use crate::{NativeRuntimeBootstrap, ProductCredentialLoginInput};
     use mutsuki_agent_client::{AgentClient, InProcessAgentClient};
-    use mutsuki_agent_contracts::{CredentialKind, SessionVersion, OPENAI_CREDENTIAL_PROVIDER_ID};
+    use mutsuki_agent_contracts::{
+        AgentEventMeta, AgentPermissionMode, CredentialKind, InteractionKind, InteractionRequest,
+        PermissionRequest, SessionVersion, ToolSideEffect, OPENAI_CREDENTIAL_PROVIDER_ID,
+    };
+    use mutsuki_runtime_contracts::{
+        ResourceAccess, ResourceCellRef, ResourceId, ResourceLifetime, ResourceSealState,
+        ResourceSemantic,
+    };
     use serde_json::json;
     use std::io::{Read, Write};
     use std::sync::mpsc;
@@ -632,6 +663,51 @@ mod tests {
         runtime_with_final_models(1)
     }
 
+    fn test_session(events: Vec<AgentEvent>) -> AgentSession {
+        let resource = ResourceRef {
+            ref_id: "resource:wire-fold".into(),
+            resource_id: ResourceId {
+                kind_id: "mutsuki.agent.session".into(),
+                slot_id: "wire-fold".into(),
+                generation: 1,
+                version: 1,
+            },
+            semantic: ResourceSemantic::VersionedSnapshot,
+            provider_id: "test".into(),
+            resource_kind: "mutsuki.agent.session".into(),
+            schema: "mutsuki.agent.session@1".into(),
+            version: 1,
+            generation: 1,
+            access: ResourceAccess::Inline,
+            size_hint: None,
+            content_hash: None,
+            lifetime: ResourceLifetime::Persistent,
+            lease: None,
+            seal_state: ResourceSealState::Sealed,
+        };
+        let cell = ResourceCellRef {
+            cell_id: "cell:wire-fold".into(),
+            resource_kind: "mutsuki.agent.session".into(),
+            owner_plugin_id: "test".into(),
+            schema: "mutsuki.agent.session@1".into(),
+            generation: 1,
+            health: "ready".into(),
+            reload_policy: "persistent".into(),
+        };
+        let mut session = AgentSession::new("wire-fold", "profile", resource, cell);
+        session.events = events
+            .into_iter()
+            .enumerate()
+            .map(|(sequence, event)| AgentEventEnvelope {
+                session_id: session.session_id.clone(),
+                sequence: sequence as u64,
+                meta: AgentEventMeta::new(format!("event-{sequence}"), "test"),
+                event,
+            })
+            .collect();
+        session
+    }
+
     #[test]
     fn wire_authority_owns_version_idempotency_and_event_resume() {
         let (runtime, server) = runtime_with_final_model();
@@ -677,6 +753,80 @@ mod tests {
             .unwrap()
             .events
             .is_empty());
+    }
+
+    #[test]
+    fn waiting_interaction_maps_to_running_tools_and_keeps_turn_waiting() {
+        let status = turn_status("waiting_interaction");
+
+        assert_eq!(status, AgentTurnStatus::RunningTools);
+        assert!(is_waiting_turn(&status));
+    }
+
+    #[test]
+    fn waiting_interaction_keeps_pending_interaction_in_session_state() {
+        let session = test_session(vec![
+            AgentEvent::TurnState {
+                turn_id: "turn-interaction".into(),
+                status: "waiting_interaction".into(),
+            },
+            AgentEvent::InteractionRequested {
+                turn_id: "turn-interaction".into(),
+                interaction: InteractionRequest {
+                    session_id: "wire-fold".into(),
+                    turn_id: "turn-interaction".into(),
+                    version: 2,
+                    interaction_id: "interaction-1".into(),
+                    kind: InteractionKind::Clarification,
+                    source_tool: Some("ask_user_question".into()),
+                    permission_mode: AgentPermissionMode::Ask,
+                    prompt: "Which option?".into(),
+                    options: json!(["a", "b"]),
+                    context: None,
+                    details: None,
+                },
+            },
+        ]);
+
+        let state = session_state_from_snapshot(session);
+
+        assert_eq!(state.turns[0].status, AgentTurnStatus::RunningTools);
+        assert_eq!(state.pending_interactions.len(), 1);
+        assert_eq!(
+            state.pending_interactions[0].interaction_id,
+            "interaction-1"
+        );
+    }
+
+    #[test]
+    fn completed_tool_call_removes_folded_pending_approval() {
+        let session = test_session(vec![
+            AgentEvent::TurnState {
+                turn_id: "turn-approval".into(),
+                status: "waiting_approval".into(),
+            },
+            AgentEvent::ApprovalRequest {
+                request: PermissionRequest {
+                    session_id: "wire-fold".into(),
+                    turn_id: "turn-approval".into(),
+                    action_id: "call-approval".into(),
+                    tool: "apply_patch".into(),
+                    side_effect: ToolSideEffect::WorkspaceWrite,
+                    summary: "apply change".into(),
+                    version: 1,
+                },
+            },
+            AgentEvent::ToolCallCompleted {
+                turn_id: "turn-approval".into(),
+                call_id: "call-approval".into(),
+                summary: "applied".into(),
+                details: None,
+            },
+        ]);
+
+        let state = session_state_from_snapshot(session);
+
+        assert!(state.pending_approvals.is_empty());
     }
 
     #[test]

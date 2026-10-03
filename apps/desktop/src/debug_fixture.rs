@@ -1,7 +1,7 @@
 use crate::application::{
-    ArchitectureBackend, ArchitecturePermission, DesktopApplication, ProjectArchitectureApplyInput,
-    ProjectArchitectureChange, ProjectArchitectureEdge, ProjectArchitectureNode,
-    RemoteEndpointAddress, RemotePairDeviceInput,
+    ArchitectureBackend, ArchitecturePermission, DesktopApplication, DesktopTurnRequest,
+    ProjectArchitectureApplyInput, ProjectArchitectureChange, ProjectArchitectureEdge,
+    ProjectArchitectureNode, RemoteEndpointAddress, RemotePairDeviceInput,
 };
 use lilia_agent::ProductCredentialLoginInput;
 use lilia_contracts::{
@@ -167,6 +167,17 @@ pub fn prepare(application: &DesktopApplication) -> Result<(), String> {
     prepare_model_credential(application)?;
     let runtime = application.authority().shared_runtime();
     let mcp_task_id = TaskId::new(MCP_ELICITATION_TASK_ID).map_err(|error| error.to_string())?;
+    application
+        .inner
+        .turn_submissions
+        .queue()
+        .map_err(|error| error.to_string())?
+        .enqueue_idempotent(
+            "native-agent-debug-mcp-turn",
+            &DesktopTurnRequest::new(mcp_task_id.clone(), "debug MCP interaction"),
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())?;
     runtime
         .inner()
         .seed_debug_interaction(

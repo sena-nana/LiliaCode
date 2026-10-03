@@ -99,6 +99,12 @@ impl DesktopApplication {
             .agent
             .request(task_id, &turn_id)
             .ok_or_else(|| DesktopApplicationError::NoActiveTurn(task_id.clone()))?;
+        let claim_token = self
+            .inner
+            .agent
+            .active(task_id, &turn_id)
+            .and_then(|active| active.claim_token);
+        self.ensure_turn_claim(task_id, &turn_id, claim_token.as_deref())?;
         let payload: DesktopArchitectureInteractionPayload =
             serde_json::from_value(pending.payload.clone()).map_err(|error| {
                 DesktopApplicationError::InvalidPendingInteraction {
@@ -141,7 +147,10 @@ impl DesktopApplication {
                 message: "readonly turns cannot apply architecture changes".to_owned(),
             });
         }
+        self.ensure_turn_claim(task_id, &turn_id, claim_token.as_deref())?;
 
+        let submission = self.inner.turn_submissions.submission_guard_recovering();
+        self.ensure_turn_claim(task_id, &turn_id, claim_token.as_deref())?;
         let (graph, event, message) = match decision {
             DesktopArchitectureInteractionDecision::Allow => {
                 let result = self.apply_project_architecture(ProjectArchitectureApplyInput {
@@ -172,6 +181,7 @@ impl DesktopApplication {
                 (None, event, "架构图变更已拒绝".to_owned())
             }
         };
+        drop(submission);
         let response = json!({
             "interaction": "architecture_change",
             "decision": decision,
@@ -179,6 +189,7 @@ impl DesktopApplication {
             "event": event,
             "message": message,
         });
+        self.ensure_turn_claim(task_id, &turn_id, claim_token.as_deref())?;
         let interaction = self.respond_task_interaction(task_id, request_id, true, response)?;
         Ok(DesktopArchitectureInteractionResponse {
             decision,
