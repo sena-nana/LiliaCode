@@ -76,6 +76,11 @@ zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 # nana-ui-devtools 的离屏截图/CPU 回读仅限调试与测试，禁止接入产品 present 路径。
 nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "cbb590e5c7ba8ebb2dadae0ec022746c91041228", features = ["offscreen"] }
+# Probe the exact WGPU format capability before constructing NanaUI's
+# offscreen painter; the painter's motion parity pipeline requires Rgba32Float
+# as a render attachment on the selected adapter.
+pollster = "0.4.0"
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "gles", "metal", "vulkan"] }
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 global-hotkey = "0.8.0"

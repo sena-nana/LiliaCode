@@ -42,6 +42,40 @@ mod tests {
             .len()
     }
 
+    fn motion_eval_pixels_available() -> bool {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::from_env().unwrap_or_default(),
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter =
+            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+                apply_limit_buckets: false,
+            })) {
+                Ok(adapter) => adapter,
+                Err(error) => {
+                    eprintln!(
+                        "skipping offscreen remaining-surface evidence: no GPU adapter ({error})"
+                    );
+                    return false;
+                }
+            };
+        let features = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba32Float);
+        let required_usages =
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
+        if !features.allowed_usages.contains(required_usages) {
+            let info = adapter.get_info();
+            eprintln!(
+                "skipping offscreen remaining-surface evidence: NanaUI motion eval requires a renderable Rgba32Float target (adapter={}, backend={:?}, allowed_usages={:?})",
+                info.name, info.backend, features.allowed_usages
+            );
+            return false;
+        }
+        true
+    }
+
     fn capture(
         document: &mut RuntimeDocument,
         name: &str,
@@ -142,7 +176,7 @@ mod tests {
 
     #[test]
     fn remaining_surfaces_paint_offscreen() {
-        if !offscreen::pixels_available() {
+        if !motion_eval_pixels_available() {
             return;
         }
         let document_id = DocumentId::new(901).unwrap();
@@ -265,7 +299,7 @@ mod tests {
     /// running desktop host; only the GPU egress is replaced by OffscreenSnapshots.
     #[test]
     fn product_shell_paints_offscreen() {
-        if !offscreen::pixels_available() {
+        if !motion_eval_pixels_available() {
             return;
         }
         let snapshot = crate::runtime_shell::empty_snapshot();

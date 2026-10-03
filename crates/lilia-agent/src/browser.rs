@@ -756,6 +756,38 @@ mod tests {
     }
 
     #[test]
+    fn page_change_cancels_inflight_work_and_rejects_late_results() {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let sessions = Arc::new(BrowserSessions::for_test(Arc::new(Blocking {
+            started: started_tx,
+            finish: Mutex::new(finish_rx),
+        })));
+        let first = sessions
+            .register(scope("page-change"), page("original"))
+            .unwrap();
+        let worker_sessions = sessions.clone();
+        let request = request(&first);
+        let worker = std::thread::spawn(move || worker_sessions.execute(&request));
+        let token = started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+
+        let changed = sessions
+            .page_changed(&first.scope, page("navigated"))
+            .unwrap();
+        assert!(changed.page_version > first.page_version);
+        assert!(token.is_cancelled());
+
+        finish_tx.send(()).unwrap();
+        assert_eq!(worker.join().unwrap(), Err(BrowserError::Cancelled));
+        assert_eq!(
+            sessions.state(&first.scope).unwrap().page.title,
+            "navigated"
+        );
+    }
+
+    #[test]
     fn explicit_cancel_reports_busy_then_releases_it_without_committing_late_page() {
         let (started_tx, started_rx) = mpsc::channel();
         let (finish_tx, finish_rx) = mpsc::channel();
