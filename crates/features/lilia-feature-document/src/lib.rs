@@ -7,6 +7,7 @@
 
 mod buffer;
 mod diagnostics;
+mod diff;
 mod document;
 mod jobs;
 mod language;
@@ -22,11 +23,12 @@ pub use buffer::{
     BufferError, BufferId, BufferRevision, BufferSnapshot, BufferStore, TextBuffer, TextEdit,
 };
 pub use diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticStore};
+pub use diff::{DiffHunk, DiffLine, DiffLineKind, DocumentDiff};
 pub use document::{
     canonicalize_existing_file, content_fingerprint, document_resource_key,
     path_from_document_resource_key, path_key, persist_document_replacement,
-    read_document_disk_text, stage_document_replacement, DocumentError, DocumentId,
-    DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    read_document_disk_text, stage_document_replacement, DocumentContextSnapshot, DocumentError,
+    DocumentExternalChange, DocumentId, DocumentSavePlan, DocumentSnapshot, DocumentStore,
 };
 pub use jobs::{
     definition_slot, diagnostics_slot, DefinitionRequest, DiagnosticsRequest, LanguagePort,

@@ -555,6 +555,14 @@ impl AgentTurnHost for DesktopApplication {
             architecture.as_ref(),
             worktree_instructions.as_deref(),
         );
+        // Capture open buffers once at turn start.  LSP jobs and later
+        // WorkspaceEdit application can compare this revision token instead
+        // of observing a document that changed while the turn was running.
+        context["documents"] = serde_json::to_value(
+            self.document_context_snapshots()
+                .map_err(agent_turn_error)?,
+        )
+        .map_err(|error| AgentTurnError::Agent(error.to_string()))?;
         let memory = self.prepare_memory_for_turn(&spec.task_id, &spec.turn_id)?;
         context["memoryInjection"] = serde_json::to_value(&memory)
             .map_err(|error| AgentTurnError::Agent(error.to_string()))?;

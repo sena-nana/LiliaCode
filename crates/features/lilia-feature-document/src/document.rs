@@ -36,6 +36,36 @@ pub struct DocumentSnapshot {
     pub disk_fingerprint: u64,
 }
 
+/// Stable context facts supplied to Agent/LSP consumers for one turn.  The
+/// revision is the optimistic concurrency token; consumers must not apply a
+/// result after it no longer matches the open buffer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentContextSnapshot {
+    pub id: DocumentId,
+    pub canonical_path: PathBuf,
+    pub language: Option<LanguageId>,
+    pub text: String,
+    pub revision: BufferRevision,
+    pub saved_revision: BufferRevision,
+    pub dirty: bool,
+}
+
+impl From<DocumentSnapshot> for DocumentContextSnapshot {
+    fn from(snapshot: DocumentSnapshot) -> Self {
+        let dirty = snapshot.buffer.is_dirty();
+        Self {
+            id: snapshot.id,
+            canonical_path: snapshot.canonical_path,
+            language: snapshot.language,
+            text: snapshot.buffer.text,
+            revision: snapshot.buffer.revision,
+            saved_revision: snapshot.buffer.saved_revision,
+            dirty,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct DocumentRecord {
     id: DocumentId,
@@ -104,6 +134,14 @@ impl DocumentStore {
     pub fn find_by_path(&self, canonical_path: &Path) -> Result<Option<DocumentId>, DocumentError> {
         let key = path_key(canonical_path)?;
         Ok(self.by_path.get(&key).copied())
+    }
+
+    pub fn snapshots(&self) -> Result<Vec<DocumentSnapshot>, DocumentError> {
+        self.records
+            .keys()
+            .copied()
+            .map(|id| self.snapshot(id))
+            .collect()
     }
 
     pub fn apply_edits(
@@ -205,6 +243,31 @@ impl DocumentStore {
         })
     }
 
+    /// Incorporates an external disk observation without ever overwriting a
+    /// dirty buffer. Clean documents are reloaded and receive a new revision;
+    /// dirty documents return both versions for an explicit user decision.
+    pub fn observe_disk_text(
+        &mut self,
+        id: DocumentId,
+        disk_text: impl Into<String>,
+    ) -> Result<DocumentExternalChange, DocumentError> {
+        let disk_text = disk_text.into();
+        let disk_fingerprint = content_fingerprint(&disk_text);
+        let snapshot = self.snapshot(id)?;
+        if snapshot.disk_fingerprint == disk_fingerprint {
+            return Ok(DocumentExternalChange::Unchanged);
+        }
+        if snapshot.buffer.is_dirty() {
+            return Ok(DocumentExternalChange::Conflict {
+                document: snapshot,
+                disk_text,
+                disk_fingerprint,
+            });
+        }
+        let reloaded = self.reload_from_disk_text(id, disk_text)?;
+        Ok(DocumentExternalChange::Reloaded(reloaded))
+    }
+
     pub fn force_reload(
         &mut self,
         id: DocumentId,
@@ -260,6 +323,20 @@ pub struct DocumentSavePlan {
     pub path: PathBuf,
     pub revision: BufferRevision,
     pub text: String,
+}
+
+/// Result of comparing an open document with a fresh disk read.  A dirty
+/// buffer is never replaced implicitly; the caller must choose which side to
+/// keep after showing the conflict.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DocumentExternalChange {
+    Unchanged,
+    Reloaded(DocumentSnapshot),
+    Conflict {
+        document: DocumentSnapshot,
+        disk_text: String,
+        disk_fingerprint: u64,
+    },
 }
 
 pub fn document_resource_key(path: &Path) -> Result<String, DocumentError> {
@@ -519,6 +596,44 @@ mod tests {
                 ..
             })
         ));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn observing_a_clean_external_change_reloads_and_advances_revision() {
+        let path = temporary_file("observe-clean", "one");
+        let mut store = DocumentStore::default();
+        let (document, _) = store.open_file(path.clone(), "one", None, false).unwrap();
+        let change = store.observe_disk_text(document.id, "two").unwrap();
+        let DocumentExternalChange::Reloaded(snapshot) = change else {
+            panic!("clean external changes should reload");
+        };
+        assert_eq!(snapshot.buffer.text, "two");
+        assert_eq!(snapshot.buffer.revision.get(), 1);
+        assert!(!snapshot.buffer.is_dirty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn observing_a_dirty_external_change_preserves_both_versions() {
+        let path = temporary_file("observe-dirty", "one");
+        let mut store = DocumentStore::default();
+        let (document, _) = store.open_file(path.clone(), "one", None, false).unwrap();
+        store
+            .replace_text(document.id, document.buffer.revision, "draft".to_owned())
+            .unwrap();
+        let change = store.observe_disk_text(document.id, "outside").unwrap();
+        let DocumentExternalChange::Conflict {
+            document: current,
+            disk_text,
+            ..
+        } = change
+        else {
+            panic!("dirty external changes require an explicit decision");
+        };
+        assert_eq!(current.buffer.text, "draft");
+        assert!(current.buffer.is_dirty());
+        assert_eq!(disk_text, "outside");
         let _ = fs::remove_file(path);
     }
 }

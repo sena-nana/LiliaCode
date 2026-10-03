@@ -13,8 +13,8 @@ use crate::application::{
 };
 
 pub use lilia_feature_document::{
-    document_resource_key, path_from_document_resource_key, DocumentError, DocumentId,
-    DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    document_resource_key, path_from_document_resource_key, DocumentError, DocumentExternalChange,
+    DocumentId, DocumentSavePlan, DocumentSnapshot, DocumentStore,
 };
 impl crate::application::DesktopDocumentService {
     pub fn register_language(
@@ -132,6 +132,79 @@ impl crate::application::DesktopDocumentService {
             .snapshot(id)?)
     }
 
+    pub fn document_context_snapshots(
+        &self,
+    ) -> Result<Vec<crate::application::DocumentContextSnapshot>, DesktopApplicationError> {
+        Ok(self
+            .documents
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
+            .snapshots()?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    pub fn observe_document_disk_text(
+        &self,
+        id: DocumentId,
+        disk_text: impl Into<String>,
+    ) -> Result<DocumentExternalChange, DesktopApplicationError> {
+        let change = self
+            .documents
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
+            .observe_disk_text(id, disk_text)?;
+        if let DocumentExternalChange::Reloaded(snapshot) = &change {
+            if let Err(error) = self.notify_document_language_service_changed(id) {
+                eprintln!("failed to synchronize reloaded language document: {error}");
+            }
+            self.publish(
+                id,
+                snapshot.buffer.revision,
+                crate::application::DocumentChangeKind::Reloaded,
+            );
+        } else if let DocumentExternalChange::Conflict { document, .. } = &change {
+            // The conflict event carries only the revision.  The module reads
+            // the authoritative buffer and keeps its draft; disk is read
+            // again only if the user explicitly chooses reload or overwrite.
+            self.publish(
+                id,
+                document.buffer.revision,
+                crate::application::DocumentChangeKind::ExternalConflict,
+            );
+        }
+        Ok(change)
+    }
+
+    pub fn observe_document_disk(
+        &self,
+        id: DocumentId,
+    ) -> Result<DocumentExternalChange, DesktopApplicationError> {
+        let path = self.document_snapshot(id)?.canonical_path;
+        let disk_text = read_document_disk_text(&path)?;
+        self.observe_document_disk_text(id, disk_text)
+    }
+
+    /// Polls all open documents after a filesystem notification.  The caller
+    /// may invoke this from the existing project-file watcher; clean buffers
+    /// reload and dirty buffers return a conflict without being overwritten.
+    pub fn observe_open_documents(
+        &self,
+    ) -> Result<Vec<(DocumentId, DocumentExternalChange)>, DesktopApplicationError> {
+        let ids = self
+            .documents
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?
+            .snapshots()?
+            .into_iter()
+            .map(|snapshot| snapshot.id)
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .map(|id| self.observe_document_disk(id).map(|change| (id, change)))
+            .collect()
+    }
+
     pub fn edit_document(
         &self,
         id: DocumentId,
@@ -226,6 +299,56 @@ impl crate::application::DesktopDocumentService {
             id,
             snapshot.buffer.revision,
             crate::application::DocumentChangeKind::Reloaded,
+        );
+        Ok(snapshot)
+    }
+
+    /// Saves a dirty document after the user explicitly chose the newer
+    /// in-memory version in an external-file conflict.  A normal
+    /// `save_document` still rejects a changed disk fingerprint; this method
+    /// is reachable only from the conflict action and preserves the same
+    /// revision check and atomic replacement path.
+    pub fn overwrite_document(
+        &self,
+        id: DocumentId,
+        expected_revision: BufferRevision,
+    ) -> Result<DocumentSnapshot, DesktopApplicationError> {
+        let mut documents = self
+            .documents
+            .lock()
+            .map_err(|_| DesktopApplicationError::StateUnavailable("document store"))?;
+        let snapshot = documents.snapshot(id)?;
+        if snapshot.buffer.revision != expected_revision {
+            return Err(DocumentError::SaveConflict {
+                id,
+                expected_revision,
+                current_revision: snapshot.buffer.revision,
+                disk_changed: false,
+            }
+            .into());
+        }
+        if snapshot.read_only {
+            return Err(DocumentError::ReadOnly(id).into());
+        }
+        let plan = DocumentSavePlan {
+            id,
+            path: snapshot.canonical_path.clone(),
+            revision: snapshot.buffer.revision,
+            text: snapshot.buffer.text.clone(),
+        };
+        let fingerprint = content_fingerprint(&plan.text);
+        let staged = stage_document_replacement(&plan.path, plan.text.as_bytes())?;
+        persist_document_replacement(staged, &plan.path)?;
+        documents.mark_saved(id, plan.revision, fingerprint)?;
+        let snapshot = documents.snapshot(id)?;
+        drop(documents);
+        if let Err(error) = self.notify_document_language_service_saved(id) {
+            eprintln!("failed to synchronize language document save: {error}");
+        }
+        self.publish(
+            id,
+            snapshot.buffer.revision,
+            crate::application::DocumentChangeKind::Saved,
         );
         Ok(snapshot)
     }
@@ -325,6 +448,31 @@ impl DesktopApplication {
     ) -> Result<DocumentSnapshot, DesktopApplicationError> {
         self.inner.document_service.document_snapshot(id)
     }
+    pub fn document_context_snapshots(
+        &self,
+    ) -> Result<Vec<crate::application::DocumentContextSnapshot>, DesktopApplicationError> {
+        self.inner.document_service.document_context_snapshots()
+    }
+    pub fn observe_document_disk_text(
+        &self,
+        id: DocumentId,
+        disk_text: impl Into<String>,
+    ) -> Result<DocumentExternalChange, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .observe_document_disk_text(id, disk_text)
+    }
+    pub fn observe_document_disk(
+        &self,
+        id: DocumentId,
+    ) -> Result<DocumentExternalChange, DesktopApplicationError> {
+        self.inner.document_service.observe_document_disk(id)
+    }
+    pub fn observe_open_documents(
+        &self,
+    ) -> Result<Vec<(DocumentId, DocumentExternalChange)>, DesktopApplicationError> {
+        self.inner.document_service.observe_open_documents()
+    }
     pub fn edit_document(
         &self,
         id: DocumentId,
@@ -359,6 +507,15 @@ impl DesktopApplication {
         id: DocumentId,
     ) -> Result<DocumentSnapshot, DesktopApplicationError> {
         self.inner.document_service.discard_document_changes(id)
+    }
+    pub fn overwrite_document(
+        &self,
+        id: DocumentId,
+        expected_revision: BufferRevision,
+    ) -> Result<DocumentSnapshot, DesktopApplicationError> {
+        self.inner
+            .document_service
+            .overwrite_document(id, expected_revision)
     }
     pub fn mark_document_saved(
         &self,
