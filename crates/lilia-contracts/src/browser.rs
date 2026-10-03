@@ -67,6 +67,27 @@ mod resource_ref_tests {
         assert!(debug.contains("example.test/form"));
         assert!(debug.contains("screenshot_bytes_len"));
     }
+
+    #[test]
+    fn browser_host_decision_debug_does_not_include_local_paths() {
+        let decision = super::BrowserHostDecision::Upload {
+            paths: vec![r"C:\Users\alice\secret.txt".into()],
+        };
+        let debug = format!("{decision:?}");
+        assert!(!debug.contains("alice"));
+        assert!(!debug.contains("secret.txt"));
+
+        let page = super::BrowserPage {
+            url: "https://example.test".into(),
+            title: String::new(),
+            targets: vec![],
+            screenshot_artifact: None,
+            screenshot_bytes: Some(b"C:\\Users\\alice\\secret.png".to_vec()),
+        };
+        let wire = serde_json::to_string(&page).expect("browser page serializes");
+        assert!(!wire.contains("alice"));
+        assert!(!wire.contains("secret.png"));
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

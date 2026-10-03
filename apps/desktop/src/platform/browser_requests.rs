@@ -1,5 +1,6 @@
 use super::*;
 use lilia_contracts::{BrowserHostDecision, BrowserHostRequest, BrowserHostRequestKind};
+use std::rc::Weak as RcWeak;
 
 pub(super) enum Payload {
     Download(ICoreWebView2DownloadStartingEventArgs),
@@ -9,7 +10,18 @@ pub(super) enum Payload {
 
 pub(super) struct Download {
     ticket: BrowserHostRequest,
+    tab: RcWeak<Tab>,
     pub operation: ICoreWebView2DownloadOperation,
+    epoch: u64,
+}
+
+pub(super) struct Upload {
+    ticket: BrowserHostRequest,
+    tab: Rc<Tab>,
+    node: u64,
+    token: BrowserCancellation,
+    epoch: u64,
+    issued: Instant,
 }
 
 pub(super) struct Pending {
@@ -19,6 +31,7 @@ pub(super) struct Pending {
     tab: Rc<Tab>,
     epoch: u64,
     issued: Instant,
+    upload_dispatched: bool,
 }
 
 fn epoch(tab: &Tab, kind: &BrowserHostRequestKind) -> u64 {
@@ -31,20 +44,15 @@ fn epoch(tab: &Tab, kind: &BrowserHostRequestKind) -> u64 {
 
 impl Drop for Pending {
     fn drop(&mut self) {
-        if let Payload::Upload { node, .. } = &self.payload {
-            // With Page.setInterceptFileChooserDialog enabled, the page is
-            // paused until the chooser is completed.  Dropping the host
-            // ticket must explicitly finish that chooser; otherwise reject,
-            // timeout, navigation, and tab close can leave the document
-            // waiting forever for file input.
-            let token = BrowserCancellation::default();
-            cdp(
-                &self.tab.view,
-                "DOM.setFileInputFiles",
-                json!({"backendNodeId": node, "files": []}),
-                &token,
-                Box::new(|_| {}),
-            );
+        if !self.upload_dispatched {
+            if let Payload::Upload { node, .. } = &self.payload {
+                // With Page.setInterceptFileChooserDialog enabled, the page
+                // is paused until the chooser is completed.  Dropping the
+                // host ticket must explicitly finish that chooser; otherwise
+                // reject, timeout, navigation, and tab close can leave the
+                // document waiting forever for file input.
+                clear_file_input(&self.tab, *node);
+            }
         }
         if let Some(deferral) = self.deferral.take() {
             unsafe {
@@ -63,11 +71,29 @@ impl Drop for Pending {
     }
 }
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
+
+fn clear_file_input(tab: &Tab, node: u64) {
+    let token = BrowserCancellation::default();
+    cdp(
+        &tab.view,
+        "DOM.setFileInputFiles",
+        json!({"backendNodeId": node, "files": []}),
+        &token,
+        Box::new(|_| {}),
+    );
+}
+
+fn cancel_upload(upload: &Upload) {
+    upload.token.cancel();
+    clear_file_input(&upload.tab, upload.node);
+}
+
 #[derive(Default)]
 pub(super) struct Requests {
     next: u64,
     pending: BTreeMap<u64, Pending>,
-    uploads: BTreeMap<u64, (BrowserHostRequest, BrowserCancellation)>,
+    uploads: BTreeMap<u64, Upload>,
 }
 
 impl Requests {
@@ -95,6 +121,7 @@ impl Requests {
             epoch: epoch(&tab, &ticket.kind),
             tab,
             issued: Instant::now(),
+            upload_dispatched: false,
         };
         if state.is_none() || self.pending.len() + self.uploads.len() >= 64 {
             return Err(pending);
@@ -110,6 +137,18 @@ impl Requests {
             .collect()
     }
 
+    fn remove_matching(&mut self, ticket: &BrowserHostRequest) -> Option<Pending> {
+        if self
+            .pending
+            .get(&ticket.id)
+            .is_some_and(|pending| pending.ticket == *ticket)
+        {
+            self.pending.remove(&ticket.id)
+        } else {
+            None
+        }
+    }
+
     pub fn valid(
         &self,
         ticket: &BrowserHostRequest,
@@ -122,8 +161,12 @@ impl Requests {
         if pending.ticket != *ticket {
             return Err(BrowserError::WrongScope);
         }
-        if sessions.state(&ticket.scope)?.lifecycle != ticket.lifecycle {
+        let state = sessions.state(&ticket.scope)?;
+        if state.lifecycle != ticket.lifecycle {
             return Err(BrowserError::StaleLifecycle);
+        }
+        if state.page_version != ticket.page_version {
+            return Err(BrowserError::StalePage);
         }
         if pending.epoch != epoch(&pending.tab, &pending.ticket.kind) {
             return Err(BrowserError::StalePage);
@@ -136,10 +179,12 @@ impl Requests {
             .pending
             .iter()
             .filter_map(|(id, pending)| {
-                (!(pending.issued.elapsed() < Duration::from_secs(600)
-                    && sessions
-                        .state(&pending.ticket.scope)
-                        .is_ok_and(|state| state.lifecycle == pending.ticket.lifecycle)
+                let current = sessions.state(&pending.ticket.scope).ok();
+                (!(pending.issued.elapsed() < REQUEST_TIMEOUT
+                    && current.as_ref().is_some_and(|state| {
+                        state.lifecycle == pending.ticket.lifecycle
+                            && state.page_version == pending.ticket.page_version
+                    })
                     && pending.epoch == epoch(&pending.tab, &pending.ticket.kind)))
                 .then_some(*id)
             })
@@ -148,16 +193,45 @@ impl Requests {
             .into_iter()
             .filter_map(|id| self.pending.remove(&id))
             .collect();
-        self.uploads.retain(|_, (ticket, token)| {
-            let valid = sessions
-                .state(&ticket.scope)
-                .is_ok_and(|state| state.lifecycle == ticket.lifecycle);
-            if !valid {
-                token.cancel();
-            }
-            valid
-        });
         expired
+    }
+
+    pub fn sweep_uploads(&mut self, sessions: &BrowserSessions) -> Vec<BrowserHostRequest> {
+        let expired = self
+            .uploads
+            .iter()
+            .filter_map(|(id, upload)| {
+                let valid = sessions
+                    .state(&upload.ticket.scope)
+                    .is_ok_and(|state| state.lifecycle == upload.ticket.lifecycle)
+                    && upload.epoch == upload.tab.document_epoch.get()
+                    && upload.issued.elapsed() < REQUEST_TIMEOUT;
+                (!valid).then_some(*id)
+            })
+            .collect::<Vec<_>>();
+        expired
+            .into_iter()
+            .filter_map(|id| {
+                let upload = self.uploads.remove(&id)?;
+                cancel_upload(&upload);
+                Some(upload.ticket)
+            })
+            .collect()
+    }
+
+    pub fn cancel_uploads(&mut self, scope: &BrowserScope) -> Vec<BrowserHostRequest> {
+        let ids = self
+            .uploads
+            .iter()
+            .filter_map(|(id, upload)| (upload.ticket.scope == *scope).then_some(*id))
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .filter_map(|id| {
+                let upload = self.uploads.remove(&id)?;
+                cancel_upload(&upload);
+                Some(upload.ticket)
+            })
+            .collect()
     }
 
     pub fn cancel_scope(&mut self, scope: &BrowserScope) -> Vec<Pending> {
@@ -170,21 +244,13 @@ impl Requests {
             .into_iter()
             .filter_map(|id| self.pending.remove(&id))
             .collect();
-        self.uploads.retain(|_, (ticket, token)| {
-            if ticket.scope == *scope {
-                token.cancel();
-                false
-            } else {
-                true
-            }
-        });
         removed
     }
 
     pub fn clear(&mut self) -> Vec<Pending> {
         let removed = std::mem::take(&mut self.pending).into_values().collect();
-        for (_, token) in self.uploads.values() {
-            token.cancel();
+        for upload in self.uploads.values() {
+            cancel_upload(upload);
         }
         self.uploads.clear();
         removed
@@ -202,9 +268,11 @@ impl UiBrowserHost {
             let mut active = Vec::new();
             for download in downloads {
                 let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+                let navigation_epoch = download.tab.upgrade().map(|tab| tab.navigation_epoch.get());
                 let valid = sessions
                     .state(&download.ticket.scope)
-                    .is_ok_and(|state| state.lifecycle == download.ticket.lifecycle);
+                    .is_ok_and(|state| state.lifecycle == download.ticket.lifecycle)
+                    && navigation_epoch == Some(download.epoch);
                 if !valid {
                     unsafe {
                         let _ = download.operation.Cancel();
@@ -275,14 +343,42 @@ impl UiBrowserHost {
             }
         } else {
             if let Err(error) = sessions.validate_scope(&ticket.scope) {
-                self.requests.borrow_mut().pending.remove(&ticket.id);
+                let pending = self.requests.borrow_mut().remove_matching(ticket);
+                if let Some(pending) = pending {
+                    self.events
+                        .borrow_mut()
+                        .push(BrowserHostEvent::RequestResolved {
+                            request: pending.ticket.clone(),
+                            error: Some("Browser request cancelled".into()),
+                        });
+                }
                 return Err(error);
             }
-            self.requests.borrow().valid(ticket, &sessions)?;
+            if let Err(error) = self.requests.borrow().valid(ticket, &sessions) {
+                if matches!(
+                    &error,
+                    BrowserError::StalePage
+                        | BrowserError::StaleLifecycle
+                        | BrowserError::Cancelled
+                        | BrowserError::UnknownTab
+                ) {
+                    let pending = self.requests.borrow_mut().remove_matching(ticket);
+                    if let Some(pending) = pending {
+                        drop(pending);
+                        self.events
+                            .borrow_mut()
+                            .push(BrowserHostEvent::RequestResolved {
+                                request: ticket.clone(),
+                                error: Some("Browser request is no longer available".into()),
+                            });
+                    }
+                }
+                return Err(error);
+            }
         }
         match decision {
             BrowserHostDecision::Reject => {
-                let pending = self.requests.borrow_mut().pending.remove(&ticket.id);
+                let pending = self.requests.borrow_mut().remove_matching(ticket);
                 drop(pending);
                 Ok(())
             }
@@ -299,6 +395,15 @@ impl UiBrowserHost {
                     return Err(BrowserError::Host(
                         "Choose an absolute download destination in an existing folder".into(),
                     ));
+                }
+                if !self
+                    .requests
+                    .borrow()
+                    .pending
+                    .get(&ticket.id)
+                    .is_some_and(|pending| matches!(&pending.payload, Payload::Download(_)))
+                {
+                    return Err(BrowserError::WrongScope);
                 }
                 let mut pending = self
                     .requests
@@ -330,7 +435,9 @@ impl UiBrowserHost {
                     pending.deferral = None;
                     pending.tab.downloads.borrow_mut().push(Download {
                         ticket: ticket.clone(),
+                        tab: Rc::downgrade(&pending.tab),
                         operation,
+                        epoch: pending.epoch,
                     });
                 }
                 Ok(())
@@ -342,12 +449,26 @@ impl UiBrowserHost {
                 {
                     return Err(BrowserError::WrongScope);
                 }
+                sessions.validate_scope(&target_scope)?;
                 let target = self.tab(&target_scope)?;
                 if !target.pristine.get() {
                     return Err(BrowserError::StalePage);
                 }
-                if sessions.state(&ticket.scope)?.control == lilia_contracts::BrowserControl::Human
+                let source_is_human = sessions.state(&ticket.scope)?.control
+                    == lilia_contracts::BrowserControl::Human;
                 {
+                    let requests = self.requests.borrow();
+                    let pending = requests
+                        .pending
+                        .get(&ticket.id)
+                        .ok_or(BrowserError::Cancelled)?;
+                    if !matches!(&pending.payload, Payload::NewWindow(_))
+                        || pending.tab.environment.as_raw() != target.environment.as_raw()
+                    {
+                        return Err(BrowserError::WrongScope);
+                    }
+                }
+                if source_is_human {
                     sessions.takeover(&target_scope)?;
                 }
                 let mut pending = self
@@ -359,9 +480,6 @@ impl UiBrowserHost {
                 let Payload::NewWindow(args) = &pending.payload else {
                     return Err(BrowserError::WrongScope);
                 };
-                if pending.tab.environment.as_raw() != target.environment.as_raw() {
-                    return Err(BrowserError::WrongScope);
-                }
                 unsafe {
                     args.SetNewWindow(&target.view).map_err(host_error)?;
                     args.SetHandled(true).map_err(host_error)?;
@@ -407,16 +525,32 @@ impl UiBrowserHost {
                         .remove(&ticket.id);
                     return Err(error);
                 }
-                self.requests.borrow_mut().pending.remove(&ticket.id);
-                self.requests
+                let mut pending = self
+                    .requests
                     .borrow_mut()
-                    .uploads
-                    .insert(ticket.id, (ticket.clone(), token.clone()));
+                    .pending
+                    .remove(&ticket.id)
+                    .ok_or(BrowserError::Cancelled)?;
+                pending.upload_dispatched = true;
+                self.requests.borrow_mut().uploads.insert(
+                    ticket.id,
+                    Upload {
+                        ticket: ticket.clone(),
+                        tab: pending.tab.clone(),
+                        node,
+                        token: token.clone(),
+                        epoch: pending.epoch,
+                        issued: pending.issued,
+                    },
+                );
+                drop(pending);
                 let requests = self.requests.clone();
                 let events = self.events.clone();
                 let wake = self.wake.clone();
                 let host_tokens = self.host_tokens.clone();
                 let ticket = ticket.clone();
+                let upload_tab = tab.clone();
+                let upload_sessions = self.sessions.clone();
                 cdp(
                     &tab.view,
                     "DOM.setFileInputFiles",
@@ -427,11 +561,33 @@ impl UiBrowserHost {
                             .lock()
                             .expect("browser request tokens")
                             .remove(&ticket.id);
-                        requests.borrow_mut().uploads.remove(&ticket.id);
-                        events.borrow_mut().push(BrowserHostEvent::RequestResolved {
-                            request: ticket,
-                            error: result.err().map(|error| error.to_string()),
-                        });
+                        let upload = requests.borrow_mut().uploads.remove(&ticket.id);
+                        let completed = upload.is_some();
+                        if completed {
+                            let stale = upload.as_ref().is_some_and(|upload| {
+                                upload.epoch != upload.tab.document_epoch.get()
+                                    || upload_sessions
+                                        .borrow()
+                                        .upgrade()
+                                        .and_then(|sessions| {
+                                            sessions.state(&upload.ticket.scope).ok()
+                                        })
+                                        .is_none_or(|state| {
+                                            state.lifecycle != upload.ticket.lifecycle
+                                        })
+                            });
+                            let error = result
+                                .err()
+                                .or(stale.then_some(BrowserError::StalePage))
+                                .map(|_| "Upload failed".to_owned());
+                            if error.is_some() {
+                                clear_file_input(&upload_tab, node);
+                            }
+                            events.borrow_mut().push(BrowserHostEvent::RequestResolved {
+                                request: ticket,
+                                error,
+                            });
+                        }
                         wake();
                     }),
                 );

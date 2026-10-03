@@ -782,6 +782,7 @@ mod tests {
     #[test]
     fn navigation_credentials_are_private_and_pending_capacity_is_bounded() {
         let (host, sessions, scope) = private_setup();
+        assert_eq!(safe_browser_url("file:///C:/Users/alice/secret.txt"), "");
         let url =
             "https://alice:password-canary@example.org/path?token=query-canary#fragment-canary";
         let mut result = sealed(

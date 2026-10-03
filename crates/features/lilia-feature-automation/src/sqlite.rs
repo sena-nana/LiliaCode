@@ -286,7 +286,7 @@ impl AutomationStore for SqliteAutomationStore {
                      name = excluded.name,
                      scope_json = excluded.scope_json,
                      draft_json = excluded.draft_json,
-                     updated_at = excluded.updated_at"#,
+                     updated_at = MAX(excluded.updated_at, automation_workflows.updated_at + 1)"#,
                 params![workflow_id, name, scope_json, draft_json, now],
             )
             .map_err(|error| AutomationStoreError::storage("save workflow draft", error))?;
@@ -340,7 +340,8 @@ impl AutomationStore for SqliteAutomationStore {
         let updated = transaction
             .execute(
                 r#"UPDATE automation_workflows
-                   SET published_version_id = ?1, updated_at = ?2 WHERE id = ?3"#,
+                   SET published_version_id = ?1, updated_at = MAX(?2, updated_at + 1)
+                   WHERE id = ?3"#,
                 params![version.id, version.created_at, workflow_id],
             )
             .map_err(|error| AutomationStoreError::storage("publish workflow version", error))?;
@@ -372,7 +373,7 @@ impl AutomationStore for SqliteAutomationStore {
         }
         transaction
             .execute(
-                "UPDATE automation_workflows SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
+                "UPDATE automation_workflows SET enabled = ?1, updated_at = MAX(?2, updated_at + 1) WHERE id = ?3",
                 params![i64::from(enabled), now_millis(), workflow_id],
             )
             .map_err(|error| AutomationStoreError::storage("update workflow state", error))?;
@@ -1373,6 +1374,40 @@ mod tests {
                 .title,
             "Ship"
         );
+    }
+
+    #[test]
+    fn workflow_mutations_advance_updated_at_when_clock_has_not_advanced() {
+        let mut store = SqliteAutomationStore::in_memory().unwrap();
+        let first = store.save_draft(workflow_input("workflow-1")).unwrap();
+        let future_timestamp = first.updated_at + 60_000;
+        store
+            .connection
+            .lock()
+            .execute(
+                "UPDATE automation_workflows SET updated_at = ?1 WHERE id = 'workflow-1'",
+                params![future_timestamp],
+            )
+            .unwrap();
+
+        let mut changed = workflow_input("workflow-1");
+        changed.nodes[1].title = "Ship".to_owned();
+        let saved = store.save_draft(changed).unwrap();
+        assert_eq!(saved.updated_at, future_timestamp + 1);
+        assert_eq!(saved.created_at, first.created_at);
+        assert_eq!(saved.draft.nodes[1].title, "Ship");
+
+        let published = store.publish("workflow-1").unwrap();
+        let workflow = store.workflow("workflow-1").unwrap().unwrap();
+        assert_eq!(workflow.updated_at, saved.updated_at + 1);
+        assert_eq!(workflow.published_version_id.as_ref(), Some(&published.id));
+
+        let enabled = store.set_enabled("workflow-1", true).unwrap();
+        assert_eq!(enabled.updated_at, workflow.updated_at + 1);
+        assert!(enabled.enabled);
+        let disabled = store.set_enabled("workflow-1", false).unwrap();
+        assert_eq!(disabled.updated_at, enabled.updated_at + 1);
+        assert!(!disabled.enabled);
     }
 
     #[test]

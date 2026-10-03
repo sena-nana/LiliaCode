@@ -90,6 +90,8 @@ impl TaskBrowserHost for BrowserBridge {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if cancellation.is_cancelled() {
+                let _ = self.sender.try_send(Command::Cancel(request.scope.clone()));
+                (self.wake)();
                 return Err(BrowserError::Cancelled);
             }
             match receive.recv_timeout(Duration::from_millis(25)) {
@@ -97,6 +99,8 @@ impl TaskBrowserHost for BrowserBridge {
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Err(BrowserError::Unavailable),
                 Err(_) if Instant::now() >= deadline => {
                     cancellation.cancel();
+                    let _ = self.sender.try_send(Command::Cancel(request.scope.clone()));
+                    (self.wake)();
                     return Err(BrowserError::Host("Browser operation timed out".into()));
                 }
                 Err(_) => {}
@@ -481,6 +485,19 @@ impl UiBrowserHost {
                     });
             }
             drop(expired);
+            let cancelled = self.requests.borrow_mut().sweep_uploads(&sessions);
+            if !cancelled.is_empty() {
+                let mut host_tokens = self.host_tokens.lock().expect("browser request tokens");
+                for request in &cancelled {
+                    host_tokens.remove(&request.id);
+                    self.events
+                        .borrow_mut()
+                        .push(BrowserHostEvent::RequestResolved {
+                            request: request.clone(),
+                            error: Some("Upload cancelled".into()),
+                        });
+                }
+            }
         }
         for _ in 0..64 {
             let Ok(command) = self.receiver.try_recv() else {
@@ -520,6 +537,8 @@ impl UiBrowserHost {
                     }
                 }
                 Command::Cancel(scope) => {
+                    // page_changed uses this command for DOM updates; host-request
+                    // epochs are swept separately so downloads survive observations.
                     if let Some(tab) = self
                         .tabs
                         .borrow()
@@ -747,6 +766,19 @@ impl UiBrowserHost {
                 });
         }
         drop(cancelled);
+        let uploads = self.requests.borrow_mut().cancel_uploads(scope);
+        self.host_tokens
+            .lock()
+            .expect("browser request tokens")
+            .retain(|id, _| !uploads.iter().any(|request| request.id == *id));
+        for request in uploads {
+            self.events
+                .borrow_mut()
+                .push(BrowserHostEvent::RequestResolved {
+                    request,
+                    error: Some("Browser request cancelled".into()),
+                });
+        }
         if self
             .creating
             .borrow()
