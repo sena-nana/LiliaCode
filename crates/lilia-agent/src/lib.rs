@@ -31,11 +31,12 @@ pub use browser::{
     TaskBrowserHost,
 };
 pub use credential::{
-    CredentialDescriptorView, CredentialHealthSnapshot, InMemoryProductCredentialRegistry,
-    IndependentDiagnostics, ProductCredentialBridge, ProductCredentialImportInput,
-    ProductCredentialLoginInput, ProductCredentialRecord, ProductCredentialRecoveryIssue,
-    ProductCredentialRegistry, ProductCredentialRegistryLoad, ProductCredentialRevocationIntent,
-    SqliteProductCredentialRegistry,
+    service_credential_bridge_for_home, CredentialDescriptorView, CredentialHealthSnapshot,
+    InMemoryProductCredentialRegistry, IndependentDiagnostics, KeyringSecretStore,
+    ProductCredentialBridge, ProductCredentialImportInput, ProductCredentialLoginInput,
+    ProductCredentialRecord, ProductCredentialRecoveryIssue, ProductCredentialRegistry,
+    ProductCredentialRegistryLoad, ProductCredentialRevocationIntent,
+    SqliteProductCredentialRegistry, SERVICE_IN_MEMORY_SECRETS_ENV, SERVICE_KEYRING_SERVICE,
 };
 pub use job_runtime::{JobRuntimeError, LiliaJobRuntime, LiliaJobRuntimeBuilder};
 pub use model_turn::{
