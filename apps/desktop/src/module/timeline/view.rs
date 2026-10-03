@@ -1,4 +1,4 @@
-use crate::runtime_layout::{pill_button, reconcile_children, token_chip};
+use crate::runtime_layout::{pill_button, reconcile_children};
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,9 +52,9 @@ fn content_hash(item: &TimelineRow) -> u64 {
 }
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
-    Activate, AppContext, Button, Chip, DocumentId, Entity, FlexDirection, FrameworkError,
-    LengthSpec, List, NativeMarkdown, NodeStyle, RichTextEvent, ScrollAxes, ScrollChanged,
-    ScrollView, Stack, VirtualListItems, VirtualListLayout,
+    Activate, AppContext, Button, DocumentId, Entity, FlexDirection, FrameworkError, LengthSpec,
+    List, NativeMarkdown, NodeStyle, RichTextEvent, ScrollAxes, ScrollChanged, ScrollView, Stack,
+    VirtualListItems, VirtualListLayout,
 };
 use nana_ui::ButtonKind;
 use nana_ui_platform::WindowId;
@@ -105,7 +105,7 @@ pub(crate) struct TimelineView {
     timeline_virtual: VirtualListItems<String, Stack>,
     pub(crate) timeline_markdown: HashMap<String, Entity<NativeMarkdown>>,
     timeline_markdown_source: HashMap<String, u64>,
-    pub(crate) timeline_actions: HashMap<String, Entity<Chip>>,
+    pub(crate) timeline_actions: HashMap<String, Entity<Button>>,
     timeline_toolbars: HashMap<String, Entity<Stack>>,
     pub(crate) load_earlier: Option<Entity<Button>>,
     sink: Sink,
@@ -446,18 +446,18 @@ impl TimelineView {
         id: &str,
         label: &str,
         intent: TimelineAction,
-    ) -> Result<Entity<Chip>, FrameworkError> {
+    ) -> Result<Entity<Button>, FrameworkError> {
         if let Some(button) = self.timeline_actions.get(id).copied() {
             context.update_component(button, |button, _| {
-                *button = token_chip(label, false);
+                *button = pill_button(label, ButtonKind::Subtle);
             })?;
             Ok(button)
         } else {
-            let chip_label = label.to_owned();
+            let button_label = label.to_owned();
             let (_, button) = context.mount_view_detached(document_id, move || {
-                let button = entity_ref::<Chip>();
+                let button = entity_ref::<Button>();
                 with_refs(
-                    widget(token_chip(&chip_label, false)).entity_ref(button),
+                    widget(pill_button(&button_label, ButtonKind::Subtle)).entity_ref(button),
                     button,
                 )
             })?;
