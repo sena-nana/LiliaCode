@@ -39,7 +39,7 @@ Issue79 标题为 **[Native IDE][Desktop] 完成多视图代码编辑体验与�
 
 ## 当前验证记录
 
-配置 `/workspace/.local/sysroot` 的 GUI 依赖后，系统库不再阻塞 Cargo 编译。最近一次回归中 `lilia-feature-document` 23/23、`lilia-feature-automation` 32/32、`lilia-desktop` 633/634 通过；唯一失败是离屏 GPU 环境不支持 `Rgba32Float`，属于渲染环境限制，不能替代 Issue79 的 Windows 实窗证据。自动化保存时间戳的同毫秒碰撞也已改为严格单调递增，避免过期 revision 冲突被绕过。
+配置 `/workspace/.local/sysroot` 的 GUI 依赖后，系统库不再阻塞 Cargo 编译。最近一次回归中 `lilia-feature-document` 23/23、`lilia-feature-automation` 33/33、`lilia-desktop` 637/637 全部通过；`cargo check --locked -p lilia-desktop`、格式检查和差异检查也通过。自动化保存时间戳的同毫秒碰撞已改为严格单调递增，避免过期 revision 冲突被绕过。
 
 该结果只说明已有行为测试可运行，未把 Issue79 的 E-02/E-03/E-10/E-11/E-13 写成完成，也未产生 Windows 高 DPI 截图。
 
