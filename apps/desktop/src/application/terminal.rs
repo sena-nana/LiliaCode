@@ -66,6 +66,14 @@ impl DesktopApplication {
         Ok(self.inner.terminals.terminate(session_id)?)
     }
 
+    /// Closes the workspace-owned terminal and cancels its PTY process.
+    pub fn close_terminal(
+        &self,
+        session_id: &DesktopTerminalSessionId,
+    ) -> Result<(), DesktopApplicationError> {
+        Ok(self.inner.terminals.close(session_id)?)
+    }
+
     pub fn forget_terminal(
         &self,
         session_id: &DesktopTerminalSessionId,

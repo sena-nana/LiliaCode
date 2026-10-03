@@ -402,6 +402,41 @@ impl DesktopTerminalService {
         Ok(())
     }
 
+    /// Closes a session and cancels its process when it is still running.
+    ///
+    /// Workspace tabs own the lifetime of interactive terminals. Once a tab is
+    /// closed there is no consumer for the session snapshot, so keeping the
+    /// session registered would leave a background PTY alive indefinitely.
+    /// Kill the process before removing the registration; the reader and waiter
+    /// threads only retain the shared runtime state and can finish naturally.
+    pub fn close(&self, session_id: &DesktopTerminalSessionId) -> Result<(), DesktopTerminalError> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| DesktopTerminalError::StateUnavailable)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| DesktopTerminalError::SessionNotFound(session_id.clone()))?;
+        if session.is_running()? {
+            if let Err(error) = session.killer.kill() {
+                // A very short-lived command can exit between the state check
+                // and the kill call. Give its waiter a moment to publish the
+                // terminal state before surfacing a real cancellation error.
+                for _ in 0..10 {
+                    if !session.is_running()? {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                if session.is_running()? {
+                    return Err(operation_error("close", error));
+                }
+            }
+        }
+        sessions.remove(session_id);
+        Ok(())
+    }
+
     /// Drops a finished session. A running session must be terminated first so
     /// no process is left without an owner.
     pub fn forget(
@@ -925,6 +960,26 @@ fn terminal_style(cell: &vt100::Cell) -> DesktopTerminalStyle {
 #[cfg(test)]
 mod grid_tests {
     use super::*;
+    use crate::SilentTerminalEvents;
+
+    fn marker_command(marker: &str) -> DesktopTerminalCommand {
+        #[cfg(windows)]
+        {
+            DesktopTerminalCommand {
+                program: "cmd.exe".to_owned(),
+                arguments: vec!["/D".to_owned(), "/C".to_owned(), format!("echo {marker}")],
+                ..DesktopTerminalCommand::default()
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            DesktopTerminalCommand {
+                program: "/bin/sh".to_owned(),
+                arguments: vec!["-c".to_owned(), format!("printf '%s\\n' {marker}")],
+                ..DesktopTerminalCommand::default()
+            }
+        }
+    }
 
     #[test]
     fn terminal_queries_survive_read_boundaries_and_use_the_live_cursor() {
@@ -1060,6 +1115,172 @@ mod grid_tests {
         assert!(cells[2].bold);
         assert!(!cells[3].bold);
         assert_eq!(cells[3].text, "!");
+    }
+
+    #[test]
+    fn concurrent_sessions_keep_output_and_lifecycle_isolated() {
+        use std::time::{Duration, Instant};
+
+        let service = Arc::new(DesktopTerminalService::default());
+        let events: Arc<dyn TerminalEvents> = Arc::new(SilentTerminalEvents);
+        let first = service
+            .launch(
+                DesktopTerminalLaunch {
+                    scope: DesktopTerminalScope::Task(TaskId::new("terminal-isolation-a").unwrap()),
+                    command: Some(marker_command("terminal-one")),
+                    rows: 4,
+                    columns: 80,
+                },
+                std::env::temp_dir(),
+                events.clone(),
+            )
+            .unwrap();
+        let second = service
+            .launch(
+                DesktopTerminalLaunch {
+                    scope: DesktopTerminalScope::Task(TaskId::new("terminal-isolation-b").unwrap()),
+                    command: Some(marker_command("terminal-two")),
+                    rows: 4,
+                    columns: 80,
+                },
+                std::env::temp_dir(),
+                events,
+            )
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (first, second) = loop {
+            let first_snapshot = service.snapshot(&first.id, 0).unwrap();
+            let second_snapshot = service.snapshot(&second.id, 0).unwrap();
+            let first_text = first_snapshot
+                .screen
+                .iter()
+                .map(|row| row.text.as_str())
+                .collect::<String>();
+            let second_text = second_snapshot
+                .screen
+                .iter()
+                .map(|row| row.text.as_str())
+                .collect::<String>();
+            if first_text.contains("terminal-one")
+                && second_text.contains("terminal-two")
+                && !first_snapshot.process.is_running()
+                && !second_snapshot.process.is_running()
+            {
+                break ((first_snapshot, first_text), (second_snapshot, second_text));
+            }
+            assert!(
+                Instant::now() < deadline,
+                "terminal sessions did not produce isolated output"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(!first.1.contains("terminal-two"));
+        assert!(!second.1.contains("terminal-one"));
+        assert!(!first.0.process.is_running());
+        assert!(!second.0.process.is_running());
+
+        service.forget(&first.0.id).unwrap();
+        service.forget(&second.0.id).unwrap();
+        assert!(service.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn spawn_errors_are_reported_without_registering_a_dead_session() {
+        let service = DesktopTerminalService::default();
+        let program = if cfg!(windows) {
+            r"Z:\lilia-code\missing-terminal-program.exe"
+        } else {
+            "/lilia-code/missing-terminal-program"
+        };
+        let error = service
+            .launch(
+                DesktopTerminalLaunch {
+                    scope: DesktopTerminalScope::Task(TaskId::new("terminal-spawn-error").unwrap()),
+                    command: Some(DesktopTerminalCommand::new(program)),
+                    rows: 4,
+                    columns: 40,
+                },
+                std::env::temp_dir(),
+                Arc::new(SilentTerminalEvents),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            DesktopTerminalError::Operation {
+                operation: "spawn process",
+                ..
+            }
+        ));
+        assert!(service.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn close_cancels_a_running_process_and_removes_the_session() {
+        let service = DesktopTerminalService::default();
+        let command = {
+            #[cfg(windows)]
+            {
+                DesktopTerminalCommand {
+                    program: "cmd.exe".to_owned(),
+                    arguments: vec![
+                        "/D".to_owned(),
+                        "/C".to_owned(),
+                        "ping -n 30 127.0.0.1 >NUL".to_owned(),
+                    ],
+                    ..DesktopTerminalCommand::default()
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                DesktopTerminalCommand {
+                    program: "/bin/sh".to_owned(),
+                    arguments: vec!["-c".to_owned(), "sleep 30".to_owned()],
+                    ..DesktopTerminalCommand::default()
+                }
+            }
+        };
+        let launch = service
+            .launch(
+                DesktopTerminalLaunch {
+                    scope: DesktopTerminalScope::Task(TaskId::new("terminal-close").unwrap()),
+                    command: Some(command),
+                    rows: 4,
+                    columns: 40,
+                },
+                std::env::temp_dir(),
+                Arc::new(SilentTerminalEvents),
+            )
+            .unwrap();
+
+        service.close(&launch.id).unwrap();
+        assert!(service.list().unwrap().is_empty());
+        assert!(matches!(
+            service.snapshot(&launch.id, 0),
+            Err(DesktopTerminalError::SessionNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn large_output_is_bounded_by_terminal_scrollback_limit() {
+        use std::fmt::Write as _;
+
+        let mut parser = vt100::Parser::new_with_callbacks(
+            4,
+            32,
+            TERMINAL_SCROLLBACK_ROWS,
+            TerminalResponses::default(),
+        );
+        let mut output = String::new();
+        for index in 0..20_000 {
+            writeln!(&mut output, "line-{index}").unwrap();
+        }
+        parser.process(output.as_bytes());
+
+        let mut maximum = parser.screen().clone();
+        maximum.set_scrollback(usize::MAX);
+        assert!(maximum.scrollback() <= TERMINAL_SCROLLBACK_ROWS);
+        assert_eq!(maximum.size(), (4, 32));
     }
 }
 
