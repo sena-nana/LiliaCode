@@ -5328,7 +5328,11 @@ impl DesktopProgram {
             output: terminal_plain_text(&snapshot),
             screen: crate::terminal_view::terminal_screen(&snapshot),
             running: snapshot.process.is_running(),
-            notice: self.terminal_notices.get(&snapshot.id).cloned(),
+            notice: self
+                .terminal_notices
+                .get(&snapshot.id)
+                .cloned()
+                .or_else(|| Self::terminal_status_notice(&snapshot)),
         })
     }
 
@@ -12869,6 +12873,38 @@ impl DesktopProgram {
         })
     }
 
+    fn terminal_status_notice(snapshot: &DesktopTerminalSnapshot) -> Option<String> {
+        if let Some(error) = snapshot.output_error.as_deref() {
+            return Some(format!("终端输出错误：{error}"));
+        }
+        match &snapshot.process {
+            crate::application::DesktopTerminalProcessState::Failed { message } => {
+                Some(format!("终端进程失败：{message}"))
+            }
+            crate::application::DesktopTerminalProcessState::Exited {
+                success,
+                exit_code,
+                signal,
+            } => {
+                let status = if *success {
+                    "已退出"
+                } else {
+                    "异常退出"
+                };
+                let detail = signal
+                    .as_deref()
+                    .map(|signal| format!("，信号 {signal}"))
+                    .unwrap_or_else(|| format!("，代码 {exit_code}"));
+                Some(format!("{status}{detail}"))
+            }
+            crate::application::DesktopTerminalProcessState::Restored => {
+                Some("终端会话已结束".to_owned())
+            }
+            crate::application::DesktopTerminalProcessState::Running
+            | crate::application::DesktopTerminalProcessState::Terminating => None,
+        }
+    }
+
     fn shell_terminal_for_pane(
         &self,
         pane_id: &PaneId,
@@ -12895,7 +12931,11 @@ impl DesktopProgram {
             output: terminal_plain_text(&snapshot),
             screen: crate::terminal_view::terminal_screen(&snapshot),
             running: snapshot.process.is_running(),
-            notice: self.terminal_notices.get(&snapshot.id).cloned(),
+            notice: self
+                .terminal_notices
+                .get(&snapshot.id)
+                .cloned()
+                .or_else(|| Self::terminal_status_notice(&snapshot)),
         })
     }
 
@@ -13060,7 +13100,35 @@ impl DesktopProgram {
         }
     }
 
+    fn close_terminal_item(&mut self, item: &WorkspaceItem) {
+        if item.kind.as_str() != TERMINAL_WORKSPACE_ITEM_KIND {
+            return;
+        }
+        let Some(session_id) = item.terminal_session_id().ok().flatten() else {
+            return;
+        };
+        let clear_projection = |program: &mut Self| {
+            program.terminal_snapshots.remove(&session_id);
+            program.terminal_scrollback.remove(&session_id);
+            program.terminal_notices.remove(&session_id);
+        };
+        match self.kernel.session().close_terminal(&session_id) {
+            Ok(()) => clear_projection(self),
+            Err(crate::application::DesktopApplicationError::Terminal(
+                crate::application::DesktopTerminalError::SessionNotFound(_),
+            )) => clear_projection(self),
+            Err(error) => {
+                self.error_message = Some(format!("无法关闭终端：{error}"));
+            }
+        }
+    }
+
     fn close_workspace_item(&mut self, item_id: WorkspaceItemId) {
+        let terminal_item = self
+            .workspace_items
+            .iter()
+            .find(|item| item.id == item_id && item.kind.as_str() == TERMINAL_WORKSPACE_ITEM_KIND)
+            .cloned();
         let document_item = self
             .workspace_items
             .iter()
@@ -13082,6 +13150,9 @@ impl DesktopProgram {
             .map(|item| self.document_ids_released_by_closing(std::slice::from_ref(item)))
             .unwrap_or_default();
         if self.execute_workspace_command(DesktopCommand::CloseWorkspaceItem { pane_id, item_id }) {
+            if let Some(item) = terminal_item {
+                self.close_terminal_item(&item);
+            }
             if let Some(item) = document_item {
                 self.release_document_views(&[item], documents_to_close);
             }
@@ -28202,6 +28273,18 @@ impl DesktopProgram {
         enqueue_close: bool,
     ) -> bool {
         let document_items = self.document_items_in_workspace_window(window_id);
+        let terminal_items = self
+            .task_popups
+            .get(&window_id)
+            .and_then(|popup| popup.workspace.snapshot().ok())
+            .map(|snapshot| {
+                snapshot
+                    .workspace_items
+                    .into_iter()
+                    .filter(|item| item.kind.as_str() == TERMINAL_WORKSPACE_ITEM_KIND)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         if let Some(title) = self.first_dirty_document_title(&document_items) {
             if let Some(popup) = self.task_popups.get_mut(&window_id) {
                 popup.error = Some(format!("“{title}”有未保存更改，请先保存或丢弃更改。"));
@@ -28213,6 +28296,9 @@ impl DesktopProgram {
             return false;
         }
         self.release_document_views(&document_items, documents_to_close);
+        for item in &terminal_items {
+            self.close_terminal_item(item);
+        }
         self.clear_task_popup_ephemeral_state(window_id);
         self.persist_workspace_topology();
         if enqueue_close {
@@ -28473,6 +28559,11 @@ impl DesktopProgram {
         let Some(snapshot) = snapshot else {
             return;
         };
+        let terminal_item = snapshot
+            .workspace_items
+            .iter()
+            .find(|item| item.id == item_id && item.kind.as_str() == TERMINAL_WORKSPACE_ITEM_KIND)
+            .cloned();
         let document_item = snapshot
             .workspace_items
             .iter()
@@ -28500,6 +28591,9 @@ impl DesktopProgram {
             window_id,
             DesktopCommand::CloseWorkspaceItem { pane_id, item_id },
         ) {
+            if let Some(item) = terminal_item {
+                self.close_terminal_item(&item);
+            }
             if let Some(item) = document_item {
                 self.release_document_views(&[item], documents_to_close);
             }
