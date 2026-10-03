@@ -3,8 +3,9 @@ use std::sync::Arc;
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, Entity, FrameworkError, LengthSpec, ScrollAxes,
-    ScrollView, Stack, Text, TextArea, TextChanged,
+    ScrollView, Stack, StatusBadge, Text, TextArea, TextChanged,
 };
+use nana_ui::StatusTone;
 
 use crate::application::{
     DesktopGoalSnapshot, DesktopGoalStatus, DesktopTaskTodo, DesktopTodoGuideStatus,
@@ -247,22 +248,28 @@ impl TodoPanel {
                     with_refs(widget(Text::new(goal_label)).entity_ref(label), label)
                 })?;
                 context.append_child(row, label)?;
-                let status = match goal.status {
-                    DesktopGoalStatus::Active => "进行中",
-                    DesktopGoalStatus::Paused => "已暂停",
-                    DesktopGoalStatus::Blocked => "受阻",
-                    DesktopGoalStatus::UsageLimited => "用量受限",
-                    DesktopGoalStatus::BudgetLimited => "预算已用完",
-                    DesktopGoalStatus::Complete => "已完成",
+                let (status, tone) = match goal.status {
+                    DesktopGoalStatus::Active => ("进行中", StatusTone::Info),
+                    DesktopGoalStatus::Paused => ("已暂停", StatusTone::Warning),
+                    DesktopGoalStatus::Blocked => ("受阻", StatusTone::Danger),
+                    DesktopGoalStatus::UsageLimited => ("用量受限", StatusTone::Warning),
+                    DesktopGoalStatus::BudgetLimited => ("预算已用完", StatusTone::Warning),
+                    DesktopGoalStatus::Complete => ("已完成", StatusTone::Success),
                 };
                 let budget = goal
                     .token_budget
                     .map(|value| format!("/{value}"))
                     .unwrap_or_default();
-                let meta_text = format!("{status} · {}{budget} tokens", goal.tokens_used);
+                let meta_text = format!("{}{budget} tokens", goal.tokens_used);
                 let (_, meta) = context.mount_view_detached(document, move || {
-                    let meta = entity_ref::<Text>();
-                    with_refs(widget(Text::new(meta_text)).entity_ref(meta), meta)
+                    let meta = entity_ref::<Stack>();
+                    with_refs(
+                        widget(Stack::row(6.0)).entity_ref(meta).children((
+                            widget(StatusBadge::new(status, tone)),
+                            widget(Text::new(meta_text)),
+                        )),
+                        meta,
+                    )
                 })?;
                 context.append_child(row, meta)?;
                 let (_, actions) = context.mount_view_detached(document, || {
