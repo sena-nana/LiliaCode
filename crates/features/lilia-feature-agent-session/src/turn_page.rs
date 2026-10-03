@@ -19,9 +19,30 @@ pub enum TurnFinishKind {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObservedPageDisposition {
+    Waiting,
+    Finished,
+}
+
 /// Host I/O for [`handle_observed_page`].
 pub trait TurnPageHost {
-    fn bind_session_version(&self, turn_id: &str, version: u64);
+    /// Revalidates the durable owner before publishing a page-derived product
+    /// effect. Production hosts must reject a missing or stale claim.
+    fn ensure_turn_claim(
+        &self,
+        _task_id: &TaskId,
+        _turn_id: &str,
+        _claim_token: Option<&str>,
+    ) -> Result<(), AgentTurnError> {
+        Ok(())
+    }
+    fn bind_session_version(
+        &self,
+        turn_id: &str,
+        claim_token: Option<&str>,
+        version: u64,
+    ) -> Result<(), AgentTurnError>;
     fn pending_projections(
         &self,
         task_id: &TaskId,
@@ -50,6 +71,19 @@ pub trait TurnPageHost {
         kind: TurnFinishKind,
         message: Option<String>,
     );
+    /// Finishes a page only for the worker claim that observed it. Hosts that
+    /// do not need an ownership fence may use the default forwarding method.
+    fn finish_turn_for_claim(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+        kind: TurnFinishKind,
+        message: Option<String>,
+        _claim_token: Option<&str>,
+    ) -> bool {
+        self.finish_turn(task_id, turn_id, kind, message);
+        true
+    }
     fn request_title_update(&self, task_id: TaskId, turn_id: String);
 }
 
@@ -60,11 +94,47 @@ pub fn handle_observed_page(
     turn_id: &str,
     page: ObservedTurnOutcome,
 ) -> Result<(), AgentTurnError> {
-    if runtime.active(task_id, turn_id).is_none() {
+    handle_observed_page_with_claim(runtime, host, task_id, turn_id, None, page).map(|_| ())
+}
+
+/// Handles a page while retaining the claim token captured by its worker.
+/// Passing the token through this boundary prevents a worker that outlives
+/// recovery from re-reading and borrowing the replacement owner's token.
+pub fn handle_observed_page_with_claim(
+    runtime: &DesktopAgentRuntime,
+    host: &dyn TurnPageHost,
+    task_id: &TaskId,
+    turn_id: &str,
+    expected_claim_token: Option<&str>,
+    page: ObservedTurnOutcome,
+) -> Result<ObservedPageDisposition, AgentTurnError> {
+    let active = runtime
+        .active(task_id, turn_id)
+        .ok_or_else(|| AgentTurnError::NoActiveTurn(task_id.clone()))?;
+    if let Some(expected) = expected_claim_token {
+        if active.claim_token.as_deref() != Some(expected) {
+            return Err(AgentTurnError::Queue(
+                crate::DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ));
+        }
+    }
+    let claim_token = expected_claim_token.or(active.claim_token.as_deref());
+    host.bind_session_version(turn_id, claim_token, page.session_version)?;
+    if page.session_version != 0
+        && !runtime.bind_session_version_with_claim(
+            task_id,
+            turn_id,
+            page.session_version,
+            expected_claim_token,
+        )
+    {
         return Err(AgentTurnError::NoActiveTurn(task_id.clone()));
     }
-    host.bind_session_version(turn_id, page.session_version);
+    host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
     if page.waiting_approval {
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         let request_id = host
             .pending_projections(task_id)?
             .into_iter()
@@ -76,11 +146,14 @@ pub fn handle_observed_page(
                     && pending.turn_id.as_deref() == Some(turn_id)
             })
             .map(|pending| pending.request_id);
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         host.emit_waiting_approval(task_id, turn_id, request_id);
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         host.dispatch_user_guide(task_id);
-        return Ok(());
+        return Ok(ObservedPageDisposition::Waiting);
     }
     if page.waiting_interaction {
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         let pending = host
             .pending_projections(task_id)?
             .into_iter()
@@ -101,6 +174,7 @@ pub fn handle_observed_page(
                     ExecutionPermission::Ask => None,
                 })
         });
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         host.emit_waiting_interaction(
             task_id,
             turn_id,
@@ -110,8 +184,9 @@ pub fn handle_observed_page(
         );
         if let (Some(pending), Some(allow)) = (pending.as_ref(), auto_allow) {
             match host.respond_architecture(task_id, &pending.request_id, allow) {
-                Ok(()) => return Ok(()),
+                Ok(()) => return Ok(ObservedPageDisposition::Waiting),
                 Err(error) => {
+                    host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
                     host.emit_waiting_interaction(
                         task_id,
                         turn_id,
@@ -122,38 +197,40 @@ pub fn handle_observed_page(
                 }
             }
         }
+        host.ensure_turn_claim(task_id, turn_id, expected_claim_token)?;
         host.dispatch_user_guide(task_id);
-        return Ok(());
+        return Ok(ObservedPageDisposition::Waiting);
     }
-    if page.cancelled_by_user {
-        host.finish_turn(
-            task_id.clone(),
-            turn_id.to_owned(),
-            TurnFinishKind::Cancelled,
-            None,
-        );
-        return Ok(());
-    }
-    if page.completed {
-        let cancelled = runtime.cancel_requested(task_id, turn_id);
-        let kind = if cancelled {
-            TurnFinishKind::Cancelled
-        } else {
-            TurnFinishKind::Completed
-        };
-        host.finish_turn(task_id.clone(), turn_id.to_owned(), kind, None);
-        if matches!(kind, TurnFinishKind::Completed) {
-            host.request_title_update(task_id.clone(), turn_id.to_owned());
-        }
-        return Ok(());
-    }
-    host.finish_turn(
+    let (kind, message) = if page.cancelled_by_user
+        || (page.completed
+            && runtime.cancel_requested_with_claim(task_id, turn_id, expected_claim_token))
+    {
+        (TurnFinishKind::Cancelled, None)
+    } else if page.completed {
+        (TurnFinishKind::Completed, None)
+    } else {
+        (
+            TurnFinishKind::Failed,
+            Some("Native Agent turn ended without completion".to_owned()),
+        )
+    };
+    if !host.finish_turn_for_claim(
         task_id.clone(),
         turn_id.to_owned(),
-        TurnFinishKind::Failed,
-        Some("Native Agent turn ended without completion".to_owned()),
-    );
-    Ok(())
+        kind,
+        message,
+        expected_claim_token,
+    ) {
+        return Err(AgentTurnError::Queue(
+            crate::DesktopTurnQueueError::ClaimOwnership {
+                turn_id: turn_id.to_owned(),
+            },
+        ));
+    }
+    if matches!(kind, TurnFinishKind::Completed) {
+        host.request_title_update(task_id.clone(), turn_id.to_owned());
+    }
+    Ok(ObservedPageDisposition::Finished)
 }
 
 #[cfg(test)]
@@ -169,6 +246,7 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingHost {
+        reject_finish: bool,
         pending: Vec<PendingProjection>,
         waits: Mutex<Vec<&'static str>>,
         finishes: Mutex<Vec<(String, TurnFinishKind, Option<String>)>>,
@@ -177,7 +255,14 @@ mod tests {
     }
 
     impl TurnPageHost for RecordingHost {
-        fn bind_session_version(&self, _turn_id: &str, _version: u64) {}
+        fn bind_session_version(
+            &self,
+            _turn_id: &str,
+            _claim_token: Option<&str>,
+            _version: u64,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
 
         fn pending_projections(
             &self,
@@ -237,6 +322,21 @@ mod tests {
             message: Option<String>,
         ) {
             self.finishes.lock().unwrap().push((turn_id, kind, message));
+        }
+
+        fn finish_turn_for_claim(
+            &self,
+            task_id: TaskId,
+            turn_id: String,
+            kind: TurnFinishKind,
+            message: Option<String>,
+            _claim_token: Option<&str>,
+        ) -> bool {
+            if self.reject_finish {
+                return false;
+            }
+            self.finish_turn(task_id, turn_id, kind, message);
+            true
         }
 
         fn request_title_update(&self, _task_id: TaskId, turn_id: String) {
@@ -322,6 +422,33 @@ mod tests {
         .unwrap();
         let finishes = host.finishes.lock().unwrap().clone();
         assert_eq!(finishes[0].1, TurnFinishKind::Failed);
+        assert!(host.titles.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejected_terminal_pages_report_stale_claim_without_title_updates() {
+        let runtime = DesktopAgentRuntime::default();
+        let task_id = TaskId::new("task-page").unwrap();
+        runtime.enqueue_idempotent(
+            DesktopTurnRequest::new(task_id.clone(), "hi"),
+            "turn-1".into(),
+        );
+        let host = RecordingHost {
+            reject_finish: true,
+            ..RecordingHost::default()
+        };
+        let mut cancelled = outcome(false, false, false);
+        cancelled.cancelled_by_user = true;
+        for page in [
+            cancelled,
+            outcome(false, false, true),
+            outcome(false, false, false),
+        ] {
+            let error =
+                handle_observed_page(&runtime, &host, &task_id, "turn-1", page).unwrap_err();
+            assert!(error.is_stale_claim());
+        }
+        assert!(host.finishes.lock().unwrap().is_empty());
         assert!(host.titles.lock().unwrap().is_empty());
     }
 }

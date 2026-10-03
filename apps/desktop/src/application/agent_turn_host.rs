@@ -83,8 +83,24 @@ impl TurnStartHost for DesktopApplication {
 }
 
 impl TurnPageHost for DesktopApplication {
-    fn bind_session_version(&self, turn_id: &str, version: u64) {
-        self.bind_turn_session_version(turn_id, version);
+    fn ensure_turn_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        claim_token: Option<&str>,
+    ) -> Result<(), AgentTurnError> {
+        DesktopApplication::ensure_turn_claim(self, task_id, turn_id, claim_token)
+            .map_err(agent_turn_error)
+    }
+
+    fn bind_session_version(
+        &self,
+        turn_id: &str,
+        claim_token: Option<&str>,
+        version: u64,
+    ) -> Result<(), AgentTurnError> {
+        self.bind_turn_session_version(turn_id, claim_token, version)
+            .map_err(agent_turn_error)
     }
 
     fn pending_projections(
@@ -174,6 +190,24 @@ impl TurnPageHost for DesktopApplication {
         DesktopApplication::finish_turn(self, task_id, turn_id, state);
     }
 
+    fn finish_turn_for_claim(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+        kind: TurnFinishKind,
+        message: Option<String>,
+        claim_token: Option<&str>,
+    ) -> bool {
+        let state = match kind {
+            TurnFinishKind::Cancelled => DesktopTurnState::Cancelled,
+            TurnFinishKind::Completed => DesktopTurnState::Completed,
+            TurnFinishKind::Failed => DesktopTurnState::Failed {
+                message: message.unwrap_or_else(|| "Native Agent turn failed".to_owned()),
+            },
+        };
+        DesktopApplication::finish_turn_with_claim(self, task_id, turn_id, state, claim_token)
+    }
+
     fn request_title_update(&self, task_id: TaskId, turn_id: String) {
         self.request_title_update_after_turn(task_id, Some(turn_id));
     }
@@ -184,12 +218,31 @@ impl TurnResumeHost for DesktopApplication {
         &self,
         task_id: &TaskId,
         decision: ProductApprovalDecision,
+        claim_token: Option<&str>,
     ) -> Result<ObservedTurnOutcome, AgentTurnError> {
+        self.ensure_turn_claim(task_id, &decision.turn_id, claim_token)
+            .map_err(agent_turn_error)?;
         let events_application = self.clone();
         let events_task_id = task_id.clone();
+        let events_turn_id = decision.turn_id.clone();
+        let events_claim_token = claim_token.map(str::to_owned);
+        // Recheck immediately before crossing into AgentKit. Recovery may
+        // have replaced this worker after the initial validation above.
+        self.ensure_turn_claim(task_id, &decision.turn_id, claim_token)
+            .map_err(agent_turn_error)?;
         let page = self
             .authority()
             .respond_agent_task_approval_observed(decision, move |events| {
+                if events_application
+                    .ensure_turn_claim(
+                        &events_task_id,
+                        &events_turn_id,
+                        events_claim_token.as_deref(),
+                    )
+                    .is_err()
+                {
+                    return;
+                }
                 events_application.emit_event(TimelineChanged {
                     task_id: events_task_id.clone(),
                     cursor: events.last().map(|event| event.sequence),
@@ -212,9 +265,18 @@ impl TurnResumeHost for DesktopApplication {
         &self,
         task_id: &TaskId,
         spec: InteractionResumeSpec,
+        claim_token: Option<&str>,
     ) -> Result<ObservedTurnOutcome, AgentTurnError> {
+        self.ensure_turn_claim(task_id, &spec.turn_id, claim_token)
+            .map_err(agent_turn_error)?;
         let events_application = self.clone();
         let events_task_id = task_id.clone();
+        let events_turn_id = spec.turn_id.clone();
+        let events_claim_token = claim_token.map(str::to_owned);
+        // Recheck immediately before crossing into AgentKit. Recovery may
+        // have replaced this worker after the initial validation above.
+        self.ensure_turn_claim(task_id, &spec.turn_id, claim_token)
+            .map_err(agent_turn_error)?;
         let page = self
             .authority()
             .respond_agent_task_interaction_observed(
@@ -227,6 +289,16 @@ impl TurnResumeHost for DesktopApplication {
                     response: spec.response,
                 },
                 move |events| {
+                    if events_application
+                        .ensure_turn_claim(
+                            &events_task_id,
+                            &events_turn_id,
+                            events_claim_token.as_deref(),
+                        )
+                        .is_err()
+                    {
+                        return;
+                    }
                     events_application.emit_event(TimelineChanged {
                         task_id: events_task_id.clone(),
                         cursor: events.last().map(|event| event.sequence),
@@ -319,12 +391,13 @@ impl AgentTurnHost for DesktopApplication {
         &self,
         turn_id: &str,
         request: &DesktopTurnRequest,
+        claim_token: Option<&str>,
     ) -> Result<(), AgentTurnError> {
         self.inner
             .turn_submissions
             .queue()
             .map_err(|_| AgentTurnError::StateUnavailable("pending turns"))?
-            .update_request(turn_id, request)
+            .update_request(turn_id, request, claim_token)
             .map_err(AgentTurnError::from)
     }
 
@@ -339,8 +412,9 @@ impl AgentTurnHost for DesktopApplication {
         task_id: &TaskId,
         turn_id: &str,
         request: &DesktopTurnRequest,
+        claim_token: Option<&str>,
     ) -> Result<(), AgentTurnError> {
-        self.run_context_compaction_turn(task_id, turn_id, request)
+        self.run_context_compaction_turn(task_id, turn_id, request, claim_token)
             .map_err(agent_turn_error)
     }
 
@@ -455,6 +529,11 @@ impl AgentTurnHost for DesktopApplication {
     }
 
     fn submit_observed(&self, spec: TurnSubmitSpec) -> Result<ObservedTurnOutcome, AgentTurnError> {
+        // Recheck immediately before crossing into AgentKit. A recovery may
+        // have replaced the durable owner while this worker was preparing
+        // context; the captured token must still own the turn.
+        self.ensure_turn_claim(&spec.task_id, &spec.turn_id, spec.claim_token.as_deref())
+            .map_err(agent_turn_error)?;
         let task = self.get_task(&spec.task_id).map_err(agent_turn_error)?;
         let mut message = AgentMessage::user(&spec.request.content);
         let goal = self.task_goal(&spec.task_id).map_err(agent_turn_error)?;
@@ -480,8 +559,12 @@ impl AgentTurnHost for DesktopApplication {
         context["memoryInjection"] = serde_json::to_value(&memory)
             .map_err(|error| AgentTurnError::Agent(error.to_string()))?;
         message.metadata = Some(context);
+        self.ensure_turn_claim(&spec.task_id, &spec.turn_id, spec.claim_token.as_deref())
+            .map_err(agent_turn_error)?;
         let events_application = self.clone();
         let events_task_id = spec.task_id.clone();
+        let events_turn_id = spec.turn_id.clone();
+        let events_claim_token = spec.claim_token.clone();
         let page = self
             .authority()
             .submit_agent_task_turn_observed(
@@ -490,6 +573,16 @@ impl AgentTurnHost for DesktopApplication {
                 vec![message],
                 &format!("native-desktop:{}:{}", spec.task_id.as_str(), spec.turn_id),
                 move |events| {
+                    if events_application
+                        .ensure_turn_claim(
+                            &events_task_id,
+                            &events_turn_id,
+                            events_claim_token.as_deref(),
+                        )
+                        .is_err()
+                    {
+                        return;
+                    }
                     let has_tool_window = events
                         .iter()
                         .any(|event| is_agent_tool_window_event(&event.event));

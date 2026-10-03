@@ -30,8 +30,8 @@ use lilia_feature_agent_session::PersistedDesktopTurnState;
 pub use lilia_contracts::ExecutionPermission as DesktopExecutionPermission;
 
 use lilia_feature_agent_session::{
-    accept_persisted_turn, prepare_turn_request, run_approval_resume, run_interaction_resume,
-    InteractionResumeSpec, TurnCancellationMode,
+    accept_persisted_turn, prepare_turn_request, run_approval_resume_with_claim,
+    run_interaction_resume_with_claim, InteractionResumeSpec, TurnCancellationMode,
 };
 pub use lilia_feature_agent_session::{
     DesktopAgentRuntime, DesktopApprovalResponse, DesktopAutomaticTurnSelection,
@@ -54,16 +54,23 @@ pub(crate) use lilia_feature_agent_session::supported_pending_interaction_kind;
 /// Submits claimed turns, approval decisions and interaction resolutions.
 /// The desktop host installs a kernel-backed executor; nothing here holds Jobs.
 pub trait DesktopTurnExecutor: Send + Sync + 'static {
-    fn execute_turn(&self, task_id: TaskId, turn_id: String) -> Result<(), String>;
+    fn execute_turn(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+        claim_token: Option<String>,
+    ) -> Result<(), String>;
     fn execute_approval(
         &self,
         task_id: TaskId,
         decision: ProductApprovalDecision,
+        claim_token: Option<String>,
     ) -> Result<(), String>;
     fn execute_interaction(
         &self,
         task_id: TaskId,
         resolution: InteractionResolution,
+        claim_token: Option<String>,
     ) -> Result<(), String>;
 }
 
@@ -83,8 +90,14 @@ impl InlineTurnExecutor {
 }
 
 impl DesktopTurnExecutor for InlineTurnExecutor {
-    fn execute_turn(&self, task_id: TaskId, turn_id: String) -> Result<(), String> {
-        self.application()?.execute_turn_job(task_id, turn_id);
+    fn execute_turn(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+        claim_token: Option<String>,
+    ) -> Result<(), String> {
+        self.application()?
+            .execute_turn_job(task_id, turn_id, claim_token);
         Ok(())
     }
 
@@ -92,8 +105,10 @@ impl DesktopTurnExecutor for InlineTurnExecutor {
         &self,
         task_id: TaskId,
         decision: ProductApprovalDecision,
+        claim_token: Option<String>,
     ) -> Result<(), String> {
-        self.application()?.execute_approval_job(task_id, decision);
+        self.application()?
+            .execute_approval_job(task_id, decision, claim_token);
         Ok(())
     }
 
@@ -101,9 +116,10 @@ impl DesktopTurnExecutor for InlineTurnExecutor {
         &self,
         task_id: TaskId,
         resolution: InteractionResolution,
+        claim_token: Option<String>,
     ) -> Result<(), String> {
         self.application()?
-            .execute_interaction_job(task_id, resolution);
+            .execute_interaction_job(task_id, resolution, claim_token);
         Ok(())
     }
 }
@@ -280,15 +296,25 @@ impl DesktopApplication {
         merged
     }
 
-    pub(crate) fn bind_turn_session_version(&self, turn_id: &str, version: u64) {
+    pub(crate) fn bind_turn_session_version(
+        &self,
+        turn_id: &str,
+        claim_token: Option<&str>,
+        version: u64,
+    ) -> Result<(), DesktopApplicationError> {
         if version == 0 {
-            return;
+            return Ok(());
         }
-        if let Ok(pending_turns) = self.inner.turn_submissions.queue() {
-            if let Err(error) = pending_turns.bind_session_version(turn_id, version) {
-                eprintln!("failed to bind AgentKit session version: {error}");
-            }
+        let pending_turns = self.inner.turn_submissions.queue()?;
+        let bound = pending_turns.bind_session_version(turn_id, claim_token, version)?;
+        if !bound {
+            return Err(DesktopApplicationError::TurnQueue(
+                lilia_feature_agent_session::DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ));
         }
+        Ok(())
     }
 
     #[cfg(debug_assertions)]
@@ -558,7 +584,7 @@ impl DesktopApplication {
         task_id: &TaskId,
     ) -> Result<DesktopInterruptResult, DesktopApplicationError> {
         let runtime = self.authority().shared_runtime();
-        let mut candidate = None::<(u64, String, String)>;
+        let mut candidate = None::<(u64, String)>;
         for binding in self.authority().list_session_bindings(task_id)? {
             let session_id = binding.agent_session.as_str().to_owned();
             let session = runtime
@@ -574,27 +600,17 @@ impl DesktopApplication {
                 }
                 if candidate
                     .as_ref()
-                    .is_none_or(|(sequence, _, _)| event.sequence > *sequence)
+                    .is_none_or(|(sequence, _)| event.sequence > *sequence)
                 {
-                    candidate = Some((event.sequence, session_id.clone(), turn_id));
+                    candidate = Some((event.sequence, turn_id));
                 }
             }
         }
-        let Some((_, session_id, turn_id)) = candidate else {
+        let Some((_, turn_id)) = candidate else {
             return Err(DesktopApplicationError::NoActiveTurn(task_id.clone()));
         };
-        runtime
-            .inner()
-            .cancel_session_turn(&session_id, &turn_id)
-            .map_err(|error| DesktopApplicationError::Agent(error.to_string()))?;
-        self.emit_event(TimelineChanged {
-            task_id: task_id.clone(),
-            cursor: None,
-        });
-        Ok(DesktopInterruptResult {
-            turn_id,
-            cancellation_requested: true,
-        })
+        self.interrupt_task_turn_at(task_id, &turn_id)?
+            .ok_or_else(|| DesktopApplicationError::NoActiveTurn(task_id.clone()))
     }
 
     pub fn respond_projected_task_approval(
@@ -603,55 +619,7 @@ impl DesktopApplication {
         request_id: &str,
         approved: bool,
     ) -> Result<DesktopApprovalResponse, DesktopApplicationError> {
-        let pending = self
-            .task_session_snapshot(task_id)?
-            .pending
-            .into_iter()
-            .find(|pending| {
-                pending.request_id == request_id
-                    && pending.status == PendingProjectionStatus::Open
-                    && pending.kind == "permission_approval"
-            })
-            .ok_or_else(|| DesktopApplicationError::PendingInteractionNotFound {
-                task_id: task_id.clone(),
-                request_id: request_id.to_owned(),
-            })?;
-        let turn_id = pending.turn_id.clone().ok_or_else(|| {
-            DesktopApplicationError::InvalidPendingInteraction {
-                request_id: request_id.to_owned(),
-                message: "approval is missing its turn id".to_owned(),
-            }
-        })?;
-        let version = pending.action_revision.ok_or_else(|| {
-            DesktopApplicationError::InvalidPendingInteraction {
-                request_id: request_id.to_owned(),
-                message: "approval is missing its action revision".to_owned(),
-            }
-        })?;
-        let events_application = self.clone();
-        let events_task_id = task_id.clone();
-        self.authority()
-            .respond_agent_task_approval_observed(
-                ProductApprovalDecision {
-                    session_id: pending.agent_session.as_str().to_owned(),
-                    turn_id: turn_id.clone(),
-                    action_id: request_id.to_owned(),
-                    version,
-                    approved,
-                },
-                move |_| {
-                    events_application.emit_event(TimelineChanged {
-                        task_id: events_task_id.clone(),
-                        cursor: None,
-                    });
-                },
-            )
-            .map_err(agent_wire_error)?;
-        Ok(DesktopApprovalResponse {
-            turn_id,
-            request_id: request_id.to_owned(),
-            approved,
-        })
+        self.respond_task_approval(task_id, request_id, approved)
     }
 
     pub fn respond_projected_task_interaction(
@@ -661,59 +629,7 @@ impl DesktopApplication {
         accepted: bool,
         response: Value,
     ) -> Result<DesktopInteractionResponse, DesktopApplicationError> {
-        let pending = self
-            .task_session_snapshot(task_id)?
-            .pending
-            .into_iter()
-            .find(|pending| {
-                pending.request_id == request_id
-                    && pending.status == PendingProjectionStatus::Open
-                    && supported_pending_interaction_kind(&pending.kind)
-            })
-            .ok_or_else(|| DesktopApplicationError::PendingInteractionNotFound {
-                task_id: task_id.clone(),
-                request_id: request_id.to_owned(),
-            })?;
-        let turn_id = pending.turn_id.clone().ok_or_else(|| {
-            DesktopApplicationError::InvalidPendingInteraction {
-                request_id: request_id.to_owned(),
-                message: "interaction is missing its turn id".to_owned(),
-            }
-        })?;
-        let version = pending.action_revision.ok_or_else(|| {
-            DesktopApplicationError::InvalidPendingInteraction {
-                request_id: request_id.to_owned(),
-                message: "interaction is missing its version".to_owned(),
-            }
-        })?;
-        let (accepted, response) =
-            normalized_pending_interaction_response(&pending, accepted, response)?;
-        let events_application = self.clone();
-        let events_task_id = task_id.clone();
-        self.authority()
-            .respond_agent_task_interaction_observed(
-                InteractionResolution {
-                    session_id: pending.agent_session.as_str().to_owned(),
-                    turn_id: turn_id.clone(),
-                    version,
-                    interaction_id: request_id.to_owned(),
-                    accepted,
-                    response,
-                },
-                move |_| {
-                    events_application.emit_event(TimelineChanged {
-                        task_id: events_task_id.clone(),
-                        cursor: None,
-                    });
-                },
-            )
-            .map_err(agent_wire_error)?;
-        Ok(DesktopInteractionResponse {
-            turn_id,
-            request_id: request_id.to_owned(),
-            accepted,
-            continuation: None,
-        })
+        self.respond_task_interaction(task_id, request_id, accepted, response)
     }
 
     pub fn start_task_turn(
@@ -892,10 +808,11 @@ impl DesktopApplication {
                     && persisted.request.auto_turn_settings.is_none()
                 {
                     let prepared = self.prepare_task_turn_request(persisted.request.clone())?;
-                    self.inner
-                        .turn_submissions
-                        .queue()?
-                        .update_request(&persisted.turn_id, &prepared)?;
+                    self.inner.turn_submissions.queue()?.update_request(
+                        &persisted.turn_id,
+                        &prepared,
+                        persisted.claim_token.as_deref(),
+                    )?;
                     persisted.request = prepared;
                 }
                 let guide_id = persisted.request.guide_id.clone();
@@ -1076,6 +993,28 @@ impl DesktopApplication {
                 DesktopTurnState::Cancelled,
             );
         };
+        if let Err(error) =
+            self.ensure_turn_claim(task_id, &cancel.turn_id, cancel.claim_token.as_deref())
+        {
+            self.inner.agent.revert_cancel_with_claim(
+                task_id,
+                turn_id,
+                cancel.claim_token.as_deref(),
+            );
+            return Err(error);
+        }
+        let submission = self.inner.turn_submissions.submission_guard_recovering();
+        if let Err(error) =
+            self.ensure_turn_claim(task_id, &cancel.turn_id, cancel.claim_token.as_deref())
+        {
+            drop(submission);
+            self.inner.agent.revert_cancel_with_claim(
+                task_id,
+                turn_id,
+                cancel.claim_token.as_deref(),
+            );
+            return Err(error);
+        }
         let paused = if let Some(session_id) = &cancel.session_id {
             match self
                 .authority()
@@ -1088,19 +1027,30 @@ impl DesktopApplication {
                     lilia_agent::TurnCancellationDisposition::PausedAction
                 ),
                 Err(error) => {
-                    self.inner.agent.revert_automation_cancel(task_id, turn_id);
+                    drop(submission);
+                    self.inner.agent.revert_cancel_with_claim(
+                        task_id,
+                        turn_id,
+                        cancel.claim_token.as_deref(),
+                    );
                     return Err(DesktopApplicationError::Agent(error.to_string()));
                 }
             }
         } else {
             false
         };
+        drop(submission);
         self.emit_event(TimelineChanged {
             task_id: task_id.clone(),
             cursor: None,
         });
         if paused {
-            self.finish_turn(task_id.clone(), cancel.turn_id, DesktopTurnState::Cancelled);
+            self.finish_turn_with_claim(
+                task_id.clone(),
+                cancel.turn_id,
+                DesktopTurnState::Cancelled,
+                cancel.claim_token.as_deref(),
+            );
         }
         Ok(())
     }
@@ -1137,13 +1087,45 @@ impl DesktopApplication {
         task_id: &TaskId,
         cancel: lilia_feature_agent_session::CancelSnapshot,
     ) -> Result<DesktopInterruptResult, DesktopApplicationError> {
+        if let Err(error) =
+            self.ensure_turn_claim(task_id, &cancel.turn_id, cancel.claim_token.as_deref())
+        {
+            self.inner.agent.revert_cancel_with_claim(
+                task_id,
+                &cancel.turn_id,
+                cancel.claim_token.as_deref(),
+            );
+            return Err(error);
+        }
+        let submission = self.inner.turn_submissions.submission_guard_recovering();
+        if let Err(error) =
+            self.ensure_turn_claim(task_id, &cancel.turn_id, cancel.claim_token.as_deref())
+        {
+            drop(submission);
+            self.inner.agent.revert_cancel_with_claim(
+                task_id,
+                &cancel.turn_id,
+                cancel.claim_token.as_deref(),
+            );
+            return Err(error);
+        }
         let paused = if let Some(session_id) = &cancel.session_id {
-            let disposition = self
+            let disposition = match self
                 .authority()
                 .shared_runtime()
                 .inner()
                 .cancel_session_turn(session_id, &cancel.turn_id)
-                .map_err(|error| DesktopApplicationError::Agent(error.to_string()))?;
+            {
+                Ok(disposition) => disposition,
+                Err(error) => {
+                    self.inner.agent.revert_cancel_with_claim(
+                        task_id,
+                        &cancel.turn_id,
+                        cancel.claim_token.as_deref(),
+                    );
+                    return Err(DesktopApplicationError::Agent(error.to_string()));
+                }
+            };
             matches!(
                 disposition,
                 lilia_agent::TurnCancellationDisposition::PausedAction
@@ -1151,15 +1133,17 @@ impl DesktopApplication {
         } else {
             false
         };
+        drop(submission);
         self.emit_event(TimelineChanged {
             task_id: task_id.clone(),
             cursor: None,
         });
         if paused {
-            self.finish_turn(
+            self.finish_turn_with_claim(
                 task_id.clone(),
                 cancel.turn_id.clone(),
                 DesktopTurnState::Cancelled,
+                cancel.claim_token.as_deref(),
             );
         }
         Ok(DesktopInterruptResult {
@@ -1205,12 +1189,15 @@ impl DesktopApplication {
                 message: "approval is missing its action revision".to_owned(),
             }
         })?;
-        if self.inner.agent.active(task_id, &turn_id).is_none() {
+        let claim_token = if let Some(active) = self.inner.agent.active(task_id, &turn_id) {
+            active.claim_token
+        } else {
             return Err(DesktopApplicationError::TurnNotWaitingApproval {
                 task_id: task_id.clone(),
                 turn_id,
             });
-        }
+        };
+        self.ensure_turn_claim(task_id, &turn_id, claim_token.as_deref())?;
         let decision = ProductApprovalDecision {
             session_id: pending.agent_session.as_str().to_owned(),
             turn_id: turn_id.clone(),
@@ -1223,7 +1210,7 @@ impl DesktopApplication {
             turn_id: turn_id.clone(),
             state: DesktopTurnState::ResolvingApproval,
         });
-        self.submit_approval_job(task_id.clone(), decision)?;
+        self.submit_approval_job(task_id.clone(), decision, claim_token)?;
         Ok(DesktopApprovalResponse {
             turn_id,
             request_id: request_id.to_owned(),
@@ -1286,12 +1273,15 @@ impl DesktopApplication {
                 message: "interaction does not belong to the active turn".to_owned(),
             });
         }
-        if self.inner.agent.active(task_id, &turn_id).is_none() {
+        let claim_token = if let Some(active) = self.inner.agent.active(task_id, &turn_id) {
+            active.claim_token
+        } else {
             return Err(DesktopApplicationError::TurnNotWaitingInteraction {
                 task_id: task_id.clone(),
                 turn_id,
             });
-        }
+        };
+        self.ensure_turn_claim(task_id, &turn_id, claim_token.as_deref())?;
         let resolution = InteractionResolution {
             session_id: pending.agent_session.as_str().to_owned(),
             turn_id: turn_id.clone(),
@@ -1305,7 +1295,7 @@ impl DesktopApplication {
             turn_id: turn_id.clone(),
             state: DesktopTurnState::ResolvingInteraction,
         });
-        self.submit_interaction_job(task_id.clone(), resolution)?;
+        self.submit_interaction_job(task_id.clone(), resolution, claim_token)?;
         Ok(DesktopInteractionResponse {
             turn_id,
             request_id: request_id.to_owned(),
@@ -1398,35 +1388,105 @@ impl DesktopApplication {
         task_id: TaskId,
         turn_id: String,
     ) -> Result<(), DesktopApplicationError> {
+        let claim_token = self
+            .inner
+            .agent
+            .active(&task_id, &turn_id)
+            .and_then(|active| active.claim_token);
         self.emit_event(TurnStateChanged {
             task_id: task_id.clone(),
             turn_id: turn_id.clone(),
             state: DesktopTurnState::Starting,
         });
+        let expected_claim_token = claim_token.clone();
         self.turn_executor()?
-            .execute_turn(task_id.clone(), turn_id.clone())
+            .execute_turn(task_id.clone(), turn_id.clone(), claim_token)
             .map_err(|error| {
-                self.finish_turn(
+                self.finish_turn_with_claim(
                     task_id,
                     turn_id,
                     DesktopTurnState::Failed {
                         message: error.clone(),
                     },
+                    expected_claim_token.as_deref(),
                 );
                 DesktopApplicationError::Agent(format!("start Native Agent turn: {error}"))
             })
     }
 
-    pub fn execute_turn_job(&self, task_id: TaskId, turn_id: String) {
-        self.run_turn_worker(task_id, turn_id);
+    pub fn execute_turn_job(&self, task_id: TaskId, turn_id: String, claim_token: Option<String>) {
+        self.run_turn_worker(task_id, turn_id, claim_token);
     }
 
-    pub fn execute_approval_job(&self, task_id: TaskId, decision: ProductApprovalDecision) {
-        self.run_approval_worker(task_id, decision);
+    pub fn execute_approval_job(
+        &self,
+        task_id: TaskId,
+        decision: ProductApprovalDecision,
+        claim_token: Option<String>,
+    ) {
+        self.run_approval_worker(task_id, decision, claim_token);
     }
 
-    pub fn execute_interaction_job(&self, task_id: TaskId, resolution: InteractionResolution) {
-        self.run_interaction_worker(task_id, resolution);
+    pub fn execute_interaction_job(
+        &self,
+        task_id: TaskId,
+        resolution: InteractionResolution,
+        claim_token: Option<String>,
+    ) {
+        self.run_interaction_worker(task_id, resolution, claim_token);
+    }
+
+    /// Reject a job whose process-level worker lost its durable claim during
+    /// recovery. The caller deliberately treats this as a no-op: the new
+    /// owner must continue without an old worker emitting terminal state or
+    /// sending a second AgentKit resume.
+    pub(crate) fn ensure_turn_claim(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        expected_claim_token: Option<&str>,
+    ) -> Result<(), DesktopApplicationError> {
+        let Some(active) = self.inner.agent.active(task_id, turn_id) else {
+            return Err(DesktopApplicationError::NoActiveTurn(task_id.clone()));
+        };
+        if active.claim_token.as_deref() != expected_claim_token {
+            return Err(DesktopApplicationError::TurnQueue(
+                lilia_feature_agent_session::DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ));
+        }
+        let Some(claim_token) = expected_claim_token else {
+            return Err(DesktopApplicationError::TurnQueue(
+                lilia_feature_agent_session::DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ));
+        };
+        if self
+            .inner
+            .turn_submissions
+            .queue()?
+            .owns_claim(task_id, turn_id, claim_token)?
+        {
+            Ok(())
+        } else {
+            Err(DesktopApplicationError::TurnQueue(
+                lilia_feature_agent_session::DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ))
+        }
+    }
+
+    fn is_stale_turn_claim(error: &DesktopApplicationError) -> bool {
+        matches!(
+            error,
+            DesktopApplicationError::NoActiveTurn(_)
+                | DesktopApplicationError::TurnQueue(
+                    lilia_feature_agent_session::DesktopTurnQueueError::ClaimOwnership { .. }
+                )
+        )
     }
 
     fn turn_executor(&self) -> Result<Arc<dyn DesktopTurnExecutor>, DesktopApplicationError> {
@@ -1537,22 +1597,43 @@ impl DesktopApplication {
         Ok(())
     }
 
-    fn run_turn_worker(&self, task_id: TaskId, turn_id: String) {
-        if let Err(error) = self.run_turn(&task_id, &turn_id) {
-            let state = if self.inner.agent.cancel_requested(&task_id, &turn_id) {
+    fn run_turn_worker(&self, task_id: TaskId, turn_id: String, claim_token: Option<String>) {
+        if let Err(error) = self
+            .ensure_turn_claim(&task_id, &turn_id, claim_token.as_deref())
+            .and_then(|()| self.run_turn(&task_id, &turn_id, claim_token.as_deref()))
+        {
+            if Self::is_stale_turn_claim(&error) {
+                return;
+            }
+            let state = if self.inner.agent.cancel_requested_with_claim(
+                &task_id,
+                &turn_id,
+                claim_token.as_deref(),
+            ) {
                 DesktopTurnState::Cancelled
             } else {
                 DesktopTurnState::Failed {
                     message: error.to_string(),
                 }
             };
-            self.finish_turn(task_id, turn_id, state);
+            self.finish_turn_with_claim(task_id, turn_id, state, claim_token.as_deref());
         }
     }
 
-    fn run_turn(&self, task_id: &TaskId, turn_id: &str) -> Result<(), DesktopApplicationError> {
-        lilia_feature_agent_session::run_prepared_turn(&self.inner.agent, self, task_id, turn_id)
-            .map_err(DesktopApplicationError::from)
+    fn run_turn(
+        &self,
+        task_id: &TaskId,
+        turn_id: &str,
+        claim_token: Option<&str>,
+    ) -> Result<(), DesktopApplicationError> {
+        lilia_feature_agent_session::run_prepared_turn_with_claim(
+            &self.inner.agent,
+            self,
+            task_id,
+            turn_id,
+            claim_token,
+        )
+        .map_err(DesktopApplicationError::from)
     }
 
     pub(crate) fn run_context_compaction_turn(
@@ -1560,12 +1641,19 @@ impl DesktopApplication {
         task_id: &TaskId,
         turn_id: &str,
         request: &DesktopTurnRequest,
+        claim_token: Option<&str>,
     ) -> Result<(), DesktopApplicationError> {
-        if self.inner.agent.cancel_requested(task_id, turn_id) {
-            self.finish_turn(
+        self.ensure_turn_claim(task_id, turn_id, claim_token)?;
+        if self
+            .inner
+            .agent
+            .cancel_requested_with_claim(task_id, turn_id, claim_token)
+        {
+            self.finish_turn_with_claim(
                 task_id.clone(),
                 turn_id.to_owned(),
                 DesktopTurnState::Cancelled,
+                claim_token,
             );
             return Ok(());
         }
@@ -1583,15 +1671,30 @@ impl DesktopApplication {
         )?;
         let result =
             self.compact_task_agent_context_with_commit_guard(task_id, turn_id, None, || {
-                !self.inner.agent.cancel_requested(task_id, turn_id)
+                self.ensure_turn_claim(task_id, turn_id, claim_token)
+                    .is_ok()
+                    && !self
+                        .inner
+                        .agent
+                        .cancel_requested_with_claim(task_id, turn_id, claim_token)
             })?;
-        self.inner
-            .agent
-            .attach_session(task_id, turn_id, result.session_id);
-        self.finish_turn(
+        if !self.inner.agent.attach_session_with_claim(
+            task_id,
+            turn_id,
+            result.session_id,
+            claim_token,
+        ) {
+            return Err(DesktopApplicationError::TurnQueue(
+                lilia_feature_agent_session::DesktopTurnQueueError::ClaimOwnership {
+                    turn_id: turn_id.to_owned(),
+                },
+            ));
+        }
+        self.finish_turn_with_claim(
             task_id.clone(),
             turn_id.to_owned(),
             DesktopTurnState::Completed,
+            claim_token,
         );
         Ok(())
     }
@@ -1600,25 +1703,54 @@ impl DesktopApplication {
         &self,
         task_id: TaskId,
         decision: ProductApprovalDecision,
+        claim_token: Option<String>,
     ) -> Result<(), DesktopApplicationError> {
         self.turn_executor()?
-            .execute_approval(task_id, decision)
+            .execute_approval(task_id, decision, claim_token)
             .map_err(|error| {
                 DesktopApplicationError::Agent(format!("start Native approval response: {error}"))
             })
     }
 
-    fn run_approval_worker(&self, task_id: TaskId, decision: ProductApprovalDecision) {
-        run_approval_resume(&self.inner.agent, self, task_id, decision);
+    fn run_approval_worker(
+        &self,
+        task_id: TaskId,
+        decision: ProductApprovalDecision,
+        claim_token: Option<String>,
+    ) {
+        if let Err(error) =
+            self.ensure_turn_claim(&task_id, &decision.turn_id, claim_token.as_deref())
+        {
+            if Self::is_stale_turn_claim(&error) {
+                return;
+            }
+            self.emit_event(TurnStateChanged {
+                task_id,
+                turn_id: decision.turn_id,
+                state: DesktopTurnState::WaitingApproval {
+                    request_id: Some(decision.action_id),
+                    error: Some(error.to_string()),
+                },
+            });
+            return;
+        }
+        run_approval_resume_with_claim(
+            &self.inner.agent,
+            self,
+            task_id,
+            decision,
+            claim_token.as_deref(),
+        );
     }
 
     fn submit_interaction_job(
         &self,
         task_id: TaskId,
         resolution: InteractionResolution,
+        claim_token: Option<String>,
     ) -> Result<(), DesktopApplicationError> {
         self.turn_executor()?
-            .execute_interaction(task_id, resolution)
+            .execute_interaction(task_id, resolution, claim_token)
             .map_err(|error| {
                 DesktopApplicationError::Agent(format!(
                     "start Native interaction response: {error}"
@@ -1626,8 +1758,30 @@ impl DesktopApplication {
             })
     }
 
-    fn run_interaction_worker(&self, task_id: TaskId, resolution: InteractionResolution) {
-        run_interaction_resume(
+    fn run_interaction_worker(
+        &self,
+        task_id: TaskId,
+        resolution: InteractionResolution,
+        claim_token: Option<String>,
+    ) {
+        if let Err(error) =
+            self.ensure_turn_claim(&task_id, &resolution.turn_id, claim_token.as_deref())
+        {
+            if Self::is_stale_turn_claim(&error) {
+                return;
+            }
+            self.emit_event(TurnStateChanged {
+                task_id,
+                turn_id: resolution.turn_id,
+                state: DesktopTurnState::WaitingInteraction {
+                    request_id: Some(resolution.interaction_id),
+                    kind: None,
+                    error: Some(error.to_string()),
+                },
+            });
+            return;
+        }
+        run_interaction_resume_with_claim(
             &self.inner.agent,
             self,
             task_id,
@@ -1639,15 +1793,58 @@ impl DesktopApplication {
                 accepted: resolution.accepted,
                 response: resolution.response,
             },
+            claim_token.as_deref(),
         );
     }
 
     pub(crate) fn finish_turn(&self, task_id: TaskId, turn_id: String, state: DesktopTurnState) {
-        let Some(active) = self.inner.agent.begin_finish(&task_id, &turn_id) else {
-            return;
+        let _ = self.finish_turn_with_claim(task_id, turn_id, state, None);
+    }
+
+    pub(crate) fn finish_turn_with_claim(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+        state: DesktopTurnState,
+        expected_claim_token: Option<&str>,
+    ) -> bool {
+        // Recovery and acknowledgement must serialize with the in-memory
+        // finish claim. Otherwise recovery can hydrate the same turn id with
+        // a new token after begin_finish and the old worker could clear it.
+        let submission = self.inner.turn_submissions.submission_guard_recovering();
+        let current = self.inner.agent.active(&task_id, &turn_id);
+        let Some(current) = current else {
+            return false;
+        };
+        if let Some(expected_claim_token) = expected_claim_token {
+            let owns_claim = self
+                .inner
+                .turn_submissions
+                .queue_recovering()
+                .owns_claim_at_session_version(
+                    &task_id,
+                    &turn_id,
+                    expected_claim_token,
+                    current.session_version,
+                )
+                .unwrap_or(false);
+            if !owns_claim {
+                return false;
+            }
+        }
+        let active = if expected_claim_token.is_some() {
+            self.inner
+                .agent
+                .begin_finish_with_claim(&task_id, &turn_id, expected_claim_token)
+        } else {
+            self.inner.agent.begin_finish(&task_id, &turn_id)
+        };
+        let Some(active) = active else {
+            return false;
         };
         let cancellation_mode = active.cancellation_mode;
         let claim_token = active.claim_token.clone();
+        let session_version = active.session_version;
         let hook_workspace_path = active.request.workspace_path.clone();
         let automation = active.request.automation;
         self.emit_event(TurnStateChanged {
@@ -1700,7 +1897,6 @@ impl DesktopApplication {
                 }
             }
         }
-        let submission = self.inner.turn_submissions.submission_guard_recovering();
         if cancellation_mode == Some(TurnCancellationMode::User) {
             let queued = self.inner.agent.queued(&task_id);
             let guides_reset = queued.iter().try_for_each(|turn| {
@@ -1712,7 +1908,11 @@ impl DesktopApplication {
             });
             let discarded = if let Err(error) = guides_reset {
                 eprintln!("failed to reset cancelled Native Guide queue: {error}");
-                self.inner.agent.finish_without_next(&task_id, &turn_id);
+                self.inner.agent.finish_without_next_with_claim(
+                    &task_id,
+                    &turn_id,
+                    claim_token.as_deref(),
+                );
                 Vec::new()
             } else {
                 match self
@@ -1730,7 +1930,11 @@ impl DesktopApplication {
                         eprintln!(
                             "failed to clear persisted Native Agent turns after cancellation: {error}"
                         );
-                        self.inner.agent.finish_without_next(&task_id, &turn_id);
+                        self.inner.agent.finish_without_next_with_claim(
+                            &task_id,
+                            &turn_id,
+                            claim_token.as_deref(),
+                        );
                         Vec::new()
                     }
                 }
@@ -1743,13 +1947,13 @@ impl DesktopApplication {
                     state: DesktopTurnState::Cancelled,
                 });
             }
-            return;
+            return true;
         }
         let expected_next = self.inner.agent.queued_front(&task_id);
         let durable_next = {
             let mut pending_turns = self.inner.turn_submissions.queue_recovering();
             let result = if let Some(claim_token) = claim_token.as_deref() {
-                pending_turns.ack_and_claim_next(&task_id, &turn_id, claim_token, None)
+                pending_turns.ack_and_claim_next(&task_id, &turn_id, claim_token, session_version)
             } else {
                 pending_turns.claim_first(&task_id)
             };
@@ -1757,8 +1961,12 @@ impl DesktopApplication {
                 Ok(next) => next,
                 Err(error) => {
                     eprintln!("failed to acknowledge persisted Native Agent turn: {error}");
-                    self.inner.agent.finish_without_next(&task_id, &turn_id);
-                    return;
+                    self.inner.agent.finish_without_next_with_claim(
+                        &task_id,
+                        &turn_id,
+                        claim_token.as_deref(),
+                    );
+                    return false;
                 }
             }
         };
@@ -1770,8 +1978,12 @@ impl DesktopApplication {
                 durable_next.as_ref().map(|turn| turn.turn_id.as_str()),
                 expected_next.as_ref().map(|turn| turn.turn_id.as_str())
             );
-            self.inner.agent.finish_without_next(&task_id, &turn_id);
-            return;
+            self.inner.agent.finish_without_next_with_claim(
+                &task_id,
+                &turn_id,
+                claim_token.as_deref(),
+            );
+            return false;
         }
         let next = self
             .inner
@@ -1811,6 +2023,7 @@ impl DesktopApplication {
                 eprintln!("failed to dispatch Native idle-window Guide: {error}");
             }
         }
+        true
     }
 
     pub(crate) fn persist_session_binding(

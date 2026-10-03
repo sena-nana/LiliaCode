@@ -18,6 +18,13 @@ pub const INTERACTION_PROTOCOL: &str = "lilia.agent/interaction@1";
 pub struct TurnJobRequest {
     pub task_id: String,
     pub turn_id: String,
+    /// The durable queue ownership token captured when this job was submitted.
+    ///
+    /// `None` is accepted while decoding old persisted jobs for compatibility,
+    /// but the protocol handler rejects it before dispatching. This keeps a
+    /// pre-recovery job from borrowing a replacement claim.
+    #[serde(default)]
+    pub claim_token: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +32,9 @@ pub struct TurnJobRequest {
 pub struct ApprovalJobRequest {
     pub task_id: String,
     pub decision: ProductApprovalDecision,
+    /// See [`TurnJobRequest::claim_token`].
+    #[serde(default)]
+    pub claim_token: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,6 +42,9 @@ pub struct ApprovalJobRequest {
 pub struct InteractionJobRequest {
     pub task_id: String,
     pub resolution: Value,
+    /// See [`TurnJobRequest::claim_token`].
+    #[serde(default)]
+    pub claim_token: Option<String>,
 }
 
 pub trait TurnPort: Send + Sync + 'static {
@@ -70,6 +83,7 @@ pub(crate) fn turn_protocols(port: Arc<dyn TurnPort>) -> Vec<JobProtocol> {
 fn run_turn_job(payload: Value, port: &dyn TurnPort) -> Result<Value, String> {
     let request: TurnJobRequest = serde_json::from_value(payload)
         .map_err(|error| format!("invalid turn request: {error}"))?;
+    ensure_claim_token(request.claim_token.as_deref(), "turn")?;
     port.run_turn(request)?;
     Ok(Value::Null)
 }
@@ -77,6 +91,7 @@ fn run_turn_job(payload: Value, port: &dyn TurnPort) -> Result<Value, String> {
 fn run_approval_job(payload: Value, port: &dyn TurnPort) -> Result<Value, String> {
     let request: ApprovalJobRequest = serde_json::from_value(payload)
         .map_err(|error| format!("invalid approval request: {error}"))?;
+    ensure_claim_token(request.claim_token.as_deref(), "approval")?;
     port.run_approval(request)?;
     Ok(Value::Null)
 }
@@ -84,8 +99,17 @@ fn run_approval_job(payload: Value, port: &dyn TurnPort) -> Result<Value, String
 fn run_interaction_job(payload: Value, port: &dyn TurnPort) -> Result<Value, String> {
     let request: InteractionJobRequest = serde_json::from_value(payload)
         .map_err(|error| format!("invalid interaction request: {error}"))?;
+    ensure_claim_token(request.claim_token.as_deref(), "interaction")?;
     port.run_interaction(request)?;
     Ok(Value::Null)
+}
+
+fn ensure_claim_token(token: Option<&str>, kind: &str) -> Result<(), String> {
+    if token.is_some_and(|token| !token.trim().is_empty()) {
+        Ok(())
+    } else {
+        Err(format!("invalid {kind} request: missing claim token"))
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +150,7 @@ mod tests {
         TurnJobRequest {
             task_id: "task-1".to_owned(),
             turn_id: "turn-7".to_owned(),
+            claim_token: Some("claim-1".to_owned()),
         }
     }
 
@@ -160,6 +185,15 @@ mod tests {
         .expect_err("a request without a task cannot run");
 
         assert!(error.contains("invalid turn request"), "{error}");
+    }
+
+    #[test]
+    fn old_turn_payloads_decode_without_a_claim_token_but_are_rejected_at_execution() {
+        let payload = serde_json::json!({ "taskId": "task-1", "turnId": "turn-7" });
+        let decoded: TurnJobRequest = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(decoded.claim_token, None);
+        let error = run_turn_job(payload, &RecordingPort::default()).unwrap_err();
+        assert!(error.contains("missing claim token"), "{error}");
     }
 
     #[test]

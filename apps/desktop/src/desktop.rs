@@ -1198,14 +1198,17 @@ pub enum Message {
     RequestTurnJob {
         task_id: TaskId,
         turn_id: String,
+        claim_token: Option<String>,
     },
     RequestApprovalJob {
         task_id: TaskId,
         decision: ProductApprovalDecision,
+        claim_token: Option<String>,
     },
     RequestInteractionJob {
         task_id: TaskId,
         resolution: InteractionResolution,
+        claim_token: Option<String>,
     },
     GitHub(GitHubMessage),
     Sidebar(SidebarMessage),
@@ -11171,14 +11174,21 @@ impl DesktopProgram {
             Message::RequestTitleUpdate { task_id, turn_id } => {
                 self.start_title_update(task_id, turn_id)
             }
-            Message::RequestTurnJob { task_id, turn_id } => self.start_turn_job(task_id, turn_id),
-            Message::RequestApprovalJob { task_id, decision } => {
-                self.start_approval_job(task_id, decision)
-            }
+            Message::RequestTurnJob {
+                task_id,
+                turn_id,
+                claim_token,
+            } => self.start_turn_job(task_id, turn_id, claim_token),
+            Message::RequestApprovalJob {
+                task_id,
+                decision,
+                claim_token,
+            } => self.start_approval_job(task_id, decision, claim_token),
             Message::RequestInteractionJob {
                 task_id,
                 resolution,
-            } => self.start_interaction_job(task_id, resolution),
+                claim_token,
+            } => self.start_interaction_job(task_id, resolution, claim_token),
             Message::Terminal(message) => return self.apply_terminal_message(message),
         }
         None
@@ -13244,12 +13254,13 @@ impl DesktopProgram {
         }
     }
 
-    fn start_turn_job(&mut self, task_id: TaskId, turn_id: String) {
+    fn start_turn_job(&mut self, task_id: TaskId, turn_id: String, claim_token: Option<String>) {
         let request = JobRequest::new(
             lilia_feature_agent_session::TURN_PROTOCOL,
             serde_json::to_value(lilia_feature_agent_session::TurnJobRequest {
                 task_id: task_id.to_string(),
                 turn_id,
+                claim_token,
             })
             .expect("a turn request is representable as JSON"),
         )
@@ -13260,12 +13271,18 @@ impl DesktopProgram {
         }
     }
 
-    fn start_approval_job(&mut self, task_id: TaskId, decision: ProductApprovalDecision) {
+    fn start_approval_job(
+        &mut self,
+        task_id: TaskId,
+        decision: ProductApprovalDecision,
+        claim_token: Option<String>,
+    ) {
         let request = JobRequest::new(
             lilia_feature_agent_session::APPROVAL_PROTOCOL,
             serde_json::to_value(lilia_feature_agent_session::ApprovalJobRequest {
                 task_id: task_id.to_string(),
                 decision,
+                claim_token,
             })
             .expect("an approval request is representable as JSON"),
         )
@@ -13276,13 +13293,19 @@ impl DesktopProgram {
         }
     }
 
-    fn start_interaction_job(&mut self, task_id: TaskId, resolution: InteractionResolution) {
+    fn start_interaction_job(
+        &mut self,
+        task_id: TaskId,
+        resolution: InteractionResolution,
+        claim_token: Option<String>,
+    ) {
         let request = JobRequest::new(
             lilia_feature_agent_session::INTERACTION_PROTOCOL,
             serde_json::to_value(lilia_feature_agent_session::InteractionJobRequest {
                 task_id: task_id.to_string(),
                 resolution: serde_json::to_value(resolution)
                     .expect("an interaction resolution is representable as JSON"),
+                claim_token,
             })
             .expect("an interaction request is representable as JSON"),
         )
@@ -32439,7 +32462,8 @@ struct DesktopTurnPort {
 impl lilia_feature_agent_session::TurnPort for DesktopTurnPort {
     fn run_turn(&self, request: lilia_feature_agent_session::TurnJobRequest) -> Result<(), String> {
         let task_id = TaskId::new(&request.task_id).map_err(|error| error.to_string())?;
-        self.application.execute_turn_job(task_id, request.turn_id);
+        self.application
+            .execute_turn_job(task_id, request.turn_id, request.claim_token);
         Ok(())
     }
 
@@ -32449,7 +32473,7 @@ impl lilia_feature_agent_session::TurnPort for DesktopTurnPort {
     ) -> Result<(), String> {
         let task_id = TaskId::new(&request.task_id).map_err(|error| error.to_string())?;
         self.application
-            .execute_approval_job(task_id, request.decision);
+            .execute_approval_job(task_id, request.decision, request.claim_token);
         Ok(())
     }
 
@@ -32461,7 +32485,7 @@ impl lilia_feature_agent_session::TurnPort for DesktopTurnPort {
         let resolution = serde_json::from_value(request.resolution)
             .map_err(|error| format!("invalid interaction resolution: {error}"))?;
         self.application
-            .execute_interaction_job(task_id, resolution);
+            .execute_interaction_job(task_id, resolution, request.claim_token);
         Ok(())
     }
 }
@@ -32475,26 +32499,42 @@ struct QueuedTurnExecutor {
 }
 
 impl DesktopTurnExecutor for QueuedTurnExecutor {
-    fn execute_turn(&self, task_id: TaskId, turn_id: String) -> Result<(), String> {
-        (self.messages)(Message::RequestTurnJob { task_id, turn_id })
+    fn execute_turn(
+        &self,
+        task_id: TaskId,
+        turn_id: String,
+        claim_token: Option<String>,
+    ) -> Result<(), String> {
+        (self.messages)(Message::RequestTurnJob {
+            task_id,
+            turn_id,
+            claim_token,
+        })
     }
 
     fn execute_approval(
         &self,
         task_id: TaskId,
         decision: ProductApprovalDecision,
+        claim_token: Option<String>,
     ) -> Result<(), String> {
-        (self.messages)(Message::RequestApprovalJob { task_id, decision })
+        (self.messages)(Message::RequestApprovalJob {
+            task_id,
+            decision,
+            claim_token,
+        })
     }
 
     fn execute_interaction(
         &self,
         task_id: TaskId,
         resolution: InteractionResolution,
+        claim_token: Option<String>,
     ) -> Result<(), String> {
         (self.messages)(Message::RequestInteractionJob {
             task_id,
             resolution,
+            claim_token,
         })
     }
 }
