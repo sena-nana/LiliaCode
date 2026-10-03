@@ -19,15 +19,16 @@ use nana_ui::runtime::{
     sidebar_row_tool_button, sidebar_section_tool_button, sidebar_top_bar_tool_button, Activate,
     AppContext, Breadcrumb, BreadcrumbItem, BreadcrumbTone, Button, CodeEditing, CommandPalette,
     ConfirmDialog, ConfirmIntent, ConfirmSlots, ContextMenu, ContextMenuEvent, ContextMenuItem,
-    DesktopShell, DocumentId, EmptyState, Entity, FrameworkError, HighlightRequest, IconButton,
-    ImageViewer, ImageViewerContent, ImageViewerEvent, LengthSpec, List, ListItem, NodeStyle,
-    OverlayChanged, OverlayClosing, OverlayHost, PaneChrome, PaneChromeAction,
-    PaneChromeActionKind, ReorderItem, ReorderList, ReorderListEvent, ScrollAxes, ScrollView,
-    SecondaryPress, SemanticColorRole, SettingsPage, SidebarFooter, SidebarFooterButton,
-    SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection, SidebarSectionState,
-    SplitPane, StableNodeId, Stack, TabOption, Tabs, TabsEvent, Text, TextArea, TextChanged,
-    TextDiagnosticSeverity, TextDiagnosticSpan, TextFindScope, TextInput, TextSearchOptions,
-    TreeDropPosition, TreeView, TreeViewEvent, View,
+    DesktopShell, DiffEvent, DiffHunk as RuntimeDiffHunk, DiffLayout, DiffLine as RuntimeDiffLine,
+    DiffLineKind as RuntimeDiffLineKind, DiffView, DocumentId, EmptyState, Entity, FrameworkError,
+    HighlightRequest, IconButton, ImageViewer, ImageViewerContent, ImageViewerEvent, LengthSpec,
+    List, ListItem, NodeStyle, OverlayChanged, OverlayClosing, OverlayHost, PaneChrome,
+    PaneChromeAction, PaneChromeActionKind, ReorderItem, ReorderList, ReorderListEvent, ScrollAxes,
+    ScrollView, SecondaryPress, SemanticColorRole, SettingsPage, SidebarFooter,
+    SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection,
+    SidebarSectionState, SplitPane, StableNodeId, Stack, TabOption, Tabs, TabsEvent, Text,
+    TextArea, TextChanged, TextDiagnosticSeverity, TextDiagnosticSpan, TextFindScope, TextInput,
+    TextSearchOptions, TreeDropPosition, TreeView, TreeViewEvent, View,
 };
 use nana_ui::{
     AppearanceEvent, ButtonKind, CommandPaletteEvent, CommandPaletteItem, ControlSize, Icon,
@@ -442,6 +443,17 @@ pub struct ShellDocumentSnapshot {
     pub diagnostics: Vec<ShellDiagnosticRow>,
 }
 
+/// Inputs kept by the review surface so a hunk action can produce an editor
+/// change against the same revision that was displayed.  The disk text is
+/// read again on the next shell projection, so stale actions are rejected by
+/// the document CAS in the normal `DocumentChanged` path.
+#[derive(Clone)]
+struct DocumentReviewSource {
+    revision: u64,
+    new_text: String,
+    diff: crate::application::DocumentDiff,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellDiagnosticRow {
     pub severity: DiagnosticSeverity,
@@ -494,6 +506,63 @@ impl ShellDiagnosticRow {
             .with_message(self.message.clone()),
         )
     }
+}
+
+fn runtime_diff(diff: &crate::application::DocumentDiff) -> DiffView {
+    let hunks: Arc<[RuntimeDiffHunk]> = diff
+        .hunks
+        .iter()
+        .map(|hunk| {
+            let header = format!(
+                "@@ -{},{} +{},{} @@",
+                hunk.old_start, hunk.old_len, hunk.new_start, hunk.new_len
+            );
+            let lines: Arc<[RuntimeDiffLine]> = hunk
+                .lines
+                .iter()
+                .map(|line| RuntimeDiffLine {
+                    old_number: line.old_line.map(|number| number as u32),
+                    new_number: line.new_line.map(|number| number as u32),
+                    kind: match line.kind {
+                        crate::application::DiffLineKind::Added => RuntimeDiffLineKind::Added,
+                        crate::application::DiffLineKind::Removed => RuntimeDiffLineKind::Removed,
+                        crate::application::DiffLineKind::Context => RuntimeDiffLineKind::Context,
+                    },
+                    text: Arc::from(line.text.as_str()),
+                })
+                .collect::<Vec<_>>()
+                .into();
+            RuntimeDiffHunk::new(header, lines)
+        })
+        .collect::<Vec<_>>()
+        .into();
+    DiffView::new(hunks).layout(DiffLayout::Split)
+}
+
+fn split_review_lines(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        Vec::new()
+    } else {
+        text.split('\n').map(str::to_owned).collect()
+    }
+}
+
+/// Reject one displayed hunk by replacing its new-side context with the
+/// corresponding old-side lines.  Hunk coordinates refer to the complete new
+/// buffer, so applying hunks in reverse order keeps later coordinates stable.
+fn reject_review_hunk(source: &DocumentReviewSource, hunk_index: usize) -> Option<String> {
+    let hunk = source.diff.hunks.get(hunk_index)?;
+    let mut lines = split_review_lines(&source.new_text);
+    let old_lines = hunk
+        .lines
+        .iter()
+        .filter(|line| line.old_line.is_some())
+        .map(|line| line.text.clone())
+        .collect::<Vec<_>>();
+    let start = hunk.new_start.saturating_sub(1).min(lines.len());
+    let end = start.saturating_add(hunk.new_len).min(lines.len());
+    lines.splice(start..end, old_lines);
+    Some(lines.join("\n"))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1019,6 +1088,8 @@ pub struct ShellHandles {
     workspace_heading: Entity<Text>,
     workspace_status: Entity<Text>,
     workspace_editor: Entity<TextArea>,
+    workspace_diff: Entity<DiffView>,
+    workspace_diff_source: Arc<Mutex<Option<DocumentReviewSource>>>,
     workspace_search: EditorSearchView,
     workspace_bindings: Arc<Mutex<PaneInputBindings>>,
     workspace_log: Entity<nana_ui::runtime::TerminalView>,
@@ -3011,6 +3082,47 @@ pub fn mount_primary_shell(
         )
     })?;
     let workspace_bindings = Arc::new(Mutex::new(PaneInputBindings::default()));
+    let workspace_diff_source: Arc<Mutex<Option<DocumentReviewSource>>> =
+        Arc::new(Mutex::new(None));
+    let diff_source_for_events = Arc::clone(&workspace_diff_source);
+    let diff_bindings_for_events = Arc::clone(&workspace_bindings);
+    let diff_sink = Arc::clone(&sink);
+    let (_, workspace_diff) = context.mount_view_detached(document_id, || {
+        let diff = entity_ref::<DiffView>();
+        with_refs(
+            widget(runtime_diff(&crate::application::DocumentDiff::between(
+                "", "",
+            )))
+            .entity_ref(diff),
+            diff,
+        )
+    })?;
+    context.on(workspace_diff, move |_, event: &DiffEvent, _| {
+        let hunk = match event {
+            DiffEvent::HunkRejected { hunk } | DiffEvent::LineRejected { hunk, .. } => *hunk,
+            DiffEvent::HunkAccepted { .. }
+            | DiffEvent::LineAccepted { .. }
+            | DiffEvent::LayoutChanged { .. } => return,
+        };
+        let Some(source) = diff_source_for_events.lock().unwrap().clone() else {
+            return;
+        };
+        let current_revision = diff_bindings_for_events
+            .lock()
+            .unwrap()
+            .document
+            .as_ref()
+            .map(|(_, revision, _)| *revision);
+        if current_revision != Some(source.revision) {
+            return;
+        }
+        let Some(value) = reject_review_hunk(&source, hunk) else {
+            return;
+        };
+        if let Some(intent) = diff_bindings_for_events.lock().unwrap().edit(value) {
+            emit(&diff_sink, intent);
+        }
+    })?;
     bind_document_input(context, workspace_editor, &sink, &workspace_bindings)?;
     let workspace_search = EditorSearchView::mount(
         context,
@@ -3330,6 +3442,8 @@ pub fn mount_primary_shell(
         workspace_heading,
         workspace_status,
         workspace_editor,
+        workspace_diff,
+        workspace_diff_source,
         workspace_search,
         workspace_bindings,
         workspace_log,
@@ -5069,6 +5183,27 @@ impl ShellHandles {
                     .collect::<Vec<_>>()
                     .into();
             })?;
+            if let Ok(old_text) = std::fs::read_to_string(&document.title) {
+                let diff = crate::application::DocumentDiff::between(&old_text, &document.text);
+                *self.workspace_diff_source.lock().unwrap() = Some(DocumentReviewSource {
+                    revision: document.revision,
+                    new_text: document.text.clone(),
+                    diff: diff.clone(),
+                });
+                context.update_component(self.workspace_diff, |view, _| {
+                    *view = runtime_diff(&diff);
+                })?;
+            } else {
+                *self.workspace_diff_source.lock().unwrap() = None;
+                context.update_component(self.workspace_diff, |view, _| {
+                    *view = runtime_diff(&crate::application::DocumentDiff::between("", ""));
+                })?;
+            }
+        } else {
+            *self.workspace_diff_source.lock().unwrap() = None;
+            context.update_component(self.workspace_diff, |view, _| {
+                *view = runtime_diff(&crate::application::DocumentDiff::between("", ""));
+            })?;
         }
         if let Some(terminal) = &snapshot.terminal {
             if self.workspace_terminal_session.as_deref() != Some(&terminal.session_id) {
@@ -5112,6 +5247,13 @@ impl ShellHandles {
                     order.push(self.workspace_search.root.stable_id());
                 }
                 order.push(self.workspace_editor.stable_id());
+                if snapshot
+                    .document
+                    .as_ref()
+                    .is_some_and(|document| document.dirty || document.conflicted)
+                {
+                    order.push(self.workspace_diff.stable_id());
+                }
                 order.push(self.workspace_actions.stable_id());
             }
             Some("project-files") => {
@@ -6571,6 +6713,24 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
 mod tests {
     use super::*;
     use crate::runtime_layout::COMPOSER_CARD_RADIUS;
+
+    #[test]
+    fn rejecting_a_review_hunk_restores_only_that_hunk() {
+        let diff = crate::application::DocumentDiff::between(
+            "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
+            "one\nchanged\nthree\nfour\nfive\nsix\nseven\neight\nnine\nnew-ten",
+        );
+        let source = DocumentReviewSource {
+            revision: 0,
+            new_text: "one\nchanged\nthree\nfour\nfive\nsix\nseven\neight\nnine\nnew-ten"
+                .to_owned(),
+            diff,
+        };
+        let rejected = reject_review_hunk(&source, 0).expect("first hunk");
+        assert!(rejected.contains("three"));
+        assert!(rejected.contains("new-ten"));
+        assert!(!rejected.contains("changed"));
+    }
 
     fn snapshot_with_empty_primary_pane() -> PrimaryShellSnapshot {
         let mut snapshot = empty_snapshot();

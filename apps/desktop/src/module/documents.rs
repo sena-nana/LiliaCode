@@ -356,12 +356,24 @@ impl DocumentsModule {
         let document_id = state.document_id;
         let mut expected = state.revision;
         if state.unapplied_edit {
-            match service.replace_document_text(document_id, expected, state.editor.text()) {
-                Ok(revision) => {
-                    expected = revision;
+            let external_conflict = state.external_conflict;
+            let draft = state.editor.text();
+            let result = if external_conflict {
+                // This branch is reached only after the explicit “保留并保存”
+                // action for a filesystem conflict.
+                service.overwrite_document(document_id, expected)
+            } else {
+                service
+                    .replace_document_text(document_id, expected, draft)
+                    .and_then(|_| service.document_snapshot(document_id))
+            };
+            match result {
+                Ok(snapshot) => {
+                    expected = snapshot.buffer.revision;
                     if let Some(state) = self.editors.get_mut(&item_id) {
                         state.unapplied_edit = false;
-                        state.revision = revision;
+                        state.external_conflict = false;
+                        state.revision = expected;
                     }
                     self.sync_views(document_id, service);
                 }
@@ -409,10 +421,17 @@ impl DocumentsModule {
         };
         let document_id = state.document_id;
         if state.unapplied_edit {
-            match service.document_snapshot(document_id) {
+            let external_conflict = state.external_conflict;
+            let reload = if external_conflict {
+                service.discard_document_changes(document_id)
+            } else {
+                service.document_snapshot(document_id)
+            };
+            match reload {
                 Ok(snapshot) => {
                     if let Some(state) = self.editors.get_mut(&item_id) {
                         state.unapplied_edit = false;
+                        state.external_conflict = false;
                         state.sync_from_snapshot(&snapshot);
                         state.conflict_message = None;
                         state.status_message = None;
@@ -643,6 +662,16 @@ impl DocumentsModule {
             state.sync_from_snapshot(&snapshot);
         }
     }
+
+    fn mark_external_conflict(&mut self, document_id: DocumentId) {
+        for state in self
+            .editors
+            .values_mut()
+            .filter(|state| state.document_id == document_id)
+        {
+            state.mark_external_conflict();
+        }
+    }
 }
 
 impl UiModule for DocumentsModule {
@@ -661,15 +690,36 @@ impl UiModule for DocumentsModule {
                 expected_revision,
                 value,
             } => {
-                let Some(state) = self.editors.get_mut(&item_id) else {
+                let Some(current_revision) = self.editors.get(&item_id).map(|state| state.revision)
+                else {
                     return UiModuleOutcome::clean();
                 };
-                if state.read_only {
+                if self
+                    .editors
+                    .get(&item_id)
+                    .is_some_and(|state| state.read_only)
+                {
                     return UiModuleOutcome::clean();
                 }
-                if state.revision.get() != expected_revision {
+                if current_revision.get() != expected_revision {
+                    // A view event can arrive after another view committed a
+                    // newer revision.  Retain the user's draft, but first
+                    // advance the view to the authoritative revision.  Using
+                    // `None` here leaves SaveEditor permanently retrying the
+                    // stale revision and makes the explicit "保留并保存"
+                    // decision impossible to complete.
+                    let service = cx
+                        .kernel()
+                        .service::<crate::application::DocumentServiceKey>()
+                        .ok();
+                    let latest = service.as_ref().and_then(|service| {
+                        self.editors
+                            .get(&item_id)
+                            .and_then(|state| service.document_snapshot(state.document_id).ok())
+                    });
+                    let state = self.editors.get_mut(&item_id).expect("editor still exists");
                     state.editor.perform(value);
-                    state.retain_edit_conflict(None);
+                    state.retain_edit_conflict(latest.as_ref());
                     state.conflict_message = Some(
                         "文档已在其他位置更新。当前输入已保留，请选择保留并保存或重新载入。"
                             .to_owned(),
@@ -768,6 +818,10 @@ impl UiModule for DocumentsModule {
             Ok(service) => service,
             Err(error) => return UiModuleOutcome::failed(error.to_string()),
         };
+        if event.kind == crate::application::DocumentChangeKind::ExternalConflict {
+            self.mark_external_conflict(event.document_id);
+            return UiModuleOutcome::dirty();
+        }
         self.sync_views(event.document_id, &service);
         UiModuleOutcome::dirty()
     }
@@ -949,6 +1003,56 @@ mod tests {
         assert!(outcome.dirty);
         assert!(module.editors[&item].unapplied_edit);
         assert_eq!(module.editors[&item].editor.text(), "stale");
+    }
+
+    #[test]
+    fn stale_view_event_can_be_explicitly_saved_against_authoritative_revision() {
+        let home = tempfile::tempdir().unwrap();
+        let application = application(home.path());
+        let path = home.path().join("shared.md");
+        std::fs::write(&path, "original").unwrap();
+        let (snapshot, _) = application
+            .open_document(&path, "original", None, false)
+            .unwrap();
+        let mut module = DocumentsModule::default();
+        let item = workspace_item("editor", "shared.md");
+        module.ensure_editor(&item, &snapshot);
+
+        let authoritative_revision = application
+            .replace_document_text(snapshot.id, snapshot.buffer.revision, "other writer")
+            .unwrap();
+        let service = application.document_service();
+        let kernel = lilia_kernel::Kernel::new();
+        kernel
+            .mount(std::sync::Arc::new(
+                crate::application::DocumentServiceFeature::new(service.clone()),
+            ))
+            .unwrap();
+        let cx = UiModuleContext::new(&kernel, nana_ui_platform::WindowId::PRIMARY);
+
+        let outcome = module.reduce(
+            DocumentMessage::EditorReplaced {
+                item_id: item.id.clone(),
+                expected_revision: snapshot.buffer.revision.get(),
+                value: "my draft".to_owned(),
+            },
+            &cx,
+        );
+        assert!(outcome.dirty);
+        assert!(module.editors[&item.id].unapplied_edit);
+        assert_eq!(module.editors[&item.id].revision, authoritative_revision);
+        assert_eq!(module.editors[&item.id].editor.text(), "my draft");
+
+        module.save_editor(item.id.clone(), &service, kernel.jobs());
+
+        let saved = application.document_snapshot(snapshot.id).unwrap();
+        assert_eq!(saved.buffer.text, "my draft");
+        assert!(!saved.buffer.is_dirty());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "my draft");
+        let state = &module.editors[&item.id];
+        assert!(!state.unapplied_edit);
+        assert!(!state.dirty);
+        assert!(state.conflict_message.is_none());
     }
 
     #[test]

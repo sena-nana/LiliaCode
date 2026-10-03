@@ -3219,11 +3219,7 @@ impl DesktopProgram {
                 } else {
                     SplitAxis::Vertical
                 };
-                if window == HostedWindowId::PRIMARY {
-                    self.split_workspace_pane(pane_id, axis);
-                } else {
-                    self.split_workspace_window_pane(window, pane_id, axis);
-                }
+                self.split_workspace_pane_for_view(window, pane_id, axis);
                 None
             }
             ShellIntent::ReorderPaneTab {
@@ -6469,12 +6465,20 @@ impl DesktopProgram {
                     TitlebarMenuAction::ToggleTaskInspector => self.toggle_task_inspector(),
                     TitlebarMenuAction::SplitHorizontal => {
                         if let Some((pane_id, _)) = self.integrated_product_shell_pane() {
-                            self.split_workspace_pane(pane_id, SplitAxis::Horizontal);
+                            self.split_workspace_pane_for_view(
+                                HostedWindowId::PRIMARY,
+                                pane_id,
+                                SplitAxis::Horizontal,
+                            );
                         }
                     }
                     TitlebarMenuAction::SplitVertical => {
                         if let Some((pane_id, _)) = self.integrated_product_shell_pane() {
-                            self.split_workspace_pane(pane_id, SplitAxis::Vertical);
+                            self.split_workspace_pane_for_view(
+                                HostedWindowId::PRIMARY,
+                                pane_id,
+                                SplitAxis::Vertical,
+                            );
                         }
                     }
                     TitlebarMenuAction::CloseCurrentItem => {
@@ -12418,8 +12422,27 @@ impl DesktopProgram {
     }
 
     fn route_documents_message(&mut self, message: DocumentMessage) {
-        let outcome =
-            self.route_to_primary_module(&DocumentsModule::feature_id(), Box::new(message));
+        let window_id = match &message {
+            DocumentMessage::GoToDefinition { window_id, .. }
+            | DocumentMessage::OpenDefinitionTarget { window_id, .. } => *window_id,
+            DocumentMessage::EditorReplaced { item_id, .. }
+            | DocumentMessage::SaveEditor(item_id)
+            | DocumentMessage::DiscardEditor(item_id) => self
+                .workspace_item_location(item_id)
+                .map(|(window_id, _)| window_id)
+                .unwrap_or(HostedWindowId::PRIMARY),
+            DocumentMessage::Job(_) => self.dispatch_window(),
+        };
+        let outcome = if window_id == HostedWindowId::PRIMARY {
+            self.route_to_primary_module(&DocumentsModule::feature_id(), Box::new(message))
+        } else {
+            self.route_to_window_module(
+                window_id,
+                &DocumentsModule::feature_id(),
+                Box::new(message),
+                None,
+            )
+        };
         if let Some(outcome) = outcome {
             self.apply_ui_module_outcome(outcome);
         }
@@ -12918,6 +12941,120 @@ impl DesktopProgram {
             axis,
             ratio: 0.5,
         });
+    }
+
+    /// Splits a pane and, when it contains a document, opens a second view of
+    /// that same document in the new pane.  Workspace items identify views,
+    /// while `resource_id` and the document store identify the shared buffer;
+    /// this keeps edits shared without aliasing cursor/selection state.
+    fn split_workspace_pane_for_view(
+        &mut self,
+        window_id: HostedWindowId,
+        pane_id: PaneId,
+        axis: SplitAxis,
+    ) {
+        let snapshot = if window_id == HostedWindowId::PRIMARY {
+            self.application_workspace.snapshot().ok()
+        } else {
+            self.task_popups
+                .get(&window_id)
+                .and_then(|popup| popup.workspace.snapshot().ok())
+        };
+        let Some(snapshot) = snapshot else {
+            return;
+        };
+        let active_item_id = snapshot
+            .panel_layout
+            .active_item(&pane_id)
+            .ok()
+            .flatten()
+            .cloned();
+        let Some(active_item_id) = active_item_id else {
+            if window_id == HostedWindowId::PRIMARY {
+                self.split_workspace_pane(pane_id, axis);
+            } else {
+                self.split_workspace_window_pane(window_id, pane_id, axis);
+            }
+            return;
+        };
+        let Some(active_item) = snapshot
+            .workspace_items
+            .iter()
+            .find(|item| item.id == active_item_id)
+        else {
+            return;
+        };
+        if active_item.kind.as_str() != DOCUMENT_WORKSPACE_ITEM_KIND {
+            if window_id == HostedWindowId::PRIMARY {
+                self.split_workspace_pane(pane_id, axis);
+            } else {
+                self.split_workspace_window_pane(window_id, pane_id, axis);
+            }
+            return;
+        }
+        let document_id = if window_id == HostedWindowId::PRIMARY {
+            self.documents_module()
+                .and_then(|module| module.editor_document_id(&active_item_id))
+        } else {
+            self.window_module(window_id, &DocumentsModule::feature_id())
+                .and_then(|module: &DocumentsModule| module.editor_document_id(&active_item_id))
+        };
+        let Some(document_id) = document_id else {
+            return;
+        };
+        let view_id = match WorkspaceItemId::new(format!(
+            "{}:view:{}",
+            active_item.resource_id.as_str(),
+            uuid::Uuid::new_v4()
+        )) {
+            Ok(id) => id,
+            Err(_) => return,
+        };
+        let Ok(view) = self
+            .kernel
+            .session()
+            .document_workspace_item_view(document_id, view_id)
+        else {
+            return;
+        };
+        let view = view.with_serialized_state(active_item.serialized_state.clone());
+        let new_pane_id = PaneId::new(format!("pane-{}", uuid::Uuid::new_v4()))
+            .expect("UUID-backed pane ids are valid");
+        let split = if window_id == HostedWindowId::PRIMARY {
+            self.execute_workspace_command(DesktopCommand::SplitPane {
+                pane_id,
+                new_pane_id: new_pane_id.clone(),
+                axis,
+                ratio: 0.5,
+            })
+        } else {
+            self.execute_workspace_window_command(
+                window_id,
+                DesktopCommand::SplitPane {
+                    pane_id,
+                    new_pane_id: new_pane_id.clone(),
+                    axis,
+                    ratio: 0.5,
+                },
+            )
+        };
+        if !split {
+            return;
+        }
+        if window_id == HostedWindowId::PRIMARY {
+            self.execute_workspace_command(DesktopCommand::OpenWorkspaceItem {
+                pane_id: new_pane_id,
+                item: view,
+            });
+        } else {
+            self.execute_workspace_window_command(
+                window_id,
+                DesktopCommand::OpenWorkspaceItem {
+                    pane_id: new_pane_id,
+                    item: view,
+                },
+            );
+        }
     }
 
     fn sync_workspace_splits(&mut self) {
@@ -26620,6 +26757,13 @@ impl DesktopProgram {
         } else if let Some(event) = envelope.downcast::<ProjectFilesChanged>() {
             if self.current_selected_project().as_ref() == Some(&event.project_id) {
                 self.refresh_project_files();
+            }
+            // The project watcher is already debounced for external writes.
+            // Reuse that signal to inspect open document buffers; clean
+            // documents reload and dirty ones publish an explicit conflict
+            // event without replacing their in-memory text.
+            if let Err(error) = self.kernel.session().observe_open_documents() {
+                eprintln!("failed to observe open documents after filesystem change: {error}");
             }
         } else if let Some(event) = envelope.downcast::<TerminalChanged>() {
             self.refresh_terminal(&event.session_id);

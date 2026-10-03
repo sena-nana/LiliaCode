@@ -172,8 +172,8 @@ pub use conversation_suggestions::{
     CONVERSATION_SUGGESTION_SETTINGS_KEY,
 };
 pub use document::{
-    document_resource_key, path_from_document_resource_key, DocumentError, DocumentId,
-    DocumentSavePlan, DocumentSnapshot, DocumentStore,
+    document_resource_key, path_from_document_resource_key, DocumentError, DocumentExternalChange,
+    DocumentId, DocumentSavePlan, DocumentSnapshot, DocumentStore,
 };
 #[cfg(debug_assertions)]
 pub use equivalence::{
@@ -258,8 +258,9 @@ pub use lilia_feature_automation::{
 };
 pub use lilia_feature_document::{
     BufferError, BufferId, BufferRevision, BufferSnapshot, BufferStore, Diagnostic,
-    DiagnosticSeverity, DiagnosticStore, LanguageDefinition, LanguageId, LanguageRegistry,
-    LanguageRegistryError, ProjectContext, ProjectContextError, TextBuffer, TextEdit,
+    DiagnosticSeverity, DiagnosticStore, DiffHunk, DiffLine, DiffLineKind, DocumentContextSnapshot,
+    DocumentDiff, LanguageDefinition, LanguageId, LanguageRegistry, LanguageRegistryError,
+    ProjectContext, ProjectContextError, TextBuffer, TextEdit,
 };
 pub use lilia_feature_memory::{
     DesktopMemory, DesktopMemoryError, DesktopMemoryService, InMemoryMemorySettingsStore,

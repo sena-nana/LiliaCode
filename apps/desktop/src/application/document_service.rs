@@ -17,6 +17,10 @@ pub enum DocumentChangeKind {
     Edited,
     Saved,
     Reloaded,
+    /// A filesystem observation found a newer disk version while the
+    /// authoritative in-memory buffer was dirty.  The buffer remains intact
+    /// and the editor must present an explicit reload/overwrite choice.
+    ExternalConflict,
     Closed,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -189,6 +193,10 @@ mod tests {
             "next draft"
         );
         assert!(rx.try_recv().is_err());
+        let overwritten = mounted.overwrite_document(document.id, revision).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "next draft");
+        assert!(!overwritten.buffer.is_dirty());
+        assert_eq!(rx.try_recv().unwrap().0.kind, DocumentChangeKind::Saved);
         kernel.events().unsubscribe(subscription);
     }
     #[test]

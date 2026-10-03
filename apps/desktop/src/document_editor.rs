@@ -132,6 +132,10 @@ pub struct DocumentEditorViewState {
     pub revision: BufferRevision,
     pub dirty: bool,
     pub unapplied_edit: bool,
+    /// The disk changed while this view had a dirty buffer.  This is kept
+    /// separately from `unapplied_edit`: the latter also represents a stale
+    /// view event whose authoritative buffer is still the right reload source.
+    pub external_conflict: bool,
     pub read_only: bool,
     pub conflict_message: Option<String>,
     pub status_message: Option<String>,
@@ -158,6 +162,7 @@ impl DocumentEditorViewState {
             revision: snapshot.buffer.revision,
             dirty: snapshot.buffer.is_dirty(),
             unapplied_edit: false,
+            external_conflict: false,
             read_only: snapshot.read_only,
             conflict_message: None,
             status_message: None,
@@ -205,6 +210,17 @@ impl DocumentEditorViewState {
         }
         self.unapplied_edit = true;
         self.dirty = true;
+        self.note_text_changed();
+        self.definition_targets.clear();
+    }
+
+    pub fn mark_external_conflict(&mut self) {
+        self.unapplied_edit = true;
+        self.external_conflict = true;
+        self.dirty = true;
+        self.conflict_message = Some(
+            "磁盘文件已在其他位置更新。当前内容已保留，请选择保留并保存或重新载入。".to_owned(),
+        );
         self.note_text_changed();
         self.definition_targets.clear();
     }
