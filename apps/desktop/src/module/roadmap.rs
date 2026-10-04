@@ -458,6 +458,15 @@ impl UiModule for RoadmapModule {
         Self::feature_id()
     }
 
+    fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String> {
+        let _ = self.refresh(cx);
+        Ok(())
+    }
+
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        self.refresh(cx)
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             RoadmapMessage::Open => UiModuleOutcome::effect(ShellEffect::RevealProjectSurface(

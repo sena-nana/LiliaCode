@@ -26643,9 +26643,6 @@ impl DesktopProgram {
     }
 
     fn apply_kernel_event(&mut self, envelope: lilia_kernel::EventEnvelope) {
-        if envelope.is::<lilia_kernel::JobEvent>() {
-            return;
-        }
         if envelope.is::<ProjectsChanged>() {
             self.refresh_projects();
             if self.project_removal.as_ref().is_some_and(|removal| {
@@ -28394,7 +28391,9 @@ impl DesktopProgram {
         // platform later recycles cannot inherit the closed window's session or
         // modules.
         self.workspace_sessions.remove(window_id);
-        self.ui_module_hosts.remove(&window_id);
+        if let Some(mut host) = self.ui_module_hosts.remove(&window_id) {
+            host.unmount();
+        }
         self.file_drop_hovered_windows.remove(&window_id);
         self.attachment_previews.remove(&window_id);
         self.markdown_image_previews.remove(&window_id);
@@ -30188,9 +30187,6 @@ impl RuntimeProgram for DesktopProgram {
         };
         let dispatcher = context.clone();
         application.event_bus().observe(None, move |envelope| {
-            if envelope.is::<lilia_kernel::JobEvent>() {
-                return;
-            }
             dispatcher.dispatch(Message::KernelEvent(envelope.clone()));
         });
         let extensions_exchange = Arc::new(ExtensionsExchange::default());

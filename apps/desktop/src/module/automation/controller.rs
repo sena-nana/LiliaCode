@@ -1350,6 +1350,21 @@ impl UiModule for AutomationController {
         Self::feature_id()
     }
 
+    fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String> {
+        if cx.window() == self.window {
+            self.refresh_automations();
+        }
+        Ok(())
+    }
+
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        if cx.window() != self.window {
+            return UiModuleOutcome::clean();
+        }
+        self.refresh_automations();
+        UiModuleOutcome::dirty()
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         if cx.window() != self.window {
             return UiModuleOutcome::clean();

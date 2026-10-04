@@ -220,6 +220,22 @@ pub trait UiModule: 'static {
     /// The feature that owns this domain. Messages are routed by it.
     fn feature(&self) -> FeatureId;
 
+    /// Attaches the module to one window-local host. The hook is also the
+    /// module's first opportunity to load an authoritative projection.
+    fn mount(&mut self, _cx: &UiModuleContext<'_>) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Releases subscriptions and transient state before the window host goes
+    /// away. It intentionally does not borrow a workspace context because the
+    /// session may already have been removed during window teardown.
+    fn unmount(&mut self) {}
+
+    /// Re-reads authoritative state after the host observes a sequence gap.
+    fn resync(&mut self, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        UiModuleOutcome::clean()
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome;
 
     /// Reloads this module's cached slice when a typed event names its domain.
@@ -255,6 +271,10 @@ pub trait ErasedUiModule {
 
     fn feature(&self) -> FeatureId;
 
+    fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String>;
+
+    fn unmount(&mut self);
+
     /// Lets the shell recover the concrete module.
     ///
     /// Needed by the paths that are not projection: the debug harness observing
@@ -279,6 +299,8 @@ pub trait ErasedUiModule {
         envelope: &lilia_kernel::EventEnvelope,
         cx: &UiModuleContext<'_>,
     ) -> UiModuleOutcome;
+
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome;
 }
 
 impl<M> ErasedUiModule for M
@@ -291,6 +313,14 @@ where
 
     fn feature(&self) -> FeatureId {
         UiModule::feature(self)
+    }
+
+    fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String> {
+        UiModule::mount(self, cx)
+    }
+
+    fn unmount(&mut self) {
+        UiModule::unmount(self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -325,6 +355,10 @@ where
         cx: &UiModuleContext<'_>,
     ) -> UiModuleOutcome {
         UiModule::invalidate(self, envelope, cx)
+    }
+
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        UiModule::resync(self, cx)
     }
 }
 
@@ -376,6 +410,7 @@ impl UiModuleRegistry {
         for (_, factory) in &self.factories {
             host.register(factory(cx)?)?;
         }
+        host.mount(cx)?;
         Ok(host)
     }
 }
@@ -385,9 +420,40 @@ impl UiModuleRegistry {
 pub struct UiModuleHost {
     modules: Vec<Box<dyn ErasedUiModule>>,
     routes: HashMap<FeatureId, usize>,
+    mounted: bool,
+    last_event_sequence: Option<u64>,
 }
 
 impl UiModuleHost {
+    pub fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String> {
+        if self.mounted {
+            return Ok(());
+        }
+        let mut mounted = 0;
+        for module in &mut self.modules {
+            if let Err(error) = module.mount(cx) {
+                module.unmount();
+                for module in self.modules[..mounted].iter_mut().rev() {
+                    module.unmount();
+                }
+                return Err(error);
+            }
+            mounted += 1;
+        }
+        self.mounted = true;
+        Ok(())
+    }
+
+    pub fn unmount(&mut self) {
+        if !self.mounted {
+            return;
+        }
+        for module in self.modules.iter_mut().rev() {
+            module.unmount();
+        }
+        self.mounted = false;
+    }
+
     pub fn job(
         &mut self,
         event: &lilia_kernel::JobEvent,
@@ -462,7 +528,7 @@ impl UiModuleHost {
         envelope: &lilia_kernel::EventEnvelope,
         cx: &UiModuleContext<'_>,
     ) -> UiModuleOutcome {
-        let mut combined = UiModuleOutcome::clean();
+        let mut combined = self.observe_event(envelope, cx);
         for module in &mut self.modules {
             let outcome = module.invalidate(envelope, cx);
             combined.dirty |= outcome.dirty;
@@ -473,11 +539,48 @@ impl UiModuleHost {
         }
         combined
     }
+
+    /// Advances the host cursor for an envelope and performs authoritative
+    /// reloads when one or more envelopes were not delivered to this host.
+    pub fn observe_event(
+        &mut self,
+        envelope: &lilia_kernel::EventEnvelope,
+        cx: &UiModuleContext<'_>,
+    ) -> UiModuleOutcome {
+        let sequence = envelope.sequence();
+        let gap = self
+            .last_event_sequence
+            .is_some_and(|last| sequence != last.saturating_add(1));
+        self.last_event_sequence = Some(sequence);
+        if !gap {
+            return UiModuleOutcome::clean();
+        }
+        let mut combined = UiModuleOutcome::clean();
+        for module in &mut self.modules {
+            let outcome = module.resync(cx);
+            combined.dirty |= outcome.dirty;
+            if combined.error.is_none() {
+                combined.error = outcome.error;
+            }
+            combined.effects.extend(outcome.effects);
+        }
+        combined
+    }
+}
+
+impl Drop for UiModuleHost {
+    fn drop(&mut self) {
+        self.unmount();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     struct TitleProjection<'a>(&'a mut String);
     struct HeaderProjection<'a>(&'a mut String);
@@ -558,6 +661,58 @@ mod tests {
         fn project_fields(&self, _cx: &UiModuleContext<'_>, into: Self::Projection<'_>) {
             *into.0 = self.heading.clone();
         }
+    }
+
+    #[derive(Clone)]
+    struct LifecycleEvent;
+
+    impl lilia_kernel::Event for LifecycleEvent {
+        const NAME: &'static str = "test.lifecycle";
+    }
+
+    struct LifecycleModule {
+        feature: &'static str,
+        mounted: Arc<AtomicUsize>,
+        unmounted: Arc<AtomicUsize>,
+        resynced: Arc<AtomicUsize>,
+        fail_mount: bool,
+    }
+
+    impl UiModule for LifecycleModule {
+        type Message = ();
+        type Projection<'a> = HeaderProjection<'a>;
+
+        fn feature(&self) -> FeatureId {
+            FeatureId::new(self.feature).expect("test feature id")
+        }
+
+        fn mount(&mut self, _cx: &UiModuleContext<'_>) -> Result<(), String> {
+            self.mounted.fetch_add(1, Ordering::SeqCst);
+            if self.fail_mount {
+                Err("mount failed".to_owned())
+            } else {
+                Ok(())
+            }
+        }
+
+        fn unmount(&mut self) {
+            self.unmounted.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn resync(&mut self, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+            self.resynced.fetch_add(1, Ordering::SeqCst);
+            UiModuleOutcome::dirty()
+        }
+
+        fn reduce(
+            &mut self,
+            _message: Self::Message,
+            _cx: &UiModuleContext<'_>,
+        ) -> UiModuleOutcome {
+            UiModuleOutcome::clean()
+        }
+
+        fn project_fields(&self, _cx: &UiModuleContext<'_>, _into: Self::Projection<'_>) {}
     }
 
     fn titler(feature: &'static str) -> Box<dyn ErasedUiModule> {
@@ -714,5 +869,82 @@ mod tests {
 
         assert_eq!(snapshot.title_parent, "a title");
         assert_eq!(snapshot.heading, "a heading");
+    }
+
+    #[test]
+    fn host_mounts_once_and_unmounts_on_drop() {
+        let kernel = Kernel::new();
+        let cx = UiModuleContext::new(&kernel, WindowId::PRIMARY);
+        let mounted = Arc::new(AtomicUsize::new(0));
+        let unmounted = Arc::new(AtomicUsize::new(0));
+        let resynced = Arc::new(AtomicUsize::new(0));
+        let mut host = UiModuleHost::new();
+        host.register(Box::new(LifecycleModule {
+            feature: "test.lifecycle",
+            mounted: Arc::clone(&mounted),
+            unmounted: Arc::clone(&unmounted),
+            resynced: Arc::clone(&resynced),
+            fail_mount: false,
+        }))
+        .unwrap();
+        host.mount(&cx).unwrap();
+        host.mount(&cx).unwrap();
+        assert_eq!(mounted.load(Ordering::SeqCst), 1);
+        drop(host);
+        assert_eq!(unmounted.load(Ordering::SeqCst), 1);
+        assert_eq!(resynced.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn mount_failure_rolls_back_successful_and_failing_modules() {
+        let kernel = Kernel::new();
+        let cx = UiModuleContext::new(&kernel, WindowId::PRIMARY);
+        let first_unmounted = Arc::new(AtomicUsize::new(0));
+        let second_mounted = Arc::new(AtomicUsize::new(0));
+        let second_unmounted = Arc::new(AtomicUsize::new(0));
+        let mut host = UiModuleHost::new();
+        host.register(Box::new(LifecycleModule {
+            feature: "test.lifecycle.first",
+            mounted: Arc::new(AtomicUsize::new(0)),
+            unmounted: Arc::clone(&first_unmounted),
+            resynced: Arc::new(AtomicUsize::new(0)),
+            fail_mount: false,
+        }))
+        .unwrap();
+        host.register(Box::new(LifecycleModule {
+            feature: "test.lifecycle.second",
+            mounted: Arc::clone(&second_mounted),
+            unmounted: Arc::clone(&second_unmounted),
+            resynced: Arc::new(AtomicUsize::new(0)),
+            fail_mount: true,
+        }))
+        .unwrap();
+        assert!(host.mount(&cx).is_err());
+        assert_eq!(first_unmounted.load(Ordering::SeqCst), 1);
+        assert_eq!(second_mounted.load(Ordering::SeqCst), 1);
+        assert_eq!(second_unmounted.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_sequence_gap_requests_resync_before_incremental_invalidation() {
+        let kernel = Kernel::new();
+        let cx = UiModuleContext::new(&kernel, WindowId::PRIMARY);
+        let resynced = Arc::new(AtomicUsize::new(0));
+        let mut host = UiModuleHost::new();
+        host.register(Box::new(LifecycleModule {
+            feature: "test.lifecycle",
+            mounted: Arc::new(AtomicUsize::new(0)),
+            unmounted: Arc::new(AtomicUsize::new(0)),
+            resynced: Arc::clone(&resynced),
+            fail_mount: false,
+        }))
+        .unwrap();
+        let first = kernel.events().publish(LifecycleEvent);
+        host.invalidate(&first, &cx);
+        let _skipped = kernel.events().publish(LifecycleEvent);
+        let third = kernel.events().publish(LifecycleEvent);
+        let outcome = host.invalidate(&third, &cx);
+        assert!(outcome.dirty);
+        assert_eq!(resynced.load(Ordering::SeqCst), 1);
     }
 }

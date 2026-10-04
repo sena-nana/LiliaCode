@@ -102,6 +102,19 @@ impl UiModule for SettingsModule {
         Self::feature_id()
     }
 
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        if let Ok(service) = cx
+            .kernel()
+            .service::<crate::application::AgentInteractionServiceKey>()
+        {
+            if let Ok((settings, catalog)) = service.snapshot() {
+                self.interaction = settings;
+                self.catalog = catalog;
+            }
+        }
+        UiModuleOutcome::dirty()
+    }
+
     fn reduce(&mut self, message: Self::Message, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             SettingsModuleMessage::SetCatalog(catalog) => {
