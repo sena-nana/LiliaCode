@@ -213,6 +213,10 @@ impl UiModule for TimelineModule {
         Self::feature_id()
     }
 
+    fn resync(&mut self, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        UiModuleOutcome::dirty()
+    }
+
     fn reduce(&mut self, message: Self::Message, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             TimelineModuleMessage::Toggle(event_id) => {

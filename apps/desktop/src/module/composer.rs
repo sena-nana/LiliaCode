@@ -586,6 +586,21 @@ impl UiModule for ComposerModule {
         Self::feature_id()
     }
 
+    fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String> {
+        let _ = self.refresh(cx);
+        Ok(())
+    }
+
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        // A new conversation can still be a window-local transient draft. Keep
+        // that draft while asking the shell to repaint; once it is persisted,
+        // the service is authoritative again.
+        if self.transient {
+            return UiModuleOutcome::dirty();
+        }
+        self.refresh(cx)
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             ComposerMessage::SetMenu(menu) => {

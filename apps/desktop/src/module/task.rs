@@ -176,6 +176,10 @@ impl UiModule for TaskModule {
         Self::feature_id()
     }
 
+    fn resync(&mut self, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        UiModuleOutcome::dirty()
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         if matches!(
             &message,

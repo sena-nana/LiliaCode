@@ -683,6 +683,25 @@ impl UiModule for DocumentsModule {
         Self::feature_id()
     }
 
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        let service = match cx
+            .kernel()
+            .service::<crate::application::DocumentServiceKey>()
+        {
+            Ok(service) => service,
+            Err(error) => return UiModuleOutcome::failed(error.to_string()),
+        };
+        let document_ids = self
+            .editors
+            .values()
+            .map(|state| state.document_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        for document_id in document_ids {
+            self.sync_views(document_id, &service);
+        }
+        UiModuleOutcome::dirty()
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             DocumentMessage::EditorReplaced {

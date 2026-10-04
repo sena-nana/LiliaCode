@@ -1642,6 +1642,17 @@ impl UiModule for ExtensionsModule {
         Self::feature_id()
     }
 
+    fn mount(&mut self, cx: &UiModuleContext<'_>) -> Result<(), String> {
+        let _ = self.resync(cx);
+        Ok(())
+    }
+
+    fn resync(&mut self, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+        self.queue(ExtensionsCommand::Refresh {
+            project_cwd: Self::project_cwd(cx),
+        })
+    }
+
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             ExtensionsModuleMessage::Ui(message) => self.reduce_ui(message, cx),
