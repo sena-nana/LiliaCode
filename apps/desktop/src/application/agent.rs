@@ -575,7 +575,7 @@ impl DesktopApplication {
                 source_turn_id,
             )
             .map_err(agent_wire_error)?;
-        self.replace_session_binding(task_id, &forked.session_id, &forked.profile_id)?;
+        self.bind_forked_task_session(task_id, &forked.session_id, &forked.profile_id)?;
         Ok(forked.session_id)
     }
 
@@ -706,10 +706,7 @@ impl DesktopApplication {
                         quarantined.turn_id
                     );
                 } else {
-                    self.emit_event(TimelineChanged {
-                        task_id: task_id.clone(),
-                        cursor: None,
-                    });
+                    self.emit_timeline_changed_after_cancel(task_id.clone(), Some(session_id));
                 }
             }
             if self
@@ -1040,10 +1037,7 @@ impl DesktopApplication {
             false
         };
         drop(submission);
-        self.emit_event(TimelineChanged {
-            task_id: task_id.clone(),
-            cursor: None,
-        });
+        self.emit_timeline_changed_after_cancel(task_id.clone(), cancel.session_id.as_deref());
         if paused {
             self.finish_turn_with_claim(
                 task_id.clone(),
@@ -1080,6 +1074,22 @@ impl DesktopApplication {
             return Ok(None);
         };
         self.apply_user_turn_cancellation(task_id, cancel).map(Some)
+    }
+
+    fn emit_timeline_changed_after_cancel(&self, task_id: TaskId, session_id: Option<&str>) {
+        self.emit_event(TimelineChanged {
+            task_id,
+            cursor: session_id.and_then(|session_id| self.session_event_cursor(session_id)),
+        });
+    }
+
+    fn session_event_cursor(&self, session_id: &str) -> Option<u64> {
+        self.authority()
+            .shared_runtime()
+            .inner()
+            .session_snapshot(session_id)
+            .ok()
+            .and_then(|session| session.events.last().map(|event| event.sequence))
     }
 
     fn apply_user_turn_cancellation(
@@ -1134,10 +1144,7 @@ impl DesktopApplication {
             false
         };
         drop(submission);
-        self.emit_event(TimelineChanged {
-            task_id: task_id.clone(),
-            cursor: None,
-        });
+        self.emit_timeline_changed_after_cancel(task_id.clone(), cancel.session_id.as_deref());
         if paused {
             self.finish_turn_with_claim(
                 task_id.clone(),
@@ -2043,6 +2050,62 @@ impl DesktopApplication {
         let client = self.authority().client()?;
         let binding = self.session_binding(task_id, session_id, profile_id)?;
         Ok(client.products().record_binding(binding)?)
+    }
+
+    pub(crate) fn bind_forked_task_session(
+        &self,
+        task_id: &TaskId,
+        session_id: &str,
+        profile_id: &str,
+    ) -> Result<AgentSessionBinding, DesktopApplicationError> {
+        let session_id = session_id.trim();
+        let profile_id = profile_id.trim();
+        if session_id.is_empty() || profile_id.is_empty() {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "agent_session",
+                message: "forked session is not ready to bind".to_owned(),
+            });
+        }
+        let runtime = self.authority().shared_runtime();
+        let session = runtime.inner().session_snapshot(session_id).map_err(|_| {
+            DesktopApplicationError::InvalidInput {
+                field: "agent_session",
+                message: "forked session is not ready to bind".to_owned(),
+            }
+        })?;
+        if session.session_id != session_id || session.profile_id != profile_id {
+            return Err(DesktopApplicationError::InvalidInput {
+                field: "agent_session",
+                message: "forked session is not ready to bind".to_owned(),
+            });
+        }
+        let previous = self.authority().list_session_bindings(task_id)?;
+        let binding = self.replace_session_binding(task_id, session_id, profile_id)?;
+        if let Err(error) =
+            runtime
+                .inner()
+                .replace_task_session_binding(task_id, session_id, Some(profile_id))
+        {
+            self.restore_task_session_binding(task_id, &previous);
+            return Err(DesktopApplicationError::Agent(error.to_string()));
+        }
+        Ok(binding)
+    }
+
+    fn restore_task_session_binding(&self, task_id: &TaskId, previous: &[AgentSessionBinding]) {
+        let restored = previous.first().and_then(|binding| {
+            binding
+                .profile_id
+                .as_deref()
+                .map(|profile_id| (binding.agent_session.as_str(), profile_id))
+        });
+        if let Some((session_id, profile_id)) = restored {
+            let _ = self.replace_session_binding(task_id, session_id, profile_id);
+            return;
+        }
+        if let Ok(client) = self.authority().client() {
+            let _ = client.clear_bindings(task_id);
+        }
     }
 
     pub(crate) fn replace_session_binding(

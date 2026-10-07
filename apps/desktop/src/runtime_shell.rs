@@ -25,10 +25,10 @@ use nana_ui::runtime::{
     List, ListItem, NodeStyle, OverlayChanged, OverlayClosing, OverlayHost, PaneChrome,
     PaneChromeAction, PaneChromeActionKind, ReorderItem, ReorderList, ReorderListEvent, ScrollAxes,
     ScrollView, SecondaryPress, SemanticColorRole, SettingsPage, SidebarFooter,
-    SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarSection,
-    SidebarSectionState, SplitPane, StableNodeId, Stack, TabOption, Tabs, TabsEvent, Text,
-    TextArea, TextChanged, TextDiagnosticSeverity, TextDiagnosticSpan, TextFindScope, TextInput,
-    TextSearchOptions, TreeDropPosition, TreeView, TreeViewEvent, View,
+    SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarRowTone,
+    SidebarSection, SidebarSectionState, SplitPane, StableNodeId, Stack, TabOption, Tabs,
+    TabsEvent, Text, TextArea, TextChanged, TextDiagnosticSeverity, TextDiagnosticSpan,
+    TextFindScope, TextInput, TextSearchOptions, TreeDropPosition, TreeView, TreeViewEvent, View,
 };
 use nana_ui::{
     AppearanceEvent, ButtonKind, CommandPaletteEvent, CommandPaletteItem, ControlSize, Icon,
@@ -138,6 +138,14 @@ pub enum SidebarDropPosition {
     After,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShellSidebarAttention {
+    #[default]
+    Quiet,
+    Waiting,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellSidebarRow {
     pub id: String,
@@ -151,6 +159,7 @@ pub struct ShellSidebarRow {
     pub stop_turn_id: Option<String>,
     pub can_menu: bool,
     pub can_draft: bool,
+    pub attention: ShellSidebarAttention,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -739,7 +748,9 @@ pub enum ShellIntent {
     },
     CloseMarkdownPreview,
     MarkdownImageViewerInteraction,
-    PageMarkdownPreview { forward: bool },
+    PageMarkdownPreview {
+        forward: bool,
+    },
 
     StartGitHubBinding,
     CancelGitHubBinding,
@@ -961,6 +972,7 @@ pub enum ShellIntent {
     CancelMcpEditor,
     ToggleMcpServer(String),
     ToggleTitlebarMenu,
+    CloseTitlebarMenu,
     BackToTaskList,
     OpenTaskPopup,
     AskTaskPopup,
@@ -1595,7 +1607,7 @@ fn mount_workspace_pane_view_in(
     let (
         _,
         (
-            (chrome, _tabs, content, _heading),
+            (chrome, tabs, content, _heading),
             (_status, editor, log, tree),
             (actions, search_host, browser_host),
             (save, discard, interrupt),
@@ -1671,60 +1683,62 @@ fn mount_workspace_pane_view_in(
         let tree_sink = view_sink.clone();
         let view = widget(PaneChrome::new())
             .entity_ref(chrome)
-            .header(widget(Stack::bar(0.0)).children((
-                widget(Stack::row(0.0).with_layout(|layout| {
-                    // Basis 0 so the title takes only the space left of the
-                    // pane actions and the caption spacer, and truncates.
-                    layout.flex_grow = Some(1.0);
-                    layout.flex_shrink = Some(1.0);
-                    layout.flex_basis = Some(LengthSpec::Px(0.0));
-                    layout.min_width = Some(LengthSpec::Px(0.0));
-                    layout.width = Some(LengthSpec::Px(0.0));
-                }))
-                .children(
-                    widget(Tabs::new(String::new()).fill(true).strip_id(strip.clone()))
-                        .entity_ref(tabs)
-                        .bind(move |tabs| {
-                            let (selected, options) = tabs_state.get();
-                            *tabs = Tabs::new(selected)
-                                .options(options)
-                                .strip_id(strip.clone())
-                                .fill(true);
-                        })
-                        .on(move |event: &TabsEvent| {
-                            emit(&tab_sink, workspace_tabs_intent_for(&pane_key, event));
-                        }),
-                ),
-                icon_action(
-                    "左右分栏",
-                    Icon::Sidebar,
-                    split_h,
-                    ShellIntent::SplitWorkspaceHorizontal,
-                    Arc::clone(&chrome_sink),
-                ),
-                icon_action(
-                    "上下分栏",
-                    Icon::Workspace,
-                    split_v,
-                    ShellIntent::SplitWorkspaceVertical,
-                    Arc::clone(&chrome_sink),
-                ),
-                icon_action(
-                    move_label,
-                    Icon::Restore,
-                    move_window,
-                    ShellIntent::MovePaneToWindow,
-                    Arc::clone(&chrome_sink),
-                ),
-                icon_action(
-                    "移至下一窗格",
-                    Icon::ArrowRight,
-                    move_next,
-                    ShellIntent::MovePaneToNext,
-                    chrome_sink.clone(),
-                ),
-                widget(pane_caption_spacer()),
-            )))
+            .header(
+                widget(Stack::bar(0.0)).children((
+                    widget(Stack::row(0.0).with_layout(|layout| {
+                        // Basis 0 so the title takes only the space left of the
+                        // pane actions and the caption spacer, and truncates.
+                        layout.flex_grow = Some(1.0);
+                        layout.flex_shrink = Some(1.0);
+                        layout.flex_basis = Some(LengthSpec::Px(0.0));
+                        layout.min_width = Some(LengthSpec::Px(0.0));
+                        layout.width = Some(LengthSpec::Px(0.0));
+                    }))
+                    .children(
+                        widget(Tabs::new(String::new()).fill(true).strip_id(strip.clone()))
+                            .entity_ref(tabs)
+                            .bind(move |tabs| {
+                                let (selected, options) = tabs_state.get();
+                                *tabs = Tabs::new(selected)
+                                    .options(options)
+                                    .strip_id(strip.clone())
+                                    .fill(true);
+                            })
+                            .on(move |event: &TabsEvent| {
+                                emit(&tab_sink, workspace_tabs_intent_for(&pane_key, event));
+                            }),
+                    ),
+                    icon_action(
+                        "左右分栏",
+                        Icon::Sidebar,
+                        split_h,
+                        ShellIntent::SplitWorkspaceHorizontal,
+                        Arc::clone(&chrome_sink),
+                    ),
+                    icon_action(
+                        "上下分栏",
+                        Icon::Workspace,
+                        split_v,
+                        ShellIntent::SplitWorkspaceVertical,
+                        Arc::clone(&chrome_sink),
+                    ),
+                    icon_action(
+                        move_label,
+                        Icon::Restore,
+                        move_window,
+                        ShellIntent::MovePaneToWindow,
+                        Arc::clone(&chrome_sink),
+                    ),
+                    icon_action(
+                        "移至下一窗格",
+                        Icon::ArrowRight,
+                        move_next,
+                        ShellIntent::MovePaneToNext,
+                        chrome_sink.clone(),
+                    ),
+                    widget(pane_caption_spacer()),
+                )),
+            )
             .body(
                 widget(Stack::fill_column(0.0)).children(
                     widget(Stack::fill_column(12.0).padding(16.0))
@@ -1867,6 +1881,9 @@ fn mount_workspace_pane_view_in(
             ),
         )
     })?;
+    context.update_component(chrome, |chrome, _| {
+        chrome.tabs = Some(tabs.stable_id());
+    })?;
     let search = EditorSearchView::mount(context, document_id, editor, &bindings, sink)?;
     context.append_child(search_host, search.root)?;
     context.append_child(browser_host, browser.root)?;
@@ -1962,7 +1979,11 @@ pub(crate) fn gallery_position(sources: &[String], current: &str) -> (usize, usi
         .unwrap_or((0, 0))
 }
 
-pub(crate) fn page_gallery_index(sources: &[String], current: &str, forward: bool) -> Option<usize> {
+pub(crate) fn page_gallery_index(
+    sources: &[String],
+    current: &str,
+    forward: bool,
+) -> Option<usize> {
     let (index, count) = gallery_position(sources, current);
     if count <= 1 {
         return None;
@@ -4384,9 +4405,11 @@ impl ShellHandles {
                 SidebarRowState::Idle
             };
             let row = if let Some(row) = self.task_rows.get(&item.id).copied() {
+                let tone = sidebar_row_tone(item.attention);
                 context.update_component(row, |row, _| {
                     row.label = Arc::from(item.label.as_str());
                     row.state = state;
+                    row.tone = tone;
                     row.depth = item.depth;
                     row.disclosure = item.expanded;
                 })?;
@@ -4408,6 +4431,7 @@ impl ShellHandles {
                     None
                 };
                 let mut row_view = SidebarRow::new(item.label.clone())
+                    .tone(sidebar_row_tone(item.attention))
                     .state(state)
                     .depth(item.depth)
                     .slots(nana_ui::runtime::ListItemSlots {
@@ -6189,7 +6213,7 @@ impl ShellHandles {
                         emit(&sink, titlebar_menu_intent(value.as_ref()));
                     }
                     ContextMenuEvent::Dismiss => {
-                        emit(&sink, ShellIntent::ToggleTitlebarMenu);
+                        emit(&sink, ShellIntent::CloseTitlebarMenu);
                     }
                     ContextMenuEvent::Search(_) => {}
                 })?;
@@ -6342,6 +6366,14 @@ fn sidebar_project_entry_count(rows: &[ShellSidebarRow]) -> usize {
         .count()
 }
 
+fn sidebar_row_tone(attention: ShellSidebarAttention) -> SidebarRowTone {
+    match attention {
+        ShellSidebarAttention::Quiet => SidebarRowTone::Default,
+        ShellSidebarAttention::Waiting => SidebarRowTone::Warning,
+        ShellSidebarAttention::Failed => SidebarRowTone::Error,
+    }
+}
+
 fn sidebar_row_is_section_chrome(row: &ShellSidebarRow) -> bool {
     matches!(row.kind, ShellSidebarKind::Header | ShellSidebarKind::Inbox)
         || matches!(
@@ -6379,6 +6411,7 @@ fn partition_sidebar_rows(snapshot: &PrimaryShellSnapshot) -> SidebarRowGroups {
                     stop_turn_id: None,
                     can_menu: true,
                     can_draft: false,
+                    attention: ShellSidebarAttention::Quiet,
                 })
                 .collect(),
             projects: Vec::new(),
@@ -6638,6 +6671,9 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
             scroll_offset: 0.0,
             viewport_extent: TIMELINE_DEFAULT_VIEWPORT_EXTENT,
             can_load_earlier: false,
+            search_query: String::new(),
+            search_status: String::new(),
+            search_can_step: false,
         },
         clone_repository: String::new(),
         clone_parent: String::new(),
@@ -6850,6 +6886,7 @@ mod tests {
             stop_turn_id: None,
             can_menu: false,
             can_draft: false,
+            attention: ShellSidebarAttention::Quiet,
         }
     }
 
@@ -7228,6 +7265,35 @@ mod tests {
         handles.sync(&mut document, &snapshot).unwrap();
         assert_eq!(handles.titlebar_menu.unwrap(), menu);
         assert!(document.context().active_runtime_overlay(doc).is_some());
+    }
+
+    #[test]
+    fn host_closing_the_window_menu_emits_close_not_toggle() {
+        let mut snapshot = snapshot_with_empty_primary_pane();
+        snapshot.titlebar_menu_open = true;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&events);
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |event| sink.lock().unwrap().push(event)),
+        )
+        .unwrap();
+        handles.sync(&mut document, &snapshot).unwrap();
+        document
+            .context_mut()
+            .advance_animations(std::time::Duration::from_millis(180));
+        events.lock().unwrap().clear();
+        snapshot.titlebar_menu_open = false;
+        handles.sync(&mut document, &snapshot).unwrap();
+        let events = events.lock().unwrap();
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ShellIntent::CloseTitlebarMenu)));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, ShellIntent::ToggleTitlebarMenu))
+        );
     }
 
     #[test]

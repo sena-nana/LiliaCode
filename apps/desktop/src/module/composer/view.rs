@@ -13,11 +13,10 @@ use nana_ui::runtime::view::{
     entity_ref, signal, widget, with_refs, AnyView, EachExt, EntityRef, IntoView, Signal, WhenExt,
 };
 use nana_ui::runtime::{
-    ActionMenu, ActionMenuItem, Activate, AppContext, Button, Card, ComponentView,
-    DocumentId, DonutChart, DonutSlice, Dropdown, DropdownEvent, DropdownOption, DropdownSelection,
-    Entity, FrameworkError, IconButton, IconGlyph, JustifySpec, KeyInput, LengthSpec,
-    PopoverToggled, SemanticColorRole, StableNodeId, Stack, TextArea, TextAtomSpan, TextChanged,
-    TextInput,
+    ActionMenu, ActionMenuItem, Activate, AppContext, Button, Card, ComponentView, DocumentId,
+    DonutChart, DonutSlice, Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity,
+    FrameworkError, IconButton, IconGlyph, JustifySpec, KeyInput, LengthSpec, PopoverToggled,
+    SemanticColorRole, StableNodeId, Stack, TextArea, TextAtomSpan, TextChanged, TextInput,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon, PopoverPlacement, UI_METRICS};
 use std::collections::{HashMap, HashSet};
@@ -990,9 +989,12 @@ fn extra_row(row: ExtraRow, chrome: Chrome) -> AnyView {
                 .on_activate(move || dispatch(&sink, &binding, action.clone()))
                 .into_any()
         }
-        ExtraRow::Optimize { label, enabled } => {
-            prompt_button(&chrome, &label, enabled, ComposerInputAction::OptimizePrompt)
-        }
+        ExtraRow::Optimize { label, enabled } => prompt_button(
+            &chrome,
+            &label,
+            enabled,
+            ComposerInputAction::OptimizePrompt,
+        ),
         ExtraRow::ContextUsage {
             label,
             percent,
@@ -1697,31 +1699,31 @@ impl ComposerView {
                     .justify(JustifySpec::SpaceBetween)
                     .wrap(true),
             )
-                .entity_ref(toolbar_ref)
-                .children((
-                    extras_each,
-                    widget(Stack::row(6.0))
-                        .entity_ref(toolbar_actions_ref)
-                        .children((
-                            widget(extra_button("浏览器", ButtonKind::Text))
-                                .entity_ref(browser_ref)
-                                .disabled(browser_off)
-                                .on_activate(move || {
-                                    let target = browser_binding.lock().unwrap().target.clone();
-                                    if let Some(task_id) = target.task_id {
-                                        emit(
-                                            &browser_sink,
-                                            ShellIntent::OpenBrowser {
-                                                window_id: target.window_id,
-                                                task_id,
-                                            },
-                                        );
-                                    }
-                                }),
-                            model,
-                            reasoning,
-                        )),
-                ));
+            .entity_ref(toolbar_ref)
+            .children((
+                extras_each,
+                widget(Stack::row(6.0))
+                    .entity_ref(toolbar_actions_ref)
+                    .children((
+                        widget(extra_button("浏览器", ButtonKind::Text))
+                            .entity_ref(browser_ref)
+                            .disabled(browser_off)
+                            .on_activate(move || {
+                                let target = browser_binding.lock().unwrap().target.clone();
+                                if let Some(task_id) = target.task_id {
+                                    emit(
+                                        &browser_sink,
+                                        ShellIntent::OpenBrowser {
+                                            window_id: target.window_id,
+                                            task_id,
+                                        },
+                                    );
+                                }
+                            }),
+                        model,
+                        reasoning,
+                    )),
+            ));
             with_refs(
                 widget(
                     Stack::column(8.0)
@@ -2839,9 +2841,7 @@ mod tests {
                 ("50%".into(), false)
             );
             assert_eq!(
-                context
-                    .read(ring, |chart| chart.slices[0].value)
-                    .unwrap(),
+                context.read(ring, |chart| chart.slices[0].value).unwrap(),
                 50.0
             );
             assert_eq!(
@@ -2955,5 +2955,4 @@ mod tests {
             .unwrap();
         assert!(events.lock().unwrap().is_empty());
     }
-
 }

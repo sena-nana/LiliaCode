@@ -174,6 +174,14 @@ mod tests {
     }
 
     #[test]
+    fn product_profile_leaves_agentkit_compaction_service_unset() {
+        let profile =
+            build_product_coding_profile(&ProductCredentialBridge::new(), Some("lilia_compact"))
+                .unwrap();
+        assert!(profile.context.compaction_service.is_none());
+    }
+
+    #[test]
     fn two_openai_compatible_providers_share_one_adapter() {
         let bridge = ProductCredentialBridge::new();
         bridge

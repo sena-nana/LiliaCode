@@ -12,9 +12,8 @@ use mutsuki_agent_bundle::{
 use mutsuki_agent_contracts::{
     AgentError, AgentMessage, AgentPermissionMode, AgentResult, AgentRunRequest, AgentRunResult,
     AgentRunStatus, AgentSessionCreateRequest, AgentSessionGetRequest, AgentToolDescriptor,
-    AgentToolExecuteRequest, AgentToolExecution, InteractionKind, ToolSideEffect,
-    ToolTargetPayloadMode, AGENT_RUN_PROTOCOL, AGENT_SESSION_CREATE_PROTOCOL,
-    AGENT_SESSION_GET_PROTOCOL,
+    AgentToolExecuteRequest, AgentToolExecution, ToolSideEffect, ToolTargetPayloadMode,
+    AGENT_RUN_PROTOCOL, AGENT_SESSION_CREATE_PROTOCOL, AGENT_SESSION_GET_PROTOCOL,
 };
 use mutsuki_runtime_contracts::{
     PluginDeploymentKind, RuntimeProfile, RuntimeProfileMode, Task, TaskBatch, TaskHandle,
@@ -49,10 +48,6 @@ impl SdkProtocol for SharedMcpToolProtocol {
     const PROTOCOL_ID: &'static str = MCP_TOOL_PROTOCOL;
 }
 impl ProtocolSpec for SharedMcpToolProtocol {}
-const PROJECT_ARCHITECTURE_TOOL_NAME: &str = "update_project_architecture";
-const PROJECT_ARCHITECTURE_CONTRACT_JSON: &str =
-    include_str!("../../lilia-contracts/contracts/architecture-contract.json");
-
 #[derive(Clone, Debug)]
 struct NativeSubagentToolProtocol;
 
@@ -235,9 +230,9 @@ impl AgentKitHost {
         }
         if !product_tools
             .iter()
-            .any(|descriptor| descriptor.name == PROJECT_ARCHITECTURE_TOOL_NAME)
+            .any(|descriptor| descriptor.name == crate::architecture_tool::TOOL)
         {
-            product_tools.push(project_architecture_tool_descriptor());
+            product_tools.push(crate::architecture_tool::descriptor());
         }
         let routed_tools = product_tools
             .into_iter()
@@ -310,6 +305,8 @@ impl AgentKitHost {
         if let Some(plugin) = browser_tools.as_ref() {
             manifests.push(plugin.manifest.clone());
         }
+        let mut architecture_tools = crate::architecture_tool::plugin(client.clone()).build();
+        manifests.push(architecture_tools.manifest.clone());
         let mut subagent_tools = subagents.as_ref().map(|runtime| {
             native_subagent_tool_plugin(client.clone(), Arc::clone(runtime)).build()
         });
@@ -335,6 +332,9 @@ impl AgentKitHost {
             for runner in plugin.runners.drain(..) {
                 bootstrapper.register_builtin_runner(runner);
             }
+        }
+        for runner in architecture_tools.runners.drain(..) {
+            bootstrapper.register_builtin_runner(runner);
         }
         if let Some(plugin) = subagent_tools.as_mut() {
             for runner in plugin.runners.drain(..) {
@@ -558,21 +558,6 @@ impl AgentKitHost {
             .as_ref()
             .map_or(Ok(0), |runtime| runtime.cancel_parent(parent_session_id))
     }
-}
-
-fn project_architecture_tool_descriptor() -> AgentToolDescriptor {
-    let contract: Value = serde_json::from_str(PROJECT_ARCHITECTURE_CONTRACT_JSON)
-        .expect("architecture-contract.json must be valid JSON");
-    let mut descriptor = AgentToolDescriptor::new(
-        PROJECT_ARCHITECTURE_TOOL_NAME,
-        AGENT_RUN_PROTOCOL,
-        "Propose typed changes to the current Lilia project architecture graph. Use the authoritative project architecture snapshot in the turn context, explain the reason, and submit only changes supported by the schema. The host applies or rejects the proposal according to the current execution permission.",
-    );
-    descriptor.input_schema = contract["updateProjectArchitectureInputSchema"].clone();
-    descriptor.execution = AgentToolExecution::Interaction {
-        interaction_kind: InteractionKind::Custom,
-    };
-    descriptor
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1214,16 +1199,101 @@ mod tests {
 
     #[test]
     fn architecture_tool_is_a_typed_model_visible_interaction() {
-        let descriptor = project_architecture_tool_descriptor();
-        assert_eq!(descriptor.name, PROJECT_ARCHITECTURE_TOOL_NAME);
+        let descriptor = crate::architecture_tool::descriptor();
+        assert_eq!(descriptor.name, crate::architecture_tool::TOOL);
         assert_eq!(descriptor.target_protocol_id, AGENT_RUN_PROTOCOL);
         assert!(matches!(
             descriptor.execution,
             AgentToolExecution::Interaction {
-                interaction_kind: InteractionKind::Custom
+                interaction_kind: mutsuki_agent_contracts::InteractionKind::Custom
             }
         ));
         assert_eq!(descriptor.input_schema["type"], "object");
         assert!(descriptor.input_schema["properties"]["changes"].is_object());
+    }
+
+    #[test]
+    fn architecture_plugin_rejects_stale_claims_and_does_not_apply_the_graph() {
+        let bootstrap = crate::NativeRuntimeBootstrap::embedded_reference().unwrap();
+        let host = AgentKitHost::build_host(
+            bootstrap.bundle().clone(),
+            None,
+            crate::model_turn::adapter_credential_broker(bootstrap.credentials().broker().clone()),
+            false,
+            ToolAccess::Full,
+            None,
+            None,
+        )
+        .unwrap();
+        let listed = host
+            .submit(
+                "list-architecture",
+                mutsuki_agent_contracts::AGENT_TOOL_LIST_PROTOCOL,
+                json!({}),
+            )
+            .unwrap();
+        let output = host.wait(&listed, Duration::from_secs(5)).unwrap();
+        let listed: mutsuki_agent_contracts::AgentToolListResult =
+            serde_json::from_value(output).unwrap();
+        let architecture = listed
+            .tools
+            .iter()
+            .find(|tool| tool.name == crate::architecture_tool::TOOL)
+            .expect("architecture tool");
+        assert!(matches!(
+            architecture.execution,
+            AgentToolExecution::Interaction { .. }
+        ));
+
+        let execution = |claim: &str| {
+            json!({
+                "call_id": "architecture-1",
+                "name": crate::architecture_tool::TOOL,
+                "session_id": "session-1",
+                "input": {
+                    "reason": "Add the application boundary",
+                    "changes": [{
+                        "type": "set_summary",
+                        "summary": "Native UI depends on typed application services."
+                    }]
+                },
+                "context": {
+                    "permission": "ask",
+                    "decision": "allow",
+                    "claimToken": claim,
+                    "activeClaimToken": "claim-1",
+                    "turnId": "turn-1",
+                    "productProjectId": "project-1",
+                    "productTaskId": "task-1",
+                    "projectArchitectureVersion": 3
+                }
+            })
+        };
+        let stale = host
+            .submit(
+                "architecture-stale-claim",
+                crate::architecture_tool::PROTOCOL,
+                execution("old-claim"),
+            )
+            .unwrap();
+        let error = host.wait(&stale, Duration::from_secs(5)).unwrap_err();
+        assert_eq!(error.code, "lilia.architecture.claim");
+        assert!(!error.message.contains("old-claim"));
+        assert!(!error.message.contains("claim-1"));
+
+        let allowed = host
+            .submit(
+                "architecture-allow",
+                crate::architecture_tool::PROTOCOL,
+                execution("claim-1"),
+            )
+            .unwrap();
+        let output = host.wait(&allowed, Duration::from_secs(5)).unwrap();
+        assert_eq!(output["applied"], false);
+        assert_eq!(output["authorized"], true);
+        assert_eq!(output["permission"], "ask");
+        assert_eq!(output["requiresConfirmation"], true);
+        assert!(output.get("graph").is_none());
+        assert!(!output.to_string().contains("claim-1"));
     }
 }

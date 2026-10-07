@@ -1072,7 +1072,6 @@ impl ExtensionsModule {
     fn set_mcp_transport(&mut self, transport: DesktopMcpTransport) -> UiModuleOutcome {
         self.edit_mcp_field(|editor| {
             if editor.transport != transport {
-                editor.location.clear();
                 editor.args_json = "[]".to_owned();
                 editor.credential_names_json = "[]".to_owned();
             }
@@ -1663,6 +1662,7 @@ impl UiModule for ExtensionsModule {
             }
             ExtensionsModuleMessage::JobFailed(error) => {
                 self.busy = false;
+                self.editor_save_pending = false;
                 self.error = Some(error);
                 UiModuleOutcome::dirty()
             }
@@ -2036,5 +2036,73 @@ pub(crate) fn mcp_prompt_preview(
         } else {
             text
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shell::ExtensionsMessage;
+    use crate::ui_module::{UiModule, UiModuleContext};
+
+    fn reduce(module: &mut ExtensionsModule, message: ExtensionsModuleMessage) {
+        let kernel = lilia_kernel::Kernel::new();
+        module.reduce(
+            message,
+            &UiModuleContext::new(&kernel, nana_ui_platform::WindowId::PRIMARY),
+        );
+    }
+
+    fn ui(module: &mut ExtensionsModule, message: ExtensionsMessage) {
+        reduce(module, ExtensionsModuleMessage::Ui(message));
+    }
+
+    #[test]
+    fn changing_mcp_transport_keeps_the_address_and_saves_it_as_the_url() {
+        let mut module = ExtensionsModule::default();
+        ui(&mut module, ExtensionsMessage::NewMcpServer);
+        ui(
+            &mut module,
+            ExtensionsMessage::McpServerIdChanged("native-ui-exec".into()),
+        );
+        ui(
+            &mut module,
+            ExtensionsMessage::McpLocationChanged("http://127.0.0.1:9/mcp".into()),
+        );
+        ui(
+            &mut module,
+            ExtensionsMessage::McpArgsChanged("[\"--stdio\"]".into()),
+        );
+        ui(
+            &mut module,
+            ExtensionsMessage::McpTransportChanged("streamable_http".into()),
+        );
+        let editor = module.mcp_editor().expect("editor");
+        assert_eq!(editor.location, "http://127.0.0.1:9/mcp");
+        assert_eq!(editor.args_json, "[]");
+        assert_eq!(editor.credential_names_json, "[]");
+        ui(&mut module, ExtensionsMessage::SaveMcpServer);
+        let Some(ExtensionsCommand::McpRegistry(McpRegistryOperation::Upsert(command))) =
+            module.take_pending_submit()
+        else {
+            panic!("missing save");
+        };
+        assert_eq!(command.server_id, "native-ui-exec");
+        assert_eq!(command.transport.as_registry(), "streamable_http");
+        assert_eq!(command.url.as_deref(), Some("http://127.0.0.1:9/mcp"));
+        assert!(command.command.is_none());
+        assert!(command.args.is_empty());
+        assert!(command.header_secret_names.is_empty());
+        assert!(command.enabled);
+        assert!(module.busy());
+        reduce(
+            &mut module,
+            ExtensionsModuleMessage::JobFailed("rejected".into()),
+        );
+        assert!(!module.busy());
+        assert!(module.mcp_editor().is_some());
+        assert_eq!(module.error(), Some("rejected"));
+        ui(&mut module, ExtensionsMessage::CancelEditor);
+        assert!(module.editor().is_none());
     }
 }

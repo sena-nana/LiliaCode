@@ -235,151 +235,160 @@ impl MemoryView {
                     ScrollView::new(ScrollAxes::Vertical)
                         .style(Stack::fill_column(0.0).node_style()),
                 )
-                .children(widget(Stack::column(12.0).with_layout(|layout| {
-                    // Keep the save row and the switches off the scrollport edge.
-                    layout.padding_bottom = Some(LengthSpec::Px(16.0));
-                })).children((
-                text(error_text).entity_ref(error).visible(show_error),
-                field(
-                    "标题",
-                    widget(TextArea::new("").height(40.0))
-                        .entity_ref(title)
-                        .value(title_text)
-                        .on_input(move |event| {
-                            title_sink(MemoryMessage::TitleChanged(event.value.to_string()))
-                        }),
-                ),
-                field(
-                    "正文",
-                    widget(TextArea::new("").height(112.0).resize_vertical(true))
-                        .entity_ref(body)
-                        .value(body_text)
-                        .on_input(move |event| {
-                            body_sink(MemoryMessage::BodyReplaced(event.value.to_string()))
-                        }),
-                ),
-                field(
-                    "标签",
-                    widget(TextArea::new("").height(40.0))
-                        .entity_ref(tags)
-                        .value(tags_text)
-                        .on_input(move |event| {
-                            tags_sink(MemoryMessage::TagsChanged(event.value.to_string()))
-                        }),
-                ),
-                view_row(8.0).children((
-                    widget(Button::new("项目").kind(ButtonKind::Subtle))
-                        .entity_ref(scope)
-                        .label(scope_label)
-                        .on_activate(move || scope_sink(MemoryMessage::ToggleScope)),
-                    widget(Button::new("保存").kind(ButtonKind::Primary))
-                        .entity_ref(save)
-                        .disabled(save_off)
-                        .on_activate(move || save_sink(MemoryMessage::Save)),
-                    widget(Button::new("删除").kind(ButtonKind::Danger))
-                        .entity_ref(delete)
-                        .disabled(delete_off)
-                        .on_activate(move || delete_sink(MemoryMessage::Delete)),
-                    widget(Button::new("重置冷却").kind(ButtonKind::Subtle))
-                        .entity_ref(reset)
-                        .disabled(reset_off)
-                        .on_activate(move || reset_sink(MemoryMessage::ResetTaskCooldown)),
-                    widget(
-                        ActionMenu::new()
-                            .trigger("注入任务".to_owned())
-                            .placement(PopoverPlacement::Bottom)
-                            .open(false),
-                    )
-                    .entity_ref(task_menu)
-                    .bind(move |menu| menu.popover.open = menu_open.get())
-                    .on(move |_event: &PopoverToggled| menu_sink(MemoryMessage::ToggleTaskMenu))
-                    .children({
-                        let item_sink = Arc::clone(&item_sink);
-                        let tasks = tasks;
-                        menu_open.then_show(move || {
-                            let item_sink = Arc::clone(&item_sink);
-                            let tasks = tasks;
-                            tasks.each(
-                                |task| task.0.clone(),
-                                move |task| {
-                                    let id = task.0.clone();
-                                    let label_id = id.clone();
-                                    let tasks = tasks;
-                                    let sink = Arc::clone(&item_sink);
-                                    widget(ActionMenuItem::new(task.1.clone()))
-                                        .bind(move |item| {
-                                            if let Some(label) = tasks.with(|tasks| {
-                                                tasks
-                                                    .iter()
-                                                    .find(|(task_id, _)| task_id == &label_id)
-                                                    .map(|(_, label)| label.clone())
-                                            }) {
-                                                item.label = Arc::from(label);
-                                            }
-                                        })
-                                        .on(move |_event: &Activate| {
-                                            sink(MemoryMessage::SelectInjectionTask(id.clone()))
-                                        })
-                                },
+                .children(
+                    widget(Stack::column(12.0).with_layout(|layout| {
+                        // Keep the save row and the switches off the scrollport edge.
+                        layout.padding_bottom = Some(LengthSpec::Px(16.0));
+                    }))
+                    .children((
+                        text(error_text).entity_ref(error).visible(show_error),
+                        field(
+                            "标题",
+                            widget(TextArea::new("").height(40.0))
+                                .entity_ref(title)
+                                .value(title_text)
+                                .on_input(move |event| {
+                                    title_sink(MemoryMessage::TitleChanged(event.value.to_string()))
+                                }),
+                        ),
+                        field(
+                            "正文",
+                            widget(TextArea::new("").height(112.0).resize_vertical(true))
+                                .entity_ref(body)
+                                .value(body_text)
+                                .on_input(move |event| {
+                                    body_sink(MemoryMessage::BodyReplaced(event.value.to_string()))
+                                }),
+                        ),
+                        field(
+                            "标签",
+                            widget(TextArea::new("").height(40.0))
+                                .entity_ref(tags)
+                                .value(tags_text)
+                                .on_input(move |event| {
+                                    tags_sink(MemoryMessage::TagsChanged(event.value.to_string()))
+                                }),
+                        ),
+                        view_row(8.0).children((
+                            widget(Button::new("项目").kind(ButtonKind::Subtle))
+                                .entity_ref(scope)
+                                .label(scope_label)
+                                .on_activate(move || scope_sink(MemoryMessage::ToggleScope)),
+                            widget(Button::new("保存").kind(ButtonKind::Primary))
+                                .entity_ref(save)
+                                .disabled(save_off)
+                                .on_activate(move || save_sink(MemoryMessage::Save)),
+                            widget(Button::new("删除").kind(ButtonKind::Danger))
+                                .entity_ref(delete)
+                                .disabled(delete_off)
+                                .on_activate(move || delete_sink(MemoryMessage::Delete)),
+                            widget(Button::new("重置冷却").kind(ButtonKind::Subtle))
+                                .entity_ref(reset)
+                                .disabled(reset_off)
+                                .on_activate(move || reset_sink(MemoryMessage::ResetTaskCooldown)),
+                            widget(
+                                ActionMenu::new()
+                                    .trigger("注入任务".to_owned())
+                                    .placement(PopoverPlacement::Bottom)
+                                    .open(false),
                             )
-                        })
-                    }),
-                )),
-                widget(Stack::bar(8.0).wrap(true)).children((
-                    widget(Switch::new("启用记忆", true))
-                        .entity_ref(enabled)
-                        .label("启用记忆")
-                        .checked(enabled_on)
-                        .disabled(enabled_off)
-                        .on_change(move |_| enabled_sink(MemoryMessage::ToggleEnabled)),
-                    widget(Switch::new("全局注入", true))
-                        .entity_ref(global)
-                        .label("全局注入")
-                        .checked(global_on)
-                        .on_change(move |_| global_sink(MemoryMessage::ToggleGlobal)),
-                    widget(Switch::new("基线注入", true))
-                        .entity_ref(baseline)
-                        .label("基线注入")
-                        .checked(baseline_on)
-                        .disabled(baseline_off)
-                        .on_change(move |_| baseline_sink(MemoryMessage::ToggleBaseline)),
-                    widget(Switch::new("为此会话注入记忆", true))
-                        .entity_ref(task_injection)
-                        .label("为此会话注入记忆")
-                        .checked(task_on)
-                        .disabled(task_off)
-                        .on_change(move |_| task_sink(MemoryMessage::ToggleTaskInjection)),
-                    field(
-                        "冷却轮数",
-                        widget(TextInput::new(""))
-                            .entity_ref(cooldown)
-                            .value(cooldown_text)
-                            .on_input(move |event| {
-                                cooldown_sink(MemoryMessage::CooldownChanged(
-                                    event.value.to_string(),
-                                ))
+                            .entity_ref(task_menu)
+                            .bind(move |menu| menu.popover.open = menu_open.get())
+                            .on(move |_event: &PopoverToggled| {
+                                menu_sink(MemoryMessage::ToggleTaskMenu)
+                            })
+                            .children({
+                                let item_sink = Arc::clone(&item_sink);
+                                let tasks = tasks;
+                                menu_open.then_show(move || {
+                                    let item_sink = Arc::clone(&item_sink);
+                                    let tasks = tasks;
+                                    tasks.each(
+                                        |task| task.0.clone(),
+                                        move |task| {
+                                            let id = task.0.clone();
+                                            let label_id = id.clone();
+                                            let tasks = tasks;
+                                            let sink = Arc::clone(&item_sink);
+                                            widget(ActionMenuItem::new(task.1.clone()))
+                                                .bind(move |item| {
+                                                    if let Some(label) = tasks.with(|tasks| {
+                                                        tasks
+                                                            .iter()
+                                                            .find(|(task_id, _)| {
+                                                                task_id == &label_id
+                                                            })
+                                                            .map(|(_, label)| label.clone())
+                                                    }) {
+                                                        item.label = Arc::from(label);
+                                                    }
+                                                })
+                                                .on(move |_event: &Activate| {
+                                                    sink(MemoryMessage::SelectInjectionTask(
+                                                        id.clone(),
+                                                    ))
+                                                })
+                                        },
+                                    )
+                                })
                             }),
-                    ),
-                )),
-                view_column(6.0).entity_ref(list).children(
-                    cards
-                        .each(
-                            |card| card.id.clone(),
-                            move |card| {
-                                let id = card.id.clone();
-                                let label_id = id.clone();
-                                let cards = cards;
-                                let sink = Arc::clone(&card_sink);
-                                widget(Button::new("").kind(ButtonKind::Subtle))
-                                    .label(move || card_label(&cards, &label_id))
-                                    .on_activate(move || {
-                                        sink(MemoryMessage::Select(id.clone()))
-                                    })
-                            },
-                        )
-                        .gap(6.0),
+                        )),
+                        widget(Stack::bar(8.0).wrap(true)).children((
+                            widget(Switch::new("启用记忆", true))
+                                .entity_ref(enabled)
+                                .label("启用记忆")
+                                .checked(enabled_on)
+                                .disabled(enabled_off)
+                                .on_change(move |_| enabled_sink(MemoryMessage::ToggleEnabled)),
+                            widget(Switch::new("全局注入", true))
+                                .entity_ref(global)
+                                .label("全局注入")
+                                .checked(global_on)
+                                .on_change(move |_| global_sink(MemoryMessage::ToggleGlobal)),
+                            widget(Switch::new("基线注入", true))
+                                .entity_ref(baseline)
+                                .label("基线注入")
+                                .checked(baseline_on)
+                                .disabled(baseline_off)
+                                .on_change(move |_| baseline_sink(MemoryMessage::ToggleBaseline)),
+                            widget(Switch::new("为此会话注入记忆", true))
+                                .entity_ref(task_injection)
+                                .label("为此会话注入记忆")
+                                .checked(task_on)
+                                .disabled(task_off)
+                                .on_change(move |_| task_sink(MemoryMessage::ToggleTaskInjection)),
+                            field(
+                                "冷却轮数",
+                                widget(TextInput::new(""))
+                                    .entity_ref(cooldown)
+                                    .value(cooldown_text)
+                                    .on_input(move |event| {
+                                        cooldown_sink(MemoryMessage::CooldownChanged(
+                                            event.value.to_string(),
+                                        ))
+                                    }),
+                            ),
+                        )),
+                        view_column(6.0).entity_ref(list).children(
+                            cards
+                                .each(
+                                    |card| card.id.clone(),
+                                    move |card| {
+                                        let id = card.id.clone();
+                                        let label_id = id.clone();
+                                        let cards = cards;
+                                        let sink = Arc::clone(&card_sink);
+                                        widget(Button::new("").kind(ButtonKind::Subtle))
+                                            .label(move || card_label(&cards, &label_id))
+                                            .on_activate(move || {
+                                                sink(MemoryMessage::Select(id.clone()))
+                                            })
+                                    },
+                                )
+                                .gap(6.0),
+                        ),
+                    )),
                 ),
-                ))),
             ));
             with_refs(
                 page,
@@ -445,16 +454,53 @@ impl MemoryView {
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
-        _document: DocumentId,
+        document: DocumentId,
         snapshot: &MemoryViewSnapshot,
     ) -> Result<(), FrameworkError> {
         let changed_selection = self.selected != snapshot.selected;
         self.selected = snapshot.selected.clone();
         self.project_id = snapshot.project_id.clone();
-        self.title_text.set(snapshot.title.clone());
-        self.body_text.set(snapshot.body.clone());
-        self.tags_text.set(snapshot.tags.clone());
-        self.cooldown_text.set(snapshot.cooldown.clone());
+        // Switching records replaces the draft outright. A focused edit is
+        // otherwise ahead of this snapshot until its change message lands;
+        // pushing the stale text would replace the buffer and drop undo.
+        if changed_selection {
+            for (input, value) in self.fields.into_iter().zip([
+                snapshot.title.as_str(),
+                snapshot.body.as_str(),
+                snapshot.tags.as_str(),
+            ]) {
+                replace_area(context, input, value)?;
+            }
+            replace_input(context, self.cooldown, &snapshot.cooldown)?;
+        }
+        adopt_area(
+            context,
+            document,
+            self.fields[0],
+            &self.title_text,
+            &snapshot.title,
+        )?;
+        adopt_area(
+            context,
+            document,
+            self.fields[1],
+            &self.body_text,
+            &snapshot.body,
+        )?;
+        adopt_area(
+            context,
+            document,
+            self.fields[2],
+            &self.tags_text,
+            &snapshot.tags,
+        )?;
+        adopt_input(
+            context,
+            document,
+            self.cooldown,
+            &self.cooldown_text,
+            &snapshot.cooldown,
+        )?;
         self.error_text
             .set(snapshot.error.clone().unwrap_or_default());
         self.show_error.set(
@@ -482,16 +528,6 @@ impl MemoryView {
         } else {
             Vec::new()
         });
-        if changed_selection {
-            for (input, value) in self.fields.into_iter().zip([
-                snapshot.title.as_str(),
-                snapshot.body.as_str(),
-                snapshot.tags.as_str(),
-            ]) {
-                replace_area(context, input, value)?;
-            }
-            replace_input(context, self.cooldown, &snapshot.cooldown)?;
-        }
         context.flush_reactive()?;
         self.rows = zip_buttons(context, self.list, &snapshot.cards, |card| &card.id)
             .into_iter()
@@ -572,19 +608,53 @@ fn replace_input(
     })
 }
 
+fn adopt_area(
+    context: &AppContext,
+    document: DocumentId,
+    area: Entity<TextArea>,
+    bound: &Bound<String>,
+    value: &str,
+) -> Result<(), FrameworkError> {
+    let current = context.read(area, |area| area.state.value.clone())?;
+    adopt_editor(context, document, area.stable_id(), &current, bound, value);
+    Ok(())
+}
+
+fn adopt_input(
+    context: &AppContext,
+    document: DocumentId,
+    input: Entity<TextInput>,
+    bound: &Bound<String>,
+    value: &str,
+) -> Result<(), FrameworkError> {
+    let current = context.read(input, |input| input.state.value.clone())?;
+    adopt_editor(context, document, input.stable_id(), &current, bound, value);
+    Ok(())
+}
+
+fn adopt_editor(
+    context: &AppContext,
+    document: DocumentId,
+    node: StableNodeId,
+    current: &nana_ui::runtime::TextValue,
+    bound: &Bound<String>,
+    value: &str,
+) {
+    let focused = context.world().focused(document) == Some(node);
+    if focused && current.as_ref() != value {
+        return;
+    }
+    bound.set(value.to_owned());
+}
+
 fn zip_buttons<T>(
     context: &AppContext,
     list: Entity<Stack>,
     items: &[T],
     id_of: impl Fn(&T) -> &str,
 ) -> HashMap<String, Entity<Button>> {
-    let children = context
-        .world()
-        .node(list.stable_id())
-        .map(|node| node.children.clone())
-        .unwrap_or_default();
+    let mut cursor = row_buttons(context, list.stable_id()).into_iter();
     let mut rows = HashMap::new();
-    let mut cursor = children.into_iter();
     let mut seen = HashSet::new();
     for item in items {
         let id = id_of(item);
@@ -594,9 +664,40 @@ fn zip_buttons<T>(
         let Some(child) = cursor.next() else {
             break;
         };
-        rows.insert(id.to_owned(), Entity::from_stable_id(child));
+        rows.insert(id.to_owned(), child);
     }
     rows
+}
+
+fn row_buttons(context: &AppContext, list: StableNodeId) -> Vec<Entity<Button>> {
+    let children = context
+        .world()
+        .node(list)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let mut buttons = Vec::new();
+    for child in children {
+        if let Some(button) = as_button(context, child) {
+            buttons.push(button);
+            continue;
+        }
+        let nested = context
+            .world()
+            .node(child)
+            .map(|node| node.children.clone())
+            .unwrap_or_default();
+        for grandchild in nested {
+            if let Some(button) = as_button(context, grandchild) {
+                buttons.push(button);
+            }
+        }
+    }
+    buttons
+}
+
+fn as_button(context: &AppContext, id: StableNodeId) -> Option<Entity<Button>> {
+    let button = Entity::from_stable_id(id);
+    context.read(button, |_| ()).is_ok().then_some(button)
 }
 
 fn zip_menu_items(
@@ -820,5 +921,67 @@ mod tests {
         assert!(nodes
             .iter()
             .any(|(id, _)| id == "switch.memory-task-enabled"));
+    }
+
+    #[test]
+    fn memory_title_keeps_normal_undo_across_a_stale_snapshot() {
+        let mut context = AppContext::new();
+        let document = DocumentId::new(604).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = Arc::clone(&events);
+        let mut view = MemoryView::mount(
+            &mut context,
+            document,
+            Arc::new(move |event| sink_events.lock().unwrap().push(event)),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        let mut snapshot = MemoryViewSnapshot {
+            title: "正常入口多行记忆".into(),
+            body: "正文".into(),
+            ..Default::default()
+        };
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let title = view.fields[0];
+        context.focus_node(document, title.stable_id()).unwrap();
+        context.select_all_focused_text(document).unwrap();
+        assert!(context
+            .replace_focused_text(document, "撤销重做临时标题")
+            .unwrap());
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let mut input = crate::runtime_input::ScriptedInput::bind(&mut context, document);
+        let outcome = input
+            .press_key(
+                &mut context,
+                crate::agent_debug::retained_key_event("Control+z"),
+            )
+            .unwrap();
+        assert!(outcome.prevent_default);
+        assert_eq!(
+            context.read(title, |area| area.state.value.to_string()).unwrap(),
+            "正常入口多行记忆"
+        );
+        assert!(events.lock().unwrap().iter().any(|event| {
+            matches!(event, MemoryMessage::TitleChanged(value) if value == "正常入口多行记忆")
+        }));
+
+        snapshot.selected = Some("other".into());
+        snapshot.title = "另一条记忆".into();
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let mut input = crate::runtime_input::ScriptedInput::bind(&mut context, document);
+        let outcome = input
+            .press_key(
+                &mut context,
+                crate::agent_debug::retained_key_event("Control+z"),
+            )
+            .unwrap();
+        assert!(!outcome.prevent_default);
+        assert_eq!(
+            context.read(title, |area| area.state.value.to_string()).unwrap(),
+            "另一条记忆"
+        );
     }
 }

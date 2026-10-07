@@ -5,9 +5,9 @@
 
 pub mod view;
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
-use lilia_contracts::TaskId;
+use lilia_contracts::{TaskId, TimelineProjectionCursor};
 
 use lilia_kernel::FeatureId;
 
@@ -25,6 +25,8 @@ pub struct TimelineTextSelection {
 pub enum TimelineModuleMessage {
     Toggle(String),
     ClearTextSelection,
+    SearchChanged(String),
+    SearchStep(isize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -33,9 +35,28 @@ pub(crate) struct TimelineReadingPosition {
     pub extent: f32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TimelineReadingAnchor {
+    pub position: TimelineReadingPosition,
+    pub oldest: Option<TimelineProjectionCursor>,
+    pub at_end: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TimelineMessageHit {
+    pub event_id: String,
+    pub sequence: u64,
+}
+
+struct TimelineMessageSearch {
+    query: String,
+    hits: Vec<TimelineMessageHit>,
+    active: usize,
+}
+
 pub struct TimelineModule {
-    reading_positions: BTreeMap<TaskId, TimelineReadingPosition>,
-    reading_histories: VecDeque<(TaskId, TaskSessionView)>,
+    reading_anchors: BTreeMap<TaskId, TimelineReadingAnchor>,
+    message_searches: BTreeMap<TaskId, TimelineMessageSearch>,
     toggled_events: BTreeSet<String>,
     text_selection: Option<TimelineTextSelection>,
 }
@@ -43,8 +64,8 @@ pub struct TimelineModule {
 impl Default for TimelineModule {
     fn default() -> Self {
         Self {
-            reading_positions: BTreeMap::new(),
-            reading_histories: VecDeque::new(),
+            reading_anchors: BTreeMap::new(),
+            message_searches: BTreeMap::new(),
             toggled_events: BTreeSet::new(),
             text_selection: None,
         }
@@ -118,25 +139,98 @@ impl TimelineModule {
         position: TimelineReadingPosition,
         session: Option<TaskSessionView>,
     ) {
-        self.reading_positions.insert(task_id.clone(), position);
+        let previous = self.reading_anchors.get(&task_id);
+        let mut oldest = previous.and_then(|anchor| anchor.oldest.clone());
+        let mut at_end = previous.is_some_and(|anchor| anchor.at_end);
         if let Some(session) = session {
-            self.reading_histories.retain(|(id, _)| id != &task_id);
-            self.reading_histories.push_back((task_id, session));
-            while self.reading_histories.len() > 8 {
-                self.reading_histories.pop_front();
-            }
+            oldest = session
+                .timeline
+                .first()
+                .map(|event| TimelineProjectionCursor {
+                    sequence: event.sequence,
+                    event_id: event.id.clone(),
+                });
+            at_end = reading_position_is_at_end(position, &session);
         }
+        self.reading_anchors.insert(
+            task_id,
+            TimelineReadingAnchor {
+                position,
+                oldest,
+                at_end,
+            },
+        );
     }
 
     pub(crate) fn reading_position(&self, task_id: &TaskId) -> Option<TimelineReadingPosition> {
-        self.reading_positions.get(task_id).copied()
+        self.reading_anchors
+            .get(task_id)
+            .map(|anchor| anchor.position)
     }
 
-    pub(crate) fn reading_history(&self, task_id: &TaskId) -> Option<&TaskSessionView> {
-        self.reading_histories
-            .iter()
-            .find(|(id, _)| id == task_id)
-            .map(|(_, session)| session)
+    pub(crate) fn reading_anchor(&self, task_id: &TaskId) -> Option<&TimelineReadingAnchor> {
+        self.reading_anchors.get(task_id)
+    }
+
+    pub(crate) fn apply_message_search(
+        &mut self,
+        task_id: TaskId,
+        query: String,
+        hits: Vec<TimelineMessageHit>,
+    ) {
+        let previous_event = self
+            .message_searches
+            .get(&task_id)
+            .filter(|search| search.query == query)
+            .and_then(|search| search.hits.get(search.active))
+            .map(|hit| hit.event_id.clone());
+        let active = previous_event
+            .and_then(|event_id| hits.iter().position(|hit| hit.event_id == event_id))
+            .unwrap_or_else(|| hits.len().saturating_sub(1));
+        self.message_searches.insert(
+            task_id,
+            TimelineMessageSearch {
+                query,
+                hits,
+                active,
+            },
+        );
+    }
+
+    pub(crate) fn step_message_search(
+        &mut self,
+        task_id: &TaskId,
+        delta: isize,
+    ) -> Option<TimelineMessageHit> {
+        let search = self.message_searches.get_mut(task_id)?;
+        let len = search.hits.len() as isize;
+        if len == 0 {
+            return None;
+        }
+        search.active = (search.active as isize + delta).rem_euclid(len) as usize;
+        search.hits.get(search.active).cloned()
+    }
+
+    pub(crate) fn active_message_hit(&self, task_id: &TaskId) -> Option<TimelineMessageHit> {
+        let search = self.message_searches.get(task_id)?;
+        if search.query.trim().is_empty() {
+            return None;
+        }
+        search.hits.get(search.active).cloned()
+    }
+
+    pub(crate) fn message_search_view(&self, task_id: Option<&TaskId>) -> (String, String, bool) {
+        let Some(search) = task_id.and_then(|task_id| self.message_searches.get(task_id)) else {
+            return (String::new(), String::new(), false);
+        };
+        let status = if search.query.trim().is_empty() {
+            String::new()
+        } else if search.hits.is_empty() {
+            "没有匹配".to_owned()
+        } else {
+            format!("{}/{}", search.active + 1, search.hits.len())
+        };
+        (search.query.clone(), status, !search.hits.is_empty())
     }
 
     pub fn feature_id() -> FeatureId {
@@ -194,6 +288,71 @@ impl TimelineModule {
     }
 }
 
+const TIMELINE_LOAD_EARLIER_EXTENT: f32 = 34.0;
+const TIMELINE_TAIL_TOLERANCE: f32 = 24.0;
+
+fn reading_position_is_at_end(
+    position: TimelineReadingPosition,
+    session: &TaskSessionView,
+) -> bool {
+    let content = session.timeline_layout.total_extent()
+        + if session.timeline_has_more_before {
+            TIMELINE_LOAD_EARLIER_EXTENT
+        } else {
+            0.0
+        };
+    let maximum_offset = (content - position.extent).max(0.0);
+    position.offset >= (maximum_offset - TIMELINE_TAIL_TOLERANCE).max(0.0)
+}
+
+pub(crate) fn timeline_reaches_cursor(
+    session: &TaskSessionView,
+    cursor: &TimelineProjectionCursor,
+) -> bool {
+    if session
+        .timeline
+        .iter()
+        .any(|event| event.id == cursor.event_id)
+    {
+        return true;
+    }
+    let Some(first) = session.timeline.first() else {
+        return false;
+    };
+    first.sequence < cursor.sequence
+        || (first.sequence == cursor.sequence && first.id.as_str() <= cursor.event_id.as_str())
+}
+
+fn project_message_search(
+    module: &TimelineModule,
+    cx: &UiModuleContext<'_>,
+    timeline: &mut crate::module::timeline::view::TimelineViewSnapshot,
+) {
+    let (query, status, can_step) = module.message_search_view(cx.selected_task().as_ref());
+    timeline.search_query = query;
+    timeline.search_status = status;
+    timeline.search_can_step = can_step;
+}
+
+fn message_hits(
+    cx: &UiModuleContext<'_>,
+    task_id: &TaskId,
+    query: &str,
+) -> Vec<TimelineMessageHit> {
+    cx.kernel()
+        .service::<lilia_feature_timeline::TimelineServiceKey>()
+        .map(|service| {
+            crate::application::search_timeline_bodies(query, &service.events(task_id), 100)
+                .into_iter()
+                .map(|hit| TimelineMessageHit {
+                    event_id: hit.event_id,
+                    sequence: hit.sequence,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn is_process_event(item: &TaskTimelineItem) -> bool {
     item.message_role.is_none()
         && matches!(
@@ -219,7 +378,7 @@ impl UiModule for TimelineModule {
         UiModuleOutcome::dirty()
     }
 
-    fn reduce(&mut self, message: Self::Message, _cx: &UiModuleContext<'_>) -> UiModuleOutcome {
+    fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
             TimelineModuleMessage::Toggle(event_id) => {
                 if !self.toggled_events.remove(&event_id) {
@@ -231,6 +390,21 @@ impl UiModule for TimelineModule {
                 self.text_selection = None;
                 UiModuleOutcome::dirty()
             }
+            TimelineModuleMessage::SearchChanged(query) => {
+                let Some(task_id) = cx.selected_task() else {
+                    return UiModuleOutcome::clean();
+                };
+                let hits = message_hits(cx, &task_id, &query);
+                self.apply_message_search(task_id, query, hits);
+                UiModuleOutcome::dirty()
+            }
+            TimelineModuleMessage::SearchStep(delta) => {
+                let Some(task_id) = cx.selected_task() else {
+                    return UiModuleOutcome::clean();
+                };
+                self.step_message_search(&task_id, delta);
+                UiModuleOutcome::dirty()
+            }
         }
     }
 
@@ -238,6 +412,7 @@ impl UiModule for TimelineModule {
         if !crate::module::conversation_is_visible(cx) {
             return;
         }
+        project_message_search(self, cx, into.timeline);
         let Some(session) = cx.task_session() else {
             into.timeline.rows.clear();
             into.timeline.layout = nana_ui::VirtualListLayout::default();
@@ -259,9 +434,23 @@ impl UiModule for TimelineModule {
         if envelope
             .downcast::<crate::application::TimelineChanged>()
             .is_some_and(|event| for_selected(&event.task_id))
-            || envelope
-                .downcast::<crate::application::ApprovalChanged>()
-                .is_some_and(|event| for_selected(&event.task_id))
+        {
+            if let Some(task_id) = selected.clone() {
+                if let Some(query) = self
+                    .message_searches
+                    .get(&task_id)
+                    .map(|search| search.query.clone())
+                    .filter(|query| !query.trim().is_empty())
+                {
+                    let hits = message_hits(cx, &task_id, &query);
+                    self.apply_message_search(task_id, query, hits);
+                }
+            }
+            return UiModuleOutcome::dirty();
+        }
+        if envelope
+            .downcast::<crate::application::ApprovalChanged>()
+            .is_some_and(|event| for_selected(&event.task_id))
             || envelope
                 .downcast::<crate::application::InteractionChanged>()
                 .is_some_and(|event| for_selected(&event.task_id))
@@ -430,5 +619,89 @@ mod tests {
         assert!(TimelineModule::default()
             .reading_position(&task_a)
             .is_none());
+    }
+
+    #[test]
+    fn reading_anchors_keep_the_oldest_cursor_past_eight_tasks() {
+        let mut timeline = TimelineModule::default();
+        let mut first_task = None;
+        for index in 0..9 {
+            let task_id = TaskId::new(format!("task-{index}")).unwrap();
+            let mut event = process_item(&format!("event-{index}"), "message", "completed");
+            event.sequence = 20 + index as u64;
+            let session = process_session(vec![event]);
+            timeline.remember_reading_position(
+                task_id.clone(),
+                TimelineReadingPosition {
+                    offset: index as f32 * 40.0,
+                    extent: 200.0,
+                },
+                Some(session),
+            );
+            if index == 0 {
+                first_task = Some(task_id);
+            }
+        }
+        let first_task = first_task.unwrap();
+        let anchor = timeline.reading_anchor(&first_task).unwrap();
+        assert_eq!(anchor.position.offset, 0.0);
+        assert_eq!(anchor.oldest.as_ref().unwrap().event_id, "event-0");
+        assert_eq!(anchor.oldest.as_ref().unwrap().sequence, 20);
+        let mut later = process_session(vec![process_item("late", "message", "completed")]);
+        later.timeline[0].sequence = 80;
+        assert!(!timeline_reaches_cursor(
+            &later,
+            anchor.oldest.as_ref().unwrap()
+        ));
+        later
+            .timeline
+            .insert(0, process_item("event-0", "message", "completed"));
+        later.timeline[0].sequence = 20;
+        assert!(timeline_reaches_cursor(
+            &later,
+            anchor.oldest.as_ref().unwrap()
+        ));
+    }
+
+    #[test]
+    fn message_search_steps_wrap_around_hits_without_touching_turn_state() {
+        let task_id = TaskId::new("task-search").unwrap();
+        let mut timeline = TimelineModule::default();
+        let hits = vec![
+            TimelineMessageHit {
+                event_id: "early".into(),
+                sequence: 2,
+            },
+            TimelineMessageHit {
+                event_id: "middle".into(),
+                sequence: 5,
+            },
+            TimelineMessageHit {
+                event_id: "latest".into(),
+                sequence: 9,
+            },
+        ];
+        timeline.apply_message_search(task_id.clone(), "登录".into(), hits);
+        assert_eq!(
+            timeline.active_message_hit(&task_id).unwrap().event_id,
+            "latest"
+        );
+        timeline.step_message_search(&task_id, -1);
+        assert_eq!(
+            timeline.active_message_hit(&task_id).unwrap().event_id,
+            "middle"
+        );
+        timeline.step_message_search(&task_id, 1);
+        assert_eq!(
+            timeline.active_message_hit(&task_id).unwrap().event_id,
+            "latest"
+        );
+        timeline.step_message_search(&task_id, 1);
+        assert_eq!(
+            timeline.active_message_hit(&task_id).unwrap().event_id,
+            "early"
+        );
+        timeline.apply_message_search(task_id.clone(), "   ".into(), Vec::new());
+        assert!(timeline.active_message_hit(&task_id).is_none());
     }
 }

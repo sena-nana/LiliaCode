@@ -90,7 +90,7 @@ use crate::text_editor_state::TextEditorState;
 use lilia_contracts::{
     LiliaAgentWorkflow, LiliaReviewTarget, PendingProjectionStatus, ProductApprovalDecision,
     ProductTask, ProductTaskPriority, ProductTaskStatus, Project, ProjectArchiveState, ProjectId,
-    SidebarNavigationTarget, TaskId,
+    SidebarNavigationTarget, TaskId, TimelineProjectionCursor,
 };
 use lilia_feature_project::{CloneJobRequest, CloneProgress, CloneRequest, CloneResult};
 use lilia_feature_provider::CredentialRequest;
@@ -326,6 +326,33 @@ impl From<ProjectWorkspaceSurface> for ProjectSurface {
             ProjectWorkspaceSurface::Architecture => Self::Architecture,
             ProjectWorkspaceSurface::Files => Self::Files,
         }
+    }
+}
+
+/// The page shown when a workspace snapshot has no active item surface.
+///
+/// Project menus open roadmap, memory, and architecture by setting the page
+/// directly. Selecting a project deactivates the active item, so a later
+/// refresh (for example a generated task title) must not send that page back
+/// to the session list.
+fn project_surface_from_workspace_item(
+    current: ProjectSurface,
+    item_surface: Option<ProjectWorkspaceSurface>,
+    item_selects_task: bool,
+) -> ProjectSurface {
+    if let Some(surface) = item_surface {
+        return ProjectSurface::from(surface);
+    }
+    if item_selects_task {
+        return ProjectSurface::Tasks;
+    }
+    match current {
+        ProjectSurface::Clone
+        | ProjectSurface::Settings
+        | ProjectSurface::Roadmap
+        | ProjectSurface::Memory
+        | ProjectSurface::Architecture => current,
+        ProjectSurface::Tasks | ProjectSurface::Files => ProjectSurface::Tasks,
     }
 }
 
@@ -1461,6 +1488,7 @@ pub struct DesktopProgram {
     titlebar_menu_open: bool,
     sidebar_pending_task_archive: Option<TaskId>,
     sidebar_stopping_tasks: BTreeSet<TaskId>,
+    sidebar_failed_tasks: BTreeSet<TaskId>,
     sidebar_folder_drop_hovered: bool,
     sidebar_activity_phase: u8,
     debug_timeline: NativeDebugTimeline,
@@ -2851,6 +2879,10 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::ToggleTitlebarMenu => {
                 Message::Chrome(ChromeMessage::ToggleTitlebarMenu)
             }
+            crate::runtime_shell::ShellIntent::CloseTitlebarMenu => {
+                self.update_titlebar_menu(HostedContextMenuEvent::Dismiss);
+                return None;
+            }
             crate::runtime_shell::ShellIntent::BackToTaskList => {
                 self.update_titlebar_menu(HostedContextMenuEvent::Select(
                     TitlebarMenuAction::BackToTaskList,
@@ -3422,6 +3454,7 @@ impl DesktopProgram {
                 stop_turn_id: None,
                 can_menu: false,
                 can_draft: false,
+                attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
             });
         }
         if !self.sidebar_search_query.trim().is_empty() {
@@ -3446,24 +3479,23 @@ impl DesktopProgram {
                             stop_turn_id: None,
                             can_menu: false,
                             can_draft: false,
+                            attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                         });
                     }
                     SidebarSearchTarget::Task(task_id) => {
-                        let title = self
+                        let task = self
                             .task_move_candidates
                             .iter()
-                            .find(|task| task.id == task_id)
-                            .map(|task| {
-                                if task.title.trim().is_empty() {
-                                    "未命名会话".to_owned()
-                                } else {
-                                    task.title.clone()
-                                }
-                            })
-                            .unwrap_or_else(|| "会话".to_owned());
+                            .find(|task| task.id == task_id);
+                        let (label, attention) = self.sidebar_task_presentation(
+                            &task_id,
+                            task.map(|task| task.title.as_str()).unwrap_or("会话"),
+                            task.map(|task| task.status)
+                                .unwrap_or(ProductTaskStatus::Draft),
+                        );
                         rows.push(ShellSidebarRow {
                             id: task_id.as_str().to_owned(),
-                            label: title,
+                            label,
                             kind: ShellSidebarKind::SearchTask,
                             selected: self.current_selected_task().as_ref() == Some(&task_id),
                             ancestor: false,
@@ -3473,6 +3505,7 @@ impl DesktopProgram {
                             stop_turn_id: None,
                             can_menu: false,
                             can_draft: false,
+                            attention,
                         });
                     }
                 }
@@ -3487,13 +3520,14 @@ impl DesktopProgram {
                 .iter()
                 .filter(|entry| runtime_phase_is_processing(&entry.runtime_phase))
             {
+                let (label, attention) = self.sidebar_task_presentation(
+                    &entry.task_id,
+                    &entry.title,
+                    self.task_product_status(&entry.task_id),
+                );
                 rows.push(ShellSidebarRow {
                     id: entry.task_id.as_str().to_owned(),
-                    label: if entry.title.trim().is_empty() {
-                        "未命名会话".to_owned()
-                    } else {
-                        entry.title.clone()
-                    },
+                    label,
                     kind: ShellSidebarKind::Running,
                     selected: self.current_selected_task().as_ref() == Some(&entry.task_id),
                     ancestor: false,
@@ -3507,6 +3541,7 @@ impl DesktopProgram {
                         .turn_id,
                     can_menu: false,
                     can_draft: false,
+                    attention,
                 });
             }
             let mut tasks = self
@@ -3534,16 +3569,15 @@ impl DesktopProgram {
                     stop_turn_id: None,
                     can_menu: false,
                     can_draft: false,
+                    attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                 });
             }
             for task in tasks {
+                let (label, attention) =
+                    self.sidebar_task_presentation(&task.id, &task.title, task.status);
                 rows.push(ShellSidebarRow {
                     id: task.id.as_str().to_owned(),
-                    label: if task.title.trim().is_empty() {
-                        "未命名会话".to_owned()
-                    } else {
-                        task.title.clone()
-                    },
+                    label,
                     kind: ShellSidebarKind::Task,
                     selected: self.current_selected_task().as_ref() == Some(&task.id),
                     ancestor: false,
@@ -3553,6 +3587,7 @@ impl DesktopProgram {
                     stop_turn_id: None,
                     can_menu: true,
                     can_draft: false,
+                    attention,
                 });
             }
             return rows;
@@ -3569,6 +3604,7 @@ impl DesktopProgram {
             stop_turn_id: None,
             can_menu: false,
             can_draft: false,
+            attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
         });
         if self.projects.is_empty() {
             rows.push(ShellSidebarRow {
@@ -3583,6 +3619,7 @@ impl DesktopProgram {
                 stop_turn_id: None,
                 can_menu: false,
                 can_draft: false,
+                attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
             });
         }
         let task_groups = self.sidebar_task_groups();
@@ -3607,6 +3644,7 @@ impl DesktopProgram {
                     stop_turn_id: None,
                     can_menu: true,
                     can_draft: true,
+                    attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                 });
                 if !expanded {
                     continue;
@@ -3614,13 +3652,11 @@ impl DesktopProgram {
                 let tasks = sidebar_grouped_tasks(&task_groups, Some(&project.id));
                 let visible = self.sidebar_visible_project_tasks(&project.id, &tasks);
                 for (task, depth) in visible {
+                    let (label, attention) =
+                        self.sidebar_task_presentation(&task.id, &task.title, task.status);
                     rows.push(ShellSidebarRow {
                         id: task.id.as_str().to_owned(),
-                        label: if task.title.trim().is_empty() {
-                            "未命名会话".to_owned()
-                        } else {
-                            task.title.clone()
-                        },
+                        label,
                         kind: ShellSidebarKind::Task,
                         selected: self.current_selected_task().as_ref() == Some(&task.id),
                         ancestor: false,
@@ -3630,6 +3666,7 @@ impl DesktopProgram {
                         stop_turn_id: None,
                         can_menu: true,
                         can_draft: false,
+                        attention,
                     });
                 }
                 if tasks.len() > 4 && !self.sidebar_revealed_projects.contains(&project.id) {
@@ -3645,6 +3682,7 @@ impl DesktopProgram {
                         stop_turn_id: None,
                         can_menu: false,
                         can_draft: false,
+                        attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                     });
                 } else if tasks.is_empty() {
                     rows.push(ShellSidebarRow {
@@ -3659,6 +3697,7 @@ impl DesktopProgram {
                         stop_turn_id: None,
                         can_menu: false,
                         can_draft: false,
+                        attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                     });
                 }
             }
@@ -3676,18 +3715,17 @@ impl DesktopProgram {
             stop_turn_id: None,
             can_menu: false,
             can_draft: false,
+            attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
         });
         if self.sidebar_inbox_expanded() {
             let tasks = sidebar_grouped_tasks(&task_groups, None);
             let visible = self.sidebar_visible_tasks(&tasks, self.sidebar_inbox_revealed);
             for (task, depth) in visible {
+                let (label, attention) =
+                    self.sidebar_task_presentation(&task.id, &task.title, task.status);
                 rows.push(ShellSidebarRow {
                     id: task.id.as_str().to_owned(),
-                    label: if task.title.trim().is_empty() {
-                        "未命名会话".to_owned()
-                    } else {
-                        task.title.clone()
-                    },
+                    label,
                     kind: ShellSidebarKind::Task,
                     selected: self.current_selected_task().as_ref() == Some(&task.id),
                     ancestor: false,
@@ -3697,6 +3735,7 @@ impl DesktopProgram {
                     stop_turn_id: None,
                     can_menu: true,
                     can_draft: false,
+                    attention,
                 });
             }
             if tasks.len() > 4 && !self.sidebar_inbox_revealed {
@@ -3712,6 +3751,7 @@ impl DesktopProgram {
                     stop_turn_id: None,
                     can_menu: false,
                     can_draft: false,
+                    attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                 });
             } else if tasks.is_empty() {
                 rows.push(ShellSidebarRow {
@@ -3726,6 +3766,7 @@ impl DesktopProgram {
                     stop_turn_id: None,
                     can_menu: false,
                     can_draft: false,
+                    attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
                 });
             }
         }
@@ -3742,9 +3783,44 @@ impl DesktopProgram {
                 stop_turn_id: None,
                 can_menu: false,
                 can_draft: false,
+                attention: crate::runtime_shell::ShellSidebarAttention::Quiet,
             });
         }
         rows
+    }
+
+    fn task_product_status(&self, task_id: &TaskId) -> ProductTaskStatus {
+        self.task_move_candidates
+            .iter()
+            .find(|task| &task.id == task_id)
+            .map(|task| task.status)
+            .unwrap_or(ProductTaskStatus::Draft)
+    }
+
+    fn sidebar_task_presentation(
+        &self,
+        task_id: &TaskId,
+        title: &str,
+        product_status: ProductTaskStatus,
+    ) -> (String, crate::runtime_shell::ShellSidebarAttention) {
+        let phase = self.kernel.session().task_runtime_snapshot(task_id).phase;
+        let presentation = sidebar_task_phase(
+            product_status,
+            &phase,
+            self.sidebar_failed_tasks.contains(task_id),
+        );
+        let title = if title.trim().is_empty() {
+            "未命名会话"
+        } else {
+            title
+        };
+        match presentation {
+            Some(phase) => (format!("{title} · {}", phase.label), phase.attention),
+            None => (
+                title.to_owned(),
+                crate::runtime_shell::ShellSidebarAttention::Quiet,
+            ),
+        }
     }
 
     fn shell_confirm(&self) -> Option<crate::runtime_shell::ShellConfirm> {
@@ -4757,6 +4833,9 @@ impl DesktopProgram {
                     .map(|viewport| viewport.extent)
                     .unwrap_or(TIMELINE_DEFAULT_VIEWPORT_EXTENT),
                 can_load_earlier: false,
+                search_query: String::new(),
+                search_status: String::new(),
+                search_can_step: false,
             },
             clone_repository: self.project_clone_repository.clone(),
             clone_parent: self.project_clone_parent.clone(),
@@ -5519,6 +5598,11 @@ impl DesktopProgram {
         &self,
         window_id: HostedWindowId,
     ) -> Option<crate::runtime_windows::TaskPopupSnapshot> {
+        let search_task = self.task_popups.get(&window_id)?.active_task_id.clone();
+        let (search_query, search_status, search_can_step) = self
+            .timeline_module_for(window_id)
+            .map(|module| module.message_search_view(search_task.as_ref()))
+            .unwrap_or_default();
         let popup = self.task_popups.get(&window_id)?;
         let timeline = crate::module::timeline::view::TimelineViewSnapshot {
             target: crate::module::timeline::view::TimelineTarget {
@@ -5559,6 +5643,9 @@ impl DesktopProgram {
                 .session
                 .as_ref()
                 .is_some_and(|session| session.timeline_has_more_before),
+            search_query,
+            search_status,
+            search_can_step,
         };
         let module = self.window_composer_module(window_id)?;
         let mut composer = module.view_snapshot(window_id);
@@ -10769,19 +10856,16 @@ impl DesktopProgram {
             item.application_surface()
                 .is_ok_and(|surface| surface == Some(ApplicationWorkspaceSurface::Automations))
         });
-        let next_project_surface = active_item
-            .and_then(|item| item.project_surface().ok().flatten())
-            .map(|(_, surface)| ProjectSurface::from(surface))
-            .or_else(|| {
-                active_item
-                    .and_then(|item| item.task_id().ok().flatten())
-                    .map(|_| ProjectSurface::Tasks)
-            })
-            .unwrap_or(match self.project_surface {
-                ProjectSurface::Clone => ProjectSurface::Clone,
-                ProjectSurface::Settings => ProjectSurface::Settings,
-                _ => ProjectSurface::Tasks,
-            });
+        let next_project_surface = project_surface_from_workspace_item(
+            self.project_surface,
+            active_item.and_then(|item| {
+                item.project_surface()
+                    .ok()
+                    .flatten()
+                    .map(|(_, surface)| surface)
+            }),
+            active_item.is_some_and(|item| item.task_id().ok().flatten().is_some()),
+        );
         let next_architecture_workspace_state = active_item
             .filter(|item| {
                 item.project_surface()
@@ -11875,6 +11959,20 @@ impl DesktopProgram {
             }
             TimelineAction::Jump(event_id) => {
                 self.jump_timeline_row(target.window_id, &event_id);
+            }
+            TimelineAction::SearchChanged(query) => {
+                self.route_timeline_window(
+                    target.window_id,
+                    crate::module::timeline::TimelineModuleMessage::SearchChanged(query),
+                );
+                self.jump_active_message_search(target.window_id);
+            }
+            TimelineAction::SearchStep(delta) => {
+                self.route_timeline_window(
+                    target.window_id,
+                    crate::module::timeline::TimelineModuleMessage::SearchStep(delta),
+                );
+                self.jump_active_message_search(target.window_id);
             }
             TimelineAction::Quote(event_id) => {
                 let session = if target.window_id == HostedWindowId::PRIMARY {
@@ -15983,7 +16081,7 @@ impl DesktopProgram {
             .get(&surface)
             .copied()
             .unwrap_or_default();
-        let Some(offset) = crate::module::timeline::view::timeline_jump_offset(
+        let Some(offset) = crate::module::timeline::view::timeline_event_scroll_offset(
             &rows,
             &session.timeline_layout,
             event_id,
@@ -15992,6 +16090,80 @@ impl DesktopProgram {
             return;
         };
         self.update_timeline_viewport(surface, offset, viewport.extent);
+    }
+
+    fn jump_active_message_search(&mut self, window_id: HostedWindowId) {
+        let task_id = if window_id == HostedWindowId::PRIMARY {
+            self.current_selected_task()
+        } else {
+            self.task_popups
+                .get(&window_id)
+                .and_then(|popup| popup.active_task_id.clone())
+        };
+        let Some(task_id) = task_id else {
+            return;
+        };
+        let Some(hit) = self
+            .timeline_module_for(window_id)
+            .and_then(|module| module.active_message_hit(&task_id))
+        else {
+            return;
+        };
+        match self.reveal_timeline_event(window_id, &task_id, &hit.event_id, hit.sequence) {
+            TimelineReveal::Found => self.jump_timeline_row(window_id, &hit.event_id),
+            TimelineReveal::Missing => {
+                self.set_timeline_reveal_error(window_id, "找不到这条消息。");
+            }
+            TimelineReveal::Failed => {
+                self.set_timeline_reveal_error(window_id, "无法读取更早的时间线，请重试。");
+            }
+        }
+    }
+
+    fn reveal_timeline_event(
+        &mut self,
+        window_id: HostedWindowId,
+        task_id: &TaskId,
+        event_id: &str,
+        sequence: u64,
+    ) -> TimelineReveal {
+        let mut session = if window_id == HostedWindowId::PRIMARY {
+            self.task_session.clone()
+        } else {
+            self.task_popups
+                .get(&window_id)
+                .and_then(|popup| popup.session.clone())
+        };
+        let Some(session) = session.as_mut() else {
+            return TimelineReveal::Missing;
+        };
+        let reveal = extend_timeline_until_event(
+            self.kernel.session(),
+            task_id,
+            session,
+            event_id,
+            sequence,
+        );
+        if window_id == HostedWindowId::PRIMARY {
+            self.pane_task_sessions
+                .insert(task_id.clone(), session.clone());
+            self.task_session = Some(session.clone());
+            self.publish_task_session(task_id, Some(session));
+        } else if let Some(popup) = self.task_popups.get_mut(&window_id) {
+            popup.task_sessions.insert(task_id.clone(), session.clone());
+            popup.session = Some(session.clone());
+        }
+        reveal
+    }
+
+    fn set_timeline_reveal_error(&mut self, window_id: HostedWindowId, message: &str) {
+        if window_id == HostedWindowId::PRIMARY {
+            self.task_action_error = Some(message.to_owned());
+            return;
+        }
+        if let Some(popup) = self.task_popups.get_mut(&window_id) {
+            popup.error = Some(message.to_owned());
+        }
     }
 
     fn page_markdown_image(&mut self, window_id: HostedWindowId, forward: bool) {
@@ -16021,7 +16193,10 @@ impl DesktopProgram {
         let (source, alt) = gallery[index].clone();
         self.markdown_image_previews.insert(
             window_id,
-            MarkdownImagePreview { source: source.clone(), alt },
+            MarkdownImagePreview {
+                source: source.clone(),
+                alt,
+            },
         );
         if matches!(
             self.markdown_images.get(&source),
@@ -16109,15 +16284,20 @@ impl DesktopProgram {
             self.sync_markdown_images();
             return;
         };
-        let previous_session = self.task_session.clone().or_else(|| {
-            self.timeline_module_for(HostedWindowId::PRIMARY)?
-                .reading_history(&task_id)
-                .cloned()
-        });
+        let previous_session = self.task_session.clone();
+        let reading_anchor = self
+            .timeline_module_for(HostedWindowId::PRIMARY)
+            .and_then(|module| module.reading_anchor(&task_id).cloned());
         let timeline_surface = TimelineSurfaceKey::Main;
         let timeline_had_viewport = self.timeline_viewports.contains_key(&timeline_surface);
-        let follow_timeline_tail =
-            self.timeline_is_at_end(previous_session.as_ref(), &timeline_surface, true);
+        let follow_timeline_tail = if previous_session.is_some() {
+            self.timeline_is_at_end(previous_session.as_ref(), &timeline_surface, true)
+        } else {
+            reading_anchor
+                .as_ref()
+                .map(|anchor| anchor.at_end)
+                .unwrap_or(true)
+        };
         let previous_timeline_tail = previous_session
             .as_ref()
             .and_then(|session| session.timeline.last())
@@ -16136,10 +16316,29 @@ impl DesktopProgram {
             .task_session_snapshot_page(&task_id, TIMELINE_PAGE_SIZE)
         {
             Ok(snapshot) => {
-                let session = TaskSessionView::refresh_preserving_history(
+                let mut session = TaskSessionView::refresh_preserving_history(
                     snapshot,
                     previous_session.as_ref(),
                 );
+                if previous_session.is_none() {
+                    if let Some(cursor) = reading_anchor
+                        .as_ref()
+                        .and_then(|anchor| anchor.oldest.clone())
+                    {
+                        if let Err(error) = extend_timeline_until_cursor(
+                            self.kernel.session(),
+                            &task_id,
+                            &mut session,
+                            &cursor,
+                        ) {
+                            eprintln!(
+                                "failed to restore LiliaCode timeline reading window: {error}"
+                            );
+                            self.task_action_error =
+                                Some("无法读取更早的时间线，请重试。".to_owned());
+                        }
+                    }
+                }
                 let timeline_tail_changed =
                     previous_timeline_tail.as_ref() != session.timeline.last();
                 let timeline_extent = timeline_content_extent(&session, true);
@@ -16191,6 +16390,17 @@ impl DesktopProgram {
         turn_id: String,
         state: DesktopTurnState,
     ) {
+        match &state {
+            DesktopTurnState::Failed { .. } => {
+                self.sidebar_failed_tasks.insert(task_id.clone());
+            }
+            DesktopTurnState::Queued { .. }
+            | DesktopTurnState::Starting
+            | DesktopTurnState::Completed => {
+                self.sidebar_failed_tasks.remove(&task_id);
+            }
+            _ => {}
+        }
         if self.current_selected_task().as_ref() == Some(&task_id) {
             if let DesktopTurnState::Failed { message } = &state {
                 self.task_action_error = Some(message.clone());
@@ -30818,6 +31028,7 @@ impl RuntimeProgram for DesktopProgram {
             titlebar_menu_open: false,
             sidebar_pending_task_archive: None,
             sidebar_stopping_tasks: BTreeSet::new(),
+            sidebar_failed_tasks: BTreeSet::new(),
             sidebar_folder_drop_hovered: false,
             sidebar_activity_phase: 0,
             debug_timeline: NativeDebugTimeline::default(),
@@ -31366,20 +31577,20 @@ fn collect_session_markdown_image_sources(
     session: &TaskSessionView,
     sources: &mut BTreeSet<String>,
 ) {
-        for image in session
-            .timeline
-            .iter()
-            .filter_map(|event| event.markdown_document.as_ref().map(NativeMarkdown::images))
-        {
-            sources.extend(image.into_iter().map(|image| image.source));
-        }
-        sources.extend(
-            session
-                .image_attachment_gallery()
-                .into_iter()
-                .map(|(source, _)| source),
-        );
+    for image in session
+        .timeline
+        .iter()
+        .filter_map(|event| event.markdown_document.as_ref().map(NativeMarkdown::images))
+    {
+        sources.extend(image.into_iter().map(|image| image.source));
     }
+    sources.extend(
+        session
+            .image_attachment_gallery()
+            .into_iter()
+            .map(|(source, _)| source),
+    );
+}
 
 fn markdown_image_label(preview: &MarkdownImagePreview) -> String {
     let alt = preview.alt.trim();
@@ -31432,6 +31643,110 @@ fn timeline_event_has_details(event: &TaskTimelineItem) -> bool {
         || event.can_retry
         || event.batch_apply.is_some()
         || event.session_branch_turn_id.is_some()
+}
+
+const TIMELINE_READING_PAGE_LIMIT: usize = 64;
+
+enum TimelineReveal {
+    Found,
+    Missing,
+    Failed,
+}
+
+struct SidebarTaskPhase {
+    label: &'static str,
+    attention: crate::runtime_shell::ShellSidebarAttention,
+}
+
+fn sidebar_task_phase(
+    product_status: ProductTaskStatus,
+    runtime_phase: &str,
+    failed_until_submit: bool,
+) -> Option<SidebarTaskPhase> {
+    use crate::runtime_shell::ShellSidebarAttention;
+    let (label, attention) = match runtime_phase {
+        "queued" => ("排队中", ShellSidebarAttention::Waiting),
+        "starting" => ("启动中", ShellSidebarAttention::Quiet),
+        "running" => ("处理中", ShellSidebarAttention::Quiet),
+        "waiting_approval" => ("等待权限", ShellSidebarAttention::Waiting),
+        "waiting_interaction" => ("等待回复", ShellSidebarAttention::Waiting),
+        "cancelling" => ("正在停止", ShellSidebarAttention::Waiting),
+        _ if failed_until_submit => ("失败", ShellSidebarAttention::Failed),
+        _ => match product_status {
+            ProductTaskStatus::Waiting => ("等待中", ShellSidebarAttention::Waiting),
+            ProductTaskStatus::Blocked => ("已阻塞", ShellSidebarAttention::Waiting),
+            _ => return None,
+        },
+    };
+    Some(SidebarTaskPhase { label, attention })
+}
+
+fn extend_timeline_until_cursor(
+    application: &DesktopApplication,
+    task_id: &TaskId,
+    session: &mut TaskSessionView,
+    cursor: &TimelineProjectionCursor,
+) -> Result<(), DesktopApplicationError> {
+    for _ in 0..TIMELINE_READING_PAGE_LIMIT {
+        if crate::module::timeline::timeline_reaches_cursor(session, cursor) {
+            return Ok(());
+        }
+        if !session.timeline_has_more_before {
+            return Ok(());
+        }
+        let Some(before) = session.timeline_before_cursor.clone() else {
+            return Ok(());
+        };
+        let page = application.task_timeline_page(task_id, Some(&before), TIMELINE_PAGE_SIZE)?;
+        if page.events.is_empty() {
+            return Ok(());
+        }
+        session.prepend_timeline_page(page);
+    }
+    Ok(())
+}
+
+fn extend_timeline_until_event(
+    application: &DesktopApplication,
+    task_id: &TaskId,
+    session: &mut TaskSessionView,
+    event_id: &str,
+    sequence: u64,
+) -> TimelineReveal {
+    for _ in 0..TIMELINE_READING_PAGE_LIMIT {
+        if session.timeline.iter().any(|event| event.id == event_id) {
+            return TimelineReveal::Found;
+        }
+        let Some(first) = session.timeline.first() else {
+            return TimelineReveal::Missing;
+        };
+        if first.sequence < sequence {
+            return TimelineReveal::Missing;
+        }
+        if !session.timeline_has_more_before {
+            return TimelineReveal::Missing;
+        }
+        let Some(before) = session.timeline_before_cursor.clone() else {
+            return TimelineReveal::Missing;
+        };
+        let page = match application.task_timeline_page(task_id, Some(&before), TIMELINE_PAGE_SIZE)
+        {
+            Ok(page) => page,
+            Err(error) => {
+                eprintln!("failed to reveal LiliaCode timeline event: {error}");
+                return TimelineReveal::Failed;
+            }
+        };
+        if page.events.is_empty() {
+            return TimelineReveal::Missing;
+        }
+        session.prepend_timeline_page(page);
+    }
+    if session.timeline.iter().any(|event| event.id == event_id) {
+        TimelineReveal::Found
+    } else {
+        TimelineReveal::Missing
+    }
 }
 
 fn timeline_content_extent(session: &TaskSessionView, includes_load_earlier_control: bool) -> f32 {
@@ -34062,6 +34377,52 @@ mod tests {
         add_hook_handler_to_draft, edit_hook_handler_draft, hook_handlers_draft,
         parse_mcp_prompt_arguments, remove_hook_handler_from_draft, validated_hook_handlers,
     };
+
+    #[test]
+    fn workspace_refresh_keeps_the_memory_page_without_an_active_item() {
+        assert_eq!(
+            project_surface_from_workspace_item(ProjectSurface::Memory, None, false),
+            ProjectSurface::Memory
+        );
+        assert_eq!(
+            project_surface_from_workspace_item(ProjectSurface::Roadmap, None, false),
+            ProjectSurface::Roadmap
+        );
+        assert_eq!(
+            project_surface_from_workspace_item(
+                ProjectSurface::Memory,
+                Some(crate::application::ProjectWorkspaceSurface::Files),
+                false
+            ),
+            ProjectSurface::Files
+        );
+        assert_eq!(
+            project_surface_from_workspace_item(ProjectSurface::Memory, None, true),
+            ProjectSurface::Tasks
+        );
+        assert_eq!(
+            project_surface_from_workspace_item(ProjectSurface::Tasks, None, false),
+            ProjectSurface::Tasks
+        );
+    }
+
+    #[test]
+    fn sidebar_task_phase_keeps_failure_until_a_live_phase_or_submit() {
+        use crate::runtime_shell::ShellSidebarAttention;
+        let failed = sidebar_task_phase(ProductTaskStatus::Running, "idle", true).unwrap();
+        assert_eq!(failed.label, "失败");
+        assert_eq!(failed.attention, ShellSidebarAttention::Failed);
+        let running = sidebar_task_phase(ProductTaskStatus::Running, "running", true).unwrap();
+        assert_eq!(running.label, "处理中");
+        assert_eq!(running.attention, ShellSidebarAttention::Quiet);
+        let waiting = sidebar_task_phase(ProductTaskStatus::Waiting, "idle", false).unwrap();
+        assert_eq!(waiting.label, "等待中");
+        assert_eq!(waiting.attention, ShellSidebarAttention::Waiting);
+        let blocked = sidebar_task_phase(ProductTaskStatus::Blocked, "idle", false).unwrap();
+        assert_eq!(blocked.label, "已阻塞");
+        assert!(sidebar_task_phase(ProductTaskStatus::Running, "idle", false).is_none());
+        assert!(sidebar_task_phase(ProductTaskStatus::Done, "idle", false).is_none());
+    }
 
     #[test]
     fn command_registry_scopes_document_actions_and_dispatches_the_keymap() {

@@ -1635,6 +1635,38 @@ impl NativeAgentKitRuntime {
             .map_err(|error| AgentKitPortError::InvalidInput(error.to_string()))
     }
 
+    pub fn replace_task_session_binding(
+        &self,
+        task_id: &TaskId,
+        session_id: &str,
+        profile_id: Option<&str>,
+    ) -> Result<AgentSessionRef, AgentKitPortError> {
+        let session = self.session_snapshot(session_id)?;
+        if session.session_id != session_id {
+            return Err(AgentKitPortError::Unavailable(
+                "forked session is not ready to bind".into(),
+            ));
+        }
+        let profile_id = profile_id.unwrap_or(session.profile_id.as_str());
+        if session.profile_id != profile_id {
+            return Err(AgentKitPortError::InvalidInput(format!(
+                "session `{session_id}` profile does not match its product binding"
+            )));
+        }
+        let binding = ProductSessionBinding {
+            task_id: task_id.as_str().to_owned(),
+            profile_id: profile_id.to_owned(),
+        };
+        let mut bindings = self
+            .bindings
+            .lock()
+            .map_err(|_| AgentKitPortError::Unavailable("session binding lock poisoned".into()))?;
+        bindings.retain(|id, existing| id == session_id || existing.task_id != task_id.as_str());
+        bindings.insert(session_id.to_owned(), binding);
+        AgentSessionRef::new(session_id.to_owned())
+            .map_err(|error| AgentKitPortError::InvalidInput(error.to_string()))
+    }
+
     pub(crate) fn fork_session_state(
         &self,
         source_session_id: &str,
@@ -1650,9 +1682,9 @@ impl NativeAgentKitRuntime {
         target_session_id: &str,
         through_turn_id: Option<&str>,
     ) -> Result<AgentSession, AgentKitPortError> {
-        let source = self.binding(source_session_id)?;
+        self.binding(source_session_id)?;
         let host = self.host_for_plan(None, false)?;
-        let forked: AgentSession = self.call(
+        self.call(
             &host,
             "session-fork",
             AGENT_SESSION_FORK_PROTOCOL,
@@ -1662,12 +1694,7 @@ impl NativeAgentKitRuntime {
                 title: None,
                 through_turn_id: through_turn_id.map(str::to_owned),
             },
-        )?;
-        self.bindings
-            .lock()
-            .map_err(|_| AgentKitPortError::Unavailable("session binding lock poisoned".into()))?
-            .insert(target_session_id.to_string(), source);
-        Ok(forked)
+        )
     }
 
     pub(crate) fn persist_wire_session(

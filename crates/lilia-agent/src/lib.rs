@@ -8,6 +8,7 @@
 
 mod agentkit_host;
 mod anthropic_adapter;
+mod architecture_tool;
 mod browser;
 mod browser_tool;
 mod credential;
