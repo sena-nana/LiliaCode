@@ -81,6 +81,19 @@ pub(crate) struct PendingActionView {
 }
 
 impl TaskSessionView {
+    pub(crate) fn image_attachment_gallery(&self) -> Vec<(String, String)> {
+        let mut images = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for event in &self.timeline {
+            for attachment in &event.attachments {
+                if attachment.is_image() && seen.insert(attachment.path.clone()) {
+                    images.push((attachment.path.clone(), attachment.name.clone()));
+                }
+            }
+        }
+        images
+    }
+
     pub(crate) fn timeline_attachment(
         &self,
         event_id: &str,
@@ -997,5 +1010,70 @@ mod tests {
         assert!(window.leading_extent > 0.0);
         assert!(window.trailing_extent > 0.0);
         assert!(window.range.len() < 40, "only visible events are built");
+    }
+
+    #[test]
+    fn image_attachment_gallery_keeps_existing_image_files_in_timeline_order() {
+        let mut first = projection_event(1);
+        first.payload = json!({
+            "attachments": [
+                {
+                    "id": "note",
+                    "name": "note.txt",
+                    "path": "C:/repo/note.txt",
+                    "kind": "file",
+                    "exists": true,
+                    "mime": "text/plain"
+                },
+                {
+                    "id": "shot",
+                    "name": "界面.png",
+                    "path": "C:/repo/界面.png",
+                    "kind": "file",
+                    "exists": true,
+                    "mime": "image/png"
+                }
+            ]
+        });
+        let mut second = projection_event(2);
+        second.payload = json!({
+            "attachments": [{
+                "id": "shot-again",
+                "name": "界面.png",
+                "path": "C:/repo/界面.png",
+                "kind": "file",
+                "exists": true,
+                "mime": "image/png"
+            }, {
+                "id": "next",
+                "name": "下一张.jpg",
+                "path": "C:/repo/下一张.jpg",
+                "kind": "file",
+                "exists": true,
+                "mime": "image/jpeg"
+            }, {
+                "id": "missing",
+                "name": "gone.png",
+                "path": "C:/repo/gone.png",
+                "kind": "file",
+                "exists": false,
+                "mime": "image/png"
+            }]
+        });
+        let session = TaskSessionView::from_facts(
+            "images".into(),
+            vec![task_timeline_item(first), task_timeline_item(second)],
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(
+            session.image_attachment_gallery(),
+            vec![
+                ("C:/repo/界面.png".into(), "界面.png".into()),
+                ("C:/repo/下一张.jpg".into(), "下一张.jpg".into()),
+            ]
+        );
     }
 }

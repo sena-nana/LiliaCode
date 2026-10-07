@@ -185,8 +185,13 @@ impl NodeEditorView {
                         widget(FormField::new("节点名称"))
                             .entity_ref(title_field)
                             .child_slot(title_control, |field, id| field.control_child(id)),
-                        widget(ScrollView::new(ScrollAxes::Vertical))
-                            .children(widget(Stack::column(12.0)).entity_ref(fields)),
+                        widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+                            layout.flex_grow = Some(1.0);
+                            layout.flex_shrink = Some(1.0);
+                            layout.min_height = Some(nana_ui_core::LengthSpec::Px(0.0));
+                            layout.width = Some(nana_ui_core::LengthSpec::Fill);
+                        }))
+                        .children(widget(Stack::column(12.0)).entity_ref(fields)),
                     )),
                     (root, fields, title, save, close, title_field),
                 )

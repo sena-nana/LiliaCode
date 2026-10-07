@@ -1,5 +1,5 @@
 use crate::runtime_compat::HostedWindowId;
-use crate::runtime_layout::{view_column, view_fill_row, Bound};
+use crate::runtime_layout::{view_column, Bound};
 use crate::runtime_shell::{emit, IntentSink, ShellIntent};
 use nana_ui::runtime::view::{
     empty_state, entity_ref, signal, status_badge, switch, text_input, widget, with_refs, EachExt,
@@ -608,10 +608,13 @@ impl AutomationView {
                                 )
                                 .entity_ref(add_human),
                             )),
-                        view_fill_row(16.0)
-                            .entity_ref(body)
-                            .visible(show_workflow)
-                            .children(canvas_view),
+                        widget(
+                            Stack::fill_row(16.0)
+                                .min_height(LengthSpec::Px(inspector_row_min_height())),
+                        )
+                        .entity_ref(body)
+                        .visible(show_workflow)
+                        .children(canvas_view),
                         view_column(8.0)
                             .entity_ref(run_panel)
                             .visible(show_workflow)
@@ -1174,6 +1177,21 @@ fn run_detail_copy(run: Option<&AutomationRunView>) -> (Arc<str>, Option<Arc<str
     }
 }
 
+/// Floor for the canvas and node-editor row.
+///
+/// That row shrinks. The canvas and the editor both fill it with a zero
+/// minimum, so a tall trigger-scope list collapses the row and the editor
+/// paints over the switches. The floor matches the editor stack: the save
+/// row, the title field, the prompt field (its text area is 120px), and the
+/// column gaps.
+fn inspector_row_min_height() -> f32 {
+    let control = nana_ui::UI_METRICS.control_height;
+    let label_band = nana_ui_core::type_scale::LINE + nana_ui_core::space::XS;
+    let gap = 8.0;
+    let prompt = 120.0;
+    control + gap + (label_band + control) + gap + (label_band + prompt)
+}
+
 fn editor_frame(compact: bool, hidden: bool) -> Stack {
     let stack = if compact {
         Stack::fill_column(8.0)
@@ -1183,7 +1201,11 @@ fn editor_frame(compact: bool, hidden: bool) -> Stack {
             .grow(0.0)
             .shrink(0.0)
     };
-    stack.with_layout(|layout| layout.hidden = hidden)
+    stack.with_layout(|layout| {
+        layout.hidden = hidden;
+        layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+        layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+    })
 }
 
 fn set_hidden(style: &mut NodeStyle, hidden: bool) {

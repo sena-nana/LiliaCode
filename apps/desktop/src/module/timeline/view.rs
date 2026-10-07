@@ -19,6 +19,8 @@ pub struct TimelineRow {
     pub can_retry: bool,
     pub can_copy: bool,
     pub can_branch: bool,
+    /// User and assistant rows are the scrollbar's key nodes.
+    pub key_node: bool,
 }
 
 fn timeline_markdown_view(item: &TimelineRow) -> NativeMarkdown {
@@ -53,10 +55,10 @@ fn content_hash(item: &TimelineRow) -> u64 {
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AppContext, Button, DocumentId, Entity, FlexDirection, FrameworkError, LengthSpec,
-    List, NativeMarkdown, NodeStyle, RichTextEvent, ScrollAxes, ScrollChanged, ScrollView, Stack,
-    VirtualListItems, VirtualListLayout,
+    List, NativeMarkdown, NodeStyle, PositionSpec, RichTextEvent, ScrollAxes, ScrollChanged,
+    ScrollView, Stack, VirtualListItems, VirtualListLayout,
 };
-use nana_ui::ButtonKind;
+use nana_ui::{ButtonKind, VirtualAlignment};
 use nana_ui_platform::WindowId;
 use std::{
     collections::{HashMap, HashSet},
@@ -84,6 +86,8 @@ pub enum TimelineAction {
     Retry(String),
     Continue(String),
     Fork(String),
+    Quote(String),
+    Jump(String),
     OpenImage { source: String, alt: String },
     LoadEarlier,
     Scrolled { offset: f32, viewport_extent: f32 },
@@ -107,6 +111,7 @@ pub(crate) struct TimelineView {
     timeline_markdown_source: HashMap<String, u64>,
     pub(crate) timeline_actions: HashMap<String, Entity<Button>>,
     timeline_toolbars: HashMap<String, Entity<Stack>>,
+    pub(crate) key_markers: HashMap<String, Entity<Button>>,
     pub(crate) load_earlier: Option<Entity<Button>>,
     sink: Sink,
     target: TimelineTarget,
@@ -132,7 +137,11 @@ impl TimelineView {
                 let timeline_scroll = entity_ref::<ScrollView>();
                 let timeline_list = entity_ref::<List>();
                 with_refs(
-                    widget(Stack::fill_column(6.0)).entity_ref(root).children(
+                    widget(Stack::fill_column(6.0).with_layout(|layout| {
+                        layout.position = PositionSpec::Relative;
+                    }))
+                    .entity_ref(root)
+                    .children(
                         widget(
                             ScrollView::new(ScrollAxes::Vertical).style(timeline_scroll_style()),
                         )
@@ -168,6 +177,7 @@ impl TimelineView {
             timeline_markdown_source: HashMap::new(),
             timeline_actions: HashMap::new(),
             timeline_toolbars: HashMap::new(),
+            key_markers: HashMap::new(),
             load_earlier: None,
             sink,
             target,
@@ -218,6 +228,9 @@ impl TimelineView {
             self.timeline_markdown_source.clear();
             self.timeline_actions.clear();
             self.timeline_toolbars.clear();
+            for (_, marker) in self.key_markers.drain() {
+                let _ = context.remove_view(marker);
+            }
             if let Some(button) = self.load_earlier.take() {
                 context.remove_view(button)?;
             }
@@ -333,6 +346,16 @@ impl TimelineView {
                     TimelineAction::Copy(item.id.clone()),
                 )?;
                 actions.push(button.stable_id());
+                let quote_id = format!("quote-{}", item.id);
+                action_keep.insert(quote_id.clone());
+                let button = self.upsert_timeline_action(
+                    context,
+                    document_id,
+                    &quote_id,
+                    "引用",
+                    TimelineAction::Quote(item.id.clone()),
+                )?;
+                actions.push(button.stable_id());
             }
             if item.can_retry {
                 let id = format!("retry-{}", item.id);
@@ -397,7 +420,9 @@ impl TimelineView {
                 let _ = context.remove_view(entity);
             }
         }
+        let marker_ids = self.sync_key_markers(context, document_id, snapshot, &layout)?;
         let mut children = vec![self.timeline_scroll.stable_id()];
+        children.extend(marker_ids);
         if snapshot.can_load_earlier {
             if self.load_earlier.is_none() {
                 let (_, button) = context.mount_view_detached(document_id, || {
@@ -470,13 +495,186 @@ impl TimelineView {
             Ok(button)
         }
     }
+
+    fn sync_key_markers(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        snapshot: &TimelineViewSnapshot,
+        layout: &VirtualListLayout,
+    ) -> Result<Vec<nana_ui::runtime::StableNodeId>, FrameworkError> {
+        let markers = timeline_key_markers(&snapshot.rows, layout);
+        let mut keep = HashSet::new();
+        let mut ids = Vec::new();
+        for marker in &markers {
+            keep.insert(marker.id.clone());
+            let button = if let Some(button) = self.key_markers.get(&marker.id).copied() {
+                let name = marker.name.clone();
+                let ratio = marker.ratio;
+                context.update_component(button, |button, _| {
+                    *button = key_node_button(&name, ratio);
+                })?;
+                button
+            } else {
+                let name = marker.name.clone();
+                let ratio = marker.ratio;
+                let (_, button) = context.mount_view_detached(document_id, move || {
+                    let button = entity_ref::<Button>();
+                    with_refs(
+                        widget(key_node_button(&name, ratio)).entity_ref(button),
+                        button,
+                    )
+                })?;
+                let sink = Arc::clone(&self.sink);
+                let target = self.target.clone();
+                let row_id = marker.id.clone();
+                context.on(button, move |_, _: &Activate, _| {
+                    sink(target.clone(), TimelineAction::Jump(row_id.clone()));
+                })?;
+                self.key_markers.insert(marker.id.clone(), button);
+                button
+            };
+            ids.push(button.stable_id());
+        }
+        let stale: Vec<_> = self
+            .key_markers
+            .keys()
+            .filter(|id| !keep.contains(*id))
+            .cloned()
+            .collect();
+        for id in stale {
+            if let Some(button) = self.key_markers.remove(&id) {
+                let _ = context.remove_view(button);
+            }
+        }
+        Ok(ids)
+    }
 }
 fn timeline_virtual_layout(snapshot: &TimelineViewSnapshot) -> VirtualListLayout {
-    if snapshot.layout.len() == snapshot.rows.len() {
-        snapshot.layout.clone()
+    timeline_layout_for(&snapshot.rows, &snapshot.layout)
+}
+
+fn timeline_layout_for(rows: &[TimelineRow], layout: &VirtualListLayout) -> VirtualListLayout {
+    if layout.len() == rows.len() {
+        layout.clone()
     } else {
-        VirtualListLayout::new(snapshot.rows.iter().map(|_| TIMELINE_ROW_FALLBACK_EXTENT))
+        VirtualListLayout::new(rows.iter().map(|_| TIMELINE_ROW_FALLBACK_EXTENT))
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TimelineKeyMarker {
+    pub id: String,
+    pub name: String,
+    pub ratio: f32,
+}
+
+pub(crate) fn timeline_key_markers(
+    rows: &[TimelineRow],
+    layout: &VirtualListLayout,
+) -> Vec<TimelineKeyMarker> {
+    let resolved = timeline_layout_for(rows, layout);
+    let total = resolved.total_extent();
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| row.key_node)
+        .map(|(index, row)| {
+            let start = resolved.extent(0..index);
+            let ratio = if total > 0.0 {
+                (start / total).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            TimelineKeyMarker {
+                id: row.id.clone(),
+                name: key_node_name(&row.markdown),
+                ratio,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn timeline_jump_offset(
+    rows: &[TimelineRow],
+    layout: &VirtualListLayout,
+    row_id: &str,
+    viewport_extent: f32,
+) -> Option<f32> {
+    let index = rows
+        .iter()
+        .position(|row| row.key_node && row.id == row_id)?;
+    timeline_layout_for(rows, layout).offset_for_index(
+        index,
+        0.0,
+        viewport_extent,
+        VirtualAlignment::Start,
+    )
+}
+
+/// Characters of the row message painted on the marker. The pinned `Button`
+/// has one text slot — `Button::new` / `label` — and no tooltip method.
+const KEY_NODE_LABEL_CHARS: usize = 4;
+
+fn key_node_name(markdown: &str) -> String {
+    let line = markdown
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("关键");
+    let snippet: String = line.chars().take(KEY_NODE_LABEL_CHARS).collect();
+    if snippet.is_empty() {
+        "关键".into()
+    } else {
+        snippet
+    }
+}
+
+const KEY_MARKER_HEIGHT: f32 = 28.0;
+const KEY_MARKER_FONT: f32 = 12.0;
+const KEY_MARKER_PAD: f32 = 8.0;
+/// Four glyphs plus side inset: the 72px label track.
+const KEY_MARKER_WIDTH: f32 = KEY_NODE_LABEL_CHARS as f32 * 14.0 + KEY_MARKER_PAD * 2.0;
+const TIMELINE_KEY_TRACK: f32 = KEY_MARKER_WIDTH;
+
+fn key_node_button(name: &str, ratio: f32) -> Button {
+    let ratio = ratio.clamp(0.0, 1.0);
+    let mut button = Button::new(name)
+        .kind(ButtonKind::Primary)
+        .size(nana_ui::ControlSize::Small);
+    // `Button::style` sets style_override and drops the primary fill, which
+    // left a tiny marker with no paint. Mutate the box in place so the
+    // theme still colours it. The label is the button's own text slot.
+    button.style.control_height = None;
+    button.style.control_padding_x = None;
+    button.style.control_padding_y = None;
+    button.style.square = None;
+    let layout = Arc::make_mut(&mut button.style.layout);
+    layout.position = PositionSpec::Absolute;
+    layout.width = Some(LengthSpec::Px(KEY_MARKER_WIDTH));
+    layout.height = Some(LengthSpec::Px(KEY_MARKER_HEIGHT));
+    layout.min_width = Some(LengthSpec::Px(KEY_MARKER_WIDTH));
+    layout.min_height = Some(LengthSpec::Px(KEY_MARKER_HEIGHT));
+    layout.flex_shrink = Some(0.0);
+    layout.font_size = Some(KEY_MARKER_FONT);
+    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(KEY_MARKER_HEIGHT));
+    layout.border_radius = Some(KEY_MARKER_HEIGHT / 2.0);
+    layout.padding_left = Some(LengthSpec::Px(KEY_MARKER_PAD));
+    layout.padding_right = Some(LengthSpec::Px(KEY_MARKER_PAD));
+    layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+    layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+    // Sit in the right-hand track, clear of the scrollbar, and keep the
+    // marker's own box inside the track when the node is at the bottom.
+    layout.offset_right = Some(LengthSpec::Px((TIMELINE_KEY_TRACK - KEY_MARKER_WIDTH) / 2.0));
+    layout.offset_top = Some(LengthSpec::CalcPercentOffset {
+        percent: ratio * 100.0,
+        offset_px: -KEY_MARKER_HEIGHT * ratio,
+    });
+    layout.z_index = Some(5);
+    // Keep an explicit accent fill. The theme recipe does not paint this marker.
+    button.style.background = Some(nana_ui::runtime::SemanticColorRole::Accent);
+    button.style.foreground = Some(nana_ui::runtime::SemanticColorRole::AccentText);
+    let style = button.style.clone();
+    button.style(style)
 }
 
 fn viewport_extent(
@@ -501,7 +699,10 @@ fn timeline_scroll_style() -> NodeStyle {
     let layout = Arc::make_mut(&mut style.layout);
     layout.flex_grow = Some(1.0);
     layout.flex_shrink = Some(1.0);
-    layout.width = Some(LengthSpec::Fill);
+    layout.width = Some(LengthSpec::CalcPercentOffset {
+        percent: 100.0,
+        offset_px: -TIMELINE_KEY_TRACK,
+    });
     layout.height = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.min_height = Some(LengthSpec::Px(0.0));
@@ -520,7 +721,7 @@ fn timeline_list_style(total: f32, leading: f32, trailing: f32) -> NodeStyle {
 }
 
 fn timeline_action_is_mounted(action_id: &str, mounted: &HashSet<String>) -> bool {
-    ["expand-", "copy-", "retry-", "continue-", "fork-"]
+    ["expand-", "copy-", "quote-", "retry-", "continue-", "fork-"]
         .into_iter()
         .find_map(|prefix| action_id.strip_prefix(prefix))
         .is_some_and(|id| mounted.contains(id))
@@ -560,6 +761,7 @@ mod tests {
             can_retry: false,
             can_copy: true,
             can_branch: false,
+            key_node: false,
         };
         let view = timeline_markdown_view(&row);
         assert!(view.blocks().iter().any(|block| {
@@ -589,6 +791,7 @@ mod tests {
                     can_copy: true,
                     can_retry: true,
                     can_branch: false,
+                    key_node: false,
                 })
                 .collect(),
             layout: VirtualListLayout::new(std::iter::repeat_n(72.0, 100)),
@@ -809,6 +1012,7 @@ mod tests {
                 can_copy: false,
                 can_retry: false,
                 can_branch: false,
+                key_node: false,
             },
         );
         snapshot.layout = VirtualListLayout::new(std::iter::repeat_n(72.0, snapshot.rows.len()));
@@ -897,6 +1101,99 @@ mod tests {
             vec![
                 TimelineAction::Continue("event-0".into()),
                 TimelineAction::Fork("event-0".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn key_node_markers_jump_to_the_row_and_quote_uses_the_row_action() {
+        let rows = vec![
+            TimelineRow {
+                id: "tool".into(),
+                markdown: "tool output".into(),
+                images: Vec::new(),
+                expanded: false,
+                can_expand: false,
+                can_copy: true,
+                can_retry: false,
+                can_branch: false,
+                key_node: false,
+            },
+            TimelineRow {
+                id: "user-1".into(),
+                markdown: "先看滚动条".into(),
+                images: Vec::new(),
+                expanded: true,
+                can_expand: false,
+                can_copy: true,
+                can_retry: false,
+                can_branch: false,
+                key_node: true,
+            },
+        ];
+        let layout = VirtualListLayout::new([100.0, 100.0]);
+        let markers = timeline_key_markers(&rows, &layout);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].id, "user-1");
+        assert_eq!(markers[0].name, "先看滚动");
+        assert_ne!(markers[0].name, "·");
+        assert!(rows[1].markdown.starts_with(&markers[0].name));
+        assert!((markers[0].ratio - 0.5).abs() < 0.001);
+        assert_eq!(
+            timeline_jump_offset(&rows, &layout, "user-1", 80.0),
+            Some(100.0)
+        );
+        assert_eq!(timeline_jump_offset(&rows, &layout, "tool", 80.0), None);
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut context = AppContext::new();
+        let document = DocumentId::new(634).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let snapshot = TimelineViewSnapshot {
+            target: TimelineTarget {
+                window_id: WindowId::PRIMARY,
+                task_id: Some("task".into()),
+            },
+            rows,
+            layout,
+            scroll_offset: 0.0,
+            viewport_extent: 80.0,
+            can_load_earlier: false,
+        };
+        let sink_events = Arc::clone(&events);
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(move |target, action| sink_events.lock().unwrap().push((target, action))),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+        assert!(view.key_markers.contains_key("user-1"));
+        assert!(!view.key_markers.contains_key("tool"));
+        let marker = view.key_markers["user-1"];
+        let component_label = context.read(marker, |button| button.label.clone()).unwrap();
+        assert_eq!(component_label, "先看滚动");
+        assert_eq!(
+            context.world().text(marker.stable_id()),
+            Some("先看滚动")
+        );
+        context
+            .update_component(view.key_markers["user-1"], |_, cx| cx.emit(Activate))
+            .unwrap();
+        context
+            .update_component(view.timeline_actions["quote-user-1"], |_, cx| {
+                cx.emit(Activate)
+            })
+            .unwrap();
+        assert_eq!(
+            events.lock().unwrap().iter().map(|(_, action)| action.clone()).collect::<Vec<_>>(),
+            vec![
+                TimelineAction::Jump("user-1".into()),
+                TimelineAction::Quote("user-1".into()),
             ]
         );
     }

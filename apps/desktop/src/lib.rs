@@ -25,8 +25,6 @@ mod kernel_host;
 mod markdown_images;
 mod module;
 mod navigation;
-#[cfg(test)]
-mod offscreen_remaining;
 mod pending_import;
 mod project_files_panel;
 mod provider_ai_settings;

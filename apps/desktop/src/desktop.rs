@@ -1668,7 +1668,10 @@ impl DesktopProgram {
                     revision,
                     self.window_composer(target.window_id)
                         .map(|composer| composer.content.as_str()),
-                    !matches!(&action, ComposerInputAction::Interrupt),
+                    !matches!(
+                        &action,
+                        ComposerInputAction::Interrupt | ComposerInputAction::CompactContext
+                    ),
                 ) {
                     if current.as_ref().map(TaskId::as_str) == target.task_id.as_deref()
                         && current.is_some()
@@ -1864,6 +1867,18 @@ impl DesktopProgram {
                     }
                     ComposerInputAction::CancelReview => {
                         self.clear_review_slash_workflow(target.window_id);
+                        return None;
+                    }
+                    ComposerInputAction::OptimizePrompt => {
+                        self.start_prompt_optimization(target.window_id);
+                        return None;
+                    }
+                    ComposerInputAction::CompactContext => {
+                        if target.window_id == HostedWindowId::PRIMARY {
+                            self.compact_context();
+                        } else {
+                            self.compact_task_popup_context(target.window_id);
+                        }
                         return None;
                     }
                     _ => return None,
@@ -2199,6 +2214,10 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::MarkdownImageViewerInteraction => {
                 Message::Timeline(TimelineMessage::MarkdownImageViewerInteraction)
             }
+            crate::runtime_shell::ShellIntent::PageMarkdownPreview { forward } => {
+                self.page_markdown_image(HostedWindowId::PRIMARY, forward);
+                return None;
+            }
             crate::runtime_shell::ShellIntent::StartGitHubBinding => {
                 Message::GitHub(GitHubMessage::StartBinding)
             }
@@ -2247,8 +2266,15 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::OpenCodingTerminal => {
                 Message::Project(ProjectMessage::OpenNativeProjectTerminal)
             }
+            crate::runtime_shell::ShellIntent::RunCodingTask(task_id) => {
+                self.run_project_task(task_id);
+                return None;
+            }
             crate::runtime_shell::ShellIntent::SelectRoadmapMilestone(id) => {
                 Message::Roadmap(RoadmapMessage::Select(id))
+            }
+            crate::runtime_shell::ShellIntent::OpenArchitecture => {
+                Message::Architecture(ArchitectureMessage::Open)
             }
             crate::runtime_shell::ShellIntent::RefreshArchitecture => {
                 Message::Architecture(ArchitectureMessage::Refresh)
@@ -4948,6 +4974,17 @@ impl DesktopProgram {
                     can_manage_todos: self.current_selected_task().is_some()
                         && !self.composer_is_locked(),
                     apply_failed: false,
+                    can_optimize: false,
+                    optimizing: self.prompt_optimization_is_busy(
+                        HostedWindowId::PRIMARY,
+                        self.main_conversation_draft
+                            .as_ref()
+                            .map(|draft| &draft.task.id)
+                            .or(self.current_selected_task().as_ref()),
+                    ),
+                    context_label: None,
+                    context_usage_percent: None,
+                    can_compact: false,
                 }
             },
         }
@@ -5343,6 +5380,17 @@ impl DesktopProgram {
             Some(MarkdownImageLoadState::Failed) => "无法显示".to_owned(),
             _ => String::new(),
         };
+        let gallery = self
+            .task_session
+            .as_ref()
+            .map(|session| session.image_attachment_gallery())
+            .unwrap_or_default();
+        let sources = gallery
+            .iter()
+            .map(|(source, _)| source.clone())
+            .collect::<Vec<_>>();
+        let (gallery_index, gallery_count) =
+            crate::runtime_shell::gallery_position(&sources, &preview.source);
         Some(crate::runtime_shell::ShellMarkdownPreview {
             title: markdown_image_label(preview),
             metadata,
@@ -5357,6 +5405,8 @@ impl DesktopProgram {
                 }
                 _ => None,
             },
+            gallery_index,
+            gallery_count,
         })
     }
 
@@ -5558,6 +5608,36 @@ impl DesktopProgram {
             pending_review_target(popup.pending_review_slash_workflow.as_ref());
         composer.review_value = pending_review_value(popup.pending_review_slash_workflow.as_ref());
         composer.can_manage_todos = false;
+        let turn_active = composer.can_interrupt;
+        let pending = composer.pending_blocks_send;
+        let task_id = popup
+            .draft
+            .as_ref()
+            .map(|draft| &draft.id)
+            .or(popup.active_task_id.as_ref());
+        composer.optimizing = self.prompt_optimization_is_busy(window_id, task_id);
+        composer.can_optimize = !turn_active
+            && !pending
+            && !composer.optimizing
+            && !composer.composer.trim().is_empty();
+        if let Some(usage) = popup
+            .session
+            .as_ref()
+            .and_then(|session| session.context_usage.as_ref())
+        {
+            let (label, percent) = crate::module::composer::view::context_usage_control(
+                usage.used_tokens,
+                usage.limit_tokens,
+                usage.used_percent,
+            );
+            composer.context_label = Some(label);
+            composer.context_usage_percent = Some(percent);
+            composer.can_compact = !turn_active && !pending;
+        } else {
+            composer.context_label = None;
+            composer.context_usage_percent = None;
+            composer.can_compact = false;
+        }
         let workspace = popup.workspace.snapshot().ok();
         let panes = workspace
             .as_ref()
@@ -11793,6 +11873,21 @@ impl DesktopProgram {
                     image: MarkdownImage { source, alt },
                 });
             }
+            TimelineAction::Jump(event_id) => {
+                self.jump_timeline_row(target.window_id, &event_id);
+            }
+            TimelineAction::Quote(event_id) => {
+                let session = if target.window_id == HostedWindowId::PRIMARY {
+                    self.task_session.as_ref()
+                } else {
+                    self.task_popups
+                        .get(&target.window_id)
+                        .and_then(|popup| popup.session.as_ref())
+                };
+                if let Some(text) = timeline_row_text(session, &event_id) {
+                    self.append_timeline_quote(target.window_id, &text);
+                }
+            }
             TimelineAction::Copy(event_id) => {
                 let session = if target.window_id == HostedWindowId::PRIMARY {
                     self.task_session.as_ref()
@@ -11801,16 +11896,7 @@ impl DesktopProgram {
                         .get(&target.window_id)
                         .and_then(|popup| popup.session.as_ref())
                 };
-                let text = session
-                    .and_then(|session| session.timeline.iter().find(|event| event.id == event_id))
-                    .map(|event| {
-                        event
-                            .markdown_plain_text
-                            .clone()
-                            .or_else(|| event.markdown.clone())
-                            .or_else(|| event.summary.clone())
-                            .unwrap_or_else(|| event.title.clone())
-                    });
+                let text = timeline_row_text(session, &event_id);
                 if let Some(text) = text {
                     return self.apply_timeline_message(TimelineMessage::CopyTimelineMarkdown {
                         event_id,
@@ -15849,22 +15935,101 @@ impl DesktopProgram {
         let Some(selection) = self.timeline_text_selection(window_id) else {
             return;
         };
-        let quote = quote_timeline_text(&selection.text);
-        if quote.is_empty() {
-            return;
+        let text = selection.text.clone();
+        if self.append_timeline_quote(window_id, &text) {
+            self.clear_timeline_text_selection(window_id);
         }
+    }
+
+    fn append_timeline_quote(&mut self, window_id: HostedWindowId, text: &str) -> bool {
         let current = self
             .window_composer(window_id)
             .map(|composer| composer.content.clone())
             .unwrap_or_default();
-        let updated = format!("{current}{quote}");
-        let applied = if window_id == HostedWindowId::PRIMARY {
+        let Some(updated) = composer_with_quote(&current, text) else {
+            return false;
+        };
+        if window_id == HostedWindowId::PRIMARY {
             self.execute_composer_command(DesktopComposerCommand::SetContent(updated))
         } else {
             self.task_popup_composer_command(window_id, DesktopComposerCommand::SetContent(updated))
+        }
+    }
+
+    fn jump_timeline_row(&mut self, window_id: HostedWindowId, event_id: &str) {
+        let surface = if window_id == HostedWindowId::PRIMARY {
+            TimelineSurfaceKey::Main
+        } else {
+            TimelineSurfaceKey::TaskPopup(window_id)
         };
-        if applied {
-            self.clear_timeline_text_selection(window_id);
+        let session = if window_id == HostedWindowId::PRIMARY {
+            self.task_session.clone()
+        } else {
+            self.task_popups
+                .get(&window_id)
+                .and_then(|popup| popup.session.clone())
+        };
+        let Some(session) = session else {
+            return;
+        };
+        let Some(rows) = self
+            .timeline_module_for(window_id)
+            .map(|module| module.rows(&session))
+        else {
+            return;
+        };
+        let viewport = self
+            .timeline_viewports
+            .get(&surface)
+            .copied()
+            .unwrap_or_default();
+        let Some(offset) = crate::module::timeline::view::timeline_jump_offset(
+            &rows,
+            &session.timeline_layout,
+            event_id,
+            viewport.extent,
+        ) else {
+            return;
+        };
+        self.update_timeline_viewport(surface, offset, viewport.extent);
+    }
+
+    fn page_markdown_image(&mut self, window_id: HostedWindowId, forward: bool) {
+        let Some(preview) = self.markdown_image_previews.get(&window_id).cloned() else {
+            return;
+        };
+        let session = if window_id == HostedWindowId::PRIMARY {
+            self.task_session.clone()
+        } else {
+            self.task_popups
+                .get(&window_id)
+                .and_then(|popup| popup.session.clone())
+        };
+        let Some(session) = session else {
+            return;
+        };
+        let gallery = session.image_attachment_gallery();
+        let sources = gallery
+            .iter()
+            .map(|(source, _)| source.clone())
+            .collect::<Vec<_>>();
+        let Some(index) =
+            crate::runtime_shell::page_gallery_index(&sources, &preview.source, forward)
+        else {
+            return;
+        };
+        let (source, alt) = gallery[index].clone();
+        self.markdown_image_previews.insert(
+            window_id,
+            MarkdownImagePreview { source: source.clone(), alt },
+        );
+        if matches!(
+            self.markdown_images.get(&source),
+            Some(MarkdownImageLoadState::Ready(_))
+        ) {
+            self.touch_markdown_image(&source);
+        } else {
+            self.request_markdown_image_load(&source);
         }
     }
 
@@ -31201,14 +31366,20 @@ fn collect_session_markdown_image_sources(
     session: &TaskSessionView,
     sources: &mut BTreeSet<String>,
 ) {
-    for image in session
-        .timeline
-        .iter()
-        .filter_map(|event| event.markdown_document.as_ref().map(NativeMarkdown::images))
-    {
-        sources.extend(image.into_iter().map(|image| image.source));
+        for image in session
+            .timeline
+            .iter()
+            .filter_map(|event| event.markdown_document.as_ref().map(NativeMarkdown::images))
+        {
+            sources.extend(image.into_iter().map(|image| image.source));
+        }
+        sources.extend(
+            session
+                .image_attachment_gallery()
+                .into_iter()
+                .map(|(source, _)| source),
+        );
     }
-}
 
 fn markdown_image_label(preview: &MarkdownImagePreview) -> String {
     let alt = preview.alt.trim();
@@ -33301,6 +33472,28 @@ fn turn_state_error(state: &DesktopTurnState) -> Option<&str> {
     }
 }
 
+fn timeline_row_text(session: Option<&TaskSessionView>, event_id: &str) -> Option<String> {
+    session
+        .and_then(|session| session.timeline.iter().find(|event| event.id == event_id))
+        .map(|event| {
+            event
+                .markdown_plain_text
+                .clone()
+                .or_else(|| event.markdown.clone())
+                .or_else(|| event.summary.clone())
+                .unwrap_or_else(|| event.title.clone())
+        })
+}
+
+fn composer_with_quote(current: &str, text: &str) -> Option<String> {
+    let quote = quote_timeline_text(text);
+    if quote.is_empty() {
+        None
+    } else {
+        Some(format!("{current}{quote}"))
+    }
+}
+
 fn quote_timeline_text(text: &str) -> String {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = normalized.trim();
@@ -34364,6 +34557,11 @@ mod tests {
     #[test]
     fn selected_reply_actions_preserve_multiline_quote_and_popup_prompt_contract() {
         assert_eq!(quote_timeline_text(" A\r\nB "), "> A\n> B\n\n");
+        assert_eq!(
+            composer_with_quote("草稿", " A\r\nB ").as_deref(),
+            Some("草稿> A\n> B\n\n")
+        );
+        assert_eq!(composer_with_quote("草稿", " \n "), None);
         assert_eq!(
             popup_question_text("A\nB"),
             "请基于这段 Agent 回复继续提问：\n\n> A\n> B\n\n"

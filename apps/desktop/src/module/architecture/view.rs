@@ -55,6 +55,7 @@ pub(crate) struct ArchitectureView {
     summary: Entity<Text>,
     detail: Entity<Text>,
     history: Entity<Stack>,
+    open: Entity<Button>,
     rollback: Entity<Button>,
     summary_text: Bound<String>,
     show_summary: Bound<bool>,
@@ -85,7 +86,7 @@ impl ArchitectureView {
         let rollback_slot = rollback_disabled.clone();
         let canvas_slot = canvas_state.clone();
         let records_slot = records.clone();
-        let (_, (root, inspector, canvas, summary, detail, history, rollback)) = context
+        let (_, (root, inspector, canvas, summary, detail, history, open, rollback)) = context
             .mount_view_detached(document, move || {
                 let summary_text = summary_slot.install(signal(String::new()));
                 let show_summary = show_slot.install(signal(false));
@@ -99,13 +100,18 @@ impl ArchitectureView {
                 let summary = entity_ref::<Text>();
                 let detail = entity_ref::<Text>();
                 let history = entity_ref::<Stack>();
+                let open = entity_ref::<Button>();
                 let rollback = entity_ref::<Button>();
+                let open_sink = Arc::clone(&sink);
                 let refresh_sink = Arc::clone(&sink);
                 let rollback_sink = Arc::clone(&sink);
                 let graph_sink = sink;
                 let page = view_fill_column(12.0).entity_ref(root).children((
                     view_bar(8.0).children((
                         text("架构"),
+                        widget(Button::new("打开").kind(ButtonKind::Subtle))
+                            .entity_ref(open)
+                            .on_activate(move || open_sink(ArchitectureMessage::Open)),
                         widget(Button::new("刷新").kind(ButtonKind::Subtle))
                             .on_activate(move || refresh_sink(ArchitectureMessage::Refresh)),
                         widget(Button::new("回滚").kind(ButtonKind::Subtle))
@@ -150,7 +156,7 @@ impl ArchitectureView {
                 ));
                 with_refs(
                     (page, inspector_view),
-                    (root, inspector, canvas, summary, detail, history, rollback),
+                    (root, inspector, canvas, summary, detail, history, open, rollback),
                 )
             })?;
         context
@@ -163,6 +169,7 @@ impl ArchitectureView {
             summary,
             detail,
             history,
+            open,
             rollback,
             summary_text,
             show_summary,
@@ -365,6 +372,13 @@ mod tests {
         assert!(matches!(
             events.lock().unwrap().last(),
             Some(ArchitectureMessage::Rollback)
+        ));
+        context
+            .update_component(view.open, |_, cx| cx.emit(Activate))
+            .unwrap();
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some(ArchitectureMessage::Open)
         ));
         snapshot.records.clear();
         view.sync(&mut context, document, &snapshot).unwrap();

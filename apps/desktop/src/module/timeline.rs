@@ -87,6 +87,7 @@ impl TimelineModule {
                     can_retry: false,
                     can_copy: false,
                     can_branch: false,
+                    key_node: false,
                 });
                 if expanded {
                     for child in &session.timeline[index..end] {
@@ -188,6 +189,7 @@ impl TimelineModule {
                 .or(item.markdown.as_ref())
                 .is_some_and(|text| !text.trim().is_empty()),
             can_branch,
+            key_node: matches!(item.message_role.as_deref(), Some("user" | "assistant")),
         }
     }
 }
@@ -376,6 +378,8 @@ mod tests {
         assert_eq!(collapsed[0].id, "process-group:read");
         assert_eq!(collapsed[0].markdown, "执行过程 · 2 项");
         assert_eq!(collapsed[1].id, "reply");
+        assert!(!collapsed[0].key_node);
+        assert!(collapsed[1].key_node);
         let mut expanded = TimelineModule::default();
         expanded.toggled_events.insert("process-group:read".into());
         let rows = expanded.rows(&session);

@@ -1,10 +1,10 @@
 use super::MemoryMessage;
-use crate::runtime_layout::{view_bar, view_fill_column, view_row, Bound};
+use crate::runtime_layout::{view_bar, view_column, view_fill_column, view_row, Bound};
 use nana_ui::runtime::view::{entity_ref, signal, text, widget, with_refs, EachExt, WhenExt};
 use nana_ui::runtime::{
     ActionMenu, ActionMenuItem, Activate, AppContext, Button, DocumentId, Entity, FormField,
-    FrameworkError, MutationQueue, PopoverToggled, ScrollAxes, ScrollView, StableNodeId, Stack,
-    Switch, Text, TextArea, TextInput,
+    FrameworkError, LengthSpec, MutationQueue, PopoverToggled, ScrollAxes, ScrollView,
+    StableNodeId, Stack, Switch, Text, TextArea, TextInput,
 };
 use nana_ui::{ButtonKind, PopoverPlacement};
 use std::collections::{HashMap, HashSet};
@@ -168,7 +168,7 @@ impl MemoryView {
                 cooldown,
                 [enabled, global, baseline, task_injection],
                 task_menu,
-                scroll,
+                list,
             ),
         ) = context.mount_view_detached(document, move || {
             let title_text = title_slot.install(signal(String::new()));
@@ -207,7 +207,7 @@ impl MemoryView {
             let baseline = entity_ref::<Switch>();
             let task_injection = entity_ref::<Switch>();
             let task_menu = entity_ref::<ActionMenu>();
-            let scroll = entity_ref::<ScrollView>();
+            let list = entity_ref::<Stack>();
             let new_sink = Arc::clone(&sink);
             let scope_sink = Arc::clone(&sink);
             let save_sink = Arc::clone(&sink);
@@ -231,6 +231,14 @@ impl MemoryView {
                         .entity_ref(create)
                         .on_activate(move || new_sink(MemoryMessage::New)),
                 )),
+                widget(
+                    ScrollView::new(ScrollAxes::Vertical)
+                        .style(Stack::fill_column(0.0).node_style()),
+                )
+                .children(widget(Stack::column(12.0).with_layout(|layout| {
+                    // Keep the save row and the switches off the scrollport edge.
+                    layout.padding_bottom = Some(LengthSpec::Px(16.0));
+                })).children((
                 text(error_text).entity_ref(error).visible(show_error),
                 field(
                     "标题",
@@ -243,7 +251,7 @@ impl MemoryView {
                 ),
                 field(
                     "正文",
-                    widget(TextArea::new("").height(144.0).resize_vertical(true))
+                    widget(TextArea::new("").height(112.0).resize_vertical(true))
                         .entity_ref(body)
                         .value(body_text)
                         .on_input(move |event| {
@@ -353,26 +361,25 @@ impl MemoryView {
                             }),
                     ),
                 )),
-                widget(ScrollView::new(ScrollAxes::Vertical))
-                    .entity_ref(scroll)
-                    .children(
-                        cards
-                            .each(
-                                |card| card.id.clone(),
-                                move |card| {
-                                    let id = card.id.clone();
-                                    let label_id = id.clone();
-                                    let cards = cards;
-                                    let sink = Arc::clone(&card_sink);
-                                    widget(Button::new("").kind(ButtonKind::Subtle))
-                                        .label(move || card_label(&cards, &label_id))
-                                        .on_activate(move || {
-                                            sink(MemoryMessage::Select(id.clone()))
-                                        })
-                                },
-                            )
-                            .gap(6.0),
-                    ),
+                view_column(6.0).entity_ref(list).children(
+                    cards
+                        .each(
+                            |card| card.id.clone(),
+                            move |card| {
+                                let id = card.id.clone();
+                                let label_id = id.clone();
+                                let cards = cards;
+                                let sink = Arc::clone(&card_sink);
+                                widget(Button::new("").kind(ButtonKind::Subtle))
+                                    .label(move || card_label(&cards, &label_id))
+                                    .on_activate(move || {
+                                        sink(MemoryMessage::Select(id.clone()))
+                                    })
+                            },
+                        )
+                        .gap(6.0),
+                ),
+                ))),
             ));
             with_refs(
                 page,
@@ -384,11 +391,10 @@ impl MemoryView {
                     cooldown,
                     [enabled, global, baseline, task_injection],
                     task_menu,
-                    scroll,
+                    list,
                 ),
             )
         })?;
-        let list = only_child(context, scroll.stable_id())?;
         context
             .compat_world_mut()
             .register_focus_scope(root.stable_id())?;
@@ -564,15 +570,6 @@ fn replace_input(
     context.update_component(input, |input, _| {
         input.state.replace_value(value.to_owned());
     })
-}
-
-fn only_child(context: &AppContext, parent: StableNodeId) -> Result<Entity<Stack>, FrameworkError> {
-    let id = context
-        .world()
-        .node(parent)
-        .and_then(|node| node.children.first().copied())
-        .ok_or(FrameworkError::InvalidInput)?;
-    Ok(Entity::from_stable_id(id))
 }
 
 fn zip_buttons<T>(
