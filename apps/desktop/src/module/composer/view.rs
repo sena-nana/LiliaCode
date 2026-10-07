@@ -6,17 +6,18 @@ use super::presentation::{
 use crate::runtime_compat::HostedWindowId;
 use crate::runtime_layout::{
     composer_card, composer_interrupt_button, composer_send_button, flatten_composer_textarea,
-    reconcile_children, trigger_slot, Bound,
+    reconcile_children, trigger_slot, wrapping_controls_row, Bound,
 };
 use crate::runtime_shell::{emit, IntentSink, ShellIntent};
 use nana_ui::runtime::view::{
     entity_ref, signal, widget, with_refs, AnyView, EachExt, EntityRef, IntoView, Signal, WhenExt,
 };
 use nana_ui::runtime::{
-    ActionMenu, ActionMenuItem, Activate, AppContext, Button, Card, ComponentView, DocumentId,
-    Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity, FrameworkError, IconButton,
-    IconGlyph, JustifySpec, KeyInput, LengthSpec, PopoverToggled, StableNodeId, Stack, TextArea,
-    TextAtomSpan, TextChanged, TextInput,
+    ActionMenu, ActionMenuItem, Activate, AlignSpec, AppContext, Button, Card, ComponentView,
+    DocumentId, DonutChart, DonutSlice, Dropdown, DropdownEvent, DropdownOption, DropdownSelection,
+    Entity, FrameworkError, IconButton, IconGlyph, JustifySpec, KeyInput, LengthSpec,
+    PopoverToggled, SemanticColorRole, StableNodeId, Stack, TextArea, TextAtomSpan, TextChanged,
+    TextInput,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon, PopoverPlacement, UI_METRICS};
 use std::collections::{HashMap, HashSet};
@@ -76,6 +77,11 @@ pub struct ComposerViewSnapshot {
     pub review_value: String,
     pub can_manage_todos: bool,
     pub apply_failed: bool,
+    pub can_optimize: bool,
+    pub optimizing: bool,
+    pub context_label: Option<String>,
+    pub context_usage_percent: Option<f64>,
+    pub can_compact: bool,
 }
 impl Default for ComposerViewSnapshot {
     fn default() -> Self {
@@ -120,6 +126,11 @@ impl Default for ComposerViewSnapshot {
             review_value: Default::default(),
             can_manage_todos: Default::default(),
             apply_failed: Default::default(),
+            can_optimize: Default::default(),
+            optimizing: Default::default(),
+            context_label: Default::default(),
+            context_usage_percent: Default::default(),
+            can_compact: Default::default(),
         }
     }
 }
@@ -172,6 +183,8 @@ pub enum ComposerInputAction {
     ReviewValue(String),
     SubmitReview,
     CancelReview,
+    OptimizePrompt,
+    CompactContext,
 }
 
 #[derive(Default)]
@@ -414,7 +427,9 @@ fn composer_model_dropdown(snapshot: &ComposerViewSnapshot) -> Dropdown {
     };
     let layout = Arc::make_mut(&mut field.style.layout);
     layout.width = Some(LengthSpec::Px(width));
-    layout.min_width = Some(LengthSpec::Px(width));
+    layout.min_width = Some(LengthSpec::Px(96.0));
+    layout.max_width = Some(LengthSpec::Percent(100.0));
+    layout.flex_shrink = Some(1.0);
     layout.border_width = Some(0.0);
     field.style.border = None;
     field.style.background = None;
@@ -512,6 +527,69 @@ fn clamped_composer_height(height: f32) -> f32 {
     height.clamp(COMPOSER_MIN_HEIGHT, COMPOSER_MAX_HEIGHT)
 }
 
+pub(crate) fn prompt_optimize_target(window_id: HostedWindowId) -> String {
+    if window_id == HostedWindowId::PRIMARY {
+        crate::target_ids::COMPOSER_OPTIMIZE_PROMPT.to_owned()
+    } else {
+        crate::target_ids::task_popup_optimize_prompt(window_id.0)
+    }
+}
+
+pub(crate) fn context_compact_target(window_id: HostedWindowId) -> String {
+    if window_id == HostedWindowId::PRIMARY {
+        crate::target_ids::COMPOSER_COMPACT_CONTEXT.to_owned()
+    } else {
+        crate::target_ids::task_popup_compact_context(window_id.0)
+    }
+}
+
+pub(crate) fn context_usage_control(
+    used_tokens: u64,
+    limit_tokens: Option<u64>,
+    used_percent: Option<f64>,
+) -> (String, f64) {
+    let percent = used_percent
+        .or_else(|| {
+            limit_tokens
+                .filter(|limit| *limit > 0)
+                .map(|limit| used_tokens as f64 / limit as f64 * 100.0)
+        })
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0);
+    let label = if used_percent.is_some() || limit_tokens.is_some() {
+        format!("{percent:.0}%")
+    } else {
+        used_tokens.to_string()
+    };
+    (label, percent)
+}
+
+fn usage_ring(percent: i32) -> DonutChart {
+    let used = f64::from(percent.clamp(0, 100));
+    let mut chart = DonutChart::new([
+        DonutSlice {
+            value: used,
+            color: SemanticColorRole::Accent,
+        },
+        DonutSlice {
+            value: (100.0 - used).max(0.0),
+            color: SemanticColorRole::BorderSoft,
+        },
+    ])
+    .cutout(0.62)
+    .label(format!("上下文 {used:.0}%"));
+    let layout = Arc::make_mut(&mut chart.style.layout);
+    let edge = LengthSpec::Px(22.0);
+    layout.width = Some(edge);
+    layout.height = Some(edge);
+    layout.min_width = Some(edge);
+    layout.min_height = Some(edge);
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
+    chart
+}
+
 fn dispatch(sink: &IntentSink, binding: &Arc<Mutex<ComposerBinding>>, action: ComposerInputAction) {
     let target = binding.lock().unwrap().target.clone();
     emit(sink, ShellIntent::AddressedComposer { target, action });
@@ -553,6 +631,15 @@ enum ExtraKey {
         kind: u8,
         action: ComposerInputAction,
     },
+    Optimize {
+        label: String,
+        enabled: bool,
+    },
+    ContextUsage {
+        label: String,
+        percent: i32,
+        enabled: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -566,6 +653,15 @@ enum ExtraRow {
         label: String,
         kind: ButtonKind,
         action: ComposerInputAction,
+    },
+    Optimize {
+        label: String,
+        enabled: bool,
+    },
+    ContextUsage {
+        label: String,
+        percent: i32,
+        enabled: bool,
     },
 }
 
@@ -587,6 +683,19 @@ fn extra_key(row: &ExtraRow, task: &Option<String>) -> ExtraKey {
             kind: button_kind_key(*kind),
             action: action.clone(),
         },
+        ExtraRow::Optimize { label, enabled } => ExtraKey::Optimize {
+            label: label.clone(),
+            enabled: *enabled,
+        },
+        ExtraRow::ContextUsage {
+            label,
+            percent,
+            enabled,
+        } => ExtraKey::ContextUsage {
+            label: label.clone(),
+            percent: *percent,
+            enabled: *enabled,
+        },
     }
 }
 
@@ -594,6 +703,27 @@ fn extra_rows(snapshot: &ComposerViewSnapshot) -> Vec<ExtraRow> {
     let mut rows = vec![ExtraRow::Plus, ExtraRow::Attach, ExtraRow::Permission];
     if snapshot.worktree_label.is_some() {
         rows.push(ExtraRow::Worktree);
+    }
+    if snapshot.can_optimize || snapshot.optimizing {
+        rows.push(ExtraRow::Optimize {
+            label: if snapshot.optimizing {
+                "优化中…".into()
+            } else {
+                "优化提示词".into()
+            },
+            enabled: snapshot.can_optimize && !snapshot.optimizing,
+        });
+    }
+    if let Some(label) = &snapshot.context_label {
+        rows.push(ExtraRow::ContextUsage {
+            label: label.clone(),
+            percent: snapshot
+                .context_usage_percent
+                .unwrap_or(0.0)
+                .round()
+                .clamp(0.0, 100.0) as i32,
+            enabled: snapshot.can_compact,
+        });
     }
     if let Some(label) = &snapshot.branch_label {
         rows.push(ExtraRow::Dynamic {
@@ -860,7 +990,62 @@ fn extra_row(row: ExtraRow, chrome: Chrome) -> AnyView {
                 .on_activate(move || dispatch(&sink, &binding, action.clone()))
                 .into_any()
         }
+        ExtraRow::Optimize { label, enabled } => {
+            prompt_button(&chrome, &label, enabled, ComposerInputAction::OptimizePrompt)
+        }
+        ExtraRow::ContextUsage {
+            label,
+            percent,
+            enabled,
+        } => {
+            let sink = Arc::clone(&chrome.sink);
+            let binding = Arc::clone(&chrome.binding);
+            widget(Stack::row(4.0).shrink(0.0))
+                .children((
+                    widget(usage_ring(percent)),
+                    prompt_button_widget(
+                        &label,
+                        enabled,
+                        sink,
+                        binding,
+                        ComposerInputAction::CompactContext,
+                    ),
+                ))
+                .into_any()
+        }
     }
+}
+
+fn prompt_button(
+    chrome: &Chrome,
+    label: &str,
+    enabled: bool,
+    action: ComposerInputAction,
+) -> AnyView {
+    prompt_button_widget(
+        label,
+        enabled,
+        Arc::clone(&chrome.sink),
+        Arc::clone(&chrome.binding),
+        action,
+    )
+    .into_any()
+}
+
+fn prompt_button_widget(
+    label: &str,
+    enabled: bool,
+    sink: IntentSink,
+    binding: Arc<Mutex<ComposerBinding>>,
+    action: ComposerInputAction,
+) -> impl IntoView {
+    let mut button = extra_button(label, ButtonKind::Subtle);
+    button.disabled = !enabled;
+    widget(button).on_activate(move || {
+        if enabled {
+            dispatch(&sink, &binding, action.clone());
+        }
+    })
 }
 
 fn plus_slot_view(chrome: &Chrome) -> impl IntoView {
@@ -1035,9 +1220,41 @@ fn widen_extras(context: &mut AppContext, extras: Entity<Stack>) -> Result<(), F
     context.update_component(extras, |stack, _| {
         let mut hidden = false;
         stack.share_layouts(&mut |layout| hidden = layout.hidden);
-        *stack = Stack::fill_row(6.0);
+        *stack = wrapping_controls_row(6.0).grow(1.0);
         stack.share_layouts(&mut |layout| Arc::make_mut(layout).hidden = hidden);
     })
+}
+
+fn bind_prompt_controls(
+    context: &AppContext,
+    extras: Entity<Stack>,
+    rows: &[ExtraRow],
+) -> (
+    Option<Entity<Button>>,
+    Option<Entity<Button>>,
+    Option<Entity<DonutChart>>,
+) {
+    let mut optimize = None;
+    let mut compact = None;
+    let mut ring = None;
+    let mut cursor = node_children(context, extras.stable_id()).into_iter();
+    for row in rows {
+        let Some(child) = cursor.next() else {
+            break;
+        };
+        match row {
+            ExtraRow::Optimize { .. } => {
+                optimize = Some(Entity::from_stable_id(child));
+            }
+            ExtraRow::ContextUsage { .. } => {
+                let mut nested = node_children(context, child).into_iter();
+                ring = nested.next().map(Entity::from_stable_id);
+                compact = nested.next().map(Entity::from_stable_id);
+            }
+            _ => {}
+        }
+    }
+    (optimize, compact, ring)
 }
 
 pub struct ComposerView {
@@ -1107,6 +1324,11 @@ pub struct ComposerView {
     pub(crate) composer_actions: Entity<Stack>,
     pub(crate) send: Entity<IconButton>,
     pub(crate) interrupt: Option<Entity<IconButton>>,
+    pub(crate) optimize_prompt: Option<Entity<Button>>,
+    pub(crate) compact_context: Option<Entity<Button>>,
+    pub(crate) context_ring: Option<Entity<DonutChart>>,
+    pub(crate) optimize_target: String,
+    pub(crate) compact_target: String,
     last_failed_revision: Option<u64>,
 }
 
@@ -1368,7 +1590,8 @@ impl ComposerView {
                 widget(
                     Stack::row(6.0)
                         .width(LengthSpec::Percent(100.0))
-                        .justify(JustifySpec::End),
+                        .justify(JustifySpec::End)
+                        .shrink(0.0),
                 )
                 .entity_ref(actions_ref)
                 .children((
@@ -1469,7 +1692,11 @@ impl ComposerView {
                     );
                 }
             });
-            let toolbar = widget(Stack::bar(8.0).justify(JustifySpec::SpaceBetween))
+            let toolbar = widget(
+                Stack::bar(8.0)
+                    .justify(JustifySpec::SpaceBetween)
+                    .wrap(true),
+            )
                 .entity_ref(toolbar_ref)
                 .children((
                     extras_each,
@@ -1639,6 +1866,11 @@ impl ComposerView {
             composer_actions,
             send,
             interrupt: Some(interrupt),
+            optimize_prompt: None,
+            compact_context: None,
+            context_ring: None,
+            optimize_target: prompt_optimize_target(snapshot.window_id),
+            compact_target: context_compact_target(snapshot.window_id),
             last_failed_revision: None,
         };
         bind_composer_keys(
@@ -1758,6 +1990,12 @@ impl ComposerView {
         self.worktree_items = zip_menu(context, self.worktree_menu, &worktree);
         self.completion_items = zip_completion(context, self.completion_slot, &completion);
         self.extra_buttons = zip_extra_buttons(context, self.extras, &rows);
+        let (optimize, compact, ring) = bind_prompt_controls(context, self.extras, &rows);
+        self.optimize_prompt = optimize;
+        self.compact_context = compact;
+        self.context_ring = ring;
+        self.optimize_target = prompt_optimize_target(snapshot.window_id);
+        self.compact_target = context_compact_target(snapshot.window_id);
         widen_extras(context, self.extras)
     }
 
@@ -2549,4 +2787,173 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn optimize_and_context_compact_controls_emit_their_window_targets() {
+        let cases = [
+            (
+                HostedWindowId::PRIMARY,
+                crate::target_ids::COMPOSER_OPTIMIZE_PROMPT,
+                crate::target_ids::COMPOSER_COMPACT_CONTEXT,
+            ),
+            (
+                nana_ui_platform::WindowId(9),
+                "lilia.task-popup.9.composer.optimize-prompt",
+                "lilia.task-popup.9.composer.compact-context",
+            ),
+        ];
+        for (window, optimize_id, compact_id) in cases {
+            assert_eq!(prompt_optimize_target(window), optimize_id);
+            assert_eq!(context_compact_target(window), compact_id);
+            let mut context = AppContext::new();
+            let document = DocumentId::new(window.0 + 500).unwrap();
+            let mut snapshot = snapshot(window, "task");
+            snapshot.can_optimize = true;
+            snapshot.context_label = Some("50%".into());
+            snapshot.context_usage_percent = Some(50.0);
+            snapshot.can_compact = true;
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let received = Arc::clone(&events);
+            let view = ComposerView::mount(
+                &mut context,
+                document,
+                &snapshot,
+                Arc::new(move |event| received.lock().unwrap().push(event)),
+            )
+            .unwrap();
+            assert_eq!(view.optimize_target, optimize_id);
+            assert_eq!(view.compact_target, compact_id);
+            let optimize = view.optimize_prompt.expect("optimize control");
+            let compact = view.compact_context.expect("compact control");
+            let ring = view.context_ring.expect("context ring");
+            assert_eq!(
+                context
+                    .read(optimize, |button| (button.label.clone(), button.disabled))
+                    .unwrap(),
+                ("优化提示词".into(), false)
+            );
+            assert_eq!(
+                context
+                    .read(compact, |button| (button.label.clone(), button.disabled))
+                    .unwrap(),
+                ("50%".into(), false)
+            );
+            assert_eq!(
+                context
+                    .read(ring, |chart| chart.slices[0].value)
+                    .unwrap(),
+                50.0
+            );
+            assert_eq!(
+                context
+                    .world()
+                    .node(optimize.stable_id())
+                    .and_then(|node| node.parent),
+                Some(view.extras.stable_id())
+            );
+            let compact_row = context
+                .world()
+                .node(compact.stable_id())
+                .and_then(|node| node.parent)
+                .unwrap();
+            assert_eq!(
+                context
+                    .world()
+                    .node(ring.stable_id())
+                    .and_then(|node| node.parent),
+                Some(compact_row)
+            );
+            assert_eq!(
+                context
+                    .world()
+                    .node(compact_row)
+                    .and_then(|node| node.parent),
+                Some(view.extras.stable_id())
+            );
+            assert_eq!(
+                context
+                    .world()
+                    .node(view.send.stable_id())
+                    .and_then(|node| node.parent),
+                Some(view.composer_actions.stable_id())
+            );
+            assert_eq!(
+                context
+                    .world()
+                    .node_style(view.composer_toolbar.stable_id())
+                    .unwrap()
+                    .layout
+                    .flex_wrap,
+                nana_ui_core::FlexWrap::Wrap
+            );
+            assert_eq!(
+                context
+                    .world()
+                    .node_style(view.extras.stable_id())
+                    .unwrap()
+                    .layout
+                    .flex_wrap,
+                nana_ui_core::FlexWrap::Wrap
+            );
+            assert_eq!(
+                context
+                    .world()
+                    .node_style(view.composer_actions.stable_id())
+                    .unwrap()
+                    .layout
+                    .flex_shrink,
+                Some(0.0)
+            );
+            context
+                .update_component(optimize, |_, cx| cx.emit(Activate))
+                .unwrap();
+            context
+                .update_component(compact, |_, cx| cx.emit(Activate))
+                .unwrap();
+            let observed = events.lock().unwrap();
+            assert!(matches!(
+                &observed[0],
+                ShellIntent::AddressedComposer {
+                    target,
+                    action: ComposerInputAction::OptimizePrompt,
+                } if target.window_id == window && target.task_id.as_deref() == Some("task")
+            ));
+            assert!(matches!(
+                &observed[1],
+                ShellIntent::AddressedComposer {
+                    target,
+                    action: ComposerInputAction::CompactContext,
+                } if target.window_id == window && target.task_id.as_deref() == Some("task")
+            ));
+        }
+
+        let mut context = AppContext::new();
+        let document = DocumentId::new(501).unwrap();
+        let mut snapshot = snapshot(HostedWindowId::PRIMARY, "task");
+        snapshot.optimizing = true;
+        snapshot.can_optimize = false;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let received = Arc::clone(&events);
+        let view = ComposerView::mount(
+            &mut context,
+            document,
+            &snapshot,
+            Arc::new(move |event| received.lock().unwrap().push(event)),
+        )
+        .unwrap();
+        let optimize = view.optimize_prompt.expect("busy optimize control");
+        assert!(view.compact_context.is_none());
+        assert!(view.context_ring.is_none());
+        assert_eq!(
+            context
+                .read(optimize, |button| (button.label.clone(), button.disabled))
+                .unwrap(),
+            ("优化中…".into(), true)
+        );
+        context
+            .update_component(optimize, |_, cx| cx.emit(Activate))
+            .unwrap();
+        assert!(events.lock().unwrap().is_empty());
+    }
+
 }

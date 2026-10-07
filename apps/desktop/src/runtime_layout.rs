@@ -54,10 +54,6 @@ pub(crate) fn view_row(gap: f32) -> El<Stack> {
     widget(Stack::row(gap))
 }
 
-pub(crate) fn view_fill_row(gap: f32) -> El<Stack> {
-    widget(Stack::fill_row(gap))
-}
-
 pub(crate) fn view_bar(gap: f32) -> El<Stack> {
     widget(Stack::bar(gap))
 }
@@ -106,6 +102,7 @@ pub(crate) fn composer_card() -> Card {
     let layout = Arc::make_mut(&mut card.style.layout);
     layout.direction = Some(nana_ui_core::FlexDirection::Column);
     layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
     layout.height = Some(LengthSpec::Shrink);
     layout.gap = Some(LengthSpec::Px(7.0));
     layout.border_radius = Some(COMPOSER_CARD_RADIUS);

@@ -349,6 +349,12 @@ impl ShellHandles {
         for (id, node) in &composer.extra_buttons {
             targets.insert(format!("lilia.ui.composer.{id}"), node.stable_id());
         }
+        if let Some(button) = composer.optimize_prompt {
+            targets.insert(composer.optimize_target.clone(), button.stable_id());
+        }
+        if let Some(button) = composer.compact_context {
+            targets.insert(composer.compact_target.clone(), button.stable_id());
+        }
         for (id, node) in &composer.completion_items {
             targets.insert(format!("lilia.ui.completion.{id}"), node.stable_id());
             targets.insert(format!("lilia.ui.composer.{id}"), node.stable_id());

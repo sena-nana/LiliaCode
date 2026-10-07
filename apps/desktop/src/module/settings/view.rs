@@ -184,7 +184,7 @@ impl SettingsView {
             )
         })?;
         let product_settings = mount_view!(Stack, Stack::column(16.0).max_width(760.0));
-        let card_body = mount_view!(Stack, Stack::column(12.0));
+        let card_body = mount_view!(Stack, Stack::column(8.0));
         let toolbar = mount_view!(Stack, Stack::bar(8.0).wrap(true));
         let provider_sink = Arc::clone(&sink);
         let (_, provider) = context.mount_view_detached(document_id, move || {
@@ -233,6 +233,8 @@ impl SettingsView {
             SettingsRow,
             SettingsRow::new("工作区")
                 .stacked(true)
+                .first_in_group()
+                .last_in_group()
                 .control_child(project_workspace.stable_id())
         );
         context.append_child(project_workspace_row, project_workspace)?;
@@ -244,6 +246,8 @@ impl SettingsView {
             SettingsRow,
             SettingsRow::new("Clone 默认父目录")
                 .stacked(true)
+                .first_in_group()
+                .last_in_group()
                 .control_child(clone_parent.stable_id())
         );
         context.append_child(clone_parent_row, clone_parent)?;
@@ -255,6 +259,8 @@ impl SettingsView {
             SettingsRow,
             SettingsRow::new("工作树父目录")
                 .stacked(true)
+                .first_in_group()
+                .last_in_group()
                 .control_child(worktree_parent.stable_id())
         );
         context.append_child(worktree_parent_row, worktree_parent)?;
@@ -279,6 +285,8 @@ impl SettingsView {
             SettingsRow,
             SettingsRow::new("工作树默认行为")
                 .stacked(true)
+                .first_in_group()
+                .last_in_group()
                 .control_child(worktree_mode.stable_id())
         );
         context.append_child(worktree_mode_row, worktree_mode)?;

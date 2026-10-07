@@ -571,6 +571,9 @@ pub struct ShellMarkdownPreview {
     pub metadata: String,
     pub intrinsic_size: Option<(u32, u32)>,
     pub texture_slot: Option<String>,
+    /// Zero hides previous/next. A count above one is the task's image attachments.
+    pub gallery_index: usize,
+    pub gallery_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -736,6 +739,7 @@ pub enum ShellIntent {
     },
     CloseMarkdownPreview,
     MarkdownImageViewerInteraction,
+    PageMarkdownPreview { forward: bool },
 
     StartGitHubBinding,
     CancelGitHubBinding,
@@ -750,7 +754,9 @@ pub enum ShellIntent {
     OpenCodingHit(String),
     OpenCodingWorkspace,
     OpenCodingTerminal,
+    RunCodingTask(String),
     SelectRoadmapMilestone(String),
+    OpenArchitecture,
     RefreshArchitecture,
     RollbackArchitecture,
     ArchitectureGraph(nana_ui::runtime::GraphCanvasEvent),
@@ -1665,23 +1671,30 @@ fn mount_workspace_pane_view_in(
         let tree_sink = view_sink.clone();
         let view = widget(PaneChrome::new())
             .entity_ref(chrome)
-            .tabs(
-                widget(Tabs::new(String::new()).fill(true).strip_id(strip.clone()))
-                    .entity_ref(tabs)
-                    .bind(move |tabs| {
-                        let (selected, options) = tabs_state.get();
-                        *tabs = Tabs::new(selected)
-                            .options(options)
-                            .strip_id(strip.clone())
-                            .fill(true);
-                    })
-                    .on(move |event: &TabsEvent| {
-                        emit(&tab_sink, workspace_tabs_intent_for(&pane_key, event));
-                    }),
-            )
-            .action(
-                PaneChromeAction::new(PaneChromeActionKind::SplitHorizontal, "左右分栏")
-                    .icon(Icon::Sidebar),
+            .header(widget(Stack::bar(0.0)).children((
+                widget(Stack::row(0.0).with_layout(|layout| {
+                    // Basis 0 so the title takes only the space left of the
+                    // pane actions and the caption spacer, and truncates.
+                    layout.flex_grow = Some(1.0);
+                    layout.flex_shrink = Some(1.0);
+                    layout.flex_basis = Some(LengthSpec::Px(0.0));
+                    layout.min_width = Some(LengthSpec::Px(0.0));
+                    layout.width = Some(LengthSpec::Px(0.0));
+                }))
+                .children(
+                    widget(Tabs::new(String::new()).fill(true).strip_id(strip.clone()))
+                        .entity_ref(tabs)
+                        .bind(move |tabs| {
+                            let (selected, options) = tabs_state.get();
+                            *tabs = Tabs::new(selected)
+                                .options(options)
+                                .strip_id(strip.clone())
+                                .fill(true);
+                        })
+                        .on(move |event: &TabsEvent| {
+                            emit(&tab_sink, workspace_tabs_intent_for(&pane_key, event));
+                        }),
+                ),
                 icon_action(
                     "左右分栏",
                     Icon::Sidebar,
@@ -1689,10 +1702,6 @@ fn mount_workspace_pane_view_in(
                     ShellIntent::SplitWorkspaceHorizontal,
                     Arc::clone(&chrome_sink),
                 ),
-            )
-            .action(
-                PaneChromeAction::new(PaneChromeActionKind::SplitVertical, "上下分栏")
-                    .icon(Icon::Workspace),
                 icon_action(
                     "上下分栏",
                     Icon::Workspace,
@@ -1700,10 +1709,6 @@ fn mount_workspace_pane_view_in(
                     ShellIntent::SplitWorkspaceVertical,
                     Arc::clone(&chrome_sink),
                 ),
-            )
-            .action(
-                PaneChromeAction::new(PaneChromeActionKind::MoveToWindow, move_label)
-                    .icon(Icon::Restore),
                 icon_action(
                     move_label,
                     Icon::Restore,
@@ -1711,10 +1716,6 @@ fn mount_workspace_pane_view_in(
                     ShellIntent::MovePaneToWindow,
                     Arc::clone(&chrome_sink),
                 ),
-            )
-            .action(
-                PaneChromeAction::new(PaneChromeActionKind::MoveToNextPane, "移至下一窗格")
-                    .icon(Icon::ArrowRight),
                 icon_action(
                     "移至下一窗格",
                     Icon::ArrowRight,
@@ -1722,7 +1723,8 @@ fn mount_workspace_pane_view_in(
                     ShellIntent::MovePaneToNext,
                     chrome_sink.clone(),
                 ),
-            )
+                widget(pane_caption_spacer()),
+            )))
             .body(
                 widget(Stack::fill_column(0.0)).children(
                     widget(Stack::fill_column(12.0).padding(16.0))
@@ -1913,6 +1915,20 @@ fn workspace_chrome_button(label: &'static str, icon: Icon) -> IconButton {
         .with_tooltip(label)
 }
 
+/// Trailing space so pane actions clear the caption buttons. The measured
+/// header does not add this inset on its own, so the spacer is the control
+/// cluster plus a gap. The tab title shrinks instead.
+fn pane_caption_spacer() -> Stack {
+    let width = nana_ui_core::custom_window_controls_width() + 12.0;
+    Stack::row(0.0).with_layout(|layout| {
+        layout.width = Some(LengthSpec::Px(width));
+        layout.min_width = Some(LengthSpec::Px(width));
+        layout.flex_grow = Some(0.0);
+        layout.flex_shrink = Some(0.0);
+        layout.height = Some(LengthSpec::Px(1.0));
+    })
+}
+
 fn markdown_image_viewer(preview: &ShellMarkdownPreview) -> ImageViewer {
     let mut viewer = ImageViewer::new(
         preview
@@ -1924,7 +1940,58 @@ fn markdown_image_viewer(preview: &ShellMarkdownPreview) -> ImageViewer {
     .name(preview.title.clone())
     .metadata(preview.metadata.clone());
     viewer.intrinsic_size = preview.intrinsic_size;
+    if preview.gallery_count > 1 {
+        viewer = viewer.gallery(
+            preview
+                .gallery_index
+                .min(preview.gallery_count.saturating_sub(1)),
+            preview.gallery_count,
+        );
+    }
     viewer
+}
+
+pub(crate) fn gallery_position(sources: &[String], current: &str) -> (usize, usize) {
+    if sources.len() <= 1 {
+        return (0, 0);
+    }
+    sources
+        .iter()
+        .position(|source| source == current)
+        .map(|index| (index, sources.len()))
+        .unwrap_or((0, 0))
+}
+
+pub(crate) fn page_gallery_index(sources: &[String], current: &str, forward: bool) -> Option<usize> {
+    let (index, count) = gallery_position(sources, current);
+    if count <= 1 {
+        return None;
+    }
+    if forward {
+        (index + 1 < count).then_some(index + 1)
+    } else {
+        index.checked_sub(1)
+    }
+}
+
+pub(crate) fn coding_entry_intent(is_task: bool, id: &str) -> ShellIntent {
+    if is_task {
+        ShellIntent::RunCodingTask(id.to_owned())
+    } else {
+        ShellIntent::OpenCodingTerminal
+    }
+}
+
+pub(crate) fn architecture_intent(
+    message: crate::module::architecture::ArchitectureMessage,
+) -> ShellIntent {
+    use crate::module::architecture::ArchitectureMessage;
+    match message {
+        ArchitectureMessage::Open => ShellIntent::OpenArchitecture,
+        ArchitectureMessage::Refresh => ShellIntent::RefreshArchitecture,
+        ArchitectureMessage::Rollback => ShellIntent::RollbackArchitecture,
+        ArchitectureMessage::Graph(event) => ShellIntent::ArchitectureGraph(event),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3228,7 +3295,15 @@ pub fn mount_primary_shell(
     })?;
     let (_, coding_panel) = context.mount_view_detached(document_id, || {
         let panel = entity_ref::<Stack>();
-        with_refs(widget(Stack::fill_column(8.0)).entity_ref(panel), panel)
+        with_refs(
+            widget(Stack::fill_column(8.0).with_layout(|layout| {
+                // The inspector clips overflow. Rows past the fold stay
+                // reachable by scrolling this panel, including search.
+                layout.overflow_y = nana_ui::runtime::OverflowSpec::Auto;
+            }))
+            .entity_ref(panel),
+            panel,
+        )
     })?;
     let (_, coding_query) = context.mount_view_detached(document_id, || {
         let query = entity_ref::<TextArea>();
@@ -3874,6 +3949,10 @@ impl ShellHandles {
             || primary == self.conversation_workspace.stable_id();
         let has_terminal = task_surface && snapshot.panes.iter().any(pane_is_terminal);
         let compact = task_surface && snapshot.workspace.inline_size() < 1000.0;
+        // Collected here and attached after the shell assembles. Assembly parks
+        // the previous primary, which is this conversation, so attaching first
+        // leaves the compact page empty.
+        let mut compact_resources = None;
         let bottom = if compact {
             let mut resources = Vec::new();
             if has_workspace_primary_content(snapshot) {
@@ -3883,7 +3962,7 @@ impl ShellHandles {
                 resources.push(self.terminal_page.stable_id());
             }
             resources.extend(diagnostics);
-            self.compact_workbench.sync(context, &resources)?;
+            compact_resources = Some(resources);
             primary = self.compact_workbench.root.stable_id();
             None
         } else if has_terminal {
@@ -3916,6 +3995,9 @@ impl ShellHandles {
         if shell_changed {
             context.assemble_desktop_shell(self.shell)?;
             self.shell_assembled = true;
+        }
+        if let Some(resources) = compact_resources.as_ref() {
+            self.compact_workbench.sync(context, resources)?;
         }
         if primary == self.conversation_workspace.stable_id() {
             assemble_conversation_workspace(
@@ -4700,15 +4782,27 @@ impl ShellHandles {
             )?;
             order.push(button.stable_id());
         }
-        for row in coding.terminals.iter().chain(coding.tasks.iter()) {
-            let id = format!("coding-row-{}", row.id);
+        for row in &coding.terminals {
+            let id = format!("coding-terminal-{}", row.id);
             keep.insert(id.clone());
             let button = self.upsert_coding_button(
                 context,
                 document_id,
                 &id,
                 &row.label,
-                ShellIntent::OpenCodingTerminal,
+                coding_entry_intent(false, &row.id),
+            )?;
+            order.push(button.stable_id());
+        }
+        for row in &coding.tasks {
+            let id = format!("coding-task-{}", row.id);
+            keep.insert(id.clone());
+            let button = self.upsert_coding_button(
+                context,
+                document_id,
+                &id,
+                &row.label,
+                coding_entry_intent(true, &row.id),
             )?;
             order.push(button.stable_id());
         }
@@ -4981,20 +5075,7 @@ impl ShellHandles {
                             context,
                             document_id,
                             Arc::new(move |message| {
-                                use crate::module::architecture::ArchitectureMessage;
-                                let intent = match message {
-                                    ArchitectureMessage::Refresh => {
-                                        ShellIntent::RefreshArchitecture
-                                    }
-                                    ArchitectureMessage::Rollback => {
-                                        ShellIntent::RollbackArchitecture
-                                    }
-                                    ArchitectureMessage::Graph(event) => {
-                                        ShellIntent::ArchitectureGraph(event)
-                                    }
-                                    ArchitectureMessage::Open => return,
-                                };
-                                emit(&sink, intent);
+                                emit(&sink, architecture_intent(message));
                             }),
                         )?);
                 }
@@ -6143,7 +6224,12 @@ impl ShellHandles {
                     ImageViewerEvent::Interaction => {
                         emit(&sink, ShellIntent::MarkdownImageViewerInteraction);
                     }
-                    ImageViewerEvent::Previous | ImageViewerEvent::Next => {}
+                    ImageViewerEvent::Previous => {
+                        emit(&sink, ShellIntent::PageMarkdownPreview { forward: false });
+                    }
+                    ImageViewerEvent::Next => {
+                        emit(&sink, ShellIntent::PageMarkdownPreview { forward: true });
+                    }
                 })?;
                 context.append_child(host, viewer)?;
                 self.image_viewer = Some(viewer);
@@ -6705,6 +6791,11 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
             review_value: String::new(),
             can_manage_todos: false,
             apply_failed: false,
+            can_optimize: false,
+            optimizing: false,
+            context_label: None,
+            context_usage_percent: None,
+            can_compact: false,
         },
     }
 }
@@ -6760,6 +6851,57 @@ mod tests {
             can_menu: false,
             can_draft: false,
         }
+    }
+
+    #[test]
+    fn coding_task_rows_run_the_task_and_terminal_rows_open_a_terminal() {
+        assert!(matches!(
+            coding_entry_intent(false, "session-1"),
+            ShellIntent::OpenCodingTerminal
+        ));
+        assert!(matches!(
+            coding_entry_intent(true, "build"),
+            ShellIntent::RunCodingTask(id) if id == "build"
+        ));
+    }
+
+    #[test]
+    fn architecture_open_reaches_the_project_surface_intent() {
+        assert!(matches!(
+            architecture_intent(crate::module::architecture::ArchitectureMessage::Open),
+            ShellIntent::OpenArchitecture
+        ));
+    }
+
+    #[test]
+    fn image_viewer_hides_paging_for_one_image_and_steps_a_gallery() {
+        let sources = vec!["a.png".into(), "b.png".into(), "c.png".into()];
+        assert_eq!(gallery_position(&sources[..1], "a.png"), (0, 0));
+        assert_eq!(gallery_position(&sources, "b.png"), (1, 3));
+        assert_eq!(gallery_position(&sources, "missing.png"), (0, 0));
+        assert_eq!(page_gallery_index(&sources, "b.png", false), Some(0));
+        assert_eq!(page_gallery_index(&sources, "b.png", true), Some(2));
+        assert_eq!(page_gallery_index(&sources, "a.png", false), None);
+        assert_eq!(page_gallery_index(&sources, "c.png", true), None);
+        let single = ShellMarkdownPreview {
+            title: "一张".into(),
+            metadata: String::new(),
+            intrinsic_size: None,
+            texture_slot: None,
+            gallery_index: 0,
+            gallery_count: 1,
+        };
+        assert!(markdown_image_viewer(&single).gallery.is_none());
+        let many = ShellMarkdownPreview {
+            gallery_index: 1,
+            gallery_count: 3,
+            ..single
+        };
+        let viewer = markdown_image_viewer(&many);
+        assert_eq!(
+            viewer.gallery,
+            Some(nana_ui::runtime::ImageViewerPosition::new(1, 3))
+        );
     }
 
     #[test]
@@ -8542,6 +8684,7 @@ mod tests {
                 can_retry: false,
                 can_copy: false,
                 can_branch: false,
+                key_node: false,
             })
             .collect();
         snapshot.timeline.layout = VirtualListLayout::new(std::iter::repeat(40.0).take(50));

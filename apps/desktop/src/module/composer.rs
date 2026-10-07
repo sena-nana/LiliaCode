@@ -693,6 +693,29 @@ impl UiModule for ComposerModule {
         into.composer.pending_blocks_send = cx
             .task_session()
             .is_some_and(|session| session.blocking_pending_count > 0);
+        let blocked = into.composer.composer_disabled
+            || into.composer.pending_blocks_send
+            || into.composer.can_interrupt;
+        if let Some(usage) = cx
+            .task_session()
+            .and_then(|session| session.context_usage.clone())
+        {
+            let (label, percent) = view::context_usage_control(
+                usage.used_tokens,
+                usage.limit_tokens,
+                usage.used_percent,
+            );
+            into.composer.context_label = Some(label);
+            into.composer.context_usage_percent = Some(percent);
+            into.composer.can_compact = !blocked;
+        } else {
+            into.composer.context_label = None;
+            into.composer.context_usage_percent = None;
+            into.composer.can_compact = false;
+        }
+        into.composer.can_optimize = !blocked
+            && !into.composer.optimizing
+            && !into.composer.composer.trim().is_empty();
     }
 }
 
