@@ -115,6 +115,14 @@ impl DesktopApplication {
             )
             .map_err(|error| DesktopApplicationError::Agent(error.to_string()))?;
         if !should_commit() {
+            runtime
+                .inner()
+                .replace_task_session_binding(
+                    task_id,
+                    source_binding.agent_session.as_str(),
+                    Some(source.profile_id.as_str()),
+                )
+                .map_err(|error| DesktopApplicationError::Agent(error.to_string()))?;
             return Err(DesktopApplicationError::Agent(
                 "context compaction was cancelled before binding replacement".into(),
             ));
@@ -246,50 +254,12 @@ mod tests {
             format!("context-compaction:{label}"),
         )
         .unwrap();
-        let runtime = authority.shared_runtime();
-        runtime
-            .inner()
-            .credentials()
-            .login(ProductCredentialLoginInput {
-                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.into(),
-                kind: CredentialKind::ApiKey,
-                secret_material: "sk-test-context-compaction-0123456789".into(),
-                account_label: None,
-                source: Some("context-compaction-test".into()),
-            })
-            .unwrap();
-        let task_id = TaskId::new(format!("task-context-compaction-{label}")).unwrap();
-        authority
-            .client()
-            .unwrap()
-            .products()
-            .create_entity(ProductEntity::Task(
-                ProductTask::new(task_id.clone(), None, "Context compaction").unwrap(),
-            ))
-            .unwrap();
-        let application = DesktopApplication::from_authority(
-            DesktopApplicationConfig::new(
-                "C:/lilia/context-compaction-test",
-                format!("liliacode.context-compaction.{label}"),
-            )
-            .unwrap(),
+        durable_application_with_source_session(
             authority,
-            Arc::new(NoopHost),
+            std::path::Path::new("C:/lilia/context-compaction-test"),
+            label,
+            endpoint,
         )
-        .unwrap();
-        runtime.inner().set_model_endpoint_override(Some(endpoint));
-        runtime.inner().refresh_product_profile(None).unwrap();
-        let session = application.open_task_agent_wire_session(&task_id).unwrap();
-        runtime
-            .inner()
-            .submit_turn_with_context_streaming(
-                &AgentSessionRef::new(session.session_id.clone()).unwrap(),
-                "preserve the current implementation state",
-                "turn-before-compaction",
-                None,
-            )
-            .unwrap();
-        (application, task_id, session.session_id)
     }
 
     #[test]
@@ -382,5 +352,182 @@ mod tests {
             .unwrap();
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].agent_session.as_str(), source_session_id);
+    }
+
+    fn bound_session_ids(application: &DesktopApplication, task_id: &TaskId) -> Vec<String> {
+        let mut bindings = application
+            .authority()
+            .list_session_bindings(task_id)
+            .unwrap()
+            .into_iter()
+            .map(|binding| binding.agent_session.as_str().to_owned())
+            .collect::<Vec<_>>();
+        bindings.sort();
+        bindings
+    }
+
+    fn runtime_session_ids(application: &DesktopApplication, task_id: &TaskId) -> Vec<String> {
+        let mut ids = application
+            .authority()
+            .shared_runtime()
+            .inner()
+            .session_ids_for_task(task_id);
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn cancelled_compaction_commit_keeps_the_pre_compaction_session() {
+        let label = uuid::Uuid::new_v4().to_string();
+        let (endpoint, server) = model_server(vec![
+            model_response("initial response"),
+            model_response("目标：保留当前实现。状态：初始回合已完成。下一步：继续迁移。"),
+        ]);
+        let (application, task_id, source_session_id) =
+            application_with_source_session(&label, endpoint);
+
+        assert!(application
+            .compact_task_agent_context_with_commit_guard(
+                &task_id,
+                "turn-compaction-cancelled",
+                None,
+                || false,
+            )
+            .is_err());
+        server.join().unwrap();
+
+        assert_eq!(
+            bound_session_ids(&application, &task_id),
+            vec![source_session_id.clone()]
+        );
+        assert_eq!(
+            runtime_session_ids(&application, &task_id),
+            vec![source_session_id]
+        );
+    }
+
+    #[test]
+    fn interrupted_compaction_commit_keeps_the_pre_compaction_session_after_restart() {
+        let home = tempfile::tempdir().unwrap();
+        let label = "restart";
+        let (endpoint, server) = model_server(vec![
+            model_response("initial response"),
+            model_response("目标：保留当前实现。状态：初始回合已完成。下一步：继续迁移。"),
+        ]);
+        let (task_id, source_session_id, source_messages) = {
+            let authority = ServiceAuthority::bootstrap_with_home(home.path()).unwrap();
+            let (application, task_id, source_session_id) =
+                durable_application_with_source_session(authority, home.path(), label, endpoint);
+            let allow_commit = std::cell::Cell::new(true);
+            assert!(application
+                .compact_task_agent_context_with_commit_guard(
+                    &task_id,
+                    "turn-compaction-restart",
+                    None,
+                    || {
+                        let commit = allow_commit.get();
+                        allow_commit.set(false);
+                        commit
+                    },
+                )
+                .is_err());
+            assert_eq!(
+                bound_session_ids(&application, &task_id),
+                vec![source_session_id.clone()]
+            );
+            assert_eq!(
+                runtime_session_ids(&application, &task_id),
+                vec![source_session_id.clone()]
+            );
+            let source_messages = application
+                .authority()
+                .shared_runtime()
+                .inner()
+                .session_snapshot(&source_session_id)
+                .unwrap()
+                .messages;
+            (task_id, source_session_id, source_messages)
+        };
+        server.join().unwrap();
+
+        let authority = ServiceAuthority::bootstrap_with_home(home.path()).unwrap();
+        let application = DesktopApplication::from_authority(
+            DesktopApplicationConfig::new(
+                home.path(),
+                format!("liliacode.context-compaction.{label}.recovered"),
+            )
+            .unwrap(),
+            authority,
+            Arc::new(NoopHost),
+        )
+        .unwrap();
+
+        assert_eq!(
+            bound_session_ids(&application, &task_id),
+            vec![source_session_id.clone()]
+        );
+        assert_eq!(
+            runtime_session_ids(&application, &task_id),
+            vec![source_session_id.clone()]
+        );
+        assert_eq!(
+            application
+                .authority()
+                .shared_runtime()
+                .inner()
+                .session_snapshot(&source_session_id)
+                .unwrap()
+                .messages,
+            source_messages
+        );
+    }
+
+    fn durable_application_with_source_session(
+        authority: ServiceAuthority,
+        home: &std::path::Path,
+        label: &str,
+        endpoint: String,
+    ) -> (DesktopApplication, TaskId, String) {
+        let runtime = authority.shared_runtime();
+        runtime
+            .inner()
+            .credentials()
+            .login(ProductCredentialLoginInput {
+                provider_id: OPENAI_CREDENTIAL_PROVIDER_ID.into(),
+                kind: CredentialKind::ApiKey,
+                secret_material: "sk-test-context-compaction-0123456789".into(),
+                account_label: None,
+                source: Some("context-compaction-test".into()),
+            })
+            .unwrap();
+        let task_id = TaskId::new(format!("task-context-compaction-{label}")).unwrap();
+        authority
+            .client()
+            .unwrap()
+            .products()
+            .create_entity(ProductEntity::Task(
+                ProductTask::new(task_id.clone(), None, "Context compaction").unwrap(),
+            ))
+            .unwrap();
+        let application = DesktopApplication::from_authority(
+            DesktopApplicationConfig::new(home, format!("liliacode.context-compaction.{label}"))
+                .unwrap(),
+            authority,
+            Arc::new(NoopHost),
+        )
+        .unwrap();
+        runtime.inner().set_model_endpoint_override(Some(endpoint));
+        runtime.inner().refresh_product_profile(None).unwrap();
+        let session = application.open_task_agent_wire_session(&task_id).unwrap();
+        runtime
+            .inner()
+            .submit_turn_with_context_streaming(
+                &AgentSessionRef::new(session.session_id.clone()).unwrap(),
+                "preserve the current implementation state",
+                "turn-before-compaction",
+                None,
+            )
+            .unwrap();
+        (application, task_id, session.session_id)
     }
 }

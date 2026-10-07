@@ -713,9 +713,8 @@ impl UiModule for ComposerModule {
             into.composer.context_usage_percent = None;
             into.composer.can_compact = false;
         }
-        into.composer.can_optimize = !blocked
-            && !into.composer.optimizing
-            && !into.composer.composer.trim().is_empty();
+        into.composer.can_optimize =
+            !blocked && !into.composer.optimizing && !into.composer.composer.trim().is_empty();
     }
 }
 

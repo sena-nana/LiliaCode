@@ -217,7 +217,7 @@ pub(super) fn replay(session: &Session) -> Result {
     let home = session.run_dir.join("home");
     let marker = home.join("native-hook-executions.jsonl");
     #[cfg(windows)]
-    let command = windows_hook_append_command(&marker);
+    let command = windows_hook_append_command(&marker)?;
     #[cfg(not(windows))]
     let command = {
         let quoted = format!("'{}'", marker.to_string_lossy().replace('\'', "'\"'\"'"));
@@ -374,15 +374,120 @@ pub(super) fn replay(session: &Session) -> Result {
     )
 }
 
+/// `powershell -EncodedCommand` does not finish when stdin is a redirected pipe,
+/// so the handler runs until its timeout. `-File` reads that pipe and exits.
+/// The host may prefix a UTF-8 BOM; drop it so the recorded payload stays JSON.
 #[cfg(windows)]
-fn windows_hook_append_command(path: &Path) -> String {
-    let escaped = path.to_string_lossy().replace('\'', "''");
-    let script = format!(
-        "$in=[Console]::OpenStandardInput();$fs=[IO.File]::Open('{escaped}',[IO.FileMode]::Append,[IO.FileAccess]::Write,[IO.FileShare]::Read);$b=New-Object byte[] 65536;do{{$n=$in.Read($b,0,$b.Length);if($n -gt 0){{$fs.Write($b,0,$n)}}}}while($n -gt 0);$fs.Write([byte[]](10),0,1);$fs.Dispose()"
+fn windows_hook_append_command(path: &Path) -> Result<String> {
+    let script_path = path.with_file_name("native-hook-append.ps1");
+    let output = path.to_string_lossy().replace('\'', "''");
+    let script = r#"$in = [Console]::OpenStandardInput()
+$ms = New-Object System.IO.MemoryStream
+$buf = New-Object byte[] 8192
+while ($true) {
+    $n = $in.Read($buf, 0, $buf.Length)
+    if ($n -le 0) { break }
+    $ms.Write($buf, 0, $n)
+}
+$bytes = $ms.ToArray()
+$start = 0
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) {
+    $start = 3
+}
+$fs = [System.IO.File]::Open('__OUTPUT__', [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+if ($bytes.Length -gt $start) {
+    $fs.Write($bytes, $start, $bytes.Length - $start)
+}
+$fs.WriteByte(10)
+$fs.Dispose()
+"#
+    .replace("__OUTPUT__", &output);
+    fs::write(&script_path, script).map_err(|error| {
+        XtaskError::io("hook_append_script", "write hook append script", error)
+    })?;
+    Ok(format!(
+        "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {}",
+        script_path.display()
+    ))
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn windows_hook_append_command_records_payload_before_timeout() {
+    use std::io::{Read, Write};
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let directory = tempfile::tempdir().expect("temp dir");
+    let marker = directory.path().join("native-hook-executions.jsonl");
+    let command_text = windows_hook_append_command(&marker).expect("append command");
+    let mut command = Command::new(std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into()));
+    command.args(["/D", "/S", "/C", &command_text]);
+    command
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in ["PATH", "SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    command.creation_flags(0x0800_0000);
+    let mut child = command.spawn().expect("spawn hook append command");
+    let stdout = child.stdout.take().map(|mut stream| {
+        thread::spawn(move || {
+            let mut captured = Vec::new();
+            let _ = stream.read_to_end(&mut captured);
+        })
+    });
+    let stderr = child.stderr.take().map(|mut stream| {
+        thread::spawn(move || {
+            let mut captured = Vec::new();
+            let _ = stream.read_to_end(&mut captured);
+            captured
+        })
+    });
+    let mut stdin = child.stdin.take().expect("hook stdin");
+    let payload = r#"{"taskId":"native-agent-debug-task","turnId":"turn-1","context":"Native Hook 执行验收"}"#;
+    let writer = thread::spawn(move || {
+        stdin.write_all(payload.as_bytes())?;
+        drop(stdin);
+        Ok::<(), std::io::Error>(())
+    });
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("wait for hook command") {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(8) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("hook append command timed out");
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    writer.join().expect("stdin writer").expect("write hook stdin");
+    if let Some(stdout) = stdout {
+        stdout.join().expect("stdout drain");
+    }
+    let stderr = stderr
+        .map(|handle| handle.join().expect("stderr drain"))
+        .unwrap_or_default();
+    assert!(
+        status.success(),
+        "hook append command failed: {}",
+        String::from_utf8_lossy(&stderr)
     );
-    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    format!(
-        "powershell -NoProfile -EncodedCommand {}",
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, utf16)
+    let record: Value = serde_json::from_str(
+        fs::read_to_string(&marker)
+            .expect("hook marker")
+            .lines()
+            .next()
+            .expect("hook marker line"),
     )
+    .expect("hook payload json");
+    assert_eq!(record["taskId"], "native-agent-debug-task");
+    assert_eq!(record["turnId"], "turn-1");
+    assert_eq!(record["context"], "Native Hook 执行验收");
 }

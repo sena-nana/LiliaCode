@@ -106,6 +106,12 @@ pub trait AgentTurnHost: TurnPageHost {
         profile_id: &str,
         replace: bool,
     ) -> Result<(), AgentTurnError>;
+    fn bind_forked_session(
+        &self,
+        task_id: &TaskId,
+        session_id: &str,
+        profile_id: &str,
+    ) -> Result<(), AgentTurnError>;
     fn cancel_session_turn(&self, session_id: &str, turn_id: &str) -> Result<(), AgentTurnError>;
     fn emit_running(&self, task_id: &TaskId, turn_id: &str);
     fn execute_prompt_hooks(
@@ -173,7 +179,7 @@ pub fn run_prepared_turn_with_claim(
     let (title, _project_id) = host.load_task(task_id)?;
     let profile_id = host.refresh_profile()?;
     let existing_binding = host.existing_session(task_id)?;
-    let session_id = if let Some(branch) = active.request.session_branch.as_ref() {
+    let (session_id, forked) = if let Some(branch) = active.request.session_branch.as_ref() {
         let source = existing_binding
             .as_ref()
             .ok_or_else(|| AgentTurnError::InvalidInput {
@@ -189,27 +195,41 @@ pub fn run_prepared_turn_with_claim(
             },
             uuid::Uuid::new_v4()
         );
-        host.fork_through_turn(source, &target_session_id, &branch.source_turn_id)?
+        let session_id =
+            host.fork_through_turn(source, &target_session_id, &branch.source_turn_id)?;
+        (session_id, true)
     } else if active.request.session_fork {
         if let Some(source) = existing_binding.as_ref() {
             let target_session_id =
                 format!("native-{}-fork-{}", task_id.as_str(), uuid::Uuid::new_v4());
-            host.fork_session(source, &target_session_id)?
+            let session_id = host.fork_session(source, &target_session_id)?;
+            (session_id, true)
         } else {
-            host.open_session(task_id, None, &profile_id, Some(&title))?
+            (
+                host.open_session(task_id, None, &profile_id, Some(&title))?,
+                false,
+            )
         }
     } else {
-        host.open_session(
-            task_id,
-            existing_binding.as_deref(),
-            &profile_id,
-            Some(&title),
-        )?
+        (
+            host.open_session(
+                task_id,
+                existing_binding.as_deref(),
+                &profile_id,
+                Some(&title),
+            )?,
+            false,
+        )
     };
-    if active.request.session_fork || active.request.session_branch.is_some() {
-        host.persist_binding(task_id, &session_id, &profile_id, true)?;
+    if forked {
+        host.bind_forked_session(task_id, &session_id, &profile_id)?;
     } else {
-        host.persist_binding(task_id, &session_id, &profile_id, false)?;
+        host.persist_binding(
+            task_id,
+            &session_id,
+            &profile_id,
+            active.request.session_fork,
+        )?;
     }
     let cancel_requested = runtime.attach_session_with_claim(
         task_id,
@@ -249,4 +269,291 @@ pub fn run_prepared_turn_with_claim(
     })?;
     handle_observed_page_with_claim(runtime, host, task_id, turn_id, expected_claim_token, page)
         .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use lilia_contracts::{ExecutionPermission, PendingProjection, ProjectId, TaskId};
+
+    use super::*;
+    use crate::runtime::DesktopAgentRuntime;
+    use crate::turn::{DesktopSessionBranchAnchor, DesktopSessionBranchMode, DesktopTurnRequest};
+    use crate::turn_page::{TurnFinishKind, TurnPageHost};
+
+    struct ForkHost {
+        fail_bind: bool,
+        bound: Mutex<String>,
+        steps: Mutex<Vec<&'static str>>,
+    }
+
+    impl ForkHost {
+        fn new(fail_bind: bool) -> Self {
+            Self {
+                fail_bind,
+                bound: Mutex::new("parent-session".to_owned()),
+                steps: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn step(&self, step: &'static str) {
+            self.steps.lock().expect("steps").push(step);
+        }
+    }
+
+    impl TurnPageHost for ForkHost {
+        fn bind_session_version(
+            &self,
+            _turn_id: &str,
+            _claim_token: Option<&str>,
+            _version: u64,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn pending_projections(
+            &self,
+            _task_id: &TaskId,
+        ) -> Result<Vec<PendingProjection>, AgentTurnError> {
+            Ok(Vec::new())
+        }
+
+        fn emit_waiting_approval(
+            &self,
+            _task_id: &TaskId,
+            _turn_id: &str,
+            _request_id: Option<String>,
+        ) {
+        }
+
+        fn emit_waiting_interaction(
+            &self,
+            _task_id: &TaskId,
+            _turn_id: &str,
+            _request_id: Option<String>,
+            _kind: Option<String>,
+            _error: Option<String>,
+        ) {
+        }
+
+        fn dispatch_user_guide(&self, _task_id: &TaskId) {}
+
+        fn turn_permission(
+            &self,
+            _task_id: &TaskId,
+            _turn_id: &str,
+        ) -> Option<ExecutionPermission> {
+            None
+        }
+
+        fn respond_architecture(
+            &self,
+            _task_id: &TaskId,
+            _request_id: &str,
+            _allow: bool,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn finish_turn(
+            &self,
+            _task_id: TaskId,
+            _turn_id: String,
+            _kind: TurnFinishKind,
+            _message: Option<String>,
+        ) {
+        }
+
+        fn request_title_update(&self, _task_id: TaskId, _turn_id: String) {}
+    }
+
+    impl AgentTurnHost for ForkHost {
+        fn apply_automatic_selection(
+            &self,
+            request: DesktopTurnRequest,
+        ) -> Result<DesktopTurnRequest, AgentTurnError> {
+            Ok(request)
+        }
+
+        fn persist_request(
+            &self,
+            _turn_id: &str,
+            _request: &DesktopTurnRequest,
+            _claim_token: Option<&str>,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn mark_guide_sent(&self, _guide_id: &str) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn run_compaction(
+            &self,
+            _task_id: &TaskId,
+            _turn_id: &str,
+            _request: &DesktopTurnRequest,
+            _claim_token: Option<&str>,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn load_task(
+            &self,
+            _task_id: &TaskId,
+        ) -> Result<(String, Option<ProjectId>), AgentTurnError> {
+            Ok(("Fork".to_owned(), None))
+        }
+
+        fn refresh_profile(&self) -> Result<String, AgentTurnError> {
+            Ok("profile".to_owned())
+        }
+
+        fn existing_session(&self, _task_id: &TaskId) -> Result<Option<String>, AgentTurnError> {
+            Ok(Some(self.bound.lock().expect("bound").clone()))
+        }
+
+        fn fork_through_turn(
+            &self,
+            source: &str,
+            _target: &str,
+            _source_turn_id: &str,
+        ) -> Result<String, AgentTurnError> {
+            assert_eq!(source, "parent-session");
+            self.step("fork");
+            Ok("target-session".to_owned())
+        }
+
+        fn fork_session(&self, source: &str, _target: &str) -> Result<String, AgentTurnError> {
+            assert_eq!(source, "parent-session");
+            self.step("fork");
+            Ok("target-session".to_owned())
+        }
+
+        fn open_session(
+            &self,
+            _task_id: &TaskId,
+            _existing: Option<&str>,
+            _profile_id: &str,
+            _title: Option<&str>,
+        ) -> Result<String, AgentTurnError> {
+            self.step("open");
+            Ok("opened-session".to_owned())
+        }
+
+        fn persist_binding(
+            &self,
+            _task_id: &TaskId,
+            _session_id: &str,
+            _profile_id: &str,
+            _replace: bool,
+        ) -> Result<(), AgentTurnError> {
+            self.step("persist");
+            Ok(())
+        }
+
+        fn bind_forked_session(
+            &self,
+            _task_id: &TaskId,
+            session_id: &str,
+            _profile_id: &str,
+        ) -> Result<(), AgentTurnError> {
+            self.step("bind");
+            if self.fail_bind {
+                return Err(AgentTurnError::Agent(
+                    "forked session is not ready to bind".to_owned(),
+                ));
+            }
+            *self.bound.lock().expect("bound") = session_id.to_owned();
+            Ok(())
+        }
+
+        fn cancel_session_turn(
+            &self,
+            _session_id: &str,
+            _turn_id: &str,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn emit_running(&self, _task_id: &TaskId, _turn_id: &str) {}
+
+        fn execute_prompt_hooks(
+            &self,
+            _task_id: &TaskId,
+            _turn_id: &str,
+            _workspace: Option<&str>,
+            _content: &str,
+        ) -> Result<(), AgentTurnError> {
+            Ok(())
+        }
+
+        fn submit_observed(
+            &self,
+            spec: TurnSubmitSpec,
+        ) -> Result<ObservedTurnOutcome, AgentTurnError> {
+            self.step("submit");
+            Ok(ObservedTurnOutcome {
+                session_id: spec.session_id,
+                session_version: 1,
+                waiting_approval: false,
+                waiting_interaction: false,
+                completed: true,
+                cancelled_by_user: false,
+            })
+        }
+    }
+
+    fn run_fork(branch: bool, fail_bind: bool) -> (DesktopAgentRuntime, ForkHost, TaskId) {
+        let host = ForkHost::new(fail_bind);
+        let runtime = DesktopAgentRuntime::default();
+        let task_id = TaskId::new("task-fork-bind").unwrap();
+        let mut request = DesktopTurnRequest::new(task_id.clone(), "continue from here");
+        if branch {
+            request.session_branch = Some(DesktopSessionBranchAnchor {
+                source_turn_id: "source-turn".to_owned(),
+                mode: DesktopSessionBranchMode::Fork,
+            });
+        } else {
+            request.session_fork = true;
+        }
+        runtime.enqueue_with_turn_id(request, "turn-prepared".to_owned());
+        let result = run_prepared_turn(&runtime, &host, &task_id, "turn-prepared");
+        if fail_bind {
+            assert!(result.is_err());
+        } else {
+            result.expect("forked turn binds and submits");
+        }
+        (runtime, host, task_id)
+    }
+
+    #[test]
+    fn prepared_fork_binds_the_task_to_the_target_session_before_submit() {
+        for branch in [true, false] {
+            let (runtime, host, task_id) = run_fork(branch, false);
+            assert_eq!(host.bound.lock().expect("bound").as_str(), "target-session");
+            assert_eq!(
+                runtime.snapshot(&task_id).session_id.as_deref(),
+                Some("target-session")
+            );
+            assert_eq!(
+                host.steps.lock().expect("steps").as_slice(),
+                ["fork", "bind", "submit"]
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_fork_binding_failure_leaves_the_task_on_the_original_session() {
+        for branch in [true, false] {
+            let (runtime, host, task_id) = run_fork(branch, true);
+            assert_eq!(host.bound.lock().expect("bound").as_str(), "parent-session");
+            assert!(runtime.snapshot(&task_id).session_id.is_none());
+            assert_eq!(
+                host.steps.lock().expect("steps").as_slice(),
+                ["fork", "bind"]
+            );
+        }
+    }
 }

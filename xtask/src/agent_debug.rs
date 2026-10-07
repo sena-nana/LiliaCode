@@ -830,11 +830,16 @@ fn run_with_viewport(capture_enabled: bool, viewport: Option<(u32, u32, &str)>) 
 /// `PrintWindow` asks the window to redraw into our bitmap, so the capture stays
 /// correct while the desktop is occluded and never picks up other applications.
 ///
-/// Two Windows details matter. `MainWindowHandle` is unreliable because the
-/// process also owns tool and helper windows, so the largest visible top-level
-/// window wins instead. And the capturing process must opt into per-monitor DPI
-/// awareness, or Windows virtualises `GetClientRect` down to 96dpi and
-/// `PrintWindow` silently crops the physical window to that smaller bitmap.
+/// `MainWindowHandle` is unreliable because the process also owns tool and
+/// helper windows, so the largest visible top-level window wins instead. The
+/// drop-shadow companion (`NanaWindowShadow`) is one of those helpers: its
+/// client is larger than the real window by the shadow margin, it has no
+/// redirection bitmap, and `PrintWindow` of it is a uniform black frame. It is
+/// excluded from both selection and the visible-window inventory so a popup
+/// still adds exactly one native window. The capturing process must also opt
+/// into per-monitor DPI awareness, or Windows virtualises `GetClientRect` down
+/// to 96dpi and `PrintWindow` silently crops the physical window to that
+/// smaller bitmap.
 const CAPTURE_SCRIPT: &str = r#"
 param([int]$ProcessId, [string]$Output, [long]$NativeWindowId = 0, [switch]$ListOnly, [int]$LogicalWidth = 0, [int]$LogicalHeight = 0)
 $ErrorActionPreference = 'Stop'
@@ -843,11 +848,13 @@ Add-Type @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class LiliaCapture {
     public delegate bool EnumProc(IntPtr handle, IntPtr param);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr param);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr handle, out uint pid);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
+    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr handle, StringBuilder name, int capacity);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr handle, out RECT rect);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out RECT rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr handle, IntPtr context, uint flags);
@@ -856,12 +863,17 @@ public static class LiliaCapture {
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr handle);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     public struct RECT { public int Left, Top, Right, Bottom; }
+    public static bool IsContentWindow(IntPtr handle) {
+        var name = new StringBuilder(64);
+        GetClassName(handle, name, name.Capacity);
+        return name.ToString() != "NanaWindowShadow";
+    }
     public static long[] VisibleWindows(uint target) {
         var windows = new List<long>();
         EnumWindows(delegate(IntPtr handle, IntPtr param) {
             uint owner;
             GetWindowThreadProcessId(handle, out owner);
-            if (owner == target && IsWindowVisible(handle)) { windows.Add(handle.ToInt64()); }
+            if (owner == target && IsWindowVisible(handle) && IsContentWindow(handle)) { windows.Add(handle.ToInt64()); }
             return true;
         }, IntPtr.Zero);
         return windows.ToArray();
@@ -872,7 +884,7 @@ public static class LiliaCapture {
         EnumWindows(delegate(IntPtr handle, IntPtr param) {
             uint owner;
             GetWindowThreadProcessId(handle, out owner);
-            if (owner != target || !IsWindowVisible(handle)) { return true; }
+            if (owner != target || !IsWindowVisible(handle) || !IsContentWindow(handle)) { return true; }
             RECT rect;
             if (!GetClientRect(handle, out rect)) { return true; }
             long area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);

@@ -54,11 +54,12 @@ fn content_hash(item: &TimelineRow) -> u64 {
 }
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
-    Activate, AppContext, Button, DocumentId, Entity, FlexDirection, FrameworkError, LengthSpec,
-    List, NativeMarkdown, NodeStyle, PositionSpec, RichTextEvent, ScrollAxes, ScrollChanged,
-    ScrollView, Stack, VirtualListItems, VirtualListLayout,
+    Activate, AlignSpec, AppContext, Button, DocumentId, Entity, FlexDirection, FrameworkError,
+    LengthSpec, List, NativeMarkdown, NodeStyle, PositionSpec, RichTextEvent, ScrollAxes,
+    ScrollChanged, ScrollView, Stack, Text, TextChanged, TextInput, VirtualListItems,
+    VirtualListLayout,
 };
-use nana_ui::{ButtonKind, VirtualAlignment};
+use nana_ui::{ButtonKind, ControlSize, VirtualAlignment};
 use nana_ui_platform::WindowId;
 use std::{
     collections::{HashMap, HashSet},
@@ -90,6 +91,8 @@ pub enum TimelineAction {
     Jump(String),
     OpenImage { source: String, alt: String },
     LoadEarlier,
+    SearchChanged(String),
+    SearchStep(isize),
     Scrolled { offset: f32, viewport_extent: f32 },
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +103,9 @@ pub struct TimelineViewSnapshot {
     pub scroll_offset: f32,
     pub viewport_extent: f32,
     pub can_load_earlier: bool,
+    pub search_query: String,
+    pub search_status: String,
+    pub search_can_step: bool,
 }
 type Sink = Arc<dyn Fn(TimelineTarget, TimelineAction) + Send + Sync>;
 pub(crate) struct TimelineView {
@@ -113,6 +119,11 @@ pub(crate) struct TimelineView {
     timeline_toolbars: HashMap<String, Entity<Stack>>,
     pub(crate) key_markers: HashMap<String, Entity<Button>>,
     pub(crate) load_earlier: Option<Entity<Button>>,
+    search_bar: Option<Entity<Stack>>,
+    search_input: Option<Entity<TextInput>>,
+    pub(crate) search_previous: Option<Entity<Button>>,
+    pub(crate) search_next: Option<Entity<Button>>,
+    search_status: Option<Entity<Text>>,
     sink: Sink,
     target: TimelineTarget,
     first_item: Option<String>,
@@ -179,6 +190,11 @@ impl TimelineView {
             timeline_toolbars: HashMap::new(),
             key_markers: HashMap::new(),
             load_earlier: None,
+            search_bar: None,
+            search_input: None,
+            search_previous: None,
+            search_next: None,
+            search_status: None,
             sink,
             target,
             first_item: None,
@@ -421,7 +437,11 @@ impl TimelineView {
             }
         }
         let marker_ids = self.sync_key_markers(context, document_id, snapshot, &layout)?;
-        let mut children = vec![self.timeline_scroll.stable_id()];
+        let mut children = Vec::new();
+        if let Some(search) = self.sync_message_search(context, document_id, snapshot)? {
+            children.push(search);
+        }
+        children.push(self.timeline_scroll.stable_id());
         children.extend(marker_ids);
         if snapshot.can_load_earlier {
             if self.load_earlier.is_none() {
@@ -549,6 +569,127 @@ impl TimelineView {
         }
         Ok(ids)
     }
+
+    fn sync_message_search(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        snapshot: &TimelineViewSnapshot,
+    ) -> Result<Option<nana_ui::runtime::StableNodeId>, FrameworkError> {
+        if snapshot.target.task_id.is_none() {
+            return Ok(None);
+        }
+        if self.search_bar.is_none() {
+            let query = snapshot.search_query.clone();
+            let (_, (bar, input, status)) =
+                context.mount_view_detached(document_id, move || {
+                    let bar = entity_ref::<Stack>();
+                    let input = entity_ref::<TextInput>();
+                    let status = entity_ref::<Text>();
+                    with_refs(
+                        widget(Stack::bar(6.0).align(AlignSpec::Center))
+                            .entity_ref(bar)
+                            .children((
+                                widget(message_search_input(query)).entity_ref(input),
+                                widget(Text::new(String::new())).entity_ref(status),
+                            )),
+                        (bar, input, status),
+                    )
+                })?;
+            let sink = Arc::clone(&self.sink);
+            let target = self.target.clone();
+            context.on(input, move |_, event: &TextChanged, _| {
+                sink(
+                    target.clone(),
+                    TimelineAction::SearchChanged(event.value.to_string()),
+                );
+            })?;
+            self.search_bar = Some(bar);
+            self.search_input = Some(input);
+            self.search_status = Some(status);
+        }
+        let input = self.search_input.unwrap();
+        let status = self.search_status.unwrap();
+        let bar = self.search_bar.unwrap();
+        context.update_component(input, |input, _| {
+            if input.state.value != snapshot.search_query {
+                input.state.replace_value(snapshot.search_query.clone());
+            }
+        })?;
+        let status_label = snapshot.search_status.clone();
+        context.update_component(status, |status, _| {
+            *status = Text::new(status_label);
+        })?;
+        let mut order = vec![input.stable_id(), status.stable_id()];
+        if snapshot.search_can_step {
+            let previous = self.search_step_button(
+                context,
+                document_id,
+                true,
+                "上一条",
+                TimelineAction::SearchStep(-1),
+            )?;
+            let next = self.search_step_button(
+                context,
+                document_id,
+                false,
+                "下一条",
+                TimelineAction::SearchStep(1),
+            )?;
+            order.push(previous.stable_id());
+            order.push(next.stable_id());
+        } else {
+            if let Some(button) = self.search_previous.take() {
+                context.remove_view(button)?;
+            }
+            if let Some(button) = self.search_next.take() {
+                context.remove_view(button)?;
+            }
+        }
+        reconcile_children(context, bar.stable_id(), &order)?;
+        Ok(Some(bar.stable_id()))
+    }
+
+    fn search_step_button(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        previous: bool,
+        label: &str,
+        action: TimelineAction,
+    ) -> Result<Entity<Button>, FrameworkError> {
+        let slot = if previous {
+            &mut self.search_previous
+        } else {
+            &mut self.search_next
+        };
+        if let Some(button) = *slot {
+            let label = label.to_owned();
+            context.update_component(button, |button, _| {
+                *button = pill_button(&label, ButtonKind::Subtle);
+            })?;
+            return Ok(button);
+        }
+        let label = label.to_owned();
+        let (_, button) = context.mount_view_detached(document_id, move || {
+            let button = entity_ref::<Button>();
+            with_refs(
+                widget(pill_button(&label, ButtonKind::Subtle)).entity_ref(button),
+                button,
+            )
+        })?;
+        let sink = Arc::clone(&self.sink);
+        let target = self.target.clone();
+        context.on(button, move |_, _: &Activate, _| {
+            sink(target.clone(), action.clone());
+        })?;
+        if previous {
+            self.search_previous = Some(button);
+        } else {
+            self.search_next = Some(button);
+        }
+        Ok(button)
+    }
 }
 fn timeline_virtual_layout(snapshot: &TimelineViewSnapshot) -> VirtualListLayout {
     timeline_layout_for(&snapshot.rows, &snapshot.layout)
@@ -603,6 +744,25 @@ pub(crate) fn timeline_jump_offset(
     let index = rows
         .iter()
         .position(|row| row.key_node && row.id == row_id)?;
+    timeline_row_scroll_offset(rows, layout, index, viewport_extent)
+}
+
+pub(crate) fn timeline_event_scroll_offset(
+    rows: &[TimelineRow],
+    layout: &VirtualListLayout,
+    row_id: &str,
+    viewport_extent: f32,
+) -> Option<f32> {
+    let index = rows.iter().position(|row| row.id == row_id)?;
+    timeline_row_scroll_offset(rows, layout, index, viewport_extent)
+}
+
+fn timeline_row_scroll_offset(
+    rows: &[TimelineRow],
+    layout: &VirtualListLayout,
+    index: usize,
+    viewport_extent: f32,
+) -> Option<f32> {
     timeline_layout_for(rows, layout).offset_for_index(
         index,
         0.0,
@@ -664,7 +824,9 @@ fn key_node_button(name: &str, ratio: f32) -> Button {
     layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
     // Sit in the right-hand track, clear of the scrollbar, and keep the
     // marker's own box inside the track when the node is at the bottom.
-    layout.offset_right = Some(LengthSpec::Px((TIMELINE_KEY_TRACK - KEY_MARKER_WIDTH) / 2.0));
+    layout.offset_right = Some(LengthSpec::Px(
+        (TIMELINE_KEY_TRACK - KEY_MARKER_WIDTH) / 2.0,
+    ));
     layout.offset_top = Some(LengthSpec::CalcPercentOffset {
         percent: ratio * 100.0,
         offset_px: -KEY_MARKER_HEIGHT * ratio,
@@ -692,6 +854,17 @@ fn viewport_extent(
                 .then_some(snapshot.viewport_extent)
         })
         .unwrap_or(TIMELINE_DEFAULT_VIEWPORT_EXTENT)
+}
+
+fn message_search_input(query: String) -> TextInput {
+    let mut input = TextInput::new(query)
+        .placeholder("搜索消息")
+        .size(ControlSize::Small);
+    let layout = Arc::make_mut(&mut input.style.layout);
+    layout.flex_grow = Some(1.0);
+    layout.flex_shrink = Some(1.0);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    input
 }
 
 fn timeline_scroll_style() -> NodeStyle {
@@ -798,7 +971,46 @@ mod tests {
             scroll_offset: 0.0,
             viewport_extent: 240.0,
             can_load_earlier: true,
+            search_query: String::new(),
+            search_status: String::new(),
+            search_can_step: false,
         }
+    }
+
+    #[test]
+    fn message_search_next_steps_to_the_following_hit() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut context = AppContext::new();
+        let document = DocumentId::new(633).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let mut snapshot = snapshot(WindowId::PRIMARY, "task-a");
+        snapshot.search_query = "登录".to_owned();
+        snapshot.search_status = "2/2".to_owned();
+        snapshot.search_can_step = true;
+        let sink_events = Arc::clone(&events);
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(move |target, action| sink_events.lock().unwrap().push((target, action))),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let next = view.search_next.expect("search step");
+        context
+            .update_component(next, |_, cx| cx.emit(Activate))
+            .unwrap();
+        assert_eq!(
+            events
+                .lock()
+                .unwrap()
+                .last()
+                .map(|(_, action)| action.clone()),
+            Some(TimelineAction::SearchStep(1))
+        );
     }
 
     #[test]
@@ -1144,6 +1356,10 @@ mod tests {
             Some(100.0)
         );
         assert_eq!(timeline_jump_offset(&rows, &layout, "tool", 80.0), None);
+        assert_eq!(
+            timeline_event_scroll_offset(&rows, &layout, "tool", 80.0),
+            Some(0.0)
+        );
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut context = AppContext::new();
@@ -1161,6 +1377,9 @@ mod tests {
             scroll_offset: 0.0,
             viewport_extent: 80.0,
             can_load_earlier: false,
+            search_query: String::new(),
+            search_status: String::new(),
+            search_can_step: false,
         };
         let sink_events = Arc::clone(&events);
         let mut view = TimelineView::mount(
@@ -1177,10 +1396,7 @@ mod tests {
         let marker = view.key_markers["user-1"];
         let component_label = context.read(marker, |button| button.label.clone()).unwrap();
         assert_eq!(component_label, "先看滚动");
-        assert_eq!(
-            context.world().text(marker.stable_id()),
-            Some("先看滚动")
-        );
+        assert_eq!(context.world().text(marker.stable_id()), Some("先看滚动"));
         context
             .update_component(view.key_markers["user-1"], |_, cx| cx.emit(Activate))
             .unwrap();
@@ -1190,7 +1406,12 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            events.lock().unwrap().iter().map(|(_, action)| action.clone()).collect::<Vec<_>>(),
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, action)| action.clone())
+                .collect::<Vec<_>>(),
             vec![
                 TimelineAction::Jump("user-1".into()),
                 TimelineAction::Quote("user-1".into()),

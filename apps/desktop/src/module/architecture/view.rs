@@ -156,7 +156,9 @@ impl ArchitectureView {
                 ));
                 with_refs(
                     (page, inspector_view),
-                    (root, inspector, canvas, summary, detail, history, open, rollback),
+                    (
+                        root, inspector, canvas, summary, detail, history, open, rollback,
+                    ),
                 )
             })?;
         context

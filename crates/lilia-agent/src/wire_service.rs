@@ -882,6 +882,12 @@ mod tests {
             .events
             .iter()
             .any(|event| event.meta.turn_id.as_deref() == Some("turn-2")));
+        assert_eq!(
+            service
+                .runtime()
+                .session_ids_for_task(&TaskId::new("task-fork-cut").unwrap()),
+            vec!["session-fork-source".to_owned()]
+        );
     }
 
     #[test]

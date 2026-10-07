@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use lilia_contracts::{ProductTask, Project, ProjectId, TaskId};
+use lilia_contracts::{ProductTask, Project, ProjectId, TaskId, TimelineProjectionEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::application::{DesktopApplication, DesktopApplicationError, ProjectQuery, TaskQuery};
@@ -227,6 +227,98 @@ impl DesktopApplication {
     ) -> Result<Vec<DesktopSessionSearchResult>, DesktopApplicationError> {
         self.inner.session_search.search_sessions(query, limit)
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DesktopTimelineBodyHit {
+    pub task_id: TaskId,
+    pub event_id: String,
+    pub sequence: u64,
+    pub snippet: String,
+    pub score: f64,
+}
+
+/// Substring search over message bodies. Hits stay in timeline order so the
+/// conversation can step to each event. Tool rows are not message text.
+pub fn search_timeline_bodies(
+    query: &str,
+    events: &[TimelineProjectionEvent],
+    limit: usize,
+) -> Vec<DesktopTimelineBodyHit> {
+    let query = query.trim();
+    if query.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut hits = Vec::new();
+    for event in events {
+        let Some(body) = timeline_message_body(event) else {
+            continue;
+        };
+        let ranges = find_ranges(&body, query);
+        if ranges.is_empty() {
+            continue;
+        }
+        let earliest = ranges.iter().map(|range| range.0).min().unwrap_or(0);
+        let score = ranges.len() as f64 * 10.0 + (1.0 - earliest as f64 / body.len().max(1) as f64);
+        hits.push(DesktopTimelineBodyHit {
+            task_id: event.task_id.clone(),
+            event_id: event.id.as_str().to_owned(),
+            sequence: event.sequence,
+            snippet: message_snippet(&body, query),
+            score,
+        });
+    }
+    hits.sort_by(|left, right| {
+        left.sequence
+            .cmp(&right.sequence)
+            .then_with(|| left.event_id.cmp(&right.event_id))
+    });
+    if hits.len() > limit {
+        let drop = hits.len() - limit;
+        hits.drain(0..drop);
+    }
+    hits
+}
+
+fn timeline_message_body(event: &TimelineProjectionEvent) -> Option<String> {
+    if event.kind != "message" {
+        return None;
+    }
+    let content = event
+        .payload
+        .get("content")
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.trim().is_empty());
+    let summary = event
+        .summary
+        .as_deref()
+        .filter(|text| !text.trim().is_empty());
+    match (content, summary) {
+        (Some(content), Some(summary)) if content != summary => {
+            Some(format!("{content}\n{summary}"))
+        }
+        (Some(content), _) => Some(content.to_owned()),
+        (None, Some(summary)) => Some(summary.to_owned()),
+        (None, None) => None,
+    }
+}
+
+fn message_snippet(body: &str, query: &str) -> String {
+    let query = query.trim().to_lowercase();
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|line| line.to_lowercase().contains(&query))
+        .unwrap_or(body.trim());
+    let mut snippet = String::new();
+    for (index, character) in line.chars().enumerate() {
+        if index == 48 {
+            snippet.push('…');
+            break;
+        }
+        snippet.push(character);
+    }
+    snippet
 }
 
 fn search_text(query: &str, docs: &[SessionDoc]) -> Vec<DesktopSessionSearchResult> {
@@ -502,5 +594,47 @@ mod tests {
     fn empty_query_returns_no_results() {
         let (_dir, app) = temp_app();
         assert!(app.search_sessions("   ", 10).unwrap().is_empty());
+    }
+
+    fn message_event(sequence: u64, kind: &str, content: Option<&str>) -> TimelineProjectionEvent {
+        use lilia_contracts::{AgentSessionRef, ProjectionEventId};
+        use serde_json::json;
+
+        TimelineProjectionEvent {
+            id: ProjectionEventId::from_session_sequence("session", sequence),
+            task_id: TaskId::new("task-body").unwrap(),
+            agent_session: AgentSessionRef::new("session").unwrap(),
+            sequence,
+            turn_id: None,
+            kind: kind.to_owned(),
+            status: "completed".to_owned(),
+            title: "工具标题里的登录".to_owned(),
+            summary: None,
+            payload: match content {
+                Some(content) => json!({ "role": "assistant", "content": content }),
+                None => json!({}),
+            },
+            projected: true,
+        }
+    }
+
+    #[test]
+    fn timeline_body_search_hits_message_text_and_keeps_event_order() {
+        let events = vec![
+            message_event(1, "tool", Some("登录失败")),
+            message_event(2, "message", Some("先处理登录超时")),
+            message_event(4, "message", Some("无关内容")),
+            message_event(8, "message", Some("再次提到登录")),
+        ];
+        let hits = search_timeline_bodies("登录", &events, 10);
+        assert_eq!(
+            hits.iter().map(|hit| hit.sequence).collect::<Vec<_>>(),
+            vec![2, 8]
+        );
+        assert_eq!(hits[0].event_id, events[1].id.as_str());
+        assert!(hits[0].snippet.contains("登录"));
+        assert!(search_timeline_bodies("   ", &events, 10).is_empty());
+        assert_eq!(search_timeline_bodies("登录", &events, 1).len(), 1);
+        assert_eq!(search_timeline_bodies("登录", &events, 1)[0].sequence, 8);
     }
 }

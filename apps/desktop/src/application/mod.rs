@@ -340,8 +340,8 @@ pub use remote::{
     REMOTE_PROTOCOL_VERSION,
 };
 pub use session_search::{
-    DesktopSessionSearchKind, DesktopSessionSearchResult, SessionSearchFeature,
-    SessionSearchService, SessionSearchServiceKey,
+    search_timeline_bodies, DesktopSessionSearchKind, DesktopSessionSearchResult,
+    DesktopTimelineBodyHit, SessionSearchFeature, SessionSearchService, SessionSearchServiceKey,
 };
 pub use slash_command::{
     DesktopSlashCommand, DesktopSlashCommandAction, DesktopSlashCommandExecution,

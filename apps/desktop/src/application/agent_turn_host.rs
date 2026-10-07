@@ -493,6 +493,17 @@ impl AgentTurnHost for DesktopApplication {
         .map_err(agent_turn_error)
     }
 
+    fn bind_forked_session(
+        &self,
+        task_id: &TaskId,
+        session_id: &str,
+        profile_id: &str,
+    ) -> Result<(), AgentTurnError> {
+        self.bind_forked_task_session(task_id, session_id, profile_id)
+            .map(|_| ())
+            .map_err(agent_turn_error)
+    }
+
     fn cancel_session_turn(&self, session_id: &str, turn_id: &str) -> Result<(), AgentTurnError> {
         self.authority()
             .shared_runtime()
