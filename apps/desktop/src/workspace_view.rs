@@ -711,6 +711,7 @@ mod tests {
                 status: String::new(),
                 read_only: false,
                 dirty: false,
+                saved_text: None,
                 diagnostics: Vec::new(),
             }),
             terminal: None,

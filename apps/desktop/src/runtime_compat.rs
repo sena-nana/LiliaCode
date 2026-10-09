@@ -75,6 +75,7 @@ pub fn window_event_id(event: &WindowEvent) -> WindowId {
         | WindowEvent::AppearanceChanged { id, .. }
         | WindowEvent::SkipTaskbarChanged { id, .. }
         | WindowEvent::ReducedMotionChanged { id, .. }
+        | WindowEvent::HighContrastChanged { id, .. }
         | WindowEvent::PointerPresenceChanged { id, .. }
         | WindowEvent::ModeChanged { id, .. } => *id,
     }

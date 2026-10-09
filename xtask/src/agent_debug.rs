@@ -766,6 +766,7 @@ fn run_with_viewport(capture_enabled: bool, viewport: Option<(u32, u32, &str)>) 
         &session.request(&serde_json::json!({"command":"ui-observe"}))?,
     )?;
     let fork_target = reveal_timeline_target(&session, ".fork")?;
+    hover_timeline_message(&session, &fork_target)?;
     require_ok(
         &session.request(&serde_json::json!({"command":"ui-click", "targetId":fork_target}))?,
         "choose reply fork anchor",
@@ -1724,7 +1725,12 @@ fn replay_fork_history(session: &Session) -> Result {
             "second ordinary turn did not inherit the first turn",
         ));
     }
-    reveal_scrolled_control(session, "lilia.ui.timeline.scroll", &anchor)?;
+    reveal_scrolled_control(
+        session,
+        "lilia.ui.timeline.scroll",
+        &timeline_message_of(&anchor),
+    )?;
+    hover_timeline_message(session, &anchor)?;
     ui_click(session, &anchor)?;
     wait_target(session, "lilia.ui.composer.branch-clear")?;
     session.capture(&session.run_dir.join("fork-anchor-selected.png"))?;
@@ -2229,17 +2235,9 @@ fn replay_sidebar_modes(session: &Session) -> Result {
         value["observation"]["sidebarDisplayMode"] == "grouped"
     })?;
     let mut evidence = Vec::new();
-    for (mode, key) in [("unified", "ArrowDown"), ("grouped", "ArrowUp")] {
+    for mode in ["unified", "grouped"] {
         reveal_scrolled_control(session, "lilia.ui.settings.content-scroll", selector)?;
-        ui_click(session, selector)?;
-        for key in [key, "Enter"] {
-            require_ok(
-                &session.request(
-                    &serde_json::json!({"command":"ui-key", "targetId":selector,"key":key}),
-                )?,
-                "choose sidebar display mode",
-            )?;
-        }
+        ui_click(session, &format!("{selector}.{mode}"))?;
         let state = wait_observation(session, |value| {
             value["observation"]["sidebarDisplayMode"] == mode
         })?;
@@ -2512,18 +2510,38 @@ fn replay_browser(session: &Session) -> Result {
     Ok(())
 }
 
+/// Message actions only paint while the pointer is over their message, so
+/// each visible message is hovered in turn until one exposes `suffix`.
 fn reveal_timeline_target(session: &Session, suffix: &str) -> Result<String> {
+    let markdown_prefix = "lilia.ui.timeline.markdown.";
     for delta in std::iter::once(10_000.0).chain(std::iter::repeat_n(-200.0, 32)) {
         let ui = session.request(&serde_json::json!({"command":"ui-observe"}))?;
-        if let Some(id) = ui
+        let messages = ui
             .pointer("/snapshot/targets")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter_map(|entry| entry["id"].as_str())
-            .find(|id| id.starts_with("lilia.ui.timeline.") && id.ends_with(suffix))
-        {
-            return Ok(id.to_owned());
+            .filter_map(|id| id.strip_prefix(markdown_prefix))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        for event_id in messages.iter().rev() {
+            let action = format!("lilia.ui.timeline.{event_id}{suffix}");
+            hover_timeline_message(session, &action)?;
+            // The hover reveal lands with the next frame.
+            for _ in 0..5 {
+                let ui = session.request(&serde_json::json!({"command":"ui-observe"}))?;
+                let exposed = ui
+                    .pointer("/snapshot/targets")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|entry| entry["id"].as_str() == Some(action.as_str()));
+                if exposed {
+                    return Ok(action);
+                }
+                thread::sleep(Duration::from_millis(60));
+            }
         }
         require_ok(&session.request(&serde_json::json!({"command":"ui-scroll", "targetId":"lilia.ui.timeline.scroll", "deltaY":delta.to_string()}))?, "reveal timeline action")?;
         thread::sleep(Duration::from_millis(100));
@@ -2531,6 +2549,26 @@ fn reveal_timeline_target(session: &Session, suffix: &str) -> Result<String> {
     wait_matching_target(session, |id| {
         id.starts_with("lilia.ui.timeline.") && id.ends_with(suffix)
     })
+}
+
+/// The message target owning `action` (`lilia.ui.timeline.<event>.<verb>`).
+fn timeline_message_of(action: &str) -> String {
+    let event_id = action
+        .strip_prefix("lilia.ui.timeline.")
+        .and_then(|rest| rest.rsplit_once('.'))
+        .map(|(event_id, _)| event_id)
+        .unwrap_or_default();
+    format!("lilia.ui.timeline.markdown.{event_id}")
+}
+
+fn hover_timeline_message(session: &Session, action: &str) -> Result {
+    require_ok(
+        &session.request(&serde_json::json!({
+            "command":"ui-hover",
+            "targetId":timeline_message_of(action),
+        }))?,
+        "hover timeline message",
+    )
 }
 
 fn replay_markdown_image(session: &Session) -> Result {

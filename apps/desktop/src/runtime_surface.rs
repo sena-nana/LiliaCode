@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AppContext, Button, DocumentId, DonutChart, DonutSlice, Dropdown,
-    DropdownEvent, DropdownOption, DropdownSelection, Entity, FrameworkError, LengthSpec,
-    NodeStyle, Progress, QrCode, SemanticColorRole, SettingsCard, SettingsRow, StableNodeId, Stack,
-    Switch, Text, TextArea, TextChanged, TextInput, ToggleChanged, ValidationMessage,
+    Activate, AppContext, Button, DocumentId, Dropdown, DropdownEvent, DropdownOption,
+    DropdownSelection, Entity, FrameworkError, LengthSpec, NodeStyle, SettingsCard, SettingsRow,
+    StableNodeId, Stack, Switch, Text, TextArea, TextChanged, TextInput, ToggleChanged,
+    ValidationMessage,
 };
 use nana_ui::{ButtonKind, ValidationIntent};
 
@@ -54,29 +54,13 @@ pub(crate) enum SurfaceControl {
         label: String,
         value: String,
         multiline: bool,
-        identity: Option<String>,
         edit: Edit,
     },
     Secret {
         id: String,
         label: String,
         value: String,
-        identity: Option<String>,
         edit: Edit,
-    },
-    Bar {
-        id: String,
-        label: String,
-        value: f64,
-        max: f64,
-    },
-    Donut {
-        id: String,
-        entries: Vec<(String, f64)>,
-    },
-    Qr {
-        id: String,
-        payload: String,
     },
 }
 
@@ -140,14 +124,6 @@ impl SurfaceControl {
             edit: Arc::new(edit),
         }
     }
-    pub fn bar(id: impl Into<String>, label: impl Into<String>, value: f64, max: f64) -> Self {
-        Self::Bar {
-            id: id.into(),
-            label: label.into(),
-            value,
-            max,
-        }
-    }
     pub fn text(id: impl Into<String>, value: impl Into<String>) -> Self {
         Self::Text {
             id: id.into(),
@@ -181,7 +157,6 @@ impl SurfaceControl {
             label: label.into(),
             value: value.into(),
             multiline,
-            identity: None,
             edit: Arc::new(edit),
         }
     }
@@ -195,23 +170,8 @@ impl SurfaceControl {
             id: id.into(),
             label: label.into(),
             value: value.into(),
-            identity: None,
             edit: Arc::new(edit),
         }
-    }
-    pub fn binding_identity(mut self, identity: impl Into<String>) -> Self {
-        match &mut self {
-            Self::Field {
-                identity: current, ..
-            }
-            | Self::Secret {
-                identity: current, ..
-            } => {
-                *current = Some(identity.into());
-            }
-            _ => {}
-        }
-        self
     }
     pub fn enabled(mut self, enabled: bool) -> Self {
         if let Self::Action { enabled: state, .. } = &mut self {
@@ -234,10 +194,7 @@ impl SurfaceControl {
             | Self::Error { id, .. }
             | Self::Action { id, .. }
             | Self::Field { id, .. }
-            | Self::Secret { id, .. }
-            | Self::Bar { id, .. }
-            | Self::Donut { id, .. }
-            | Self::Qr { id, .. } => id,
+            | Self::Secret { id, .. } => id,
         }
     }
 }
@@ -251,14 +208,6 @@ enum SurfaceNode {
     Action(Entity<Button>, Arc<Mutex<ShellIntent>>),
     Field(Entity<SettingsRow>, Entity<TextArea>, Arc<Mutex<Edit>>),
     Secret(Entity<SettingsRow>, Entity<TextInput>, Arc<Mutex<Edit>>),
-    Bar(Entity<Progress>),
-    Donut(
-        Entity<Stack>,
-        Entity<DonutChart>,
-        Entity<Text>,
-        Vec<(Entity<Stack>, Entity<Text>, Entity<Text>)>,
-    ),
-    Qr(Entity<QrCode>),
 }
 
 impl SurfaceNode {
@@ -272,9 +221,6 @@ impl SurfaceNode {
             Self::Action(view, _) => view.stable_id(),
             Self::Field(view, ..) => view.stable_id(),
             Self::Secret(view, ..) => view.stable_id(),
-            Self::Bar(view) => view.stable_id(),
-            Self::Donut(view, ..) => view.stable_id(),
-            Self::Qr(view) => view.stable_id(),
         }
     }
 }
@@ -282,7 +228,6 @@ impl SurfaceNode {
 #[derive(Default)]
 pub(crate) struct SurfaceHandles {
     nodes: HashMap<String, SurfaceNode>,
-    editor_identities: HashMap<String, Option<String>>,
     settings_width: Option<f32>,
 }
 
@@ -302,7 +247,6 @@ impl SurfaceHandles {
                 (
                     id.clone(),
                     match node {
-                        SurfaceNode::Donut(_, chart, ..) => chart.stable_id(),
                         SurfaceNode::Secret(_, view, _) => view.stable_id(),
                         SurfaceNode::Choice(_, view, _) => view.stable_id(),
                         _ => editor
@@ -331,11 +275,6 @@ impl SurfaceHandles {
             }};
         }
         let stacked = self.settings_width.is_none_or(|width| width <= 900.0);
-        let chart_size = if self.settings_width.is_some_and(|width| width <= 860.0) {
-            74.0
-        } else {
-            66.0
-        };
         let mut keep = HashSet::new();
         for control in controls {
             let id = control.id().to_owned();
@@ -400,7 +339,7 @@ impl SurfaceHandles {
                     }
                     SurfaceControl::Text { value, .. } => {
                         let value = value.clone();
-                        SurfaceNode::Text(mount_view!(Text, Text::new(value)))
+                        SurfaceNode::Text(mount_view!(Text, surface_text(value)))
                     }
                     SurfaceControl::Error { value, .. } => {
                         let value = value.clone();
@@ -482,57 +421,6 @@ impl SurfaceHandles {
                         })?;
                         SurfaceNode::Secret(wrapper, editor, binding)
                     }
-                    SurfaceControl::Bar {
-                        label, value, max, ..
-                    } => {
-                        let label = label.clone();
-                        SurfaceNode::Bar(mount_view!(
-                            Progress,
-                            Progress::new(*value, *max).label(label)
-                        ))
-                    }
-                    SurfaceControl::Donut { .. } => {
-                        let root = mount_view!(Stack, Stack::row(10.0).align(AlignSpec::Center));
-                        let chart = mount_view!(DonutChart, DonutChart::new([]));
-                        let legend = mount_view!(
-                            Stack,
-                            Stack::column(5.0)
-                                .grow(1.0)
-                                .shrink(1.0)
-                                .min_width(LengthSpec::Px(0.0))
-                        );
-                        context.append_child(root, chart)?;
-                        context.append_child(root, legend)?;
-                        let mut rows = Vec::new();
-                        for color in DONUT_COLORS {
-                            let row = mount_view!(Stack, Stack::row(6.0).align(AlignSpec::Center));
-                            let dot = mount_view!(
-                                Stack,
-                                Stack::column(0.0)
-                                    .width(LengthSpec::Px(8.0))
-                                    .height(LengthSpec::Px(8.0))
-                                    .shrink(0.0)
-                                    .radius(nana_ui::theme::RadiusTier::Xs)
-                                    .surface(color)
-                            );
-                            let name = mount_view!(Text, legend_text("", true));
-                            let value = mount_view!(Text, legend_text("", false));
-                            context.append_child(row, dot)?;
-                            context.append_child(row, name)?;
-                            context.append_child(row, value)?;
-                            context.append_child(legend, row)?;
-                            rows.push((row, name, value));
-                        }
-                        let empty = mount_view!(Text, legend_text("暂无数据", true));
-                        context.append_child(legend, empty)?;
-                        SurfaceNode::Donut(root, chart, empty, rows)
-                    }
-                    SurfaceControl::Qr { payload, .. } => {
-                        let Ok(qr) = QrCode::encode(payload.as_bytes(), 220.0) else {
-                            continue;
-                        };
-                        SurfaceNode::Qr(mount_view!(QrCode, qr))
-                    }
                 };
                 self.nodes.insert(id.clone(), node);
             }
@@ -557,26 +445,6 @@ impl SurfaceHandles {
                     })?;
                 }
                 _ => {}
-            }
-            if let SurfaceControl::Field { identity, .. }
-            | SurfaceControl::Secret { identity, .. } = control
-            {
-                if self
-                    .editor_identities
-                    .get(&id)
-                    .is_some_and(|previous| previous != identity)
-                {
-                    let node = self.nodes.get(&id).expect("surface node exists");
-                    let editor = match node {
-                        SurfaceNode::Field(_, view, _) => Some(view.stable_id()),
-                        SurfaceNode::Secret(_, view, _) => Some(view.stable_id()),
-                        _ => None,
-                    };
-                    if let Some(editor) = editor {
-                        context.clear_text_history(editor)?;
-                    }
-                }
-                self.editor_identities.insert(id.clone(), identity.clone());
             }
             match (node, control) {
                 (SurfaceNode::Section(view, _), SurfaceControl::Section { label, .. }) => {
@@ -621,9 +489,8 @@ impl SurfaceHandles {
                             .collect();
                     })?;
                 }
-                (SurfaceNode::Text(view), SurfaceControl::Text { value, .. }) => {
-                    context.update_component(*view, |text, _| *text = Text::new(value.clone()))?
-                }
+                (SurfaceNode::Text(view), SurfaceControl::Text { value, .. }) => context
+                    .update_component(*view, |text, _| *text = surface_text(value.clone()))?,
                 (SurfaceNode::Error(view), SurfaceControl::Error { value, .. }) => context
                     .update_component(*view, |message, _| {
                         *message = ValidationMessage::new(value.clone(), ValidationIntent::Danger)
@@ -682,85 +549,6 @@ impl SurfaceHandles {
                             editor.state.replace_value(value.clone());
                         }
                     })?;
-                }
-                (
-                    SurfaceNode::Bar(view),
-                    SurfaceControl::Bar {
-                        label, value, max, ..
-                    },
-                ) => {
-                    context.update_component(*view, |bar, _| {
-                        *bar = Progress::new(*value, *max).label(label.clone())
-                    })?;
-                }
-                (
-                    SurfaceNode::Donut(_, chart, empty, legend),
-                    SurfaceControl::Donut { entries, .. },
-                ) => {
-                    let mut style = NodeStyle::default();
-                    let layout = Arc::make_mut(&mut style.layout);
-                    layout.width = Some(LengthSpec::Px(chart_size));
-                    layout.height = Some(LengthSpec::Px(chart_size));
-                    layout.flex_shrink = Some(0.0);
-                    if entries.is_empty() {
-                        style.background = Some(SemanticColorRole::Subtle);
-                        style.border = Some(SemanticColorRole::BorderSoft);
-                        let layout = Arc::make_mut(&mut style.layout);
-                        layout.border_width = Some(1.0);
-                        layout.border_radius = Some(chart_size / 2.0);
-                    }
-                    context.update_component(*empty, |text, _| {
-                        Arc::make_mut(&mut text.style.layout).hidden = !entries.is_empty()
-                    })?;
-                    let total: f64 = entries.iter().map(|(_, value)| value).sum();
-                    context.update_component(*chart, |chart, _| {
-                        let active = chart.active;
-                        *chart = DonutChart::new(entries.iter().zip(DONUT_COLORS).map(
-                            |((_, value), color)| DonutSlice {
-                                value: *value,
-                                color,
-                            },
-                        ))
-                        .labels(entries.iter().map(|(name, _)| name.as_str()))
-                        .label(
-                            entries
-                                .iter()
-                                .map(|(name, value)| {
-                                    format!(
-                                        "{name}: {value:.0} ({:.1}%)",
-                                        if total > 0.0 {
-                                            value / total * 100.0
-                                        } else {
-                                            0.0
-                                        }
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join("；"),
-                        )
-                        .style(style);
-                        chart.active = active.filter(|index| *index < entries.len());
-                    })?;
-                    for (index, (row, name, value)) in legend.iter().enumerate() {
-                        context.update_component(*row, |row, _| {
-                            *row = row
-                                .clone()
-                                .with_layout(|layout| layout.hidden = index >= entries.len())
-                        })?;
-                        if let Some((label, amount)) = entries.get(index) {
-                            context.update_component(*name, |text, _| {
-                                *text = legend_text(label, true)
-                            })?;
-                            context.update_component(*value, |text, _| {
-                                *text = legend_text(&format!("{amount:.0}"), false)
-                            })?;
-                        }
-                    }
-                }
-                (SurfaceNode::Qr(view), SurfaceControl::Qr { payload, .. }) => {
-                    if let Ok(qr) = QrCode::encode(payload.as_bytes(), 220.0) {
-                        context.update_component(*view, |view, _| *view = qr)?;
-                    }
                 }
                 _ => {}
             }
@@ -822,7 +610,6 @@ impl SurfaceHandles {
             .cloned()
             .collect();
         for id in stale {
-            self.editor_identities.remove(&id);
             if let Some(node) = self.nodes.remove(&id) {
                 if !context.world().contains(node.id()) {
                     continue;
@@ -852,29 +639,12 @@ impl SurfaceHandles {
                     SurfaceNode::Secret(view, ..) => {
                         context.remove_view(view)?;
                     }
-                    SurfaceNode::Bar(view) => {
-                        context.remove_view(view)?;
-                    }
-                    SurfaceNode::Donut(view, ..) => {
-                        context.remove_view(view)?;
-                    }
-                    SurfaceNode::Qr(view) => {
-                        context.remove_view(view)?;
-                    }
                 }
             }
         }
         Ok(grouped)
     }
 }
-
-const DONUT_COLORS: [SemanticColorRole; 5] = [
-    SemanticColorRole::Accent,
-    SemanticColorRole::Success,
-    SemanticColorRole::Warning,
-    SemanticColorRole::Text,
-    SemanticColorRole::Muted,
-];
 
 fn field_wrapper(
     context: &mut AppContext,
@@ -910,89 +680,10 @@ fn field_width(style: &mut NodeStyle, settings_width: Option<f32>, stacked: bool
     // first headless layout pass).
     layout.margin_left = (!stacked).then_some(LengthSpec::Px(1.0));
 }
-fn legend_text(value: &str, grow: bool) -> Text {
-    let mut text = Text::new(value);
-    let layout = Arc::make_mut(&mut text.style.layout);
-    layout.font_size = Some(11.0);
-    layout.flex_grow = Some(if grow { 1.0 } else { 0.0 });
-    layout.flex_shrink = Some(if grow { 1.0 } else { 0.0 });
-    layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.white_space_nowrap = true;
-    layout.text_overflow_ellipsis = true;
-    text
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn surface_editor_identity_preserves_echo_history_but_isolates_same_text_documents() {
-        use crate::runtime_input::ScriptedInput;
-        use nana_ui_platform::InputModifiers;
-        for multiline in [false, true] {
-            let mut context = AppContext::new();
-            let document = DocumentId::new(1).unwrap();
-            let root = context
-                .create_component(document, Stack::column(8.0))
-                .unwrap();
-            let mut surface = SurfaceHandles::default();
-            let sink: Sink = Arc::new(|_| {});
-            let control = |identity: &str, value: &str| {
-                SurfaceControl::field("same-target", "编辑", value, multiline, |_| {
-                    ShellIntent::RefreshExtensions
-                })
-                .binding_identity(identity)
-            };
-            let rows = surface
-                .sync(
-                    &mut context,
-                    document,
-                    &[control("first", "")],
-                    sink.clone(),
-                )
-                .unwrap();
-            context.reconcile_children(root.stable_id(), &rows).unwrap();
-            let node = match &surface.nodes["same-target"] {
-                SurfaceNode::Field(_, editor, _) => editor.stable_id(),
-                SurfaceNode::Secret(_, editor, _) => editor.stable_id(),
-                _ => panic!("editor"),
-            };
-            context.focus_node(document, node).unwrap();
-            let mut input = ScriptedInput::bind(&mut context, document);
-            let mut dispatch = |context: &mut AppContext, key: &str, control: bool| {
-                input
-                    .press_text(
-                        context,
-                        key,
-                        InputModifiers {
-                            control,
-                            ..Default::default()
-                        },
-                        false,
-                        (!control).then_some(key),
-                    )
-                    .unwrap();
-            };
-            dispatch(&mut context, "x", false);
-            surface
-                .sync(
-                    &mut context,
-                    document,
-                    &[control("first", "x")],
-                    sink.clone(),
-                )
-                .unwrap();
-            dispatch(&mut context, "z", true);
-            assert_eq!(context.world().text_input(node).unwrap().value, "");
-            dispatch(&mut context, "y", true);
-            surface
-                .sync(&mut context, document, &[control("second", "x")], sink)
-                .unwrap();
-            dispatch(&mut context, "z", true);
-            assert_eq!(context.world().text_input(node).unwrap().value, "x");
-        }
-    }
 
     #[test]
     fn repeated_waiting_and_completed_runs_preserve_details_and_live_actions() {
@@ -1181,4 +872,13 @@ mod tests {
         };
         assert!(context.read(*row, |row| row.stacked).unwrap());
     }
+}
+
+/// Detail text keeps its own line breaks and wraps long paths and commands.
+fn surface_text(value: String) -> Text {
+    let mut text = Text::new(value);
+    let layout = Arc::make_mut(&mut text.style.layout);
+    layout.white_space = nana_ui_core::WhiteSpaceSpec::PreWrap;
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    text
 }

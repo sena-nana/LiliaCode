@@ -179,7 +179,6 @@ struct PendingField {
 }
 struct PendingButton {
     node: Entity<Button>,
-    action: Arc<Mutex<PendingAction>>,
 }
 
 #[derive(Clone)]
@@ -241,7 +240,6 @@ struct RequestView {
     show_body: Bound<bool>,
     show_actions: Bound<bool>,
     field_values: Arc<Mutex<HashMap<String, Signal<String>>>>,
-    button_actions: Arc<Mutex<HashMap<String, Arc<Mutex<PendingAction>>>>>,
 }
 impl PendingView {
     pub(crate) fn mount(
@@ -362,7 +360,7 @@ impl RequestView {
         let show_body_slot = show_body.clone();
         let show_actions_slot = show_actions.clone();
         let values = Arc::clone(&field_values);
-        let slots = Arc::clone(&button_actions);
+        let slots = button_actions;
         let draft = Arc::clone(&tool_draft);
         let row_sink = Arc::clone(&sink);
         let action_sink = Arc::clone(&sink);
@@ -389,8 +387,16 @@ impl RequestView {
             let action_sink = Arc::clone(&action_sink);
             with_refs(
                 (
-                    widget(Text::new("")).entity_ref(title).value(title_text),
-                    widget(Text::new("")).entity_ref(prompt).value(prompt_text),
+                    widget(
+                        Text::new("")
+                            .font_weight(600)
+                            .color(nana_ui::runtime::SemanticColorRole::Text),
+                    )
+                    .entity_ref(title)
+                    .value(title_text),
+                    widget(Text::new("").color(nana_ui::runtime::SemanticColorRole::Text))
+                        .entity_ref(prompt)
+                        .value(prompt_text),
                     body.each(|row| row.key.clone(), {
                         let body = body;
                         let values = Arc::clone(&values);
@@ -400,7 +406,7 @@ impl RequestView {
                         let target = row_target.clone();
                         move |row| body_row(row, body, &values, &slots, &draft, &sink, &target)
                     })
-                    .gap(8.0)
+                    .gap(4.0)
                     .visible(show_body),
                     action_rows
                         .each(|row| row.key.clone(), {
@@ -448,7 +454,6 @@ impl RequestView {
             show_body,
             show_actions,
             field_values,
-            button_actions,
         };
         request.rebuild(context);
         Ok((mounted, request))
@@ -510,11 +515,6 @@ impl RequestView {
             .node(self.actions.stable_id())
             .map(|node| node.children.clone())
             .unwrap_or_default();
-        let slots = self
-            .button_actions
-            .lock()
-            .map(|slots| slots.clone())
-            .unwrap_or_default();
         let mut fields = HashMap::new();
         let mut buttons = HashMap::new();
         for (row, child) in body.iter().zip(body_children) {
@@ -533,31 +533,21 @@ impl RequestView {
                         },
                     );
                 }
-                BodyContent::Button { action, .. } => {
-                    let action = slots
-                        .get(&row.key)
-                        .cloned()
-                        .unwrap_or_else(|| Arc::new(Mutex::new(action.clone())));
+                BodyContent::Button { .. } => {
                     buttons.insert(
                         row.key.clone(),
                         PendingButton {
                             node: Entity::from_stable_id(child),
-                            action,
                         },
                     );
                 }
             }
         }
         for (row, child) in actions.iter().zip(action_children) {
-            let action = slots
-                .get(&row.key)
-                .cloned()
-                .unwrap_or_else(|| Arc::new(Mutex::new(row.action.clone())));
             buttons.insert(
                 row.key.clone(),
                 PendingButton {
                     node: Entity::from_stable_id(child),
-                    action,
                 },
             );
         }
@@ -627,10 +617,44 @@ fn body_row(
                 slots,
                 sink,
                 target,
+                ButtonShape::Choice,
             )
             .into_any()
         }
     }
+}
+
+/// Body buttons are the answers to pick from; footer buttons commit.
+#[derive(Clone, Copy)]
+enum ButtonShape {
+    Choice,
+    Action,
+}
+
+/// One answer row: a radio glyph that fills when chosen, the label on the
+/// start edge. `Primary` is how the body model marks the chosen answer.
+fn choice_button(face: &ButtonFace) -> Button {
+    let selected = face.kind == ButtonKind::Primary;
+    let icon = if matches!(face.action, PendingAction::OpenMarkdownLink(_)) {
+        nana_ui::icons_tabler::EXTERNAL_LINK
+    } else if selected {
+        nana_ui::icons_tabler::CIRCLE_CHECK
+    } else {
+        nana_ui::icons_tabler::CIRCLE
+    };
+    let mut button = crate::ui::theme::list_row_button(face.label.clone(), icon);
+    button.disabled = face.disabled;
+    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
+    layout.height = Some(nana_ui::runtime::LengthSpec::Px(34.0));
+    if selected {
+        button.style.background = Some(nana_ui::runtime::SemanticColorRole::AccentSoft);
+        button.style.foreground = Some(nana_ui::runtime::SemanticColorRole::AccentOnSoft);
+        button.style.interaction.hovered.background =
+            Some(nana_ui::runtime::SemanticColorRole::AccentSoft);
+    } else if face.kind == ButtonKind::Danger {
+        button.style.foreground = Some(nana_ui::runtime::SemanticColorRole::Danger);
+    }
+    button
 }
 
 fn action_button(
@@ -656,6 +680,7 @@ fn action_button(
         slots,
         sink,
         target,
+        ButtonShape::Action,
     )
 }
 
@@ -674,7 +699,14 @@ fn wire_button(
     slots: &Mutex<HashMap<String, Arc<Mutex<PendingAction>>>>,
     sink: &Sink,
     target: &PendingTarget,
+    shape: ButtonShape,
 ) -> nana_ui::runtime::view::El<Button> {
+    let initial = match shape {
+        ButtonShape::Choice => choice_button(&face),
+        ButtonShape::Action => Button::new(face.label.clone())
+            .kind(face.kind)
+            .size(ControlSize::Small),
+    };
     let slot = Arc::new(Mutex::new(face.action));
     if let Ok(mut slots) = slots.lock() {
         slots.insert(key, Arc::clone(&slot));
@@ -684,30 +716,31 @@ fn wire_button(
     let press = Arc::clone(&slot);
     let sink = Arc::clone(sink);
     let target = target.clone();
-    widget(
-        Button::new(face.label)
-            .kind(face.kind)
-            .size(ControlSize::Small),
-    )
-    .disabled(face.disabled)
-    .visible(move || (show.as_ref())().is_some_and(|face| face.visible))
-    .bind(move |button| {
-        let Some(face) = (refresh.as_ref())() else {
-            return;
-        };
-        button.label = face.label;
-        button.kind = face.kind;
-        button.disabled = face.disabled;
-        button.size = ControlSize::Small;
-        if let Ok(mut action) = slot.lock() {
-            *action = face.action;
-        }
-    })
-    .on_activate(move || {
-        if let Ok(action) = press.lock() {
-            sink(target.clone(), action.clone());
-        }
-    })
+    widget(initial)
+        .disabled(face.disabled)
+        .visible(move || (show.as_ref())().is_some_and(|face| face.visible))
+        .bind(move |button| {
+            let Some(face) = (refresh.as_ref())() else {
+                return;
+            };
+            match shape {
+                ButtonShape::Choice => *button = choice_button(&face),
+                ButtonShape::Action => {
+                    button.label = face.label.clone();
+                    button.kind = face.kind;
+                    button.disabled = face.disabled;
+                    button.size = ControlSize::Small;
+                }
+            }
+            if let Ok(mut action) = slot.lock() {
+                *action = face.action;
+            }
+        })
+        .on_activate(move || {
+            if let Ok(action) = press.lock() {
+                sink(target.clone(), action.clone());
+            }
+        })
 }
 
 fn field_signal(

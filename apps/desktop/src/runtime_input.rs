@@ -23,10 +23,12 @@ impl ScriptedInput {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn services_mut(&mut self) -> &mut nana_ui_platform::HeadlessHostServices {
         self.inner.services_mut()
     }
 
+    #[cfg(test)]
     pub(crate) fn press(
         &mut self,
         context: &mut AppContext,
@@ -45,6 +47,7 @@ impl ScriptedInput {
         self.inner.press(context, key, None, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn press_text(
         &mut self,
         context: &mut AppContext,
@@ -123,9 +126,9 @@ pub(crate) fn route_error(error: InputRouteError) -> FrameworkError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nana_ui::runtime::chart::{hit::NO_HOVER, Axis, ChartOption, LineSeries};
     use nana_ui::runtime::{
-        Button, Entity, LayoutViewport, LengthSpec, NodeStyle, SemanticColorRole, Stack,
-        TimeSeriesChart, TimeSeriesLayer, Tooltip,
+        Button, Chart, ChartTooltip, Entity, LayoutViewport, LengthSpec, NodeStyle, Stack,
     };
     use std::sync::Arc;
 
@@ -137,11 +140,87 @@ mod tests {
             .flat_map(|node| node.children)
             .any(|child| {
                 context
-                    .read(Entity::<Tooltip>::from_stable_id(child), |tip| {
+                    .read(Entity::<ChartTooltip>::from_stable_id(child), |tip| {
                         !tip.style.layout.hidden
                     })
                     .unwrap_or(false)
             })
+    }
+
+    #[test]
+    fn hovering_a_share_ring_slice_describes_that_slice() {
+        let mut context = AppContext::new();
+        let document = DocumentId::new(1).expect("document");
+        let root = context
+            .create_component(document, Stack::column(8.0))
+            .expect("root");
+        let chart = context
+            .create_detached_component(
+                document,
+                crate::ui::charts::share_ring(
+                    "项目",
+                    &[("Alpha".into(), 300.0), ("Beta".into(), 100.0)],
+                    160.0,
+                ),
+            )
+            .expect("chart");
+        context.append_child(root, chart).expect("chart child");
+        context
+            .layout_document(document, LayoutViewport::new(480.0, 420.0))
+            .expect("layout");
+        context.rebuild_hit_test(document);
+        let bounds = context.world().layout_box(chart.stable_id()).unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        for i in 0..12 {
+            let angle = i as f32 * std::f32::consts::TAU / 12.0;
+            let r = bounds.width.min(bounds.height) * 0.42;
+            let (x, y) = context
+                .world()
+                .layout_pointer_position(
+                    chart.stable_id(),
+                    bounds.x + bounds.width / 2.0 + r * angle.cos(),
+                    bounds.y + bounds.height / 2.0 + r * angle.sin(),
+                )
+                .unwrap();
+            let mut input = ScriptedInput::bind(&mut context, document);
+            input
+                .pointer(&mut context, PointerPhase::Move, x, y, 0)
+                .unwrap();
+            let datum = context
+                .read(chart, |chart| {
+                    (
+                        chart.hover_state().current,
+                        crate::ui::charts::hovered_datum(chart),
+                    )
+                })
+                .unwrap();
+            let tip = context
+                .world()
+                .node(chart.stable_id())
+                .into_iter()
+                .flat_map(|node| node.children)
+                .find_map(|child| {
+                    context
+                        .read(Entity::<ChartTooltip>::from_stable_id(child), |tip| {
+                            (
+                                tip.content.title.to_string(),
+                                tip.content.rows[0].name.to_string(),
+                            )
+                        })
+                        .ok()
+                });
+            let (_, Some((_, value, label))) = datum else {
+                continue;
+            };
+            let (title, row) = tip.expect("hovered slice shows a tooltip");
+            assert_eq!(title, label);
+            assert!(
+                row.contains(&format!("{value:.0}")) && row.contains('%'),
+                "{row}"
+            );
+            seen.insert(label);
+        }
+        assert_eq!(seen.len(), 2, "both slices were hovered: {seen:?}");
     }
 
     #[test]
@@ -156,21 +235,25 @@ mod tests {
         let chart = context
             .create_detached_component(
                 document,
-                TimeSeriesChart::new([4.0, 8.0])
-                    .label("总量")
-                    .axis_labels(["09-01", "09-02"])
-                    .stacked([TimeSeriesLayer::new(
-                        "输入",
-                        [1.0, 2.0],
-                        SemanticColorRole::Accent,
-                    )])
-                    .style(style),
+                Chart::new(
+                    ChartOption::new()
+                        .x_axis(Axis::category(["09-01", "09-02"]))
+                        .y_axis(Axis::value())
+                        .series(LineSeries::new("输入", vec![1.0, 2.0])),
+                )
+                .label("总量")
+                .style(style),
             )
             .expect("chart");
         let tab = context
             .create_detached_component(document, Button::new("用量与额度"))
             .expect("tab");
         context.append_child(root, chart).expect("chart child");
+        let hovered = |context: &AppContext| {
+            context
+                .read(chart, |chart| chart.hover_state().current[1])
+                .unwrap()
+        };
         context.append_child(root, tab).expect("tab child");
         context
             .layout_document(document, LayoutViewport::new(480.0, 420.0))
@@ -193,7 +276,7 @@ mod tests {
         input
             .pointer(&mut context, PointerPhase::Move, chart_x, chart_y, 0)
             .expect("hover chart");
-        assert!(context.read(chart, |chart| chart.active).unwrap().is_some());
+        assert_ne!(hovered(&context), NO_HOVER);
         assert!(chart_tooltip_visible(&context, chart.stable_id()));
 
         let bounds = context
@@ -212,10 +295,13 @@ mod tests {
         input
             .pointer(&mut context, PointerPhase::Move, other_x, other_y, 0)
             .expect("hover another datum");
-        assert!(context.read(chart, |chart| chart.active).unwrap().is_some());
+        assert_ne!(hovered(&context), NO_HOVER);
         assert!(chart_tooltip_visible(&context, chart.stable_id()));
 
-        let bounds = context.world().layout_box(tab.stable_id()).expect("tab bounds");
+        let bounds = context
+            .world()
+            .layout_box(tab.stable_id())
+            .expect("tab bounds");
         let (tab_x, tab_y) = context
             .world()
             .layout_pointer_position(
@@ -228,7 +314,7 @@ mod tests {
         input
             .pointer(&mut context, PointerPhase::Move, tab_x, tab_y, 0)
             .expect("hover tab");
-        assert_eq!(context.read(chart, |chart| chart.active).unwrap(), None);
+        assert_eq!(hovered(&context), NO_HOVER);
         assert!(!chart_tooltip_visible(&context, chart.stable_id()));
     }
 }

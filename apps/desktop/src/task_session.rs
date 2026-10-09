@@ -17,6 +17,7 @@ pub(crate) struct TaskTimelineItem {
     pub(crate) sequence: u64,
     pub(crate) turn_id: Option<String>,
     pub(crate) kind: String,
+    pub(crate) tool: Option<String>,
     pub(crate) title: String,
     pub(crate) message_role: Option<String>,
     pub(crate) summary: Option<String>,
@@ -92,19 +93,6 @@ impl TaskSessionView {
             }
         }
         images
-    }
-
-    pub(crate) fn timeline_attachment(
-        &self,
-        event_id: &str,
-        attachment_id: &str,
-    ) -> Option<&ChatAttachment> {
-        self.timeline
-            .iter()
-            .find(|event| event.id == event_id)?
-            .attachments
-            .iter()
-            .find(|attachment| attachment.id == attachment_id)
     }
 
     pub(crate) fn with_ephemeral_debug_overlay(
@@ -434,6 +422,11 @@ fn task_timeline_item_with_retry(
         sequence: event.sequence,
         turn_id: event.turn_id,
         kind: event.kind.clone(),
+        tool: event
+            .payload
+            .get("tool")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         title: event.title,
         message_role,
         markdown,
@@ -607,6 +600,7 @@ mod tests {
                     sequence: 2,
                     turn_id: None,
                     kind: "message".to_owned(),
+                    tool: None,
                     title: "完成".to_owned(),
                     message_role: Some("assistant".to_owned()),
                     summary: None,
@@ -626,6 +620,7 @@ mod tests {
                     sequence: 1,
                     turn_id: None,
                     kind: "command".to_owned(),
+                    tool: None,
                     title: "开始".to_owned(),
                     message_role: None,
                     summary: Some("准备环境".to_owned()),

@@ -103,20 +103,25 @@ impl TodoPanel {
                 let error = entity_ref::<Text>();
                 with_refs(
                     (
-                        widget(Stack::column(4.0)).entity_ref(root),
-                        widget(Stack::bar(6.0)).entity_ref(toolbar),
+                        widget(Stack::column(10.0)).entity_ref(root),
+                        widget(Stack::bar(2.0).align(nana_ui::runtime::AlignSpec::Center))
+                            .entity_ref(toolbar)
+                            .children(
+                                widget(Stack::row(0.0).grow(1.0))
+                                    .children(widget(crate::ui::theme::caption("目标与待办"))),
+                            ),
                         widget(
                             ScrollView::new(ScrollAxes::Vertical).style(
                                 Stack::column(0.0)
                                     .with_layout(|layout| {
-                                        layout.max_height = Some(LengthSpec::Px(144.0))
+                                        layout.max_height = Some(LengthSpec::Px(420.0))
                                     })
                                     .shrink(1.0)
                                     .node_style(),
                             ),
                         )
                         .entity_ref(scroll)
-                        .children(widget(Stack::column(4.0)).entity_ref(rows)),
+                        .children(widget(Stack::column(8.0)).entity_ref(rows)),
                         widget(Stack::column(4.0)).entity_ref(editor).children((
                             widget(TextArea::new("").height(64.0)).entity_ref(input).on(
                                 move |event: &TextChanged| {
@@ -126,9 +131,11 @@ impl TodoPanel {
                                     })
                                 },
                             ),
-                            widget(Stack::bar(6.0)).entity_ref(actions),
+                            widget(Stack::bar(6.0).justify(nana_ui::runtime::JustifySpec::End))
+                                .entity_ref(actions),
                         )),
-                        widget(Text::new("")).entity_ref(error),
+                        widget(Text::new("").color(nana_ui::runtime::SemanticColorRole::Danger))
+                            .entity_ref(error),
                     ),
                     (root, toolbar, rows, scroll, editor, input, actions, error),
                 )
@@ -196,17 +203,14 @@ impl TodoPanel {
         action: TodoAction,
         enabled: bool,
     ) -> Result<(), FrameworkError> {
-        let view = Button::new(label).disabled(!enabled).layout(
-            Stack::row(0.0)
-                .width(LengthSpec::Px(if label.chars().count() > 3 {
-                    76.0
-                } else {
-                    52.0
-                }))
-                .height(LengthSpec::Px(28.0))
-                .node_style()
-                .layout,
-        );
+        let view = Button::new(label)
+            .kind(if id == "save" {
+                nana_ui::ButtonKind::Primary
+            } else {
+                nana_ui::ButtonKind::Text
+            })
+            .size(nana_ui::ControlSize::Small)
+            .disabled(!enabled);
         let (_, button) = context.mount_view_detached(document, move || {
             let button = entity_ref::<Button>();
             with_refs(widget(view).entity_ref(button), button)
@@ -240,12 +244,30 @@ impl TodoPanel {
             if let Some(goal) = &state.goal {
                 let (_, row) = context.mount_view_detached(document, || {
                     let row = entity_ref::<Stack>();
-                    with_refs(widget(Stack::column(3.0)).entity_ref(row), row)
+                    with_refs(
+                        widget(
+                            Stack::column(6.0)
+                                .padding_xy(10.0, 10.0)
+                                .surface(nana_ui::runtime::SemanticColorRole::Subtle)
+                                .outline(nana_ui::runtime::SemanticColorRole::BorderSoft, 1.0)
+                                .radius(nana_ui_core::RadiusTier::Md),
+                        )
+                        .entity_ref(row),
+                        row,
+                    )
                 })?;
-                let goal_label = format!("目标 · {}", goal.objective);
+                let goal_label = goal.objective.clone();
                 let (_, label) = context.mount_view_detached(document, move || {
                     let label = entity_ref::<Text>();
-                    with_refs(widget(Text::new(goal_label)).entity_ref(label), label)
+                    with_refs(
+                        widget(
+                            Text::new(goal_label)
+                                .font_weight(500)
+                                .color(nana_ui::runtime::SemanticColorRole::Text),
+                        )
+                        .entity_ref(label),
+                        label,
+                    )
                 })?;
                 context.append_child(row, label)?;
                 let (status, tone) = match goal.status {
@@ -264,17 +286,23 @@ impl TodoPanel {
                 let (_, meta) = context.mount_view_detached(document, move || {
                     let meta = entity_ref::<Stack>();
                     with_refs(
-                        widget(Stack::row(6.0)).entity_ref(meta).children((
-                            widget(StatusBadge::new(status, tone)),
-                            widget(Text::new(meta_text)),
-                        )),
+                        widget(Stack::row(6.0).align(nana_ui::runtime::AlignSpec::Center))
+                            .entity_ref(meta)
+                            .children((
+                                widget(StatusBadge::new(status, tone)),
+                                widget(crate::ui::theme::meta(meta_text)),
+                            )),
                         meta,
                     )
                 })?;
                 context.append_child(row, meta)?;
                 let (_, actions) = context.mount_view_detached(document, || {
                     let actions = entity_ref::<Stack>();
-                    with_refs(widget(Stack::bar(6.0)).entity_ref(actions), actions)
+                    with_refs(
+                        widget(Stack::bar(2.0).justify(nana_ui::runtime::JustifySpec::End))
+                            .entity_ref(actions),
+                        actions,
+                    )
                 })?;
                 context.append_child(row, actions)?;
                 self.button(
@@ -314,25 +342,48 @@ impl TodoPanel {
                 } else {
                     "待发送引导"
                 };
-                let todo_label = format!("{source} · {priority} · {}", todo.text);
+                let todo_text = todo.text.clone();
+                let todo_meta = format!("{source} · {priority}");
+                let icon = if todo.source == DesktopTodoSource::Agent {
+                    nana_ui::icons_tabler::CIRCLE
+                } else {
+                    nana_ui::icons_tabler::MESSAGE
+                };
                 let (_, label) = context.mount_view_detached(document, move || {
-                    let label = entity_ref::<Text>();
-                    with_refs(widget(Text::new(todo_label)).entity_ref(label), label)
+                    let label = entity_ref::<Stack>();
+                    with_refs(
+                        widget(Stack::row(8.0).align(nana_ui::runtime::AlignSpec::Start))
+                            .entity_ref(label)
+                            .children((
+                                widget(
+                                    nana_ui::runtime::IconGlyph::new(icon)
+                                        .size(14.0)
+                                        .role(nana_ui::runtime::SemanticColorRole::Faint),
+                                ),
+                                widget(Stack::column(2.0).grow(1.0).shrink(1.0)).children((
+                                    widget(
+                                        Text::new(todo_text)
+                                            .color(nana_ui::runtime::SemanticColorRole::Text),
+                                    ),
+                                    widget(crate::ui::theme::meta(todo_meta)),
+                                )),
+                            )),
+                        label,
+                    )
                 })?;
                 context.append_child(row, label)?;
                 if todo.source == DesktopTodoSource::Lilia {
                     let (_, actions) = context.mount_view_detached(document, || {
                         let actions = entity_ref::<Stack>();
-                        with_refs(widget(Stack::bar(4.0)).entity_ref(actions), actions)
+                        with_refs(
+                            widget(Stack::bar(0.0).padding_xy(14.0, 0.0)).entity_ref(actions),
+                            actions,
+                        )
                     })?;
                     context.append_child(row, actions)?;
                     let enabled = editable_guide(todo) && !state.locked;
                     for (key, label, action) in [
-                        (
-                            "dispatch",
-                            "立即插入",
-                            TodoAction::Dispatch(todo.id.clone()),
-                        ),
+                        ("dispatch", "插入", TodoAction::Dispatch(todo.id.clone())),
                         ("edit", "编辑", TodoAction::Edit(todo.id.clone())),
                         ("priority", "优先级", TodoAction::Priority(todo.id.clone())),
                         ("delete", "删除", TodoAction::Delete(todo.id.clone())),

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     Activate, AppContext, Dialog, DocumentId, EmptyState, Entity, FrameworkError, LengthSpec,
-    ModalSlots, OverlayHost, ScrollAxes, ScrollView, SemanticColorRole, SidebarRow,
-    SidebarRowState, StableNodeId, Stack, Text, TextChanged, TextInput,
+    ModalSlots, OverlayHost, ScrollAxes, ScrollView, SidebarRow, SidebarRowState, StableNodeId,
+    Stack, Text, TextChanged, TextInput,
 };
 use nana_ui::{DialogClosePolicy, DialogSize};
 
@@ -461,6 +461,7 @@ pub(crate) struct ExtensionEditorSnapshot {
 }
 
 pub(crate) struct ExtensionBrowser {
+    page_title: Entity<Text>,
     pub root: Entity<Stack>,
     toolbar: Entity<Stack>,
     toolbar_actions: Entity<Stack>,
@@ -512,10 +513,11 @@ impl ExtensionBrowser {
                 ),
                 (
                     (list, list_scroll, detail, detail_panel, detail_header),
-                    (detail_title, detail_action_row, detail_scroll, empty),
+                    (detail_title, detail_action_row, detail_scroll, empty, page_title),
                 ),
             ),
         ) = cx.mount_view_detached(doc, move || {
+            let page_title = entity_ref();
             let root = entity_ref();
             let toolbar = entity_ref();
             let toolbar_actions = entity_ref();
@@ -534,93 +536,95 @@ impl ExtensionBrowser {
             let detail_scroll = entity_ref();
             let empty = entity_ref();
             with_refs(
-                widget(
-                    Stack::fill_column(0.0)
-                        .surface(SemanticColorRole::Surface)
-                        .outline(SemanticColorRole::BorderSoft, 1.0)
-                        .radius(nana_ui::theme::RadiusTier::Md),
-                )
-                .entity_ref(root)
-                .children((
-                    widget(
-                        Stack::bar(8.0)
-                            .min_height(LengthSpec::Px(42.0))
-                            .padding_xy(8.0, 6.0),
-                    )
-                    .entity_ref(toolbar)
+                widget(Stack::fill_column(0.0).padding_xy(16.0, 12.0))
+                    .entity_ref(root)
                     .children((
-                        widget(Stack::row(8.0)).entity_ref(toolbar_actions),
-                        widget(TextInput::new("").placeholder("插件目录"))
-                            .entity_ref(plugin_source)
-                            .on_input(move |event: &TextChanged| {
-                                plugin_dispatch(ShellIntent::ExtensionsCommand(
-                                    ExtensionsMessage::PluginSourceChanged(event.value.to_string()),
-                                ))
-                            }),
-                    )),
-                    widget(Stack::fill_row(0.0)).entity_ref(body).children((
                         widget(
-                            Stack::fill_column(8.0)
-                                .width(LengthSpec::Px(320.0))
-                                .min_width(LengthSpec::Px(250.0))
-                                .grow(0.0)
-                                .shrink(1.0)
-                                .padding(8.0),
+                            Stack::bar(8.0)
+                                .min_height(LengthSpec::Px(42.0))
+                                .padding_xy(8.0, 6.0),
                         )
-                        .entity_ref(list_panel)
+                        .entity_ref(toolbar)
                         .children((
-                            widget(
-                                TextInput::new("").placeholder("搜索当前列表").layout(
-                                    Stack::bar(0.0)
-                                        .height(LengthSpec::Px(30.0))
-                                        .node_style()
-                                        .layout,
-                                ),
-                            )
-                            .entity_ref(search)
-                            .on_input(move |event: &TextChanged| {
-                                search_dispatch(ShellIntent::ExtensionsCommand(
-                                    ExtensionsMessage::SearchChanged(event.value.to_string()),
-                                ))
-                            }),
-                            widget(
-                                ScrollView::new(ScrollAxes::Vertical)
-                                    .style(Stack::fill_column(0.0).node_style()),
-                            )
-                            .entity_ref(list_scroll)
-                            .children(
-                                widget(Stack::column(4.0)).entity_ref(list).children(
-                                    widget(EmptyState::new("没有匹配的条目").compact(true))
-                                        .entity_ref(empty),
-                                ),
-                            ),
+                            widget(page_title_text("extensions")).entity_ref(page_title),
+                            widget(Stack::row(8.0)).entity_ref(toolbar_actions),
+                            widget(TextInput::new("").placeholder("插件目录"))
+                                .entity_ref(plugin_source)
+                                .on_input(move |event: &TextChanged| {
+                                    plugin_dispatch(ShellIntent::ExtensionsCommand(
+                                        ExtensionsMessage::PluginSourceChanged(
+                                            event.value.to_string(),
+                                        ),
+                                    ))
+                                }),
                         )),
-                        widget(Stack::fill_column(0.0))
-                            .entity_ref(detail_panel)
+                        widget(Stack::fill_row(0.0)).entity_ref(body).children((
+                            widget(
+                                Stack::fill_column(8.0)
+                                    .width(LengthSpec::Px(320.0))
+                                    .min_width(LengthSpec::Px(250.0))
+                                    .grow(0.0)
+                                    .shrink(1.0)
+                                    .padding(8.0),
+                            )
+                            .entity_ref(list_panel)
                             .children((
-                                widget(detail_header_layout(false))
-                                    .entity_ref(detail_header)
-                                    .children((
-                                        widget(Text::new("选择一项")).entity_ref(detail_title),
-                                        widget(crate::runtime_layout::wrapping_controls_row(6.0))
-                                            .entity_ref(detail_action_row),
-                                    )),
+                                widget(
+                                    TextInput::new("")
+                                        .placeholder("搜索当前列表")
+                                        .size(nana_ui::ControlSize::Small),
+                                )
+                                .entity_ref(search)
+                                .on_input(
+                                    move |event: &TextChanged| {
+                                        search_dispatch(ShellIntent::ExtensionsCommand(
+                                            ExtensionsMessage::SearchChanged(
+                                                event.value.to_string(),
+                                            ),
+                                        ))
+                                    },
+                                ),
                                 widget(
                                     ScrollView::new(ScrollAxes::Vertical)
                                         .style(Stack::fill_column(0.0).node_style()),
                                 )
-                                .entity_ref(detail_scroll)
+                                .entity_ref(list_scroll)
                                 .children(
-                                    widget(Stack::column(12.0).padding(16.0)).entity_ref(detail),
+                                    widget(Stack::column(4.0)).entity_ref(list).children(
+                                        widget(EmptyState::new("没有匹配的条目").compact(true))
+                                            .entity_ref(empty),
+                                    ),
                                 ),
                             )),
+                            widget(Stack::fill_column(0.0))
+                                .entity_ref(detail_panel)
+                                .children((
+                                    widget(detail_header_layout(false))
+                                        .entity_ref(detail_header)
+                                        .children((
+                                            widget(Text::new("选择一项")).entity_ref(detail_title),
+                                            widget(crate::runtime_layout::wrapping_controls_row(
+                                                6.0,
+                                            ))
+                                            .entity_ref(detail_action_row),
+                                        )),
+                                    widget(
+                                        ScrollView::new(ScrollAxes::Vertical)
+                                            .style(Stack::fill_column(0.0).node_style()),
+                                    )
+                                    .entity_ref(detail_scroll)
+                                    .children(
+                                        widget(Stack::column(12.0).padding(16.0))
+                                            .entity_ref(detail),
+                                    ),
+                                )),
+                        )),
+                        widget(
+                            ScrollView::new(ScrollAxes::Vertical)
+                                .style(Stack::fill_column(0.0).node_style()),
+                        )
+                        .entity_ref(content_scroll),
                     )),
-                    widget(
-                        ScrollView::new(ScrollAxes::Vertical)
-                            .style(Stack::fill_column(0.0).node_style()),
-                    )
-                    .entity_ref(content_scroll),
-                )),
                 (
                     (
                         root,
@@ -634,12 +638,19 @@ impl ExtensionBrowser {
                     ),
                     (
                         (list, list_scroll, detail, detail_panel, detail_header),
-                        (detail_title, detail_action_row, detail_scroll, empty),
+                        (
+                            detail_title,
+                            detail_action_row,
+                            detail_scroll,
+                            empty,
+                            page_title,
+                        ),
                     ),
                 ),
             )
         })?;
         Ok(Self {
+            page_title,
             root,
             toolbar,
             toolbar_actions,
@@ -732,8 +743,11 @@ impl ExtensionBrowser {
         cx.update_component(self.detail_header, |header, _| {
             *header = detail_header_layout(narrow)
         })?;
+        cx.update_component(self.page_title, |title, _| {
+            *title = page_title_text(&view.tab);
+        })?;
         cx.update_component(self.detail_title, |title, _| {
-            *title = Text::new(&view.title);
+            *title = Text::new(&view.title).font_weight(600);
             let layout = Arc::make_mut(&mut title.style.layout);
             layout.width = Some(if narrow {
                 LengthSpec::Fill
@@ -797,11 +811,15 @@ impl ExtensionBrowser {
         cx.reconcile_children(self.toolbar_actions.stable_id(), &actions)?;
         let toolbar = if source.is_some() {
             vec![
+                self.page_title.stable_id(),
                 self.plugin_source.stable_id(),
                 self.toolbar_actions.stable_id(),
             ]
         } else {
-            vec![self.toolbar_actions.stable_id()]
+            vec![
+                self.page_title.stable_id(),
+                self.toolbar_actions.stable_id(),
+            ]
         };
         cx.reconcile_children(self.toolbar.stable_id(), &toolbar)?;
         let mut order = Vec::new();
@@ -1031,6 +1049,21 @@ impl ExtensionBrowser {
         }
         nodes
     }
+}
+
+fn page_title_text(tab: &str) -> Text {
+    let mut title = Text::new(match tab {
+        "plugin-packages" => "插件",
+        "plugin-hooks" => "Hooks",
+        "plugin-mcp" => "MCP",
+        _ => "技能",
+    })
+    .font_size(16.0)
+    .font_weight(600);
+    let layout = Arc::make_mut(&mut title.style.layout);
+    layout.flex_grow = Some(1.0);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    title
 }
 
 fn detail_header_layout(narrow: bool) -> Stack {

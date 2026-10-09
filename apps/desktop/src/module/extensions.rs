@@ -313,6 +313,9 @@ pub struct ExtensionsModule {
     skill_description_input: String,
     skill_delete_confirmation: Option<String>,
     plugin_source_input: String,
+    /// Path of the install in flight; its outcome clears the field only if
+    /// the field still holds that path.
+    installing_source: Option<String>,
     plugin_delete_confirmation: Option<String>,
     extensions_activation: Option<DesktopMcpActivationReport>,
     mcp_editor: Option<McpEditorState>,
@@ -343,6 +346,7 @@ impl Default for ExtensionsModule {
             skill_description_input: String::new(),
             skill_delete_confirmation: None,
             plugin_source_input: String::new(),
+            installing_source: None,
             plugin_delete_confirmation: None,
             extensions_activation: None,
             mcp_editor: None,
@@ -650,7 +654,7 @@ impl ExtensionsModule {
 
     fn apply_outcome(&mut self, outcome: ExtensionsOutcome) -> UiModuleOutcome {
         self.error = None;
-        if self.editor_save_pending
+        let completes_editor = self.editor_save_pending
             && matches!(
                 (&self.editor, &outcome),
                 (Some(ExtensionEditor::Skill), ExtensionsOutcome::Skill(_))
@@ -659,8 +663,8 @@ impl ExtensionsModule {
                         ExtensionsOutcome::Hook(_)
                     )
                     | (Some(ExtensionEditor::Mcp), ExtensionsOutcome::Activated(_))
-            )
-        {
+            );
+        if completes_editor {
             match &outcome {
                 ExtensionsOutcome::Skill(snapshot) => {
                     if let Some(skill) = snapshot
@@ -697,13 +701,18 @@ impl ExtensionsModule {
         match outcome {
             ExtensionsOutcome::Skill(snapshot) => {
                 self.extensions = Some(snapshot);
-                self.skill_id_input.clear();
-                self.skill_description_input.clear();
+                if completes_editor {
+                    self.skill_id_input.clear();
+                    self.skill_description_input.clear();
+                }
                 self.skill_delete_confirmation = None;
             }
             ExtensionsOutcome::Plugin(snapshot) => {
                 self.extensions = Some(snapshot);
-                self.plugin_source_input.clear();
+                if self.installing_source.take().as_deref() == Some(self.plugin_source_input.trim())
+                {
+                    self.plugin_source_input.clear();
+                }
                 self.plugin_delete_confirmation = None;
             }
             ExtensionsOutcome::Hook(snapshot) => {
@@ -717,7 +726,9 @@ impl ExtensionsModule {
             ExtensionsOutcome::Activated(report) => {
                 self.extensions = Some(report.snapshot.clone());
                 self.extensions_activation = Some(report);
-                self.mcp_editor = None;
+                if completes_editor {
+                    self.mcp_editor = None;
+                }
                 self.mcp_delete_confirmation = None;
             }
             ExtensionsOutcome::Content(preview) => {
@@ -803,9 +814,6 @@ impl ExtensionsModule {
                 UiModuleOutcome::dirty()
             }
             ExtensionsMessage::PluginSourceChanged(value) => {
-                if self.busy {
-                    return UiModuleOutcome::clean();
-                }
                 self.plugin_source_input = value;
                 self.error = None;
                 UiModuleOutcome::dirty()
@@ -1261,10 +1269,12 @@ impl ExtensionsModule {
             .as_ref()
             .map(|snapshot| snapshot.plugins_registry_revision)
             .unwrap_or_default();
+        let source_path = source_path.to_owned();
+        self.installing_source = Some(source_path.clone());
         self.queue(ExtensionsCommand::Plugin(PluginRegistryOperation::Install(
             DesktopPluginInstall {
                 expected_registry_revision: revision,
-                source_path: source_path.to_owned(),
+                source_path,
             },
         )))
     }
@@ -1663,13 +1673,11 @@ impl UiModule for ExtensionsModule {
             ExtensionsModuleMessage::JobFailed(error) => {
                 self.busy = false;
                 self.editor_save_pending = false;
+                self.installing_source = None;
                 self.error = Some(error);
                 UiModuleOutcome::dirty()
             }
             ExtensionsModuleMessage::PluginDirectoryPicked(path) => {
-                if self.busy {
-                    return UiModuleOutcome::clean();
-                }
                 self.plugin_source_input = path;
                 self.error = None;
                 UiModuleOutcome::dirty()
@@ -2104,5 +2112,83 @@ mod tests {
         assert_eq!(module.error(), Some("rejected"));
         ui(&mut module, ExtensionsMessage::CancelEditor);
         assert!(module.editor().is_none());
+    }
+
+    fn empty_extensions() -> DesktopExtensionsSnapshot {
+        DesktopExtensionsSnapshot {
+            data_source: String::new(),
+            shared_identity_ok: true,
+            skills_registry_path: String::new(),
+            skills_registry_revision: 0,
+            mcp_registry_path: String::new(),
+            mcp_registry_revision: 0,
+            plugins_registry_path: String::new(),
+            plugins_registry_revision: 0,
+            skill_roots: Vec::new(),
+            skills: Vec::new(),
+            plugins: Vec::new(),
+            mcp_servers: Vec::new(),
+            runtime_services: Vec::new(),
+            legacy_plugin_manager_available: false,
+            legacy_hooks_manager_available: false,
+        }
+    }
+
+    #[test]
+    fn a_late_activation_keeps_the_mcp_draft_being_written() {
+        let mut module = ExtensionsModule::default();
+        ui(&mut module, ExtensionsMessage::NewMcpServer);
+        ui(
+            &mut module,
+            ExtensionsMessage::McpServerIdChanged("draft-server".into()),
+        );
+        reduce(
+            &mut module,
+            ExtensionsModuleMessage::ApplyOutcome(ExtensionsOutcome::Activated(
+                DesktopMcpActivationReport {
+                    results: Vec::new(),
+                    snapshot: empty_extensions(),
+                },
+            )),
+        );
+        assert_eq!(module.mcp_editor().unwrap().server_id, "draft-server");
+        assert!(module.editor().is_some());
+    }
+
+    #[test]
+    fn plugin_path_typed_during_a_job_is_kept_and_installs_once_idle() {
+        let mut module = ExtensionsModule::default();
+        ui(&mut module, ExtensionsMessage::NewMcpServer);
+        ui(
+            &mut module,
+            ExtensionsMessage::McpServerIdChanged("busy-server".into()),
+        );
+        ui(
+            &mut module,
+            ExtensionsMessage::McpLocationChanged("http://127.0.0.1:9/mcp".into()),
+        );
+        ui(&mut module, ExtensionsMessage::SaveMcpServer);
+        assert!(module.take_pending_submit().is_some());
+        reduce(&mut module, ExtensionsModuleMessage::SetBusy(true));
+
+        ui(
+            &mut module,
+            ExtensionsMessage::PluginSourceChanged("C:/plugins/demo".into()),
+        );
+        assert_eq!(module.plugin_source_input(), "C:/plugins/demo");
+        ui(&mut module, ExtensionsMessage::InstallPlugin);
+        assert!(module.take_pending_submit().is_none());
+
+        reduce(
+            &mut module,
+            ExtensionsModuleMessage::JobFailed("rejected".into()),
+        );
+        ui(&mut module, ExtensionsMessage::InstallPlugin);
+        let Some(ExtensionsCommand::Plugin(PluginRegistryOperation::Install(install))) =
+            module.take_pending_submit()
+        else {
+            panic!("missing install");
+        };
+        assert_eq!(install.source_path, "C:/plugins/demo");
     }
 }

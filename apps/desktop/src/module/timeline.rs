@@ -11,7 +11,7 @@ use lilia_contracts::{TaskId, TimelineProjectionCursor};
 
 use lilia_kernel::FeatureId;
 
-use self::view::TimelineRow;
+use self::view::{StepKind, TimelineRole, TimelineRow, TimelineTone};
 use crate::task_session::{TaskSessionView, TaskTimelineItem};
 use crate::ui_module::{UiModule, UiModuleContext, UiModuleOutcome};
 
@@ -24,9 +24,14 @@ pub struct TimelineTextSelection {
 #[derive(Debug, Clone)]
 pub enum TimelineModuleMessage {
     Toggle(String),
+    TextSelected {
+        event_id: String,
+        text: Option<String>,
+    },
     ClearTextSelection,
     SearchChanged(String),
     SearchStep(isize),
+    SearchOpen(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,6 +62,7 @@ struct TimelineMessageSearch {
 pub struct TimelineModule {
     reading_anchors: BTreeMap<TaskId, TimelineReadingAnchor>,
     message_searches: BTreeMap<TaskId, TimelineMessageSearch>,
+    searching: BTreeSet<TaskId>,
     toggled_events: BTreeSet<String>,
     text_selection: Option<TimelineTextSelection>,
 }
@@ -66,6 +72,7 @@ impl Default for TimelineModule {
         Self {
             reading_anchors: BTreeMap::new(),
             message_searches: BTreeMap::new(),
+            searching: BTreeSet::new(),
             toggled_events: BTreeSet::new(),
             text_selection: None,
         }
@@ -99,19 +106,10 @@ impl TimelineModule {
             if end > index + 1 {
                 let group_id = format!("process-group:{}", item.id);
                 let expanded = self.toggled_events.contains(&group_id);
-                rows.push(TimelineRow {
-                    id: group_id,
-                    markdown: format!("执行过程 · {} 项", end - index),
-                    images: Vec::new(),
-                    expanded,
-                    can_expand: true,
-                    can_retry: false,
-                    can_copy: false,
-                    can_branch: false,
-                    key_node: false,
-                });
+                let children = &session.timeline[index..end];
+                rows.push(Self::group_row(group_id, children, expanded));
                 if expanded {
-                    for child in &session.timeline[index..end] {
+                    for child in children {
                         rows.push(Self::row(
                             child,
                             self.toggled_events.contains(&child.id),
@@ -219,6 +217,16 @@ impl TimelineModule {
         search.hits.get(search.active).cloned()
     }
 
+    pub(crate) fn search_open(&self, task_id: Option<&TaskId>) -> bool {
+        task_id.is_some_and(|task_id| {
+            self.searching.contains(task_id)
+                || self
+                    .message_searches
+                    .get(task_id)
+                    .is_some_and(|search| !search.query.is_empty())
+        })
+    }
+
     pub(crate) fn message_search_view(&self, task_id: Option<&TaskId>) -> (String, String, bool) {
         let Some(search) = task_id.and_then(|task_id| self.message_searches.get(task_id)) else {
             return (String::new(), String::new(), false);
@@ -241,51 +249,165 @@ impl TimelineModule {
         self.text_selection.as_ref()
     }
 
+    /// Records what a message reports as selected; returns whether that
+    /// changed the selection.
+    fn select_text(&mut self, event_id: String, text: Option<String>) -> bool {
+        match text.filter(|text| !text.trim().is_empty()) {
+            Some(text) => {
+                self.text_selection = Some(TimelineTextSelection { event_id, text });
+                true
+            }
+            // Selecting in one message clears the one before; that late
+            // "cleared" must not drop the new selection.
+            None if self
+                .text_selection
+                .as_ref()
+                .is_some_and(|selection| selection.event_id == event_id) =>
+            {
+                self.text_selection = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn group_row(id: String, children: &[TaskTimelineItem], expanded: bool) -> TimelineRow {
+        let mut counts: Vec<(StepKind, usize)> = Vec::new();
+        let mut tone = TimelineTone::Settled;
+        for child in children {
+            let kind = StepKind::classify(&child.kind, child.tool.as_deref(), &child.status);
+            match counts.iter_mut().find(|(seen, _)| *seen == kind) {
+                Some((_, count)) => *count += 1,
+                None => counts.push((kind, 1)),
+            }
+            if TimelineTone::from_status(&child.status) == TimelineTone::Running {
+                tone = TimelineTone::Running;
+            }
+        }
+        let detail = counts
+            .iter()
+            .take(3)
+            .map(|(kind, count)| {
+                if *count > 1 {
+                    format!("{} ×{count}", kind.label())
+                } else {
+                    kind.label().to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        TimelineRow {
+            id,
+            role: TimelineRole::Group,
+            tone,
+            title: format!("执行过程 · {} 步", children.len()),
+            detail,
+            markdown: String::new(),
+            images: Vec::new(),
+            expanded,
+            can_expand: true,
+            can_retry: false,
+            can_copy: false,
+            can_branch: false,
+            key_node: false,
+        }
+    }
+
     pub fn row(
         item: &TaskTimelineItem,
         toggled: bool,
         can_retry: bool,
         can_branch: bool,
     ) -> TimelineRow {
-        let expanded =
-            toggled != matches!(item.message_role.as_deref(), Some("user" | "assistant"));
+        let role = match item.message_role.as_deref() {
+            Some("user") => TimelineRole::User,
+            Some("assistant") => TimelineRole::Reply,
+            _ => TimelineRole::Step(StepKind::classify(
+                &item.kind,
+                item.tool.as_deref(),
+                &item.status,
+            )),
+        };
         let full = item
             .markdown
             .clone()
             .or_else(|| item.summary.clone())
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| item.title.clone());
-        let preview = item
+        let can_copy = item
+            .markdown_plain_text
+            .as_ref()
+            .or(item.markdown.as_ref())
+            .is_some_and(|text| !text.trim().is_empty());
+        let TimelineRole::Step(kind) = role else {
+            return TimelineRow {
+                id: item.id.clone(),
+                role,
+                tone: TimelineTone::from_status(&item.status),
+                title: String::new(),
+                detail: String::new(),
+                markdown: full,
+                images: Vec::new(),
+                expanded: true,
+                can_expand: false,
+                can_retry,
+                can_copy,
+                can_branch,
+                key_node: true,
+            };
+        };
+        let summary = item
             .summary
+            .as_deref()
+            .map(str::trim)
+            .filter(|summary| !summary.is_empty());
+        let title = match kind {
+            StepKind::Status => summary.unwrap_or(kind.label()).to_owned(),
+            _ => kind.label().to_owned(),
+        };
+        let detail = match kind {
+            StepKind::Status => String::new(),
+            _ => summary
+                .or(item.markdown.as_deref())
+                .map(first_line)
+                .filter(|line| *line != title)
+                .unwrap_or_default()
+                .to_owned(),
+        };
+        let body = item
+            .markdown
             .clone()
             .filter(|text| !text.trim().is_empty())
-            .unwrap_or_else(|| item.title.clone());
-        let can_expand = item.markdown.as_ref().is_some_and(|markdown| {
-            item.summary
-                .as_ref()
-                .is_some_and(|summary| summary != markdown)
-                || item.title != *markdown
-        });
+            .or_else(|| {
+                summary
+                    .filter(|text| *text != detail || text.contains('\n'))
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default();
+        let can_expand = !body.trim().is_empty() && (body.trim() != detail || body.contains('\n'));
         TimelineRow {
             id: item.id.clone(),
-            markdown: if expanded || !can_expand {
-                full
-            } else {
-                preview
-            },
+            role,
+            tone: TimelineTone::from_status(&item.status),
+            title,
+            detail,
+            markdown: if can_expand { body } else { String::new() },
             images: Vec::new(),
-            expanded,
+            expanded: toggled,
             can_expand,
             can_retry,
-            can_copy: item
-                .markdown_plain_text
-                .as_ref()
-                .or(item.markdown.as_ref())
-                .is_some_and(|text| !text.trim().is_empty()),
-            can_branch,
-            key_node: matches!(item.message_role.as_deref(), Some("user" | "assistant")),
+            can_copy: false,
+            can_branch: false,
+            key_node: false,
         }
     }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
 }
 
 const TIMELINE_LOAD_EARLIER_EXTENT: f32 = 34.0;
@@ -329,6 +451,10 @@ fn project_message_search(
     timeline: &mut crate::module::timeline::view::TimelineViewSnapshot,
 ) {
     let (query, status, can_step) = module.message_search_view(cx.selected_task().as_ref());
+    timeline.search_open = module.search_open(cx.selected_task().as_ref());
+    timeline.selection = module
+        .text_selection()
+        .map(|selection| selection.event_id.clone());
     timeline.search_query = query;
     timeline.search_status = status;
     timeline.search_can_step = can_step;
@@ -386,6 +512,13 @@ impl UiModule for TimelineModule {
                 }
                 UiModuleOutcome::dirty()
             }
+            TimelineModuleMessage::TextSelected { event_id, text } => {
+                if self.select_text(event_id, text) {
+                    UiModuleOutcome::dirty()
+                } else {
+                    UiModuleOutcome::clean()
+                }
+            }
             TimelineModuleMessage::ClearTextSelection => {
                 self.text_selection = None;
                 UiModuleOutcome::dirty()
@@ -396,6 +529,18 @@ impl UiModule for TimelineModule {
                 };
                 let hits = message_hits(cx, &task_id, &query);
                 self.apply_message_search(task_id, query, hits);
+                UiModuleOutcome::dirty()
+            }
+            TimelineModuleMessage::SearchOpen(open) => {
+                let Some(task_id) = cx.selected_task() else {
+                    return UiModuleOutcome::clean();
+                };
+                if open {
+                    self.searching.insert(task_id);
+                } else {
+                    self.searching.remove(&task_id);
+                    self.message_searches.remove(&task_id);
+                }
                 UiModuleOutcome::dirty()
             }
             TimelineModuleMessage::SearchStep(delta) => {
@@ -466,12 +611,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_selection_moving_between_messages_survives_the_old_one_clearing() {
+        let mut module = TimelineModule::default();
+        assert!(!module.select_text("reply-1".into(), Some("  ".into())));
+        assert!(module.text_selection().is_none());
+
+        assert!(module.select_text("reply-1".into(), Some("first".into())));
+        assert!(module.select_text("reply-2".into(), Some("second".into())));
+        assert!(!module.select_text("reply-1".into(), None));
+        let selection = module.text_selection().unwrap();
+        assert_eq!(
+            (selection.event_id.as_str(), selection.text.as_str()),
+            ("reply-2", "second")
+        );
+
+        assert!(module.select_text("reply-2".into(), None));
+        assert!(module.text_selection().is_none());
+    }
+
+    #[test]
     fn conversation_body_is_visible_and_process_details_are_opt_in() {
         let mut item = TaskTimelineItem {
             id: "reply".into(),
             sequence: 1,
             turn_id: None,
             kind: "message".into(),
+            tool: None,
             title: "Reply".into(),
             message_role: Some("assistant".into()),
             summary: Some("Summary".into()),
@@ -486,26 +651,26 @@ mod tests {
             selectable_reply: true,
             can_retry: false,
         };
-        assert_eq!(
-            TimelineModule::row(&item, false, false, false).markdown,
-            "Complete response"
-        );
-        assert_eq!(
-            TimelineModule::row(&item, true, false, false).markdown,
-            "Summary"
-        );
+        let reply = TimelineModule::row(&item, false, false, false);
+        assert_eq!(reply.role, TimelineRole::Reply);
+        assert_eq!(reply.markdown, "Complete response");
+        assert!(!reply.can_expand);
         item.message_role = Some("user".into());
-        assert!(TimelineModule::row(&item, false, false, false).expanded);
+        assert_eq!(
+            TimelineModule::row(&item, false, false, false).role,
+            TimelineRole::User
+        );
         item.message_role = None;
         item.kind = "tool_call".into();
-        assert_eq!(
-            TimelineModule::row(&item, false, false, false).markdown,
-            "Summary"
-        );
-        assert_eq!(
-            TimelineModule::row(&item, true, false, false).markdown,
-            "Complete response"
-        );
+        item.tool = Some("read_file".into());
+        let collapsed = TimelineModule::row(&item, false, false, false);
+        assert_eq!(collapsed.role, TimelineRole::Step(StepKind::Read));
+        assert_eq!(collapsed.title, "读取");
+        assert_eq!(collapsed.detail, "Summary");
+        assert!(collapsed.can_expand && !collapsed.expanded);
+        let expanded = TimelineModule::row(&item, true, false, false);
+        assert!(expanded.expanded);
+        assert_eq!(expanded.markdown, "Complete response");
     }
 
     fn process_item(id: &str, kind: &str, status: &str) -> TaskTimelineItem {
@@ -514,6 +679,7 @@ mod tests {
             sequence: 1,
             turn_id: Some("turn".into()),
             kind: kind.into(),
+            tool: None,
             title: format!("操作{id}"),
             message_role: None,
             summary: Some("摘要".into()),
@@ -565,7 +731,9 @@ mod tests {
         let collapsed = TimelineModule::default().rows(&session);
         assert_eq!(collapsed.len(), 2);
         assert_eq!(collapsed[0].id, "process-group:read");
-        assert_eq!(collapsed[0].markdown, "执行过程 · 2 项");
+        assert_eq!(collapsed[0].role, TimelineRole::Group);
+        assert_eq!(collapsed[0].title, "执行过程 · 2 步");
+        assert_eq!(collapsed[0].tone, TimelineTone::Running);
         assert_eq!(collapsed[1].id, "reply");
         assert!(!collapsed[0].key_node);
         assert!(collapsed[1].key_node);

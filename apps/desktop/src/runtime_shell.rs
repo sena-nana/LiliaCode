@@ -28,12 +28,13 @@ use nana_ui::runtime::{
     SidebarFooterButton, SidebarFrame, SidebarRow, SidebarRowIcon, SidebarRowState, SidebarRowTone,
     SidebarSection, SidebarSectionState, SplitPane, StableNodeId, Stack, TabOption, Tabs,
     TabsEvent, Text, TextArea, TextChanged, TextDiagnosticSeverity, TextDiagnosticSpan,
-    TextFindScope, TextInput, TextSearchOptions, TreeDropPosition, TreeView, TreeViewEvent, View,
+    TextFindScope, TextInput, TextSearchOptions, Toast, ToastDismissed, TreeDropPosition, TreeView,
+    TreeViewEvent, View,
 };
 use nana_ui::{
     AppearanceEvent, ButtonKind, CommandPaletteEvent, CommandPaletteItem, ControlSize, Icon,
-    SettingsTabId, SplitAxis, SplitPaneModel, ThemeMode, WindowChrome, WindowChromeAction,
-    WindowChromeEvent, WorkspaceModel, UI_METRICS,
+    SettingsTabId, SplitAxis, SplitPaneModel, ThemeMode, ToastTone, WindowChrome,
+    WindowChromeAction, WindowChromeEvent, WorkspaceModel, UI_METRICS,
 };
 
 use crate::application::{
@@ -51,7 +52,6 @@ use crate::target_ids;
 
 #[cfg(debug_assertions)]
 mod debug;
-pub(crate) mod quota;
 
 const PRIMARY_DOCUMENT: u64 = 1;
 const SESSIONS_EMPTY_TEXT: &str = "还没有会话";
@@ -142,6 +142,7 @@ pub enum SidebarDropPosition {
 pub enum ShellSidebarAttention {
     #[default]
     Quiet,
+    Running,
     Waiting,
     Failed,
 }
@@ -260,10 +261,27 @@ pub struct ShellCodingSnapshot {
     pub scope_label: String,
     pub busy: bool,
     pub git: String,
+    /// "工作区" or "暂存区": which side of the index the changes come from.
+    pub diff_scope_label: String,
+    pub changes: Vec<ShellCodingChange>,
+    /// The change whose diff is open, and that diff.
+    pub selected_change: Option<String>,
+    pub selected_diff: Option<crate::application::DocumentDiff>,
+    /// The patch was cut short; the open diff may be incomplete.
+    pub diff_truncated: bool,
     pub files: Vec<ShellCodingFile>,
     pub hits: Vec<ShellCodingHit>,
     pub terminals: Vec<ShellActionRow>,
     pub tasks: Vec<ShellActionRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShellCodingChange {
+    pub path: String,
+    /// One-letter git status: M, A, D, R, C, U, ?.
+    pub status: &'static str,
+    pub additions: u64,
+    pub deletions: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -449,15 +467,17 @@ pub struct ShellDocumentSnapshot {
     pub status: String,
     pub read_only: bool,
     pub dirty: bool,
+    /// The last loaded or saved text, which unsaved changes are reviewed against.
+    pub saved_text: Option<std::sync::Arc<str>>,
     pub diagnostics: Vec<ShellDiagnosticRow>,
 }
 
 /// Inputs kept by the review surface so a hunk action can produce an editor
-/// change against the same revision that was displayed.  The disk text is
-/// read again on the next shell projection, so stale actions are rejected by
-/// the document CAS in the normal `DocumentChanged` path.
+/// change against the same revision that was displayed. Stale actions are
+/// rejected by the document CAS in the normal `DocumentChanged` path.
 #[derive(Clone)]
 struct DocumentReviewSource {
+    item_id: String,
     revision: u64,
     new_text: String,
     diff: crate::application::DocumentDiff,
@@ -517,7 +537,7 @@ impl ShellDiagnosticRow {
     }
 }
 
-fn runtime_diff(diff: &crate::application::DocumentDiff) -> DiffView {
+pub(crate) fn runtime_diff(diff: &crate::application::DocumentDiff) -> DiffView {
     let hunks: Arc<[RuntimeDiffHunk]> = diff
         .hunks
         .iter()
@@ -601,6 +621,49 @@ pub struct ShellFilesSnapshot {
     pub preview: Option<String>,
 }
 
+/// What a shell toast stands for, so dismissing it clears the right state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellToastKey {
+    Error,
+    Composer,
+    Notice(u64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShellToast {
+    pub key: ShellToastKey,
+    pub title: String,
+}
+
+impl ShellToast {
+    pub const NOTICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+    const WIDTH: f32 = 360.0;
+
+    fn view(&self) -> Toast {
+        let toast = match self.key {
+            ShellToastKey::Error | ShellToastKey::Composer => {
+                Toast::new(self.title.clone(), ToastTone::Danger)
+            }
+            ShellToastKey::Notice(_) => {
+                Toast::new(self.title.clone(), ToastTone::Success).timeout(Self::NOTICE_TIMEOUT)
+            }
+        };
+        toast.dismissible(true).style(
+            Stack::column(0.0)
+                .width(LengthSpec::Px(Self::WIDTH))
+                .with_layout(|layout| {
+                    layout.position = nana_ui::runtime::PositionSpec::Absolute;
+                    layout.offset_left = Some(LengthSpec::CalcPercentOffset {
+                        percent: 50.0,
+                        offset_px: -Self::WIDTH / 2.0,
+                    });
+                    layout.offset_top = Some(LengthSpec::Px(nana_ui_core::TITLE_BAR_HEIGHT + 12.0));
+                })
+                .node_style(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PrimaryShellSnapshot {
     pub composer: crate::module::composer::view::ComposerViewSnapshot,
@@ -608,7 +671,7 @@ pub struct PrimaryShellSnapshot {
     pub title_parent: String,
     pub title_context: String,
     pub heading: String,
-    pub error: Option<String>,
+    pub toast: Option<ShellToast>,
     pub navigation: WindowRoute,
     pub sidebar_collapsed: bool,
     pub sidebar_search_open: bool,
@@ -638,6 +701,8 @@ pub struct PrimaryShellSnapshot {
     pub browser: Option<crate::browser_workbench::BrowserPresentation>,
     pub markdown_preview: Option<ShellMarkdownPreview>,
     pub inspector_title: String,
+    /// Work-panel surfaces reachable from the current context.
+    pub inspector_tabs: Vec<ShellNavItem>,
     pub inspector_body: String,
     pub inspector_todos: Vec<ShellTodoRow>,
     pub todo_panel: crate::todo_panel::TodoPanelSnapshot,
@@ -762,6 +827,8 @@ pub enum ShellIntent {
     RefreshCoding,
     CycleCodingMode,
     ToggleCodingScope,
+    CycleCodingDiffScope,
+    SelectCodingChange(String),
     OpenCodingHit(String),
     OpenCodingWorkspace,
     OpenCodingTerminal,
@@ -877,6 +944,7 @@ pub enum ShellIntent {
     ExtensionsSearchChanged(String),
     ExtensionsCommand(crate::shell::ExtensionsMessage),
     OpenPath(String),
+    DismissToast(ShellToastKey),
     ToggleRemoteHost,
     ToggleRemoteKeepAwake,
     RemoteNameChanged(String),
@@ -977,6 +1045,8 @@ pub enum ShellIntent {
     OpenTaskPopup,
     AskTaskPopup,
     ToggleTaskInspector,
+    ToggleInspector,
+    SelectInspectorPanel(String),
     CloseInspectorDock,
     SplitWorkspaceHorizontal,
     SplitWorkspaceVertical,
@@ -1033,6 +1103,7 @@ struct WorkspaceInputs {
 #[derive(PartialEq)]
 struct InspectorInputs {
     kind: String,
+    tabs: Vec<ShellNavItem>,
     todos: Vec<ShellTodoRow>,
     body: String,
     architecture_resource: Option<String>,
@@ -1048,6 +1119,8 @@ pub struct ShellHandles {
     sink: IntentSink,
     shell: Entity<DesktopShell>,
     overlay_host: Option<Entity<OverlayHost>>,
+    status_host: Option<Entity<OverlayHost>>,
+    toast: Option<(ShellToast, Entity<Toast>)>,
     pending_overlay_dismissals: Arc<Mutex<Vec<StableNodeId>>>,
     palette: Option<Entity<CommandPalette>>,
     more_menu: Option<Entity<ContextMenu>>,
@@ -1082,6 +1155,7 @@ pub struct ShellHandles {
     row_kinds: HashMap<String, ShellSidebarKind>,
     row_tools: HashMap<String, Entity<Stack>>,
     row_tool_buttons: HashMap<String, RowToolButton>,
+    row_activity: HashMap<String, (ShellSidebarAttention, StableNodeId)>,
     footer_nav: HashMap<String, Entity<SidebarFooterButton>>,
     provider_badge: Entity<SidebarFooterButton>,
     conversation: Entity<Stack>,
@@ -1089,6 +1163,9 @@ pub struct ShellHandles {
     shell_assembled: bool,
     extra_buttons: HashMap<String, Entity<Button>>,
     project_page: Entity<ScrollView>,
+    /// Background-filled host of `project_page`; the shell's primary slot.
+    project_surface: Entity<Stack>,
+    project_page_column: Entity<Stack>,
     project_page_title: Entity<Text>,
     project_page_body: Entity<Text>,
     project_cards: HashMap<String, Entity<Button>>,
@@ -1123,13 +1200,14 @@ pub struct ShellHandles {
     inspector_header: Entity<Stack>,
     inspector_close: Entity<IconButton>,
     inspector_heading: Entity<Text>,
+    inspector_tabs: Entity<Tabs>,
+    inspector_toggle: Entity<IconButton>,
     inspector_body: Entity<Text>,
     inspector_todos: Entity<Stack>,
     inspector_todo_rows: HashMap<String, Entity<Text>>,
     todo_panel: crate::todo_panel::TodoPanel,
     coding_panel: Entity<Stack>,
-    coding_query: Entity<TextArea>,
-    coding_rows: HashMap<String, Entity<Button>>,
+    coding_view: crate::ui::coding_panel::CodingPanelView,
     pane_move_window: Entity<IconButton>,
     pane_move_next: Entity<IconButton>,
     extra_workspace_panes: HashMap<String, WorkspacePaneView>,
@@ -1406,6 +1484,35 @@ pub(crate) fn bind_activate<V: View>(
     context.on(entity, move |_, _event: &Activate, _| {
         emit(&sink, intent.clone());
     })
+}
+
+fn inspector_toggle_button(open: bool) -> IconButton {
+    sidebar_icon_button(
+        if open {
+            nana_ui::icons_tabler::LAYOUT_SIDEBAR_RIGHT_COLLAPSE
+        } else {
+            nana_ui::icons_tabler::LAYOUT_SIDEBAR_RIGHT
+        },
+        if open {
+            "收起工作面板"
+        } else {
+            "打开工作面板"
+        },
+    )
+}
+
+fn inspector_tab_options(tabs: &[ShellNavItem]) -> (String, Vec<TabOption>) {
+    let selected = tabs
+        .iter()
+        .find(|tab| tab.selected)
+        .or_else(|| tabs.first())
+        .map(|tab| tab.id.clone())
+        .unwrap_or_default();
+    let options = tabs
+        .iter()
+        .map(|tab| TabOption::new(tab.id.clone(), tab.label.clone()))
+        .collect();
+    (selected, options)
 }
 
 fn sidebar_toggle_button(collapsed: bool) -> IconButton {
@@ -2716,7 +2823,7 @@ pub fn mount_primary_shell(
     let document_id = DocumentId::new(PRIMARY_DOCUMENT).expect("primary document id");
     let mut document = nana_ui::runtime::RuntimeDocument::new(document_id);
     let context = document.context_mut();
-    let _ = context.set_theme(snapshot.theme);
+    let _ = context.set_preset_theme(snapshot.theme);
 
     use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 
@@ -2752,6 +2859,18 @@ pub fn mount_primary_shell(
         let trailing = entity_ref::<Stack>();
         with_refs(widget(Stack::row(6.0)).entity_ref(trailing), trailing)
     })?;
+    let toggle_sink = Arc::clone(&sink);
+    let inspector_open = !snapshot.inspector_title.is_empty();
+    let (_, inspector_toggle) = context.mount_view_detached(document_id, move || {
+        let button = entity_ref::<IconButton>();
+        with_refs(
+            widget(inspector_toggle_button(inspector_open))
+                .entity_ref(button)
+                .on_activate(move || emit(&toggle_sink, ShellIntent::ToggleInspector)),
+            button,
+        )
+    })?;
+    context.append_child(title_trailing, inspector_toggle)?;
     if custom_controls {
         let (minimize_sink, maximize_sink, close_sink) =
             (Arc::clone(&sink), Arc::clone(&sink), Arc::clone(&sink));
@@ -3249,7 +3368,7 @@ pub fn mount_primary_shell(
     let (_, inspector) = context.mount_view_detached(document_id, || {
         let inspector = entity_ref::<Stack>();
         with_refs(
-            widget(Stack::fill_column(8.0).padding(12.0)).entity_ref(inspector),
+            widget(Stack::fill_column(10.0).padding_xy(16.0, 12.0)).entity_ref(inspector),
             inspector,
         )
     })?;
@@ -3278,13 +3397,31 @@ pub fn mount_primary_shell(
         Arc::clone(&sink),
         ShellIntent::CloseInspectorDock,
     )?;
+    let (inspector_selected, inspector_options) = inspector_tab_options(&snapshot.inspector_tabs);
+    let tabs_sink = Arc::clone(&sink);
+    let (_, inspector_tabs) = context.mount_view_detached(document_id, move || {
+        let tabs = entity_ref::<Tabs>();
+        with_refs(
+            widget(Tabs::new(inspector_selected).options(inspector_options))
+                .entity_ref(tabs)
+                .on(move |event: &TabsEvent| {
+                    if let TabsEvent::Select(value) = event {
+                        emit(
+                            &tabs_sink,
+                            ShellIntent::SelectInspectorPanel(value.to_string()),
+                        );
+                    }
+                }),
+            tabs,
+        )
+    })?;
     context.append_child(inspector_header, inspector_heading)?;
     context.append_child(inspector_header, inspector_close)?;
     let inspector_body_text = snapshot.inspector_body.clone();
     let (_, inspector_body) = context.mount_view_detached(document_id, move || {
         let body = entity_ref::<Text>();
         with_refs(
-            widget(Text::new(inspector_body_text)).entity_ref(body),
+            widget(crate::ui::theme::meta(inspector_body_text)).entity_ref(body),
             body,
         )
     })?;
@@ -3326,28 +3463,8 @@ pub fn mount_primary_shell(
             panel,
         )
     })?;
-    let (_, coding_query) = context.mount_view_detached(document_id, || {
-        let query = entity_ref::<TextArea>();
-        with_refs(
-            widget(
-                TextArea::new(String::new())
-                    .placeholder("搜索工作区")
-                    .height(36.0),
-            )
-            .entity_ref(query),
-            query,
-        )
-    })?;
-    context.on(coding_query, {
-        let sink = Arc::clone(&sink);
-        move |_, event: &TextChanged, _| {
-            emit(
-                &sink,
-                ShellIntent::CodingQueryChanged(event.value.to_string()),
-            )
-        }
-    })?;
-    context.append_child(coding_panel, coding_query)?;
+    let coding_view =
+        crate::ui::coding_panel::CodingPanelView::mount(context, document_id, Arc::clone(&sink))?;
     context.append_child(inspector, coding_panel)?;
 
     let automation_view = crate::module::automation::view::AutomationView::mount(
@@ -3363,22 +3480,45 @@ pub fn mount_primary_shell(
         with_refs(
             widget(
                 ScrollView::new(ScrollAxes::Vertical)
-                    .style(Stack::fill_column(12.0).padding(16.0).node_style()),
+                    .style(Stack::fill_column(12.0).padding_xy(24.0, 20.0).node_style()),
             )
             .entity_ref(page),
             page,
         )
     })?;
+    let (_, project_page_column) = context.mount_view_detached(document_id, || {
+        let column = entity_ref::<Stack>();
+        with_refs(
+            widget(crate::ui::theme::page_column()).entity_ref(column),
+            column,
+        )
+    })?;
     let (_, project_page_title) = context.mount_view_detached(document_id, || {
         let title = entity_ref::<Text>();
-        with_refs(widget(Text::new(String::new())).entity_ref(title), title)
+        with_refs(
+            widget(crate::ui::theme::page_title(String::new())).entity_ref(title),
+            title,
+        )
     })?;
     let (_, project_page_body) = context.mount_view_detached(document_id, || {
         let body = entity_ref::<Text>();
-        with_refs(widget(Text::new(String::new())).entity_ref(body), body)
+        with_refs(
+            widget(crate::ui::theme::page_subtitle(String::new())).entity_ref(body),
+            body,
+        )
     })?;
-    context.append_child(project_page, project_page_title)?;
-    context.append_child(project_page, project_page_body)?;
+    context.append_child(project_page_column, project_page_title)?;
+    context.append_child(project_page_column, project_page_body)?;
+    context.append_child(project_page, project_page_column)?;
+    let (_, project_surface) = context.mount_view_detached(document_id, || {
+        let surface = entity_ref::<Stack>();
+        with_refs(
+            widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
+                .entity_ref(surface),
+            surface,
+        )
+    })?;
+    context.append_child(project_surface, project_page)?;
 
     let conversation_split_model = SplitPaneModel::new(
         SplitAxis::Horizontal,
@@ -3415,7 +3555,7 @@ pub fn mount_primary_shell(
         settings_view.settings_page,
         conversation_workspace,
         automation_view.page,
-        project_page,
+        project_surface,
     );
     let mut shell_builder = DesktopShell::from_model(snapshot.workspace.clone())
         .title(snapshot.title_context.clone())
@@ -3455,6 +3595,13 @@ pub fn mount_primary_shell(
         .ok()
         .flatten();
 
+    let status_host = context
+        .read(shell, |shell| {
+            shell.status.map(Entity::<OverlayHost>::from_stable_id)
+        })
+        .ok()
+        .flatten();
+
     let pending_overlay_dismissals = Arc::new(Mutex::new(Vec::new()));
     if let Some(host) = overlay_host {
         let pending = Arc::clone(&pending_overlay_dismissals);
@@ -3480,6 +3627,8 @@ pub fn mount_primary_shell(
         sink,
         shell,
         overlay_host,
+        status_host,
+        toast: None,
         pending_overlay_dismissals,
         palette: None,
         more_menu: None,
@@ -3514,6 +3663,7 @@ pub fn mount_primary_shell(
         row_kinds: HashMap::new(),
         row_tools: HashMap::new(),
         row_tool_buttons: HashMap::new(),
+        row_activity: HashMap::new(),
         footer_nav,
         provider_badge,
         conversation,
@@ -3521,6 +3671,8 @@ pub fn mount_primary_shell(
         shell_assembled: false,
         extra_buttons: HashMap::new(),
         project_page,
+        project_surface,
+        project_page_column,
         project_page_title,
         project_page_body,
         project_cards: HashMap::new(),
@@ -3555,13 +3707,14 @@ pub fn mount_primary_shell(
         inspector_header,
         inspector_close,
         inspector_heading,
+        inspector_tabs,
+        inspector_toggle,
         inspector_body,
         inspector_todos,
         inspector_todo_rows: HashMap::new(),
         todo_panel,
         coding_panel,
-        coding_query,
-        coding_rows: HashMap::new(),
+        coding_view,
         pane_move_window,
         pane_move_next,
         extra_workspace_panes: HashMap::new(),
@@ -3706,7 +3859,7 @@ fn primary_content_id(
     settings_page: Entity<SettingsPage>,
     conversation_workspace: Entity<SplitPane>,
     automations_page: Entity<Stack>,
-    project_page: Entity<ScrollView>,
+    project_page: Entity<Stack>,
 ) -> StableNodeId {
     if snapshot.navigation.is_settings() {
         settings_page.stable_id()
@@ -3782,6 +3935,11 @@ fn close_shell_overlay<V: View>(
 }
 
 impl ShellHandles {
+    #[cfg(test)]
+    pub(crate) fn timeline_view(&self) -> &crate::module::timeline::view::TimelineView {
+        &self.task_view.timeline_view
+    }
+
     #[cfg(debug_assertions)]
     pub(crate) fn automation_graph_is_mounted(
         &self,
@@ -3852,7 +4010,7 @@ impl ShellHandles {
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
         let context = document.context_mut();
-        let _ = context.set_theme(snapshot.theme);
+        let _ = context.set_preset_theme(snapshot.theme);
         context.update_component(self.sidebar_toggle, |button, _| {
             *button = sidebar_toggle_button(snapshot.sidebar_collapsed);
         })?;
@@ -3886,8 +4044,30 @@ impl ShellHandles {
         context.update_component(self.inspector_heading, |text, _| {
             *text = Text::new(snapshot.inspector_title.clone());
         })?;
+        let (selected, options) = inspector_tab_options(&snapshot.inspector_tabs);
+        context.update_component(self.inspector_tabs, |tabs, _| {
+            *tabs = Tabs::new(selected).options(options);
+        })?;
+        let inspector_open = !snapshot.inspector_title.is_empty();
+        context.update_component(self.inspector_toggle, |button, _| {
+            *button = inspector_toggle_button(inspector_open);
+        })?;
+        let mut trailing = Vec::new();
+        if !snapshot.inspector_tabs.is_empty() {
+            trailing.push(self.inspector_toggle.stable_id());
+        }
+        trailing.extend(
+            context
+                .world()
+                .node(self.title_trailing.stable_id())
+                .map(|node| node.children.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|child| *child != self.inspector_toggle.stable_id()),
+        );
+        reconcile_children(context, self.title_trailing.stable_id(), &trailing)?;
         context.update_component(self.inspector_body, |text, _| {
-            *text = Text::new(snapshot.inspector_body.clone());
+            *text = crate::ui::theme::meta(snapshot.inspector_body.clone());
         })?;
         let document_id = context
             .world()
@@ -3932,6 +4112,7 @@ impl ShellHandles {
         self.sync_project_page(context, document_id, snapshot)?;
         let inspector_inputs = InspectorInputs {
             kind: snapshot.inspector_kind.clone(),
+            tabs: snapshot.inspector_tabs.clone(),
             todos: snapshot.inspector_todos.clone(),
             body: snapshot.inspector_body.clone(),
             architecture_resource: snapshot.architecture.project_id.clone(),
@@ -3945,6 +4126,7 @@ impl ShellHandles {
             self.synced.inspector = Some(inspector_inputs);
         }
         self.sync_overlay(context, document_id, snapshot)?;
+        self.sync_toast(context, document_id, snapshot.toast.as_ref())?;
         let navigation = if snapshot.navigation.is_settings() {
             self.settings_view.settings_sidebar.stable_id()
         } else if snapshot.navigation.is_automations() {
@@ -3958,7 +4140,7 @@ impl ShellHandles {
             self.settings_view.settings_page,
             self.conversation_workspace,
             self.automation_view.page,
-            self.project_page,
+            self.project_surface,
         );
         let inspector = (!snapshot.inspector_title.is_empty()).then(|| self.inspector.stable_id());
         let diagnostics = snapshot
@@ -4032,21 +4214,21 @@ impl ShellHandles {
                 *stack = conversation_root();
             })?;
         }
-        if primary == self.project_page.stable_id()
+        if primary == self.project_surface.stable_id()
             && snapshot.project_page == Some(ShellProjectPage::Memory)
         {
             if let Some(view) = &mut self.memory_view {
                 view.restore_focus(context)?;
             }
         }
-        if primary == self.project_page.stable_id()
+        if primary == self.project_surface.stable_id()
             && snapshot.project_page == Some(ShellProjectPage::Roadmap)
         {
             if let Some(view) = &mut self.roadmap_view {
                 view.restore_focus(context)?;
             }
         }
-        if primary == self.project_page.stable_id()
+        if primary == self.project_surface.stable_id()
             && snapshot.project_page == Some(ShellProjectPage::Architecture)
         {
             if let Some(view) = &mut self.architecture_view {
@@ -4081,6 +4263,10 @@ impl ShellHandles {
                     } else if target == target_ids::COMMAND_PALETTE_INPUT {
                         if let Some(palette) = self.palette {
                             let _ = context.focus_node(document_id, palette.stable_id())?;
+                        }
+                    } else if target == target_ids::TASK_SESSION_TIMELINE_SEARCH {
+                        if let Some(input) = self.task_view.timeline_view.search_input() {
+                            let _ = context.focus_node(document_id, input)?;
                         }
                     }
                 }
@@ -4467,10 +4653,87 @@ impl ShellHandles {
                 self.row_kinds.insert(item.id.clone(), item.kind);
                 row
             };
+            self.sync_row_activity(context, document_id, item, row)?;
             self.sync_row_tools(context, document_id, item, row)?;
             order.push(row.stable_id());
         }
         Ok(order)
+    }
+
+    /// The trailing glyph that says what a session is doing. Hovering the row
+    /// swaps it for the row tools.
+    fn sync_row_activity(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        item: &ShellSidebarRow,
+        row: Entity<SidebarRow>,
+    ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{node_ref, widget, with_refs};
+        let current = self
+            .row_activity
+            .get(&item.id)
+            .map(|(attention, _)| *attention);
+        if current == Some(item.attention) {
+            return Ok(());
+        }
+        if let Some((attention, node)) = self.row_activity.remove(&item.id) {
+            context.update_component(row, |row, _| row.slots.trailing = None)?;
+            remove_activity_glyph(context, attention, node)?;
+        }
+        let glyph = |icon: Icon, role: SemanticColorRole| {
+            nana_ui::runtime::IconGlyph::new(icon).size(14.0).role(role)
+        };
+        let (_, node) = match item.attention {
+            ShellSidebarAttention::Quiet => return Ok(()),
+            ShellSidebarAttention::Running => context.mount_view_detached(document_id, || {
+                let node = node_ref();
+                with_refs(
+                    widget(
+                        nana_ui::runtime::Spinner::new("处理中")
+                            .size(14.0)
+                            .label_visible(false),
+                    )
+                    .node_ref(node),
+                    node,
+                )
+            })?,
+            ShellSidebarAttention::Waiting => context.mount_view_detached(document_id, || {
+                let node = node_ref();
+                with_refs(
+                    widget(glyph(
+                        nana_ui::icons_tabler::HELP_CIRCLE,
+                        SemanticColorRole::Warning,
+                    ))
+                    .node_ref(node),
+                    node,
+                )
+            })?,
+            ShellSidebarAttention::Failed => context.mount_view_detached(document_id, || {
+                let node = node_ref();
+                with_refs(
+                    widget(glyph(
+                        nana_ui::icons_tabler::ALERT_TRIANGLE,
+                        SemanticColorRole::Danger,
+                    ))
+                    .node_ref(node),
+                    node,
+                )
+            })?,
+        };
+        reconcile_children(context, row.stable_id(), &{
+            let mut children = context
+                .world()
+                .node(row.stable_id())
+                .map(|node| node.children.clone())
+                .unwrap_or_default();
+            children.push(node);
+            children
+        })?;
+        context.update_component(row, |row, _| row.slots.trailing = Some(node))?;
+        self.row_activity
+            .insert(item.id.clone(), (item.attention, node));
+        Ok(())
     }
 
     fn clear_row_tools(
@@ -4508,6 +4771,9 @@ impl ShellHandles {
 
     fn remove_sidebar_row(&mut self, context: &mut AppContext, id: &str) {
         self.row_kinds.remove(id);
+        if let Some((attention, node)) = self.row_activity.remove(id) {
+            let _ = remove_activity_glyph(context, attention, node);
+        }
         let row = self.task_rows.remove(id);
         let _ = self.clear_row_tools(context, id, row);
         if let Some(row) = row {
@@ -4706,13 +4972,15 @@ impl ShellHandles {
                 inspector_order.push(self.inspector_todos.stable_id());
             }
         }
+        let heading = if snapshot.inspector_tabs.len() > 1 {
+            self.inspector_tabs.stable_id()
+        } else {
+            self.inspector_heading.stable_id()
+        };
         reconcile_children(
             context,
             self.inspector_header.stable_id(),
-            &[
-                self.inspector_heading.stable_id(),
-                self.inspector_close.stable_id(),
-            ],
+            &[heading, self.inspector_close.stable_id()],
         )?;
         reconcile_children(context, self.inspector.stable_id(), &inspector_order)
     }
@@ -4720,157 +4988,19 @@ impl ShellHandles {
     fn sync_coding_tools(
         &mut self,
         context: &mut AppContext,
-        document_id: DocumentId,
+        _document_id: DocumentId,
         snapshot: &PrimaryShellSnapshot,
     ) -> Result<(), FrameworkError> {
         let Some(coding) = &snapshot.coding else {
             reconcile_children(context, self.coding_panel.stable_id(), &[])?;
             return Ok(());
         };
-        context.update_component(self.coding_query, |editor, _| {
-            if editor.state.value != coding.query {
-                editor.state.replace_value(coding.query.clone());
-            }
-        })?;
-        let mut keep = HashSet::new();
-        let mut order = vec![self.coding_query.stable_id()];
-        for (id, label, intent) in [
-            ("coding-search", "搜索", ShellIntent::SearchCoding),
-            (
-                "coding-refresh",
-                if coding.busy { "处理中" } else { "刷新" },
-                ShellIntent::RefreshCoding,
-            ),
-            (
-                "coding-mode",
-                coding.mode_label.as_str(),
-                ShellIntent::CycleCodingMode,
-            ),
-            (
-                "coding-scope",
-                coding.scope_label.as_str(),
-                ShellIntent::ToggleCodingScope,
-            ),
-            (
-                "coding-files",
-                "文件管理器",
-                ShellIntent::OpenCodingWorkspace,
-            ),
-            (
-                "coding-terminal",
-                "工作区终端",
-                ShellIntent::OpenCodingTerminal,
-            ),
-        ] {
-            keep.insert(id.to_owned());
-            let button = self.upsert_coding_button(context, document_id, id, label, intent)?;
-            order.push(button.stable_id());
-        }
-        if !coding.git.is_empty() {
-            keep.insert("coding-git".into());
-            let button = self.upsert_coding_button(
-                context,
-                document_id,
-                "coding-git",
-                &coding.git,
-                ShellIntent::RefreshCoding,
-            )?;
-            order.push(button.stable_id());
-        }
-        for file in &coding.files {
-            let id = format!("coding-file-{}", file.path);
-            keep.insert(id.clone());
-            let button = self.upsert_coding_button(
-                context,
-                document_id,
-                &id,
-                &format!("{} · {}", file.path, file.kind),
-                ShellIntent::OpenProjectFile(file.path.clone()),
-            )?;
-            order.push(button.stable_id());
-        }
-        for hit in &coding.hits {
-            let id = format!("coding-hit-{}", hit.id);
-            keep.insert(id.clone());
-            let label = if hit.summary.is_empty() {
-                hit.label.clone()
-            } else {
-                format!("{}\n{}", hit.label, hit.summary)
-            };
-            let button = self.upsert_coding_button(
-                context,
-                document_id,
-                &id,
-                &label,
-                ShellIntent::OpenCodingHit(hit.id.clone()),
-            )?;
-            order.push(button.stable_id());
-        }
-        for row in &coding.terminals {
-            let id = format!("coding-terminal-{}", row.id);
-            keep.insert(id.clone());
-            let button = self.upsert_coding_button(
-                context,
-                document_id,
-                &id,
-                &row.label,
-                coding_entry_intent(false, &row.id),
-            )?;
-            order.push(button.stable_id());
-        }
-        for row in &coding.tasks {
-            let id = format!("coding-task-{}", row.id);
-            keep.insert(id.clone());
-            let button = self.upsert_coding_button(
-                context,
-                document_id,
-                &id,
-                &row.label,
-                coding_entry_intent(true, &row.id),
-            )?;
-            order.push(button.stable_id());
-        }
-        let stale: Vec<_> = self
-            .coding_rows
-            .keys()
-            .filter(|key| !keep.contains(*key))
-            .cloned()
-            .collect();
-        for key in stale {
-            if let Some(button) = self.coding_rows.remove(&key) {
-                let _ = context.remove_view(button);
-            }
-        }
-        reconcile_children(context, self.coding_panel.stable_id(), &order)
-    }
-
-    fn upsert_coding_button(
-        &mut self,
-        context: &mut AppContext,
-        document_id: DocumentId,
-        id: &str,
-        label: &str,
-        intent: ShellIntent,
-    ) -> Result<Entity<Button>, FrameworkError> {
-        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
-        if let Some(button) = self.coding_rows.get(id).copied() {
-            context.update_component(button, |button, _| {
-                *button = extra_button(label, ButtonKind::Subtle);
-            })?;
-            Ok(button)
-        } else {
-            let button_label = label.to_owned();
-            let (_, button) = context.mount_view_detached(document_id, move || {
-                let button = entity_ref::<Button>();
-                with_refs(
-                    widget(extra_button(&button_label, ButtonKind::Subtle)).entity_ref(button),
-                    button,
-                )
-            })?;
-            bind_activate(context, button, Arc::clone(&self.sink), intent)?;
-            self.coding_rows.insert(id.to_owned(), button);
-            Ok(button)
-        }
+        self.coding_view.sync(coding);
+        reconcile_children(
+            context,
+            self.coding_panel.stable_id(),
+            &[self.coding_view.root],
+        )
     }
 
     fn sync_project_page(
@@ -4907,10 +5037,10 @@ impl ShellHandles {
             return Ok(());
         }
         context.update_component(self.project_page_title, |text, _| {
-            *text = Text::new(snapshot.project_page_title.clone());
+            *text = crate::ui::theme::page_title(snapshot.project_page_title.clone());
         })?;
         context.update_component(self.project_page_body, |text, _| {
-            *text = Text::new(snapshot.project_page_body.clone());
+            *text = crate::ui::theme::page_subtitle(snapshot.project_page_body.clone());
         })?;
         let mut keep = HashSet::new();
         let mut field_keep = HashSet::new();
@@ -5179,10 +5309,16 @@ impl ShellHandles {
                 card
             } else {
                 let card_title = title.clone();
+                let icon = if id.starts_with("overview-") {
+                    nana_ui::icons_tabler::FOLDER
+                } else {
+                    nana_ui::icons_tabler::MESSAGE
+                };
                 let (_, card) = context.mount_view_detached(document_id, move || {
                     let card = entity_ref::<Button>();
                     with_refs(
-                        widget(Button::new(card_title).kind(ButtonKind::Subtle)).entity_ref(card),
+                        widget(crate::ui::theme::list_row_button(card_title, icon))
+                            .entity_ref(card),
                         card,
                     )
                 })?;
@@ -5206,7 +5342,23 @@ impl ShellHandles {
             }
         }
         self.project_fields.retain(context, &field_keep)?;
-        reconcile_children(context, self.project_page.stable_id(), &order)
+        if matches!(
+            snapshot.project_page,
+            Some(
+                ShellProjectPage::Roadmap
+                    | ShellProjectPage::Memory
+                    | ShellProjectPage::Architecture
+            )
+        ) {
+            reconcile_children(context, self.project_page.stable_id(), &order)
+        } else {
+            reconcile_children(context, self.project_page_column.stable_id(), &order)?;
+            reconcile_children(
+                context,
+                self.project_page.stable_id(),
+                &[self.project_page_column.stable_id()],
+            )
+        }
     }
 
     fn sync_workspace_page(
@@ -5288,20 +5440,30 @@ impl ShellHandles {
                     .collect::<Vec<_>>()
                     .into();
             })?;
-            if let Ok(old_text) = std::fs::read_to_string(&document.title) {
-                let diff = crate::application::DocumentDiff::between(&old_text, &document.text);
-                *self.workspace_diff_source.lock().unwrap() = Some(DocumentReviewSource {
-                    revision: document.revision,
-                    new_text: document.text.clone(),
-                    diff: diff.clone(),
+            let reviewed = self
+                .workspace_diff_source
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|source| {
+                    source.item_id == document.item_id && source.revision == document.revision
                 });
+            if !reviewed {
+                let diff = document
+                    .saved_text
+                    .as_deref()
+                    .map(|saved| crate::application::DocumentDiff::between(saved, &document.text));
+                *self.workspace_diff_source.lock().unwrap() =
+                    diff.clone().map(|diff| DocumentReviewSource {
+                        item_id: document.item_id.clone(),
+                        revision: document.revision,
+                        new_text: document.text.clone(),
+                        diff,
+                    });
+                let diff =
+                    diff.unwrap_or_else(|| crate::application::DocumentDiff::between("", ""));
                 context.update_component(self.workspace_diff, |view, _| {
                     *view = runtime_diff(&diff);
-                })?;
-            } else {
-                *self.workspace_diff_source.lock().unwrap() = None;
-                context.update_component(self.workspace_diff, |view, _| {
-                    *view = runtime_diff(&crate::application::DocumentDiff::between("", ""));
                 })?;
             }
         } else {
@@ -6059,6 +6221,7 @@ impl ShellHandles {
                     dialog,
                     ConfirmSlots {
                         body: None,
+                        title_icon: None,
                         close_action: None,
                         cancel: cancel.stable_id(),
                         secondary: None,
@@ -6277,6 +6440,52 @@ impl ShellHandles {
         Ok(())
     }
 
+    fn sync_toast(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        toast: Option<&ShellToast>,
+    ) -> Result<(), FrameworkError> {
+        use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+        let Some(host) = self.status_host else {
+            return Ok(());
+        };
+        if self.toast.as_ref().map(|(shown, _)| shown) == toast {
+            return Ok(());
+        }
+        if let Some((_, entity)) = self.toast.take() {
+            if context
+                .world()
+                .overlay_host(host.stable_id())
+                .is_some_and(|state| state.active == Some(entity.stable_id()))
+            {
+                context.dismiss_overlay(host)?;
+            }
+            context.remove_view(entity)?;
+        }
+        let Some(toast) = toast else {
+            context.update_component(self.shell, |shell, _| shell.status_overlays.clear())?;
+            return Ok(());
+        };
+        let view = toast.view();
+        let (_, entity) = context.mount_view_detached(document_id, move || {
+            let entity = entity_ref::<Toast>();
+            with_refs(widget(view).entity_ref(entity), entity)
+        })?;
+        let sink = Arc::clone(&self.sink);
+        let key = toast.key;
+        context.on(entity, move |_, _: &ToastDismissed, _| {
+            emit(&sink, ShellIntent::DismissToast(key));
+        })?;
+        context.append_child(host, entity)?;
+        context.update_component(self.shell, |shell, _| {
+            shell.status_overlays = vec![entity.stable_id()];
+        })?;
+        context.activate_overlay(host, entity)?;
+        self.toast = Some((toast.clone(), entity));
+        Ok(())
+    }
+
     fn sync_diagnostics(
         &mut self,
         context: &mut AppContext,
@@ -6366,10 +6575,24 @@ fn sidebar_project_entry_count(rows: &[ShellSidebarRow]) -> usize {
         .count()
 }
 
+fn remove_activity_glyph(
+    context: &mut AppContext,
+    attention: ShellSidebarAttention,
+    node: StableNodeId,
+) -> Result<(), FrameworkError> {
+    if attention == ShellSidebarAttention::Running {
+        context.remove_view(Entity::<nana_ui::runtime::Spinner>::from_stable_id(node))?;
+    } else {
+        context.remove_view(Entity::<nana_ui::runtime::IconGlyph>::from_stable_id(node))?;
+    }
+    Ok(())
+}
+
 fn sidebar_row_tone(attention: ShellSidebarAttention) -> SidebarRowTone {
     match attention {
-        ShellSidebarAttention::Quiet => SidebarRowTone::Default,
-        ShellSidebarAttention::Waiting => SidebarRowTone::Warning,
+        ShellSidebarAttention::Quiet
+        | ShellSidebarAttention::Running
+        | ShellSidebarAttention::Waiting => SidebarRowTone::Default,
         ShellSidebarAttention::Failed => SidebarRowTone::Error,
     }
 }
@@ -6646,7 +6869,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         title_parent: "LiliaCode".to_owned(),
         title_context: "今天想做什么？".to_owned(),
         heading: "今天想做什么？".to_owned(),
-        error: None,
+        toast: None,
         navigation: WindowRoute::Workspace,
         sidebar_collapsed: false,
         sidebar_search_open: false,
@@ -6673,7 +6896,9 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
             can_load_earlier: false,
             search_query: String::new(),
             search_status: String::new(),
+            search_open: false,
             search_can_step: false,
+            selection: None,
         },
         clone_repository: String::new(),
         clone_parent: String::new(),
@@ -6732,8 +6957,6 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
                 custom_agent_instruction: String::new(),
                 quota_days_label: String::new(),
                 quota_backend_label: String::new(),
-                quota_values: Vec::new(),
-                quota_axis_labels: Vec::new(),
                 quota_daily: Vec::new(),
                 quota_project_slices: Vec::new(),
                 quota_conversation_slices: Vec::new(),
@@ -6760,6 +6983,7 @@ pub(crate) fn empty_snapshot() -> PrimaryShellSnapshot {
         browser: None,
         markdown_preview: None,
         inspector_title: String::new(),
+        inspector_tabs: Vec::new(),
         inspector_body: String::new(),
         inspector_todos: Vec::new(),
         todo_panel: Default::default(),
@@ -6848,6 +7072,7 @@ mod tests {
             "one\nchanged\nthree\nfour\nfive\nsix\nseven\neight\nnine\nnew-ten",
         );
         let source = DocumentReviewSource {
+            item_id: "doc".to_owned(),
             revision: 0,
             new_text: "one\nchanged\nthree\nfour\nfive\nsix\nseven\neight\nnine\nnew-ten"
                 .to_owned(),
@@ -7289,11 +7514,9 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event, ShellIntent::CloseTitlebarMenu)));
-        assert!(
-            !events
-                .iter()
-                .any(|event| matches!(event, ShellIntent::ToggleTitlebarMenu))
-        );
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, ShellIntent::ToggleTitlebarMenu)));
     }
 
     #[test]
@@ -7371,12 +7594,7 @@ mod tests {
 
         let timeline = handles.task_view.timeline_view.root.stable_id();
         let heading = handles.task_view.heading_slot.stable_id();
-        let body = document
-            .context()
-            .world()
-            .node(timeline)
-            .and_then(|node| node.parent)
-            .expect("conversation body");
+        let body = handles.task_view.conversation_body.stable_id();
         assert_eq!(
             document
                 .context()
@@ -7384,6 +7602,15 @@ mod tests {
                 .node(heading)
                 .and_then(|node| node.parent),
             Some(body)
+        );
+        assert_ne!(
+            document
+                .context()
+                .world()
+                .node(timeline)
+                .and_then(|node| node.parent),
+            Some(body),
+            "the empty headline owns the body instead of an empty timeline"
         );
         let body_layout = &document
             .context()
@@ -7427,7 +7654,7 @@ mod tests {
                 .world()
                 .node(handles.task_view.composer_view.composer_toolbar.stable_id())
                 .and_then(|node| node.parent),
-            Some(handles.task_view.composer_view.stage.stable_id())
+            Some(dock)
         );
         let dock_layout = &document
             .context()
@@ -7614,7 +7841,7 @@ mod tests {
         snapshot.inspector_kind = "architecture".into();
         let (document, handles, primary) = mounted_primary(&snapshot);
         let view = handles.architecture_view.as_ref().unwrap();
-        assert_eq!(primary, Some(handles.project_page.stable_id()));
+        assert_eq!(primary, Some(handles.project_surface.stable_id()));
         assert_eq!(
             document
                 .context()
@@ -7652,6 +7879,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes[0].items.push(ShellPaneItem {
@@ -7718,6 +7946,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.files = Some(ShellFilesSnapshot {
@@ -7803,6 +8032,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes = vec![
@@ -7942,6 +8172,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes = vec![ShellPaneRow {
@@ -8004,6 +8235,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes[0].items.push(ShellPaneItem {
@@ -8034,6 +8266,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes[0].items.push(ShellPaneItem {
@@ -8305,9 +8538,70 @@ mod tests {
             vec![
                 handles.task_view.heading_slot.stable_id(),
                 handles.task_view.error.stable_id(),
-                handles.task_view.timeline_view.root.stable_id(),
             ]
         );
+    }
+
+    #[test]
+    fn notices_float_in_the_status_layer_and_time_out_while_errors_wait() {
+        let mut snapshot = empty_snapshot();
+        snapshot.toast = Some(ShellToast {
+            key: ShellToastKey::Notice(4),
+            title: "已复制".to_owned(),
+        });
+        let intents = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&intents);
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| sink.lock().unwrap().push(intent)),
+        )
+        .unwrap();
+        handles.sync(&mut document, &snapshot).unwrap();
+        let host = handles.status_host.unwrap().stable_id();
+        let active = |document: &nana_ui::runtime::RuntimeDocument| {
+            document
+                .context()
+                .world()
+                .overlay_host(host)
+                .unwrap()
+                .active
+        };
+        let notice = handles.toast.as_ref().unwrap().1.stable_id();
+        assert_eq!(active(&document), Some(notice));
+
+        let first_frame = std::time::Duration::from_secs(3600);
+        document.context_mut().advance_animations(first_frame);
+        document
+            .context_mut()
+            .advance_animations(first_frame + ShellToast::NOTICE_TIMEOUT);
+        let dismissed = |intents: &Mutex<Vec<ShellIntent>>, key| {
+            intents
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|intent| matches!(intent, ShellIntent::DismissToast(seen) if *seen == key))
+                .count()
+        };
+        assert_eq!(dismissed(&intents, ShellToastKey::Notice(4)), 1);
+
+        snapshot.toast = Some(ShellToast {
+            key: ShellToastKey::Error,
+            title: "无法添加项目".to_owned(),
+        });
+        handles.sync(&mut document, &snapshot).unwrap();
+        let error = handles.toast.as_ref().unwrap().1.stable_id();
+        assert_ne!(error, notice);
+        assert_eq!(active(&document), Some(error));
+        assert!(document.context().world().node(notice).is_none());
+        document
+            .context_mut()
+            .advance_animations(std::time::Duration::from_secs(7200));
+        assert_eq!(dismissed(&intents, ShellToastKey::Error), 0);
+
+        snapshot.toast = None;
+        handles.sync(&mut document, &snapshot).unwrap();
+        assert!(handles.toast.is_none());
+        assert_eq!(active(&document), None);
     }
 
     #[test]
@@ -8347,7 +8641,7 @@ mod tests {
                 .unwrap_or_default(),
             vec![
                 handles.task_view.composer_view.composer.stable_id(),
-                handles.task_view.composer_view.composer_actions.stable_id(),
+                handles.task_view.composer_view.composer_toolbar.stable_id(),
             ]
         );
         assert_eq!(
@@ -8360,7 +8654,6 @@ mod tests {
             vec![
                 handles.task_view.composer_view.completion_slot.stable_id(),
                 handles.task_view.composer_view.composer_dock.stable_id(),
-                handles.task_view.composer_view.composer_toolbar.stable_id(),
             ]
         );
         assert_eq!(
@@ -8738,11 +9031,63 @@ mod tests {
     }
 
     #[test]
+    fn work_panel_tabs_head_the_panel_and_switch_surfaces() {
+        let snapshot = crate::offscreen_tests::work_panel_fixture();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = Arc::clone(&events);
+        let (mut document, mut handles) = mount_primary_shell(
+            &snapshot,
+            Arc::new(move |intent| sink_events.lock().unwrap().push(intent)),
+        )
+        .expect("mount shell");
+        handles.sync(&mut document, &snapshot).expect("sync shell");
+        let header = document
+            .context()
+            .world()
+            .node(handles.inspector_header.stable_id())
+            .map(|node| node.children.clone())
+            .unwrap_or_default();
+        assert_eq!(
+            header,
+            vec![
+                handles.inspector_tabs.stable_id(),
+                handles.inspector_close.stable_id()
+            ]
+        );
+        document
+            .context_mut()
+            .update_component(handles.inspector_tabs, |_, cx| {
+                cx.emit(TabsEvent::Select(Arc::from("coding-tools")))
+            })
+            .unwrap();
+        assert!(events.lock().unwrap().iter().any(|intent| matches!(
+            intent,
+            ShellIntent::SelectInspectorPanel(panel) if panel == "coding-tools"
+        )));
+        let trailing = document
+            .context()
+            .world()
+            .node(handles.title_trailing.stable_id())
+            .map(|node| node.children.clone())
+            .unwrap_or_default();
+        assert_eq!(
+            trailing.first(),
+            Some(&handles.inspector_toggle.stable_id())
+        );
+    }
+
+    #[test]
     fn long_timeline_materializes_only_the_visible_window() {
         let mut snapshot = snapshot_with_empty_primary_pane();
         snapshot.timeline.rows = (0..50)
             .map(|index| crate::module::timeline::view::TimelineRow {
                 id: format!("event-{index}"),
+                role: crate::module::timeline::view::TimelineRole::Step(
+                    crate::module::timeline::view::StepKind::Tool,
+                ),
+                tone: crate::module::timeline::view::TimelineTone::Settled,
+                title: String::new(),
+                detail: String::new(),
                 markdown: format!("行 {index}"),
                 images: Vec::new(),
                 expanded: false,
@@ -8865,6 +9210,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes[0].items.push(ShellPaneItem {
@@ -8900,6 +9246,7 @@ mod tests {
             status: String::new(),
             read_only: true,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes[0].document = snapshot.document.clone();
@@ -9032,6 +9379,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: Vec::new(),
         });
         snapshot.panes[0].items.push(ShellPaneItem {
@@ -9446,6 +9794,7 @@ mod tests {
             status: String::new(),
             read_only: false,
             dirty: false,
+            saved_text: None,
             diagnostics: vec![ShellDiagnosticRow {
                 severity: DiagnosticSeverity::Error,
                 start_offset: 0,
@@ -9586,7 +9935,7 @@ impl PrimaryShellSnapshot {
     fn task_input(&self) -> crate::module::task::view::TaskViewInput<'_> {
         crate::module::task::view::TaskViewInput {
             heading: &self.heading,
-            error: self.error.as_deref(),
+            error: None,
             timeline: &self.timeline,
             composer: &self.composer,
             pending: self.pending.as_ref(),

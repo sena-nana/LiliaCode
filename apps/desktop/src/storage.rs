@@ -215,8 +215,8 @@ pub fn load_theme(home: &Path) -> ThemeMode {
 pub fn save_theme(home: &Path, theme: ThemeMode) -> Result<(), String> {
     fs::create_dir_all(home).map_err(|error| format!("failed to create Lilia home: {error}"))?;
     let value = match theme {
-        ThemeMode::Dark => "dark",
         ThemeMode::Light => "light",
+        ThemeMode::Dark | ThemeMode::Custom => "dark",
     };
     fs::write(home.join(THEME_FILE), value)
         .map_err(|error| format!("failed to persist desktop theme: {error}"))

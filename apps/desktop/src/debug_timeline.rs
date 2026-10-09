@@ -77,6 +77,7 @@ impl NativeDebugTimeline {
                 sequence: u64::MAX.saturating_sub(10_000).saturating_add(sequence),
                 turn_id: None,
                 kind: kind.to_owned(),
+                tool: None,
                 title: title.to_owned(),
                 message_role: None,
                 summary: Some(summary.to_owned()),

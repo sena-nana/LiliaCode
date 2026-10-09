@@ -29,6 +29,7 @@ const TEXTAREA_MAX_HEIGHT: f32 = 72.0;
 pub enum ComposerMessage {
     SetMenu(Option<view::ComposerMenuKind>),
     ToggleMenu(view::ComposerMenuKind),
+    DismissError,
     Refresh,
     LoadTransient {
         composer: DesktopComposerState,
@@ -603,6 +604,10 @@ impl UiModule for ComposerModule {
 
     fn reduce(&mut self, message: Self::Message, cx: &UiModuleContext<'_>) -> UiModuleOutcome {
         match message {
+            ComposerMessage::DismissError => {
+                self.error = None;
+                UiModuleOutcome::dirty()
+            }
             ComposerMessage::SetMenu(menu) => {
                 self.menu = menu;
                 UiModuleOutcome::dirty()
@@ -668,7 +673,10 @@ impl UiModule for ComposerModule {
             return;
         }
         if let Some(error) = &self.error {
-            *into.error = Some(error.clone());
+            *into.toast = Some(crate::runtime_shell::ShellToast {
+                key: crate::runtime_shell::ShellToastKey::Composer,
+                title: error.clone(),
+            });
         }
         let state = self.view_snapshot(into.composer.window_id);
         into.composer.composer = state.composer;

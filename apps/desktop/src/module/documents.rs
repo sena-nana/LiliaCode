@@ -884,6 +884,7 @@ impl UiModule for DocumentsModule {
                 }),
             read_only: state.read_only,
             dirty: state.dirty,
+            saved_text: state.saved_text.clone(),
             diagnostics: state
                 .diagnostics
                 .iter()

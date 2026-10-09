@@ -510,10 +510,12 @@ impl AutomationView {
                             .entity_ref(empty)
                             .visible(show_empty),
                         name_control,
-                        status_badge(status_label)
-                            .tone(status_tone)
-                            .entity_ref(status)
-                            .visible(show_workflow),
+                        widget(Stack::row(0.0)).visible(show_workflow).children(
+                            status_badge(status_label)
+                                .tone(status_tone)
+                                .entity_ref(status)
+                                .visible(show_workflow),
+                        ),
                         widget(Stack::bar(8.0).wrap(true))
                             .entity_ref(toolbar)
                             .visible(show_workflow)
@@ -722,6 +724,13 @@ impl AutomationView {
                 .entity_ref(sidebar)
                 .top(
                     widget(SidebarRow::new("返回"))
+                        .child_slot(
+                            widget(nana_ui::runtime::SidebarRowIcon::new(Icon::ArrowLeft)),
+                            |mut row, icon| {
+                                row.slots.leading = Some(icon);
+                                row
+                            },
+                        )
                         .entity_ref(back)
                         .on(move |_: &Activate| emit(&back_sink, ShellIntent::CloseAutomations)),
                 )

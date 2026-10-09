@@ -1,4 +1,6 @@
 use crate::runtime_layout::{pill_button, reconcile_children};
+pub(crate) use crate::ui::timeline::{StepKind, TimelineRole, TimelineTone};
+use crate::ui::timeline_row::{RowChrome, RowView};
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +14,13 @@ pub struct TimelineImage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimelineRow {
     pub id: String,
+    pub role: TimelineRole,
+    pub tone: TimelineTone,
+    /// Step label, or the group summary.
+    pub title: String,
+    /// One-line object of a step (a path, a command) shown beside its title.
+    pub detail: String,
+    /// Body text: the message, or a step's expanded details.
     pub markdown: String,
     pub images: Vec<TimelineImage>,
     pub expanded: bool,
@@ -29,8 +38,38 @@ fn timeline_markdown_view(item: &TimelineRow) -> NativeMarkdown {
     markdown
 }
 
+fn timeline_markdown_style(role: TimelineRole) -> NodeStyle {
+    let mut style = NodeStyle::default();
+    let layout = Arc::make_mut(&mut style.layout);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    layout.width = Some(if role == TimelineRole::User {
+        LengthSpec::Shrink
+    } else {
+        LengthSpec::Fill
+    });
+    if matches!(role, TimelineRole::Step(_) | TimelineRole::Group) {
+        style.foreground = Some(nana_ui::runtime::SemanticColorRole::Muted);
+    }
+    style
+}
+
+fn row_chrome(item: &TimelineRow) -> RowChrome {
+    RowChrome {
+        role: item.role,
+        tone: item.tone,
+        title: item.title.clone(),
+        detail: item.detail.clone(),
+        expanded: item.expanded,
+        can_expand: item.can_expand,
+        can_retry: item.can_retry,
+        can_copy: item.can_copy,
+        can_branch: item.can_branch,
+        has_body: !item.markdown.trim().is_empty() || !item.images.is_empty(),
+    }
+}
+
 fn apply_timeline_markdown(markdown: &mut NativeMarkdown, item: &TimelineRow) {
-    *markdown = NativeMarkdown::parse(&item.markdown);
+    *markdown = NativeMarkdown::parse(&item.markdown).style(timeline_markdown_style(item.role));
     for image in &item.images {
         markdown.resolve_image(
             &image.source,
@@ -44,6 +83,7 @@ fn apply_timeline_markdown(markdown: &mut NativeMarkdown, item: &TimelineRow) {
 fn content_hash(item: &TimelineRow) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     item.markdown.hash(&mut hasher);
+    std::mem::discriminant(&item.role).hash(&mut hasher);
     for image in &item.images {
         image.source.hash(&mut hasher);
         image.width.hash(&mut hasher);
@@ -89,11 +129,26 @@ pub enum TimelineAction {
     Fork(String),
     Quote(String),
     Jump(String),
-    OpenImage { source: String, alt: String },
+    OpenImage {
+        source: String,
+        alt: String,
+    },
     LoadEarlier,
     SearchChanged(String),
     SearchStep(isize),
-    Scrolled { offset: f32, viewport_extent: f32 },
+    SetSearchOpen(bool),
+    TextSelected {
+        event_id: String,
+        text: Option<String>,
+    },
+    SelectionCopy,
+    SelectionQuote,
+    SelectionAsk,
+    JumpToEnd,
+    Scrolled {
+        offset: f32,
+        viewport_extent: f32,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineViewSnapshot {
@@ -103,9 +158,12 @@ pub struct TimelineViewSnapshot {
     pub scroll_offset: f32,
     pub viewport_extent: f32,
     pub can_load_earlier: bool,
+    pub search_open: bool,
     pub search_query: String,
     pub search_status: String,
     pub search_can_step: bool,
+    /// The message holding the current text selection.
+    pub selection: Option<String>,
 }
 type Sink = Arc<dyn Fn(TimelineTarget, TimelineAction) + Send + Sync>;
 pub(crate) struct TimelineView {
@@ -115,15 +173,18 @@ pub(crate) struct TimelineView {
     timeline_virtual: VirtualListItems<String, Stack>,
     pub(crate) timeline_markdown: HashMap<String, Entity<NativeMarkdown>>,
     timeline_markdown_source: HashMap<String, u64>,
-    pub(crate) timeline_actions: HashMap<String, Entity<Button>>,
-    timeline_toolbars: HashMap<String, Entity<Stack>>,
+    timeline_rows: HashMap<String, RowView>,
     pub(crate) key_markers: HashMap<String, Entity<Button>>,
     pub(crate) load_earlier: Option<Entity<Button>>,
+    pub(crate) jump_to_end: Option<Entity<nana_ui::runtime::IconButton>>,
+    pub(crate) selection_bar: Option<(Entity<Stack>, [Entity<Button>; 3])>,
+    selected: Option<String>,
     search_bar: Option<Entity<Stack>>,
     search_input: Option<Entity<TextInput>>,
     pub(crate) search_previous: Option<Entity<Button>>,
     pub(crate) search_next: Option<Entity<Button>>,
     search_status: Option<Entity<Text>>,
+    search_close: Option<Entity<nana_ui::runtime::IconButton>>,
     sink: Sink,
     target: TimelineTarget,
     first_item: Option<String>,
@@ -186,21 +247,61 @@ impl TimelineView {
             timeline_virtual: VirtualListItems::default(),
             timeline_markdown: HashMap::new(),
             timeline_markdown_source: HashMap::new(),
-            timeline_actions: HashMap::new(),
-            timeline_toolbars: HashMap::new(),
+            timeline_rows: HashMap::new(),
             key_markers: HashMap::new(),
             load_earlier: None,
+            jump_to_end: None,
+            selection_bar: None,
+            selected: None,
             search_bar: None,
             search_input: None,
             search_previous: None,
             search_next: None,
             search_status: None,
+            search_close: None,
             sink,
             target,
             first_item: None,
             scroll_target,
         })
     }
+    pub(crate) fn search_input(&self) -> Option<nana_ui::runtime::StableNodeId> {
+        self.search_input.map(|input| input.stable_id())
+    }
+
+    /// Mounted entries by event id.
+    pub(crate) fn rows(&self) -> impl Iterator<Item = (&str, &RowView)> {
+        self.timeline_rows
+            .iter()
+            .map(|(id, row)| (id.as_str(), row))
+    }
+
+    /// Emits the activation of the control named `"<action>-<event id>"`.
+    #[cfg(test)]
+    pub(crate) fn activate(&self, context: &mut AppContext, key: &str) {
+        let (action, id) = key.split_once('-').expect("action key");
+        let row = &self.timeline_rows[id];
+        if action == "expand" {
+            let button = row.actions.expand.expect("expand control");
+            context
+                .update_component(button, |_, cx| cx.emit(Activate))
+                .unwrap();
+            return;
+        }
+        let button = match action {
+            "copy" => row.actions.copy,
+            "quote" => row.actions.quote,
+            "retry" => row.actions.retry,
+            "continue" => row.actions.resume,
+            "fork" => row.actions.fork,
+            _ => None,
+        }
+        .expect("row action");
+        context
+            .update_component(button, |_, cx| cx.emit(Activate))
+            .unwrap();
+    }
+
     pub(crate) fn sync(
         &mut self,
         context: &mut AppContext,
@@ -242,8 +343,7 @@ impl TimelineView {
             )?;
             self.timeline_markdown.clear();
             self.timeline_markdown_source.clear();
-            self.timeline_actions.clear();
-            self.timeline_toolbars.clear();
+            self.timeline_rows.clear();
             for (_, marker) in self.key_markers.drain() {
                 let _ = context.remove_view(marker);
             }
@@ -288,11 +388,7 @@ impl TimelineView {
             .retain(|key, _| mounted.contains(key));
         self.timeline_markdown_source
             .retain(|key, _| mounted.contains(key));
-        self.timeline_actions
-            .retain(|key, _| timeline_action_is_mounted(key, &mounted));
-        self.timeline_toolbars
-            .retain(|key, _| mounted.contains(key));
-        let mut action_keep = HashSet::new();
+        self.timeline_rows.retain(|key, _| mounted.contains(key));
         for item in snapshot
             .rows
             .iter()
@@ -320,16 +416,23 @@ impl TimelineView {
                 })?;
                 let target = snapshot.target.clone();
                 let sink = Arc::clone(&self.sink);
-                context.on(entity, move |_, event: &RichTextEvent, _| {
-                    if let RichTextEvent::ImageActivated(image) = event {
-                        sink(
-                            target.clone(),
-                            TimelineAction::OpenImage {
-                                source: image.source.clone(),
-                                alt: image.alt.clone(),
-                            },
-                        );
-                    }
+                let event_id = item.id.clone();
+                context.on(entity, move |_, event: &RichTextEvent, _| match event {
+                    RichTextEvent::ImageActivated(image) => sink(
+                        target.clone(),
+                        TimelineAction::OpenImage {
+                            source: image.source.clone(),
+                            alt: image.alt.clone(),
+                        },
+                    ),
+                    RichTextEvent::SelectionChanged(selection) => sink(
+                        target.clone(),
+                        TimelineAction::TextSelected {
+                            event_id: event_id.clone(),
+                            text: selection.as_ref().map(|selection| selection.text.clone()),
+                        },
+                    ),
+                    RichTextEvent::LinkActivated(_) => {}
                 })?;
                 context.assemble_markdown(entity)?;
                 self.timeline_markdown.insert(item.id.clone(), entity);
@@ -337,104 +440,32 @@ impl TimelineView {
                     .insert(item.id.clone(), source);
                 entity
             };
-            let mut children = vec![markdown.stable_id()];
-            let mut actions = Vec::new();
-            if item.can_expand {
-                let id = format!("expand-{}", item.id);
-                action_keep.insert(id.clone());
-                let button = self.upsert_timeline_action(
+            let chrome = row_chrome(item);
+            let reuse = self
+                .timeline_rows
+                .get(&item.id)
+                .is_some_and(|row| row.role == item.role);
+            if reuse {
+                self.timeline_rows[&item.id].sync(chrome);
+            } else {
+                if let Some(stale) = self.timeline_rows.remove(&item.id) {
+                    reconcile_children(context, stale.body, &[])?;
+                    stale.unmount(context)?;
+                }
+                let sink = Arc::clone(&self.sink);
+                let target = snapshot.target.clone();
+                let row = RowView::mount(
                     context,
                     document_id,
-                    &id,
-                    if item.expanded { "收起" } else { "展开" },
-                    TimelineAction::Expand(item.id.clone()),
+                    &item.id,
+                    chrome,
+                    Arc::new(move |action| sink(target.clone(), action)),
                 )?;
-                actions.push(button.stable_id());
+                self.timeline_rows.insert(item.id.clone(), row);
             }
-            if item.can_copy {
-                let id = format!("copy-{}", item.id);
-                action_keep.insert(id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &id,
-                    "复制",
-                    TimelineAction::Copy(item.id.clone()),
-                )?;
-                actions.push(button.stable_id());
-                let quote_id = format!("quote-{}", item.id);
-                action_keep.insert(quote_id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &quote_id,
-                    "引用",
-                    TimelineAction::Quote(item.id.clone()),
-                )?;
-                actions.push(button.stable_id());
-            }
-            if item.can_retry {
-                let id = format!("retry-{}", item.id);
-                action_keep.insert(id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &id,
-                    "重试",
-                    TimelineAction::Retry(item.id.clone()),
-                )?;
-                actions.push(button.stable_id());
-            }
-            if item.can_branch {
-                let continue_id = format!("continue-{}", item.id);
-                action_keep.insert(continue_id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &continue_id,
-                    "从这里继续",
-                    TimelineAction::Continue(item.id.clone()),
-                )?;
-                actions.push(button.stable_id());
-                let fork_id = format!("fork-{}", item.id);
-                action_keep.insert(fork_id.clone());
-                let button = self.upsert_timeline_action(
-                    context,
-                    document_id,
-                    &fork_id,
-                    "从这里分叉",
-                    TimelineAction::Fork(item.id.clone()),
-                )?;
-                actions.push(button.stable_id());
-            }
-            if !actions.is_empty() {
-                let toolbar = if let Some(toolbar) = self.timeline_toolbars.get(&item.id) {
-                    *toolbar
-                } else {
-                    let (_, toolbar) = context.mount_view_detached(document_id, || {
-                        let toolbar = entity_ref::<Stack>();
-                        with_refs(widget(Stack::row(6.0)).entity_ref(toolbar), toolbar)
-                    })?;
-                    self.timeline_toolbars.insert(item.id.clone(), toolbar);
-                    toolbar
-                };
-                reconcile_children(context, toolbar.stable_id(), &actions)?;
-                children.push(toolbar.stable_id());
-            } else if let Some(toolbar) = self.timeline_toolbars.remove(&item.id) {
-                context.remove_view(toolbar)?;
-            }
-            reconcile_children(context, root.stable_id(), &children)?;
-        }
-        let stale_actions: Vec<_> = self
-            .timeline_actions
-            .keys()
-            .filter(|key| !action_keep.contains(*key))
-            .cloned()
-            .collect();
-        for key in stale_actions {
-            if let Some(entity) = self.timeline_actions.remove(&key) {
-                let _ = context.remove_view(entity);
-            }
+            let row = &self.timeline_rows[&item.id];
+            reconcile_children(context, row.body, &[markdown.stable_id()])?;
+            reconcile_children(context, root.stable_id(), &[row.root])?;
         }
         let marker_ids = self.sync_key_markers(context, document_id, snapshot, &layout)?;
         let mut children = Vec::new();
@@ -463,6 +494,12 @@ impl TimelineView {
         } else if let Some(button) = self.load_earlier.take() {
             context.remove_view(button)?;
         }
+        if let Some(button) = self.sync_jump_to_end(context, document_id, snapshot)? {
+            children.push(button);
+        }
+        if let Some(bar) = self.sync_selection_bar(context, document_id, snapshot)? {
+            children.push(bar);
+        }
         reconcile_children(context, self.root.stable_id(), &children)?;
         let requested = snapshot.scroll_offset.max(0.0);
         let current = context
@@ -484,36 +521,127 @@ impl TimelineView {
         Ok(())
     }
 
-    fn upsert_timeline_action(
+    /// Copy, quote or ask about the selected text, in a bar over the
+    /// selection. Scrolling syncs again, so the bar follows the text.
+    fn sync_selection_bar(
         &mut self,
         context: &mut AppContext,
         document_id: DocumentId,
-        id: &str,
-        label: &str,
-        intent: TimelineAction,
-    ) -> Result<Entity<Button>, FrameworkError> {
-        if let Some(button) = self.timeline_actions.get(id).copied() {
-            context.update_component(button, |button, _| {
-                *button = pill_button(label, ButtonKind::Subtle);
-            })?;
-            Ok(button)
-        } else {
-            let button_label = label.to_owned();
-            let (_, button) = context.mount_view_detached(document_id, move || {
-                let button = entity_ref::<Button>();
-                with_refs(
-                    widget(pill_button(&button_label, ButtonKind::Subtle)).entity_ref(button),
-                    button,
-                )
-            })?;
-            let sink = Arc::clone(&self.sink);
-            let target = self.target.clone();
-            context.on(button, move |_, _: &Activate, _| {
-                sink(target.clone(), intent.clone())
-            })?;
-            self.timeline_actions.insert(id.to_owned(), button);
-            Ok(button)
+        snapshot: &TimelineViewSnapshot,
+    ) -> Result<Option<nana_ui::runtime::StableNodeId>, FrameworkError> {
+        if self.selected != snapshot.selection {
+            let cleared = self
+                .selected
+                .take()
+                .and_then(|id| self.timeline_markdown.get(&id).copied());
+            if let Some(markdown) = cleared {
+                context.update_component(markdown, |markdown, _| markdown.clear_selection())?;
+            }
+            self.selected = snapshot.selection.clone();
         }
+        if snapshot.selection.is_none() {
+            if let Some((bar, _)) = self.selection_bar.take() {
+                context.remove_view(bar)?;
+            }
+            return Ok(None);
+        }
+        if let Some((bar, _)) = self.selection_bar {
+            self.place_selection_bar(context, bar, snapshot)?;
+            return Ok(Some(bar.stable_id()));
+        }
+        let (_, (bar, buttons)) = context.mount_view_detached(document_id, || {
+            let bar = entity_ref::<Stack>();
+            let buttons = [
+                entity_ref::<Button>(),
+                entity_ref::<Button>(),
+                entity_ref::<Button>(),
+            ];
+            let button = |label: &'static str, icon| {
+                Button::new(label)
+                    .kind(ButtonKind::Text)
+                    .size(ControlSize::Small)
+                    .icon(icon)
+            };
+            with_refs(
+                widget(selection_bar_style(None)).entity_ref(bar).children((
+                    widget(button("复制", nana_ui::icons_tabler::COPY)).entity_ref(buttons[0]),
+                    widget(button("引用", nana_ui::icons_tabler::QUOTE)).entity_ref(buttons[1]),
+                    widget(button("在弹窗中提问", nana_ui::icons_tabler::MESSAGE))
+                        .entity_ref(buttons[2]),
+                )),
+                (bar, buttons),
+            )
+        })?;
+        for (button, action) in buttons.into_iter().zip([
+            TimelineAction::SelectionCopy,
+            TimelineAction::SelectionQuote,
+            TimelineAction::SelectionAsk,
+        ]) {
+            let target = Arc::clone(&self.scroll_target);
+            let sink = Arc::clone(&self.sink);
+            context.on(button, move |_, _: &Activate, _| {
+                sink(target.lock().unwrap().0.clone(), action.clone())
+            })?;
+        }
+        self.selection_bar = Some((bar, buttons));
+        self.place_selection_bar(context, bar, snapshot)?;
+        Ok(Some(bar.stable_id()))
+    }
+
+    fn place_selection_bar(
+        &self,
+        context: &mut AppContext,
+        bar: Entity<Stack>,
+        snapshot: &TimelineViewSnapshot,
+    ) -> Result<(), FrameworkError> {
+        let world = context.world();
+        let origin = snapshot
+            .selection
+            .as_ref()
+            .and_then(|id| self.timeline_markdown.get(id))
+            .and_then(|markdown| world.text_selection_bounds(markdown.stable_id()))
+            .zip(world.presentation_input_bounds(self.root.stable_id()))
+            .map(|(selected, frame)| {
+                let height = world
+                    .canonical_layout_box(bar.stable_id())
+                    .map(|bar| bar.height)
+                    .filter(|height| *height > 0.0)
+                    .unwrap_or(SELECTION_BAR_HEIGHT);
+                selection_bar_origin(selected, frame, height)
+            });
+        context.update_component(bar, |stack, _| *stack = selection_bar_style(origin))
+    }
+
+    fn sync_jump_to_end(
+        &mut self,
+        context: &mut AppContext,
+        document_id: DocumentId,
+        snapshot: &TimelineViewSnapshot,
+    ) -> Result<Option<nana_ui::runtime::StableNodeId>, FrameworkError> {
+        let below = snapshot.layout.total_extent()
+            - snapshot.scroll_offset
+            - snapshot.viewport_extent.max(0.0);
+        if below <= JUMP_TO_END_DISTANCE {
+            if let Some(button) = self.jump_to_end.take() {
+                context.remove_view(button)?;
+            }
+            return Ok(None);
+        }
+        if let Some(button) = self.jump_to_end {
+            return Ok(Some(button.stable_id()));
+        }
+        let (_, button) = context.mount_view_detached(document_id, || {
+            let button = entity_ref::<nana_ui::runtime::IconButton>();
+            with_refs(widget(jump_to_end_button()).entity_ref(button), button)
+        })?;
+        let target = Arc::clone(&self.scroll_target);
+        let sink = Arc::clone(&self.sink);
+        context.on(button, move |_, _: &Activate, _| {
+            let target = target.lock().unwrap().0.clone();
+            sink(target, TimelineAction::JumpToEnd)
+        })?;
+        self.jump_to_end = Some(button);
+        Ok(Some(button.stable_id()))
     }
 
     fn sync_key_markers(
@@ -529,21 +657,16 @@ impl TimelineView {
         for marker in &markers {
             keep.insert(marker.id.clone());
             let button = if let Some(button) = self.key_markers.get(&marker.id).copied() {
-                let name = marker.name.clone();
-                let ratio = marker.ratio;
+                let view = key_node_button(marker);
                 context.update_component(button, |button, _| {
-                    *button = key_node_button(&name, ratio);
+                    *button = view;
                 })?;
                 button
             } else {
-                let name = marker.name.clone();
-                let ratio = marker.ratio;
+                let view = key_node_button(marker);
                 let (_, button) = context.mount_view_detached(document_id, move || {
                     let button = entity_ref::<Button>();
-                    with_refs(
-                        widget(key_node_button(&name, ratio)).entity_ref(button),
-                        button,
-                    )
+                    with_refs(widget(view).entity_ref(button), button)
                 })?;
                 let sink = Arc::clone(&self.sink);
                 let target = self.target.clone();
@@ -576,24 +699,35 @@ impl TimelineView {
         document_id: DocumentId,
         snapshot: &TimelineViewSnapshot,
     ) -> Result<Option<nana_ui::runtime::StableNodeId>, FrameworkError> {
-        if snapshot.target.task_id.is_none() {
+        if snapshot.target.task_id.is_none() || !snapshot.search_open {
             return Ok(None);
         }
         if self.search_bar.is_none() {
             let query = snapshot.search_query.clone();
-            let (_, (bar, input, status)) =
+            let (_, (bar, input, status, close)) =
                 context.mount_view_detached(document_id, move || {
                     let bar = entity_ref::<Stack>();
                     let input = entity_ref::<TextInput>();
                     let status = entity_ref::<Text>();
+                    let close = entity_ref::<nana_ui::runtime::IconButton>();
                     with_refs(
                         widget(Stack::bar(6.0).align(AlignSpec::Center))
                             .entity_ref(bar)
                             .children((
                                 widget(message_search_input(query)).entity_ref(input),
-                                widget(Text::new(String::new())).entity_ref(status),
+                                widget(
+                                    Text::new(String::new())
+                                        .font_size(nana_ui_core::type_scale::META)
+                                        .color(nana_ui::runtime::SemanticColorRole::Muted),
+                                )
+                                .entity_ref(status),
+                                widget(crate::ui::timeline_row::row_action(
+                                    nana_ui::icons_tabler::X,
+                                    "关闭查找",
+                                ))
+                                .entity_ref(close),
                             )),
-                        (bar, input, status),
+                        (bar, input, status, close),
                     )
                 })?;
             let sink = Arc::clone(&self.sink);
@@ -604,6 +738,12 @@ impl TimelineView {
                     TimelineAction::SearchChanged(event.value.to_string()),
                 );
             })?;
+            let sink = Arc::clone(&self.sink);
+            let target = self.target.clone();
+            context.on(close, move |_, _: &Activate, _| {
+                sink(target.clone(), TimelineAction::SetSearchOpen(false));
+            })?;
+            self.search_close = Some(close);
             self.search_bar = Some(bar);
             self.search_input = Some(input);
             self.search_status = Some(status);
@@ -620,6 +760,7 @@ impl TimelineView {
         context.update_component(status, |status, _| {
             *status = Text::new(status_label);
         })?;
+        let close = self.search_close.map(|close| close.stable_id());
         let mut order = vec![input.stable_id(), status.stable_id()];
         if snapshot.search_can_step {
             let previous = self.search_step_button(
@@ -646,6 +787,7 @@ impl TimelineView {
                 context.remove_view(button)?;
             }
         }
+        order.extend(close);
         reconcile_children(context, bar.stable_id(), &order)?;
         Ok(Some(bar.stable_id()))
     }
@@ -708,6 +850,8 @@ pub(crate) struct TimelineKeyMarker {
     pub id: String,
     pub name: String,
     pub ratio: f32,
+    /// A step that failed, so the reader can find what went wrong.
+    pub failed: bool,
 }
 
 pub(crate) fn timeline_key_markers(
@@ -718,7 +862,7 @@ pub(crate) fn timeline_key_markers(
     let total = resolved.total_extent();
     rows.iter()
         .enumerate()
-        .filter(|(_, row)| row.key_node)
+        .filter(|(_, row)| row.key_node || row.tone == TimelineTone::Failed)
         .map(|(index, row)| {
             let start = resolved.extent(0..index);
             let ratio = if total > 0.0 {
@@ -726,25 +870,19 @@ pub(crate) fn timeline_key_markers(
             } else {
                 0.0
             };
+            let failed = !row.key_node;
             TimelineKeyMarker {
                 id: row.id.clone(),
-                name: key_node_name(&row.markdown),
+                name: if failed {
+                    key_node_name(&format!("{} {}", row.title, row.detail))
+                } else {
+                    key_node_name(&row.markdown)
+                },
                 ratio,
+                failed,
             }
         })
         .collect()
-}
-
-pub(crate) fn timeline_jump_offset(
-    rows: &[TimelineRow],
-    layout: &VirtualListLayout,
-    row_id: &str,
-    viewport_extent: f32,
-) -> Option<f32> {
-    let index = rows
-        .iter()
-        .position(|row| row.key_node && row.id == row_id)?;
-    timeline_row_scroll_offset(rows, layout, index, viewport_extent)
 }
 
 pub(crate) fn timeline_event_scroll_offset(
@@ -771,9 +909,8 @@ fn timeline_row_scroll_offset(
     )
 }
 
-/// Characters of the row message painted on the marker. The pinned `Button`
-/// has one text slot — `Button::new` / `label` — and no tooltip method.
-const KEY_NODE_LABEL_CHARS: usize = 4;
+/// Characters of the message that name its marker.
+const KEY_NODE_LABEL_CHARS: usize = 24;
 
 fn key_node_name(markdown: &str) -> String {
     let line = markdown
@@ -789,41 +926,42 @@ fn key_node_name(markdown: &str) -> String {
     }
 }
 
-const KEY_MARKER_HEIGHT: f32 = 28.0;
-const KEY_MARKER_FONT: f32 = 12.0;
-const KEY_MARKER_PAD: f32 = 8.0;
-/// Four glyphs plus side inset: the 72px label track.
-const KEY_MARKER_WIDTH: f32 = KEY_NODE_LABEL_CHARS as f32 * 14.0 + KEY_MARKER_PAD * 2.0;
-const TIMELINE_KEY_TRACK: f32 = KEY_MARKER_WIDTH;
+const KEY_MARKER_HEIGHT: f32 = 4.0;
+const KEY_MARKER_WIDTH: f32 = 14.0;
+/// Right-hand strip of the conversation holding one tick per message.
+const TIMELINE_KEY_TRACK: f32 = 18.0;
 
-fn key_node_button(name: &str, ratio: f32) -> Button {
-    let ratio = ratio.clamp(0.0, 1.0);
-    let mut button = Button::new(name)
-        .kind(ButtonKind::Primary)
-        .size(nana_ui::ControlSize::Small);
-    // `Button::style` sets style_override and drops the primary fill, which
-    // left a tiny marker with no paint. Mutate the box in place so the
-    // theme still colours it. The label is the button's own text slot.
-    button.style.control_height = None;
-    button.style.control_padding_x = None;
-    button.style.control_padding_y = None;
-    button.style.square = None;
-    let layout = Arc::make_mut(&mut button.style.layout);
+/// One tick on the conversation's scroll map. The message snippet is its
+/// accessible name; the tick itself carries no text.
+fn key_node_button(marker: &TimelineKeyMarker) -> Button {
+    let ratio = marker.ratio.clamp(0.0, 1.0);
+    let mut button = Button::new("").size(nana_ui::ControlSize::Small);
+    button.accessible_name = marker.name.clone();
+    let mut style = button.style.clone();
+    style.control_height = None;
+    style.control_padding_x = None;
+    style.control_padding_y = None;
+    style.square = None;
+    style.border = None;
+    style.background = Some(if marker.failed {
+        nana_ui::runtime::SemanticColorRole::Danger
+    } else {
+        nana_ui::runtime::SemanticColorRole::BorderStrong
+    });
+    style.interaction = Default::default();
+    style.interaction.hovered.background = Some(nana_ui::runtime::SemanticColorRole::Accent);
+    style.interaction.pressed.background = Some(nana_ui::runtime::SemanticColorRole::AccentStrong);
+    let layout = Arc::make_mut(&mut style.layout);
     layout.position = PositionSpec::Absolute;
     layout.width = Some(LengthSpec::Px(KEY_MARKER_WIDTH));
     layout.height = Some(LengthSpec::Px(KEY_MARKER_HEIGHT));
     layout.min_width = Some(LengthSpec::Px(KEY_MARKER_WIDTH));
     layout.min_height = Some(LengthSpec::Px(KEY_MARKER_HEIGHT));
     layout.flex_shrink = Some(0.0);
-    layout.font_size = Some(KEY_MARKER_FONT);
-    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(KEY_MARKER_HEIGHT));
+    layout.border_width = Some(0.0);
     layout.border_radius = Some(KEY_MARKER_HEIGHT / 2.0);
-    layout.padding_left = Some(LengthSpec::Px(KEY_MARKER_PAD));
-    layout.padding_right = Some(LengthSpec::Px(KEY_MARKER_PAD));
-    layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-    layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-    // Sit in the right-hand track, clear of the scrollbar, and keep the
-    // marker's own box inside the track when the node is at the bottom.
+    layout.padding_left = Some(LengthSpec::Px(0.0));
+    layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.offset_right = Some(LengthSpec::Px(
         (TIMELINE_KEY_TRACK - KEY_MARKER_WIDTH) / 2.0,
     ));
@@ -832,10 +970,6 @@ fn key_node_button(name: &str, ratio: f32) -> Button {
         offset_px: -KEY_MARKER_HEIGHT * ratio,
     });
     layout.z_index = Some(5);
-    // Keep an explicit accent fill. The theme recipe does not paint this marker.
-    button.style.background = Some(nana_ui::runtime::SemanticColorRole::Accent);
-    button.style.foreground = Some(nana_ui::runtime::SemanticColorRole::AccentText);
-    let style = button.style.clone();
     button.style(style)
 }
 
@@ -867,6 +1001,97 @@ fn message_search_input(query: String) -> TextInput {
     input
 }
 
+/// How far above the newest output the reader has to be before the
+/// jump-to-end button shows.
+const JUMP_TO_END_DISTANCE: f32 = 240.0;
+const JUMP_TO_END_SIZE: f32 = 32.0;
+
+/// Where the selection bar sits in the conversation: centred over the
+/// selection, under it when the selection starts too near the top, and never
+/// past the conversation's edges.
+fn selection_bar_origin(
+    selected: nana_ui::runtime::LayoutBox,
+    frame: nana_ui::runtime::LayoutBox,
+    height: f32,
+) -> (f32, f32) {
+    let inner = nana_ui::runtime::LayoutBox {
+        x: frame.x + SELECTION_BAR_MARGIN,
+        y: frame.y + SELECTION_BAR_MARGIN,
+        width: (frame.width - 2.0 * SELECTION_BAR_MARGIN).max(SELECTION_BAR_WIDTH),
+        height: (frame.height - 2.0 * SELECTION_BAR_MARGIN).max(height),
+    };
+    let (x, y) = nana_ui::runtime::resolve_popover_origin(
+        selected,
+        SELECTION_BAR_WIDTH,
+        height,
+        inner,
+        nana_ui::PopoverPlacement::Top,
+        nana_ui::PopoverAlignment::Center,
+        6.0,
+    );
+    (x - frame.x, y - frame.y)
+}
+
+/// Before any selection geometry, the bar waits at the bottom centre.
+fn selection_bar_style(origin: Option<(f32, f32)>) -> Stack {
+    Stack::row(2.0)
+        .align(AlignSpec::Center)
+        .justify(nana_ui::runtime::JustifySpec::Center)
+        .padding_xy(4.0, 2.0)
+        .surface(nana_ui::runtime::SemanticColorRole::Surface)
+        .outline(nana_ui::runtime::SemanticColorRole::Border, 1.0)
+        .radius(nana_ui_core::RadiusTier::Md)
+        .width(LengthSpec::Px(SELECTION_BAR_WIDTH))
+        .with_layout(|layout| {
+            layout.position = PositionSpec::Absolute;
+            layout.z_index = Some(6);
+            match origin {
+                Some((left, top)) => {
+                    layout.offset_left = Some(LengthSpec::Px(left));
+                    layout.offset_top = Some(LengthSpec::Px(top));
+                }
+                None => {
+                    layout.offset_bottom = Some(LengthSpec::Px(12.0));
+                    layout.offset_left = Some(LengthSpec::CalcPercentOffset {
+                        percent: 50.0,
+                        offset_px: -SELECTION_BAR_WIDTH / 2.0,
+                    });
+                }
+            }
+        })
+}
+
+const SELECTION_BAR_WIDTH: f32 = 260.0;
+const SELECTION_BAR_HEIGHT: f32 = 32.0;
+const SELECTION_BAR_MARGIN: f32 = 8.0;
+
+fn jump_to_end_button() -> nana_ui::runtime::IconButton {
+    let mut button =
+        nana_ui::runtime::IconButton::new(nana_ui::icons_tabler::ARROW_DOWN, "回到底部")
+            .kind(ButtonKind::Menu)
+            .with_tooltip("回到底部");
+    let edge = LengthSpec::Px(JUMP_TO_END_SIZE);
+    let layout = Arc::make_mut(&mut button.style.layout);
+    layout.width = Some(edge);
+    layout.height = Some(edge);
+    layout.min_width = Some(edge);
+    layout.min_height = Some(edge);
+    layout.padding_left = Some(LengthSpec::Px(0.0));
+    layout.padding_right = Some(LengthSpec::Px(0.0));
+    layout.border_radius = Some(JUMP_TO_END_SIZE / 2.0);
+    layout.position = PositionSpec::Absolute;
+    layout.offset_bottom = Some(LengthSpec::Px(12.0));
+    layout.offset_left = Some(LengthSpec::CalcPercentOffset {
+        percent: 50.0,
+        offset_px: -JUMP_TO_END_SIZE / 2.0,
+    });
+    button.style = button
+        .style
+        .surface(nana_ui::runtime::SemanticColorRole::Surface)
+        .outline(nana_ui::runtime::SemanticColorRole::Border, 1.0);
+    button
+}
+
 fn timeline_scroll_style() -> NodeStyle {
     let mut style = NodeStyle::default();
     let layout = Arc::make_mut(&mut style.layout);
@@ -893,13 +1118,6 @@ fn timeline_list_style(total: f32, leading: f32, trailing: f32) -> NodeStyle {
     style
 }
 
-fn timeline_action_is_mounted(action_id: &str, mounted: &HashSet<String>) -> bool {
-    ["expand-", "copy-", "quote-", "retry-", "continue-", "fork-"]
-        .into_iter()
-        .find_map(|prefix| action_id.strip_prefix(prefix))
-        .is_some_and(|id| mounted.contains(id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -917,6 +1135,10 @@ mod tests {
         .unwrap();
         let row = TimelineRow {
             id: "image".into(),
+            role: crate::module::timeline::view::TimelineRole::Reply,
+            tone: crate::module::timeline::view::TimelineTone::Settled,
+            title: String::new(),
+            detail: String::new(),
             markdown: markdown.into(),
             images: vec![TimelineImage {
                 source: NativeMarkdown::parse(markdown)
@@ -957,6 +1179,12 @@ mod tests {
             rows: (0..100)
                 .map(|index| TimelineRow {
                     id: format!("event-{index}"),
+                    role: crate::module::timeline::view::TimelineRole::Step(
+                        crate::module::timeline::view::StepKind::Tool,
+                    ),
+                    tone: crate::module::timeline::view::TimelineTone::Settled,
+                    title: String::new(),
+                    detail: String::new(),
                     markdown: format!("Timeline row {index}"),
                     images: Vec::new(),
                     expanded: false,
@@ -973,7 +1201,9 @@ mod tests {
             can_load_earlier: true,
             search_query: String::new(),
             search_status: String::new(),
+            search_open: false,
             search_can_step: false,
+            selection: None,
         }
     }
 
@@ -986,6 +1216,7 @@ mod tests {
             .create_component(document, Stack::fill_column(0.0))
             .unwrap();
         let mut snapshot = snapshot(WindowId::PRIMARY, "task-a");
+        snapshot.search_open = true;
         snapshot.search_query = "登录".to_owned();
         snapshot.search_status = "2/2".to_owned();
         snapshot.search_can_step = true;
@@ -1036,9 +1267,7 @@ mod tests {
             view.sync(&mut context, document, &snapshot).unwrap();
             assert!(view.timeline_virtual.mounted_keys().len() < snapshot.rows.len());
             for key in ["expand-event-0", "copy-event-0", "retry-event-0"] {
-                context
-                    .update_component(view.timeline_actions[key], |_, cx| cx.emit(Activate))
-                    .unwrap();
+                view.activate(&mut context, key);
             }
             context
                 .update_component(view.load_earlier.unwrap(), |_, cx| cx.emit(Activate))
@@ -1076,11 +1305,7 @@ mod tests {
         view.sync(&mut context, *document, current).unwrap();
         assert!(!context.world().contains(old_row));
         assert!(!received[0].0.matches(&current.target));
-        context
-            .update_component(view.timeline_actions["copy-event-0"], |_, cx| {
-                cx.emit(Activate)
-            })
-            .unwrap();
+        view.activate(&mut context, "copy-event-0");
         assert!(events
             .lock()
             .unwrap()
@@ -1217,6 +1442,12 @@ mod tests {
             0,
             TimelineRow {
                 id: "earlier".into(),
+                role: crate::module::timeline::view::TimelineRole::Step(
+                    crate::module::timeline::view::StepKind::Tool,
+                ),
+                tone: crate::module::timeline::view::TimelineTone::Settled,
+                title: String::new(),
+                detail: String::new(),
                 markdown: "Earlier event".into(),
                 images: Vec::new(),
                 expanded: false,
@@ -1273,6 +1504,301 @@ mod tests {
     }
 
     #[test]
+    fn jump_to_end_shows_only_while_reading_older_output() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut context = AppContext::new();
+        let document = DocumentId::new(635).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let mut snapshot = snapshot(WindowId::PRIMARY, "task");
+        let sink_events = Arc::clone(&events);
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(move |target, action| sink_events.lock().unwrap().push((target, action))),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+
+        let button = view
+            .jump_to_end
+            .expect("jump control while reading the top");
+        context
+            .update_component(button, |_, cx| cx.emit(Activate))
+            .unwrap();
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some((target, TimelineAction::JumpToEnd)) if *target == snapshot.target
+        ));
+
+        snapshot.scroll_offset = snapshot.layout.total_extent() - snapshot.viewport_extent;
+        view.sync(&mut context, document, &snapshot).unwrap();
+        assert!(view.jump_to_end.is_none());
+        assert!(context.world().node(button.stable_id()).is_none());
+    }
+
+    #[test]
+    fn message_actions_keep_their_space_and_show_on_hover_or_keyboard_focus() {
+        let mut context = AppContext::new();
+        let document = DocumentId::new(636).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let mut snapshot = snapshot(WindowId::PRIMARY, "task");
+        snapshot.rows.truncate(1);
+        snapshot.rows[0].role = TimelineRole::Reply;
+        snapshot.rows[0].can_expand = false;
+        snapshot.rows[0].can_branch = true;
+        snapshot.can_load_earlier = false;
+        snapshot.layout = VirtualListLayout::new([TIMELINE_ROW_FALLBACK_EXTENT]);
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(|_, _| {}),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+
+        let row = &view.timeline_rows["event-0"];
+        let fork = row.actions.fork.unwrap().stable_id();
+        let bar = context.world().parent_id(fork).unwrap();
+        let message = context.world().parent_id(row.body).unwrap();
+        let painted = |context: &AppContext| {
+            context.world().node_style(bar).unwrap().layout.opacity != Some(0.0)
+        };
+        let shown = |context: &AppContext| !context.world().node_style(bar).unwrap().layout.hidden;
+        assert!(!painted(&context));
+        assert!(shown(&context));
+
+        context
+            .set_pointer_hover(document, 1, Some(message))
+            .unwrap();
+        context.flush_reactive().unwrap();
+        assert!(painted(&context));
+        context.set_pointer_hover(document, 1, Some(fork)).unwrap();
+        context.flush_reactive().unwrap();
+        assert!(painted(&context));
+        context.set_pointer_hover(document, 1, None).unwrap();
+        context.flush_reactive().unwrap();
+        assert!(!painted(&context));
+        assert!(shown(&context));
+
+        assert!(context.focus_node(document, fork).unwrap());
+        context.flush_reactive().unwrap();
+        assert!(painted(&context));
+        context.clear_focus(document).unwrap();
+        context.flush_reactive().unwrap();
+        assert!(!painted(&context));
+    }
+
+    #[test]
+    fn selecting_text_offers_copy_quote_and_ask() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut context = AppContext::new();
+        let document = DocumentId::new(637).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let mut snapshot = snapshot(WindowId::PRIMARY, "task");
+        let sink_events = Arc::clone(&events);
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(move |target, action| sink_events.lock().unwrap().push((target, action))),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+        assert!(view.jump_to_end.is_some());
+        assert!(view.selection_bar.is_none());
+
+        let markdown = view.timeline_markdown["event-0"];
+        context
+            .update_component(markdown, |_, cx| {
+                cx.emit(RichTextEvent::SelectionChanged(Some(
+                    nana_ui::runtime::TextSelectionSnapshot {
+                        start: 0,
+                        end: 8,
+                        text: "Timeline".into(),
+                    },
+                )))
+            })
+            .unwrap();
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some((_, TimelineAction::TextSelected { event_id, text: Some(text) }))
+                if event_id == "event-0" && text == "Timeline"
+        ));
+
+        snapshot.selection = Some("event-0".into());
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let (bar, buttons) = view.selection_bar.expect("selection bar");
+        let root = context.world().node(view.root.stable_id()).unwrap();
+        assert!(root.children.contains(&bar.stable_id()));
+        for button in buttons {
+            context
+                .update_component(button, |_, cx| cx.emit(Activate))
+                .unwrap();
+        }
+        let tail = events
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(3)
+            .map(|(_, action)| action.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tail,
+            [
+                TimelineAction::SelectionAsk,
+                TimelineAction::SelectionQuote,
+                TimelineAction::SelectionCopy,
+            ]
+        );
+
+        snapshot.selection = None;
+        view.sync(&mut context, document, &snapshot).unwrap();
+        assert!(view.selection_bar.is_none());
+        assert!(context.world().node(bar.stable_id()).is_none());
+        assert!(view.jump_to_end.is_some());
+    }
+
+    #[test]
+    fn the_selection_bar_sits_over_the_selected_text_without_covering_it() {
+        let mut context = AppContext::new();
+        let document = DocumentId::new(638).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let mut snapshot = snapshot(WindowId::PRIMARY, "task");
+        snapshot.rows.truncate(3);
+        snapshot.rows[0].role = TimelineRole::Reply;
+        snapshot.rows[0].can_expand = false;
+        snapshot.layout = VirtualListLayout::new([72.0; 3]);
+        snapshot.scroll_offset = 0.0;
+        snapshot.can_load_earlier = false;
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(|_, _| {}),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let relayout = |context: &mut AppContext| {
+            context
+                .layout_document(
+                    document,
+                    nana_ui::runtime::LayoutViewport::new(900.0, 600.0),
+                )
+                .unwrap();
+        };
+        relayout(&mut context);
+        view.sync(&mut context, document, &snapshot).unwrap();
+        relayout(&mut context);
+
+        let markdown = view.timeline_markdown["event-0"];
+        let area = context
+            .world()
+            .canonical_layout_box(markdown.stable_id())
+            .unwrap();
+        context
+            .update_component(markdown, |markdown, _| {
+                markdown.pointer_down(area.x + 1.0, area.y + 4.0, area);
+                markdown.pointer_move(area.x + 40.0, area.y + 4.0, area);
+                markdown.pointer_up(area.x + 40.0, area.y + 4.0, area);
+            })
+            .unwrap();
+        snapshot.selection = Some("event-0".into());
+        view.sync(&mut context, document, &snapshot).unwrap();
+        relayout(&mut context);
+        view.sync(&mut context, document, &snapshot).unwrap();
+        relayout(&mut context);
+
+        let (bar, _) = view.selection_bar.expect("selection bar");
+        let world = context.world();
+        let selected = world
+            .text_selection_bounds(markdown.stable_id())
+            .expect("selected text");
+        let shown = world.presentation_input_bounds(bar.stable_id()).unwrap();
+        let frame = world
+            .presentation_input_bounds(view.root.stable_id())
+            .unwrap();
+        assert!(
+            shown.y + shown.height <= selected.y || shown.y >= selected.y + selected.height,
+            "{shown:?} covers {selected:?}"
+        );
+        assert!(shown.y - (selected.y + selected.height) < 12.0 && selected.y - shown.y < 48.0);
+        assert!(shown.x >= frame.x && shown.x + shown.width <= frame.x + frame.width);
+    }
+
+    #[test]
+    fn failed_steps_join_the_scroll_map_under_their_own_name() {
+        let mut snapshot = snapshot(WindowId::PRIMARY, "task");
+        snapshot.rows.truncate(4);
+        snapshot.layout = VirtualListLayout::new([100.0; 4]);
+        snapshot.rows[1].key_node = true;
+        snapshot.rows[1].markdown = "先看滚动条".into();
+        snapshot.rows[3].tone = TimelineTone::Failed;
+        snapshot.rows[3].title = "运行".into();
+        snapshot.rows[3].detail = "cargo test".into();
+
+        let markers = timeline_key_markers(&snapshot.rows, &snapshot.layout);
+        assert_eq!(
+            markers
+                .iter()
+                .map(|marker| (marker.id.as_str(), marker.name.as_str(), marker.failed))
+                .collect::<Vec<_>>(),
+            [
+                ("event-1", "先看滚动条", false),
+                ("event-3", "运行 cargo test", true),
+            ]
+        );
+        assert!((markers[1].ratio - 0.75).abs() < 0.001);
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut context = AppContext::new();
+        let document = DocumentId::new(638).unwrap();
+        let host = context
+            .create_component(document, Stack::fill_column(0.0))
+            .unwrap();
+        let sink_events = Arc::clone(&events);
+        let mut view = TimelineView::mount(
+            &mut context,
+            document,
+            snapshot.target.clone(),
+            Arc::new(move |target, action| sink_events.lock().unwrap().push((target, action))),
+        )
+        .unwrap();
+        context.append_child(host, view.root).unwrap();
+        view.sync(&mut context, document, &snapshot).unwrap();
+        let failed = view.key_markers["event-3"];
+        assert_eq!(
+            context
+                .world()
+                .node_style(failed.stable_id())
+                .unwrap()
+                .background,
+            Some(nana_ui::runtime::SemanticColorRole::Danger)
+        );
+        context
+            .update_component(failed, |_, cx| cx.emit(Activate))
+            .unwrap();
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some((_, TimelineAction::Jump(id))) if id == "event-3"
+        ));
+    }
+
+    #[test]
     fn branchable_rows_dispatch_fork_and_continue() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut context = AppContext::new();
@@ -1286,6 +1812,7 @@ mod tests {
         snapshot.rows[0].can_copy = false;
         snapshot.rows[0].can_retry = false;
         snapshot.rows[0].can_branch = true;
+        snapshot.rows[0].role = TimelineRole::Reply;
         snapshot.can_load_earlier = false;
         snapshot.layout = VirtualListLayout::new([TIMELINE_ROW_FALLBACK_EXTENT]);
         let sink_events = Arc::clone(&events);
@@ -1299,9 +1826,7 @@ mod tests {
         context.append_child(host, view.root).unwrap();
         view.sync(&mut context, document, &snapshot).unwrap();
         for key in ["continue-event-0", "fork-event-0"] {
-            context
-                .update_component(view.timeline_actions[key], |_, cx| cx.emit(Activate))
-                .unwrap();
+            view.activate(&mut context, key);
         }
         assert_eq!(
             events
@@ -1322,6 +1847,12 @@ mod tests {
         let rows = vec![
             TimelineRow {
                 id: "tool".into(),
+                role: crate::module::timeline::view::TimelineRole::Step(
+                    crate::module::timeline::view::StepKind::Tool,
+                ),
+                tone: crate::module::timeline::view::TimelineTone::Settled,
+                title: String::new(),
+                detail: String::new(),
                 markdown: "tool output".into(),
                 images: Vec::new(),
                 expanded: false,
@@ -1333,6 +1864,10 @@ mod tests {
             },
             TimelineRow {
                 id: "user-1".into(),
+                role: crate::module::timeline::view::TimelineRole::User,
+                tone: crate::module::timeline::view::TimelineTone::Settled,
+                title: String::new(),
+                detail: String::new(),
                 markdown: "先看滚动条".into(),
                 images: Vec::new(),
                 expanded: true,
@@ -1347,15 +1882,14 @@ mod tests {
         let markers = timeline_key_markers(&rows, &layout);
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].id, "user-1");
-        assert_eq!(markers[0].name, "先看滚动");
+        assert_eq!(markers[0].name, "先看滚动条");
         assert_ne!(markers[0].name, "·");
         assert!(rows[1].markdown.starts_with(&markers[0].name));
         assert!((markers[0].ratio - 0.5).abs() < 0.001);
         assert_eq!(
-            timeline_jump_offset(&rows, &layout, "user-1", 80.0),
+            timeline_event_scroll_offset(&rows, &layout, "user-1", 80.0),
             Some(100.0)
         );
-        assert_eq!(timeline_jump_offset(&rows, &layout, "tool", 80.0), None);
         assert_eq!(
             timeline_event_scroll_offset(&rows, &layout, "tool", 80.0),
             Some(0.0)
@@ -1379,7 +1913,9 @@ mod tests {
             can_load_earlier: false,
             search_query: String::new(),
             search_status: String::new(),
+            search_open: false,
             search_can_step: false,
+            selection: None,
         };
         let sink_events = Arc::clone(&events);
         let mut view = TimelineView::mount(
@@ -1394,17 +1930,14 @@ mod tests {
         assert!(view.key_markers.contains_key("user-1"));
         assert!(!view.key_markers.contains_key("tool"));
         let marker = view.key_markers["user-1"];
-        let component_label = context.read(marker, |button| button.label.clone()).unwrap();
-        assert_eq!(component_label, "先看滚动");
-        assert_eq!(context.world().text(marker.stable_id()), Some("先看滚动"));
+        let name = context
+            .read(marker, |button| button.accessible_name.clone())
+            .unwrap();
+        assert_eq!(name, "先看滚动条");
         context
             .update_component(view.key_markers["user-1"], |_, cx| cx.emit(Activate))
             .unwrap();
-        context
-            .update_component(view.timeline_actions["quote-user-1"], |_, cx| {
-                cx.emit(Activate)
-            })
-            .unwrap();
+        view.activate(&mut context, "quote-user-1");
         assert_eq!(
             events
                 .lock()
