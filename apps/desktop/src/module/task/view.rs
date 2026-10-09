@@ -1,13 +1,10 @@
 use crate::module::composer::pending_view::{PendingSnapshot, PendingView};
 use crate::module::composer::view::{ComposerView, ComposerViewSnapshot};
 use crate::module::timeline::view::{TimelineView, TimelineViewSnapshot};
-use crate::runtime_layout::{headline_slot, reconcile_children};
+use crate::runtime_layout::{conversation_headline, headline_slot, reconcile_children};
 use crate::runtime_shell::{emit, IntentSink, ShellIntent};
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
-use nana_ui::runtime::{
-    AppContext, DocumentId, EmptyState, Entity, FrameworkError, LengthSpec, Stack, Text,
-};
-use nana_ui::Icon;
+use nana_ui::runtime::{AppContext, DocumentId, Entity, FrameworkError, LengthSpec, Stack, Text};
 use std::sync::Arc;
 
 pub(crate) const CHAT_CONTENT_MAX_WIDTH: f32 = 760.0;
@@ -24,7 +21,7 @@ pub(crate) struct TaskView {
     pub conversation_column: Entity<Stack>,
     pub conversation_body: Entity<Stack>,
     pub heading_slot: Entity<Stack>,
-    pub heading: Entity<EmptyState>,
+    pub heading: Entity<Text>,
     pub error: Entity<Text>,
     pub timeline_view: TimelineView,
     pub pending_view: PendingView,
@@ -44,7 +41,7 @@ impl TaskView {
                 let conversation_column = entity_ref::<Stack>();
                 let conversation_body = entity_ref::<Stack>();
                 let heading_slot = entity_ref::<Stack>();
-                let heading = entity_ref::<EmptyState>();
+                let heading = entity_ref::<Text>();
                 let error = entity_ref::<Text>();
                 with_refs(
                     (
@@ -64,8 +61,7 @@ impl TaskView {
                                 widget(Text::new(input.error.unwrap_or_default()))
                                     .entity_ref(error),
                             )),
-                        widget(EmptyState::new(input.heading).icon(Icon::MessageSquarePlus))
-                            .entity_ref(heading),
+                        widget(conversation_headline(input.heading.to_owned())).entity_ref(heading),
                     ),
                     (
                         conversation_column,
@@ -126,7 +122,7 @@ impl TaskView {
     ) -> Result<(), FrameworkError> {
         let headline_active = !input.heading.trim().is_empty();
         context.update_component(self.heading, |heading, _| {
-            *heading = EmptyState::new(input.heading).icon(Icon::MessageSquarePlus)
+            *heading = conversation_headline(input.heading.to_owned())
         })?;
         context.update_component(self.heading_slot, |slot, _| {
             *slot = headline_slot(headline_active)
@@ -136,6 +132,12 @@ impl TaskView {
             .into_iter()
             .collect::<Vec<_>>();
         reconcile_children(context, self.heading_slot.stable_id(), &headline)?;
+        let body = if headline_active {
+            vec![self.heading_slot.stable_id(), self.error.stable_id()]
+        } else {
+            vec![self.error.stable_id(), self.timeline_view.root.stable_id()]
+        };
+        reconcile_children(context, self.conversation_body.stable_id(), &body)?;
         context.update_component(self.error, |error, _| {
             *error = Text::new(input.error.unwrap_or_default())
         })?;

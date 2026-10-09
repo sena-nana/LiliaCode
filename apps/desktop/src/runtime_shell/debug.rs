@@ -362,17 +362,19 @@ impl ShellHandles {
         for (id, node) in &self.task_view.timeline_view.timeline_markdown {
             targets.insert(format!("lilia.ui.timeline.markdown.{id}"), node.stable_id());
         }
-        for (id, node) in &self.task_view.timeline_view.timeline_actions {
-            if let Some(event_id) = id.strip_prefix("fork-") {
-                targets.insert(
-                    format!("lilia.ui.timeline.{event_id}.fork"),
-                    node.stable_id(),
-                );
-            } else if let Some(event_id) = id.strip_prefix("continue-") {
-                targets.insert(
-                    format!("lilia.ui.timeline.{event_id}.continue"),
-                    node.stable_id(),
-                );
+        for (event_id, row) in self.task_view.timeline_view.rows() {
+            let actions = &row.actions;
+            for (verb, node) in [
+                ("expand", actions.expand.map(|button| button.stable_id())),
+                ("copy", actions.copy.map(|button| button.stable_id())),
+                ("quote", actions.quote.map(|button| button.stable_id())),
+                ("retry", actions.retry.map(|button| button.stable_id())),
+                ("fork", actions.fork.map(|button| button.stable_id())),
+                ("continue", actions.resume.map(|button| button.stable_id())),
+            ] {
+                if let Some(node) = node {
+                    targets.insert(format!("lilia.ui.timeline.{event_id}.{verb}"), node);
+                }
             }
         }
         for (id, node) in &self.pane_buttons {
@@ -445,8 +447,17 @@ impl ShellHandles {
         });
         targets.insert(
             "lilia.ui.settings.appearance-sidebar".into(),
-            self.settings_view.sidebar_mode.stable_id(),
+            self.settings_view.sidebar_mode_control.stable_id(),
         );
+        for (mode, option) in ["grouped", "unified"]
+            .into_iter()
+            .zip(self.settings_view.sidebar_mode_options)
+        {
+            targets.insert(
+                format!("lilia.ui.settings.appearance-sidebar.{mode}"),
+                option.stable_id(),
+            );
+        }
         targets.insert(
             "lilia.ui.settings.worktree-mode".into(),
             self.settings_view.worktree_mode.stable_id(),
@@ -541,28 +552,26 @@ impl ShellHandles {
                             "value":option.value.as_ref(),"label":option.label.as_ref(),"disabled":option.disabled,
                         })).collect::<Vec<_>>()})
                 }).ok();
-                let chart = context.read(Entity::<nana_ui::runtime::DonutChart>::from_stable_id(node), |chart| {
-                    (
-                        chart.active,
-                        chart.active.and_then(|i| chart.slices.get(i).map(|slice| slice.value)),
-                        chart.active.and_then(|i| chart.labels.get(i).map(|label| label.to_string())),
-                        chart.active.and_then(|i| chart.tooltip(i)),
-                    )
-                }).ok().or_else(|| context.read(Entity::<nana_ui::runtime::TimeSeriesChart>::from_stable_id(node), |chart| {
-                    (
-                        chart.active,
-                        chart.active.and_then(|i| chart.values.get(i).copied()),
-                        chart.active.and_then(|i| chart.axis_labels.get(i).map(|label| label.to_string())),
-                        chart.active.and_then(|i| chart.tooltip(i)),
-                    )
-                }).ok());
-                let chart_hover = chart.map(|(active, value, label, fallback)| {
+                let chart = context
+                    .read(Entity::<nana_ui::runtime::Chart>::from_stable_id(node), |chart| {
+                        let datum = crate::ui::charts::hovered_datum(chart);
+                        (
+                            datum.as_ref().map(|(index, ..)| *index),
+                            datum.as_ref().map(|(_, value, _)| *value),
+                            datum.map(|(.., label)| label),
+                        )
+                    })
+                    .ok();
+                let chart_hover = chart.map(|(active, value, label)| {
                     let tooltip = context.world().node(node).into_iter().flat_map(|entry| entry.children)
-                        .find_map(|child| context.read(Entity::<nana_ui::runtime::Tooltip>::from_stable_id(child), |tip| {
-                            (!tip.style.layout.hidden && self.target_is_mounted(context, child))
-                                .then(|| tip.label.to_string())
-                        }).ok().flatten())
-                        .or(fallback);
+                        .find_map(|child| context.read(Entity::<nana_ui::runtime::ChartTooltip>::from_stable_id(child), |tip| {
+                            (!tip.style.layout.hidden && self.target_is_mounted(context, child)).then(|| {
+                                std::iter::once(tip.content.title.to_string())
+                                    .chain(tip.content.rows.iter().map(|row| format!("{} {}", row.name, row.value).trim().to_owned()))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            })
+                        }).ok().flatten());
                     serde_json::json!({"active":active,"value":value,"label":label,"tooltip":tooltip})
                 });
                 let images = match context.world().component_geometry(node) {

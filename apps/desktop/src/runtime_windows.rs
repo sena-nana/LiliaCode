@@ -81,7 +81,7 @@ pub fn mount_conversation_status(
     let document_id = DocumentId::new(CONVERSATION_STATUS_DOCUMENT).expect("status document");
     let mut document = nana_ui::runtime::RuntimeDocument::new(document_id);
     let context = document.context_mut();
-    let _ = context.set_theme(snapshot.theme);
+    let _ = context.set_preset_theme(snapshot.theme);
 
     let (_, (title, error, list, actions, page)) =
         context.mount_view_detached(document_id, || {
@@ -198,7 +198,7 @@ impl ConversationStatusHandles {
     ) -> Result<(), FrameworkError> {
         let document_id = document.document();
         let context = document.context_mut();
-        let _ = context.set_theme(snapshot.theme);
+        let _ = context.set_preset_theme(snapshot.theme);
         context.update_component(self.title, |title, _| {
             *title = Text::new("会话状态");
         })?;
@@ -331,7 +331,7 @@ pub fn mount_task_popup(
         DocumentId::new(10_000u64.saturating_add(snapshot.window_id.0)).expect("popup document");
     let mut document = nana_ui::runtime::RuntimeDocument::new(document_id);
     let context = document.context_mut();
-    let _ = context.set_theme(snapshot.theme);
+    let _ = context.set_preset_theme(snapshot.theme);
 
     let task_view = TaskView::mount(
         context,
@@ -418,7 +418,7 @@ impl TaskPopupHandles {
     ) -> Result<(), FrameworkError> {
         let document_id = document.document();
         let context = document.context_mut();
-        let _ = context.set_theme(snapshot.theme);
+        let _ = context.set_preset_theme(snapshot.theme);
         self.task_view
             .sync(context, document_id, snapshot.task_input())?;
         self.workspace.sync(

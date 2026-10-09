@@ -76,6 +76,26 @@ conversation (fill_column, 水平居中)
 1. IAB 真浏览宿主。NanaUI 无 WebView；在接入宿主之前不恢复「打开 / 新窗口」。
 2. 同 kind 两个文档编辑器（S1 已支持不同 kind 的双 live pane）。
 
+## 视图层重做（2026-10）
+
+壳层框架仍由 `ShellHandles` 命令式装配；新表面按「反应式视图 + 分离挂载」逐个替换旧装配，放在 `apps/desktop/src/ui/`：
+
+- `ui/theme.rs`：页面列、标题、元信息字号和列表行按钮。
+- `ui/timeline.rs`：步骤分类和中文标签。
+- `ui/timeline_row.rs`：时间线条目。用户气泡、带轨道的回复和步骤，挂一个 `RowChrome` 信号。
+- `ui/coding_panel.rs`：右侧编码面板。搜索、改动列表加内联 `DiffView`，以及运行项。
+
+视觉检查以离屏渲染为主：`cargo xtask screenshot [--matrix]` 由 `offscreen_tests.rs` 的夹具逐场景绘制 PNG。真实窗口的 `agent-debug` 只在里程碑跑。
+
+取舍：
+
+- **提示。** 错误和短确认（「已复制」）走 `DesktopShell.status` 的 `Toast`，同一时间只显示一条：错误优先，否则显示最早的通知。错误一直留着，等用户关闭；通知 3 秒后自己消失，计时由 NanaUI `Toast::timeout` 负责。主窗口的对话列不再内嵌错误行，任务弹窗仍内嵌，因为它没有提示层。
+- **消息操作在悬停或键盘焦点进入时露出。** 动作行平时 `opacity: 0`，占位不变，悬停时不改行高，虚拟列表的测量不受影响。不用 `VisibilitySpec::Hidden`，因为隐藏的按钮进不了 Tab 顺序；透明的按钮仍可 Tab 到，焦点一进来整行就显出来。悬停来自 NanaUI `PointerHoverChanged`，焦点来自 `FocusWithinChanged`。
+- **选区工具条。** `NativeMarkdown` 的 `SelectionChanged` 记进时间线模块，复制、引用、在弹窗中提问都作用于这份记录。工具条锚在选区上：位置取 NanaUI `text_selection_bounds`，默认在选区上方居中，选区贴近顶部时翻到下方，并收在对话列内。滚动会触发时间线同步，工具条随之跟着文字走。它和「回到底部」按钮可以同时出现。
+- **补全弹层贴着输入框，不跟随光标。** 聊天输入里的 `/`、`@`、引用补全浮在输入卡正上方，盖住时间线底部而不挤动它，这是聊天产品的通行做法。NanaUI `TextArea` 自带的光标补全是代码编辑器那套：接受时插入文本，接不上提及标签和对话引用这类结构化动作，所以不用。每行显示命令名或文件名，右侧是说明或路径；方向键移动高亮，最多露出 8 行，窗口跟着高亮滚动。
+- **滚动地图。** 右侧细刻度同时标出关键消息和失败步骤，失败用 Danger 色。刻度是带可访问名的按钮，键盘能 Tab 到、读屏能读出消息摘要，所以留在应用侧，不改成画在 `ScrollView` 滚动条上的原生标记：那样只剩指针能点。
+- **审阅基线。** 文档审阅对比的是编辑器视图状态里「最近一次载入或保存的文本」，视图同步时不读磁盘，同一 revision 不重算 diff。
+
 ## Key Decisions
 
 - 不把整个壳一次性换成 `DockWorkspace`。`DesktopShell` 已提供 navigation / primary / inspector / bottom，第一批只修正分区内容。

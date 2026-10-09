@@ -98,7 +98,7 @@ use lilia_feature_remote::RemoteRequest;
 use lilia_kernel::{JobContext, JobEvent, JobId, JobRequest, JobState};
 use mutsuki_agent_contracts::InteractionResolution;
 use nana_ui::runtime::{
-    DropdownEvent, DropdownOption, GraphCanvasEvent, KeyCaptureEvent, KeyCaptureLayer, KeyInput,
+    DropdownEvent, DropdownOption, GraphCanvasEvent, KeyCaptureEvent, KeyCaptureLayer,
     MarkdownImage, NativeMarkdown, RuntimeDocument, TreeDropPosition as NanaTreeDropPosition,
 };
 use nana_ui::{
@@ -198,6 +198,7 @@ const SETTINGS_ACTION: &str = "workspace.settings";
 const TOGGLE_RESOURCES_ACTION: &str = "workspace.toggle_resources";
 const SAVE_DOCUMENT_ACTION: &str = "document.save";
 const TOGGLE_THEME_ACTION: &str = "appearance.toggle_theme";
+const FIND_IN_CONVERSATION_ACTION: &str = "conversation.find";
 
 enum ClipboardTextPaste {
     Inline(String),
@@ -229,6 +230,10 @@ fn native_action_registry() -> Result<ActionRegistry, String> {
             .category("文档")
             .keywords(["save", "file"])
             .when(ContextPredicate::always().all_of(["document"])),
+        ActionDescriptor::labeled(FIND_IN_CONVERSATION_ACTION, "在对话中查找")
+            .category("对话")
+            .keywords(["find", "search", "message"])
+            .when(ContextPredicate::always().all_of(["conversation"])),
         ActionDescriptor::labeled(TOGGLE_THEME_ACTION, "切换深浅主题")
             .category("外观")
             .keywords(["theme", "dark", "light"]),
@@ -255,6 +260,11 @@ fn native_command_keymap() -> Keymap {
             TOGGLE_RESOURCES_ACTION,
             KeyStroke::new("b", KeyModifiers::primary()),
         ),
+        KeyBinding::new(
+            FIND_IN_CONVERSATION_ACTION,
+            KeyStroke::new("f", KeyModifiers::primary()),
+        )
+        .when(ContextPredicate::always().all_of(["conversation"])),
     ])
 }
 
@@ -397,6 +407,16 @@ enum UpdateOperation {
 /// unwinding. These guards only move a value in or out of a map, so a poisoned
 /// lock means some unrelated job panicked, and killing the window over it would
 /// turn one failed operation into a lost session.
+pub(crate) fn builtin_theme_id(mode: ThemeMode) -> nana_ui::ThemeId {
+    nana_ui_core::builtin_theme_arc(mode).id()
+}
+
+fn builtin_theme_mode(id: &nana_ui::ThemeId) -> Option<ThemeMode> {
+    [ThemeMode::Light, ThemeMode::Dark]
+        .into_iter()
+        .find(|mode| builtin_theme_id(*mode) == *id)
+}
+
 fn locked<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     lock.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1383,6 +1403,8 @@ pub struct DesktopProgram {
     turn_state: Option<(String, DesktopTurnState)>,
     task_action_error: Option<String>,
     last_copied_markdown: Option<(String, usize)>,
+    notices: std::collections::VecDeque<(u64, String)>,
+    next_notice_id: u64,
     markdown_images: BTreeMap<String, MarkdownImageLoadState>,
     markdown_image_recency: BTreeMap<String, u64>,
     markdown_image_access_clock: u64,
@@ -1405,6 +1427,9 @@ pub struct DesktopProgram {
     coding_tools: Option<DesktopCodingServicesSnapshot>,
     coding_git: Option<DesktopGitStatus>,
     coding_git_diff: Option<DesktopGitDiff>,
+    /// `coding_git_diff`'s patch split per file, parsed once when it arrives.
+    coding_change_diffs: Vec<(String, crate::application::DocumentDiff)>,
+    coding_selected_change: Option<String>,
     coding_git_diff_scope: DesktopGitDiffScope,
     coding_workspace: Option<DesktopWorkspaceListing>,
     coding_project_tasks: Option<DesktopProjectTaskCatalog>,
@@ -2270,6 +2295,18 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::RefreshCoding => {
                 Message::Coding(CodingMessage::RefreshCodingTools)
             }
+            crate::runtime_shell::ShellIntent::CycleCodingDiffScope => {
+                Message::Coding(CodingMessage::CycleCodingGitDiffScope)
+            }
+            crate::runtime_shell::ShellIntent::SelectCodingChange(path) => {
+                self.coding_selected_change =
+                    if self.coding_selected_change.as_deref() == Some(path.as_str()) {
+                        None
+                    } else {
+                        Some(path)
+                    };
+                return None;
+            }
             crate::runtime_shell::ShellIntent::CycleCodingMode => {
                 Message::Coding(CodingMessage::CycleCodingSearchMode)
             }
@@ -2642,6 +2679,24 @@ impl DesktopProgram {
             crate::runtime_shell::ShellIntent::ExtensionsCommand(message) => {
                 Message::Extensions(message)
             }
+            crate::runtime_shell::ShellIntent::DismissToast(key) => {
+                match key {
+                    crate::runtime_shell::ShellToastKey::Error => {
+                        self.error_message = None;
+                        self.task_action_error = None;
+                    }
+                    crate::runtime_shell::ShellToastKey::Composer => {
+                        self.route_composer_message(
+                            HostedWindowId::PRIMARY,
+                            crate::module::composer::ComposerMessage::DismissError,
+                        );
+                    }
+                    crate::runtime_shell::ShellToastKey::Notice(id) => {
+                        self.notices.retain(|(notice, _)| *notice != id);
+                    }
+                }
+                return None;
+            }
             crate::runtime_shell::ShellIntent::OpenPath(path) => {
                 if let Err(error) = self
                     .kernel
@@ -2909,6 +2964,23 @@ impl DesktopProgram {
             }
             crate::runtime_shell::ShellIntent::CloseInspectorDock => {
                 Message::Project(ProjectMessage::CloseInspectorDock)
+            }
+            crate::runtime_shell::ShellIntent::ToggleInspector => {
+                if self.inspector_region_is_visible() {
+                    self.close_inspector_dock();
+                } else if let Some(tab) = self
+                    .inspector_tabs()
+                    .into_iter()
+                    .find(|tab| tab.selected)
+                    .or_else(|| self.inspector_tabs().into_iter().next())
+                {
+                    self.select_inspector_panel(&tab.id);
+                }
+                return None;
+            }
+            crate::runtime_shell::ShellIntent::SelectInspectorPanel(panel_id) => {
+                self.select_inspector_panel(&panel_id);
+                return None;
             }
             crate::runtime_shell::ShellIntent::SplitWorkspaceHorizontal => {
                 self.update_titlebar_menu(HostedContextMenuEvent::Select(
@@ -3814,13 +3886,7 @@ impl DesktopProgram {
         } else {
             title
         };
-        match presentation {
-            Some(phase) => (format!("{title} · {}", phase.label), phase.attention),
-            None => (
-                title.to_owned(),
-                crate::runtime_shell::ShellSidebarAttention::Quiet,
-            ),
-        }
+        (title.to_owned(), presentation.unwrap_or_default())
     }
 
     fn shell_confirm(&self) -> Option<crate::runtime_shell::ShellConfirm> {
@@ -4346,6 +4412,36 @@ impl DesktopProgram {
                 "当前项目".to_owned()
             },
             busy: self.coding_busy(),
+            diff_scope_label: match self.coding_git_diff_scope {
+                DesktopGitDiffScope::WorkingTree => "工作区".to_owned(),
+                DesktopGitDiffScope::Staged => "暂存区".to_owned(),
+            },
+            changes: self
+                .coding_git_diff
+                .as_ref()
+                .map(|diff| {
+                    diff.files
+                        .iter()
+                        .map(|change| crate::runtime_shell::ShellCodingChange {
+                            path: change.path.clone(),
+                            status: git_status_letter(change.status),
+                            additions: change.additions,
+                            deletions: change.deletions,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            selected_change: self.coding_selected_change.clone(),
+            selected_diff: self.coding_selected_change.as_ref().and_then(|selected| {
+                self.coding_change_diffs
+                    .iter()
+                    .find(|(path, _)| path == selected)
+                    .map(|(_, diff)| diff.clone())
+            }),
+            diff_truncated: self
+                .coding_git_diff
+                .as_ref()
+                .is_some_and(|diff| diff.truncated),
             git: self
                 .coding_git
                 .as_ref()
@@ -4783,10 +4879,7 @@ impl DesktopProgram {
             title_parent,
             title_context,
             heading,
-            error: self
-                .error_message
-                .clone()
-                .or_else(|| self.task_action_error.clone()),
+            toast: self.shell_toast(),
             navigation: self.navigation,
             sidebar_collapsed: self
                 .workspace
@@ -4835,7 +4928,9 @@ impl DesktopProgram {
                 can_load_earlier: false,
                 search_query: String::new(),
                 search_status: String::new(),
+                search_open: false,
                 search_can_step: false,
+                selection: None,
             },
             clone_repository: self.project_clone_repository.clone(),
             clone_parent: self.project_clone_parent.clone(),
@@ -4866,6 +4961,7 @@ impl DesktopProgram {
             } else {
                 String::new()
             },
+            inspector_tabs: self.inspector_tabs(),
             titlebar_menu_open: self.titlebar_menu_open,
             titlebar_has_task: self.current_selected_task().is_some(),
             titlebar_can_split: self.integrated_product_shell_pane().is_some(),
@@ -5126,8 +5222,6 @@ impl DesktopProgram {
             custom_agent_instruction: String::new(),
             quota_days_label: String::new(),
             quota_backend_label: String::new(),
-            quota_values: Vec::new(),
-            quota_axis_labels: Vec::new(),
             quota_daily: Vec::new(),
             quota_project_slices: Vec::new(),
             quota_conversation_slices: Vec::new(),
@@ -5305,28 +5399,6 @@ impl DesktopProgram {
             } else {
                 self.quota_backend.clone()
             },
-            quota_values: self
-                .quota_usage
-                .as_ref()
-                .map(|stats| {
-                    stats
-                        .daily
-                        .iter()
-                        .map(|bucket| bucket.total_tokens as f64)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            quota_axis_labels: self
-                .quota_usage
-                .as_ref()
-                .map(|stats| {
-                    stats
-                        .daily
-                        .iter()
-                        .map(|bucket| bucket.day_start.to_string())
-                        .collect()
-                })
-                .unwrap_or_default(),
             quota_daily: self
                 .quota_usage
                 .as_ref()
@@ -5603,6 +5675,9 @@ impl DesktopProgram {
             .timeline_module_for(window_id)
             .map(|module| module.message_search_view(search_task.as_ref()))
             .unwrap_or_default();
+        let search_open = self
+            .timeline_module_for(window_id)
+            .is_some_and(|module| module.search_open(search_task.as_ref()));
         let popup = self.task_popups.get(&window_id)?;
         let timeline = crate::module::timeline::view::TimelineViewSnapshot {
             target: crate::module::timeline::view::TimelineTarget {
@@ -5643,9 +5718,13 @@ impl DesktopProgram {
                 .session
                 .as_ref()
                 .is_some_and(|session| session.timeline_has_more_before),
+            search_open,
             search_query,
             search_status,
             search_can_step,
+            selection: self
+                .timeline_text_selection(window_id)
+                .map(|selection| selection.event_id),
         };
         let module = self.window_composer_module(window_id)?;
         let mut composer = module.view_snapshot(window_id);
@@ -5892,11 +5971,14 @@ impl DesktopProgram {
         if self.current_selected_project().is_some() {
             context.insert("project");
         }
-        if item_id.is_some_and(|item_id| {
+        let document = item_id.is_some_and(|item_id| {
             self.documents_module()
                 .is_some_and(|m| m.has_editor(item_id))
-        }) {
+        });
+        if document {
             context.insert("document");
+        } else if self.window_task(window_id).is_some() {
+            context.insert("conversation");
         }
         context
     }
@@ -6059,6 +6141,17 @@ impl DesktopProgram {
                 if let Some(item_id) = source_item {
                     self.route_documents_message(DocumentMessage::SaveEditor(item_id));
                 }
+            }
+            FIND_IN_CONVERSATION_ACTION => {
+                let window_id = self.command_source_window;
+                self.route_timeline_window(
+                    window_id,
+                    crate::module::timeline::TimelineModuleMessage::SearchOpen(true),
+                );
+                self.pending_ui_commands.push(HostedUiCommand::Focus {
+                    window_id,
+                    target: target_ids::TASK_SESSION_TIMELINE_SEARCH.to_owned(),
+                });
             }
             TOGGLE_THEME_ACTION => self.set_theme(self.theme.toggle()),
             _ => {}
@@ -7121,14 +7214,14 @@ impl DesktopProgram {
         let Some(flow) = self.github_device_flow.as_ref() else {
             return;
         };
-        if let Err(error) =
-            self.kernel
-                .session()
-                .execute_host(DesktopHostAction::WriteClipboardText(
-                    flow.user_code.clone(),
-                ))
-        {
-            self.github_error = Some(format!("无法复制 GitHub 授权码：{error}"));
+        match self
+            .kernel
+            .session()
+            .execute_host(DesktopHostAction::WriteClipboardText(
+                flow.user_code.clone(),
+            )) {
+            Ok(_) => self.notify("已复制授权码"),
+            Err(error) => self.github_error = Some(format!("无法复制 GitHub 授权码：{error}")),
         }
     }
 
@@ -9618,6 +9711,51 @@ impl DesktopProgram {
         self.execute_workspace_command(DesktopCommand::ActivatePanel(panel_id));
     }
 
+    /// Work-panel surfaces the current context can show, in tab order. The
+    /// active one is selected only while the panel is open.
+    fn inspector_tabs(&self) -> Vec<crate::runtime_shell::ShellNavItem> {
+        if self.navigation.is_management() {
+            return Vec::new();
+        }
+        let task = self.current_selected_task().is_some();
+        let project = self.current_selected_project().is_some();
+        let tasks_surface = self.project_surface == ProjectSurface::Tasks;
+        let mut tabs = Vec::new();
+        if self.project_surface == ProjectSurface::Architecture {
+            tabs.push((TASK_INSPECTOR_PANEL_ID, "节点"));
+        } else if task && tasks_surface {
+            tabs.push((TASK_INSPECTOR_PANEL_ID, "会话"));
+        }
+        if project && tasks_surface {
+            tabs.push((CODING_TOOLS_PANEL_ID, "编码"));
+        }
+        if task {
+            tabs.push((IAB_PANEL_ID, "浏览器"));
+        }
+        let open = self.inspector_region_is_visible();
+        let active = self
+            .active_inspector_panel()
+            .map(|panel| panel.id.as_str().to_owned());
+        tabs.into_iter()
+            .map(|(id, label)| crate::runtime_shell::ShellNavItem {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                settings: false,
+                selected: open && active.as_deref() == Some(id),
+            })
+            .collect()
+    }
+
+    fn select_inspector_panel(&mut self, panel_id: &str) {
+        let panel = match panel_id {
+            TASK_INSPECTOR_PANEL_ID => TASK_INSPECTOR_PANEL_ID,
+            CODING_TOOLS_PANEL_ID => CODING_TOOLS_PANEL_ID,
+            IAB_PANEL_ID => IAB_PANEL_ID,
+            _ => return,
+        };
+        self.activate_inspector_panel(panel);
+    }
+
     fn close_inspector_dock(&mut self) {
         let Some(panel_id) = self.active_inspector_panel().map(|panel| panel.id.clone()) else {
             return;
@@ -10199,6 +10337,23 @@ impl DesktopProgram {
                     errors.push(error);
                 }
                 None => self.coding_git_diff = None,
+            }
+            self.coding_change_diffs = self
+                .coding_git_diff
+                .as_ref()
+                .and_then(|diff| diff.patch.as_deref())
+                .map(crate::application::DocumentDiff::parse_unified)
+                .unwrap_or_default();
+            if self
+                .coding_selected_change
+                .as_ref()
+                .is_some_and(|selected| {
+                    self.coding_change_diffs
+                        .iter()
+                        .all(|(path, _)| path != selected)
+                })
+            {
+                self.coding_selected_change = None;
             }
             match result.workspace {
                 Some(Ok(value)) => self.coding_workspace = Some(value),
@@ -11897,19 +12052,24 @@ impl DesktopProgram {
         None
     }
 
+    /// The task a window's conversation shows.
+    fn window_task(&self, window_id: HostedWindowId) -> Option<&TaskId> {
+        if window_id == HostedWindowId::PRIMARY {
+            self.selected_task.as_ref()
+        } else {
+            self.task_popups
+                .get(&window_id)
+                .and_then(|popup| popup.active_task_id.as_ref())
+        }
+    }
+
     fn apply_addressed_timeline(
         &mut self,
         target: crate::module::timeline::view::TimelineTarget,
         action: crate::module::timeline::view::TimelineAction,
     ) -> Option<HostedWindowAction> {
         use crate::module::timeline::view::TimelineAction;
-        let active = if target.window_id == HostedWindowId::PRIMARY {
-            self.selected_task.as_ref()
-        } else {
-            self.task_popups
-                .get(&target.window_id)
-                .and_then(|popup| popup.active_task_id.as_ref())
-        };
+        let active = self.window_task(target.window_id);
         let current = crate::module::timeline::view::TimelineTarget {
             window_id: target.window_id,
             task_id: active.map(|id| id.as_str().to_owned()),
@@ -11960,12 +12120,38 @@ impl DesktopProgram {
             TimelineAction::Jump(event_id) => {
                 self.jump_timeline_row(target.window_id, &event_id);
             }
+            TimelineAction::TextSelected { event_id, text } => self.route_timeline_window(
+                target.window_id,
+                crate::module::timeline::TimelineModuleMessage::TextSelected { event_id, text },
+            ),
+            TimelineAction::SelectionCopy => self.copy_timeline_selection(target.window_id),
+            TimelineAction::SelectionQuote => self.quote_timeline_selection(target.window_id),
+            TimelineAction::SelectionAsk => self.ask_timeline_selection_in_popup(target.window_id),
+            TimelineAction::JumpToEnd => {
+                let session = if target.window_id == HostedWindowId::PRIMARY {
+                    self.task_session.as_ref()
+                } else {
+                    self.task_popups
+                        .get(&target.window_id)
+                        .and_then(|popup| popup.session.as_ref())
+                };
+                if let Some(extent) = session.map(|session| timeline_content_extent(session, true))
+                {
+                    self.queue_timeline_to_end(surface, extent);
+                }
+            }
             TimelineAction::SearchChanged(query) => {
                 self.route_timeline_window(
                     target.window_id,
                     crate::module::timeline::TimelineModuleMessage::SearchChanged(query),
                 );
                 self.jump_active_message_search(target.window_id);
+            }
+            TimelineAction::SetSearchOpen(open) => {
+                self.route_timeline_window(
+                    target.window_id,
+                    crate::module::timeline::TimelineModuleMessage::SearchOpen(open),
+                );
             }
             TimelineAction::SearchStep(delta) => {
                 self.route_timeline_window(
@@ -12051,6 +12237,7 @@ impl DesktopProgram {
                     Ok(DesktopHostResult::Completed) => {
                         self.task_action_error = None;
                         self.last_copied_markdown = Some((event_id, byte_count));
+                        self.notify("已复制");
                     }
                     Ok(_) => {
                         self.task_action_error =
@@ -12900,7 +13087,10 @@ impl DesktopProgram {
                         .session()
                         .execute_host(DesktopHostAction::WriteClipboardText(pairing_uri))
                     {
-                        Ok(DesktopHostResult::Completed) => self.remote_error = None,
+                        Ok(DesktopHostResult::Completed) => {
+                            self.remote_error = None;
+                            self.notify("已复制配对信息");
+                        }
                         Ok(_) => {
                             self.remote_error =
                                 Some("复制配对信息时宿主返回了无法识别的结果。".to_owned())
@@ -13078,6 +13268,7 @@ impl DesktopProgram {
                 }),
             read_only: state.read_only,
             dirty: state.dirty,
+            saved_text: state.saved_text.clone(),
             diagnostics: state
                 .diagnostics
                 .iter()
@@ -15982,6 +16173,32 @@ impl DesktopProgram {
         self.clear_task_window_error(window_id);
     }
 
+    fn notify(&mut self, text: impl Into<String>) {
+        self.next_notice_id += 1;
+        self.notices.push_back((self.next_notice_id, text.into()));
+        while self.notices.len() > 3 {
+            self.notices.pop_front();
+        }
+    }
+
+    fn shell_toast(&self) -> Option<crate::runtime_shell::ShellToast> {
+        use crate::runtime_shell::{ShellToast, ShellToastKey};
+        if let Some(error) = self
+            .error_message
+            .as_ref()
+            .or(self.task_action_error.as_ref())
+        {
+            return Some(ShellToast {
+                key: ShellToastKey::Error,
+                title: error.clone(),
+            });
+        }
+        self.notices.front().map(|(id, text)| ShellToast {
+            key: ShellToastKey::Notice(*id),
+            title: text.clone(),
+        })
+    }
+
     fn clear_task_window_error(&mut self, window_id: HostedWindowId) {
         if window_id == HostedWindowId::PRIMARY {
             if let Some(draft) = self.main_conversation_draft.as_mut() {
@@ -16020,6 +16237,9 @@ impl DesktopProgram {
                 self.last_copied_markdown = Some((selection.event_id, byte_count));
                 self.clear_task_window_error(window_id);
                 self.clear_timeline_text_selection(window_id);
+                if window_id == HostedWindowId::PRIMARY {
+                    self.notify("已复制");
+                }
             }
             Ok(_) => self.set_task_window_error(
                 window_id,
@@ -16741,6 +16961,9 @@ impl DesktopProgram {
     }
 
     fn set_theme(&mut self, theme: ThemeMode) {
+        if theme == ThemeMode::Custom {
+            return;
+        }
         self.theme = theme;
         if let Err(error) = save_theme(&self.home, theme) {
             eprintln!("{error}");
@@ -16752,7 +16975,10 @@ impl DesktopProgram {
 
     fn update_appearance(&mut self, event: AppearanceEvent) {
         let changed = match event {
-            AppearanceEvent::Theme(theme) => {
+            AppearanceEvent::Theme(id) => {
+                let Some(theme) = builtin_theme_mode(&id) else {
+                    return;
+                };
                 if self.theme == theme {
                     false
                 } else {
@@ -18993,6 +19219,16 @@ impl DesktopProgram {
                 }
             }
             DebugCommand::UiInputFrame { target_id, text } => {
+                if self.pending_debug_frame_response.is_some() {
+                    let _ = reply.send(failure_response(
+                        "ui-input-frame",
+                        "frame_measurement_busy",
+                        "another frame measurement is still pending",
+                        None,
+                    ));
+                    return;
+                }
+                let started_at = Instant::now();
                 let result = self
                     .runtime_shell
                     .as_ref()
@@ -19002,7 +19238,12 @@ impl DesktopProgram {
                     });
                 match result {
                     Some(Ok(true)) => {
-                        snapshot_response("ui-input-frame", &json!({"dispatched": true}))
+                        self.pending_debug_frame_response = Some(PendingDebugFrameResponse {
+                            command: "ui-input-frame",
+                            started_at,
+                            reply,
+                        });
+                        return;
                     }
                     _ => failure_response(
                         "ui-input-frame",
@@ -23879,8 +24120,8 @@ impl DesktopProgram {
                 .unwrap_or_default(),
             task_action_error: self.task_action_error.clone(),
             theme: match self.theme {
-                ThemeMode::Dark => "dark",
                 ThemeMode::Light => "light",
+                ThemeMode::Dark | ThemeMode::Custom => "dark",
             },
             sidebar_display_mode: match self.sidebar_display_mode {
                 NativeSidebarDisplayMode::Grouped => "grouped",
@@ -30468,23 +30709,14 @@ impl RuntimeProgram for DesktopProgram {
             let pressed = key.is_pressed();
             let logical = key.logical.0.as_ref();
             if self.shell_shortcut_capturing {
-                let key_input = KeyInput::new(
-                    pressed,
-                    logical,
-                    key.modifiers.alt,
-                    key.modifiers.control,
-                    key.modifiers.shift,
-                    key.modifiers.meta,
-                    key.repeat,
-                );
                 let mut layer = KeyCaptureLayer::new().recording(true);
-                if let Some(capture) = layer.handle_key(&key_input) {
+                if let Some(capture) = layer.handle_key(key) {
                     self.update_message(Message::Settings(SettingsMessage::ShellShortcutCaptured(
                         capture,
                     )));
                     return Ok(HostedProgramUpdate::redraw(id));
                 }
-                if layer.should_consume(&key_input) {
+                if layer.should_consume(key) {
                     return Ok(HostedProgramUpdate::redraw(id));
                 }
             }
@@ -30726,33 +30958,7 @@ impl RuntimeProgram for DesktopProgram {
                 Ok(())
             })?;
         }
-        let settings_model = SettingsModel::new(
-            "appearance",
-            [
-                SettingsTab::new("appearance", "外观").icon(Icon::Palette),
-                SettingsTab::new("project", "项目").icon(Icon::Folder),
-                SettingsTab::new("provider", "模型服务").icon(Icon::Cpu),
-                SettingsTab::new("agent", "Agent").icon(Icon::Bot),
-                SettingsTab::new("quota", "用量与额度").icon(Icon::Chart),
-                SettingsTab::new("extensions", "技能")
-                    .icon(Icon::Puzzle)
-                    .full_page(true),
-                SettingsTab::new("plugin-packages", "插件")
-                    .icon(Icon::Package)
-                    .full_page(true),
-                SettingsTab::new("plugin-hooks", "Hooks")
-                    .icon(Icon::Puzzle)
-                    .full_page(true),
-                SettingsTab::new("plugin-mcp", "MCP")
-                    .icon(Icon::Cpu)
-                    .full_page(true),
-                SettingsTab::new("remote", "远程控制").icon(Icon::MonitorPlay),
-                SettingsTab::new("desktop", "桌面").icon(Icon::Workspace),
-                SettingsTab::new("data", "数据迁移").icon(Icon::Package),
-                SettingsTab::new("about", "关于").icon(Icon::About),
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        let settings_model = product_settings_model().map_err(|error| error.to_string())?;
         let settings_state = SettingsState::new(&settings_model);
         let action_registry = native_action_registry()?;
         let command_keymap = native_command_keymap();
@@ -30927,6 +31133,8 @@ impl RuntimeProgram for DesktopProgram {
             turn_state: None,
             task_action_error: None,
             last_copied_markdown: None,
+            notices: std::collections::VecDeque::new(),
+            next_notice_id: 0,
             markdown_images: BTreeMap::new(),
             markdown_image_recency: BTreeMap::new(),
             markdown_image_access_clock: 0,
@@ -30949,6 +31157,8 @@ impl RuntimeProgram for DesktopProgram {
             coding_tools: None,
             coding_git: None,
             coding_git_diff: None,
+            coding_change_diffs: Vec::new(),
+            coding_selected_change: None,
             coding_git_diff_scope: DesktopGitDiffScope::WorkingTree,
             coding_workspace: None,
             coding_project_tasks: None,
@@ -31274,6 +31484,7 @@ impl RuntimeProgram for DesktopProgram {
                 }
                 HostedWindowEvent::SkipTaskbarChanged { .. }
                 | HostedWindowEvent::ReducedMotionChanged { .. }
+                | HostedWindowEvent::HighContrastChanged { .. }
                 | HostedWindowEvent::PointerPresenceChanged { .. }
                 | HostedWindowEvent::ModeChanged { .. } => HostedProgramUpdate::default(),
             };
@@ -31328,6 +31539,7 @@ impl RuntimeProgram for DesktopProgram {
                 }
                 HostedWindowEvent::SkipTaskbarChanged { .. }
                 | HostedWindowEvent::ReducedMotionChanged { .. }
+                | HostedWindowEvent::HighContrastChanged { .. }
                 | HostedWindowEvent::PointerPresenceChanged { .. }
                 | HostedWindowEvent::ModeChanged { .. } => HostedProgramUpdate::default(),
             };
@@ -31403,6 +31615,7 @@ impl RuntimeProgram for DesktopProgram {
             HostedWindowEvent::CloseRequested { .. } => HostedProgramUpdate::exit(),
             HostedWindowEvent::SkipTaskbarChanged { .. }
             | HostedWindowEvent::ReducedMotionChanged { .. }
+            | HostedWindowEvent::HighContrastChanged { .. }
             | HostedWindowEvent::PointerPresenceChanged { .. }
             | HostedWindowEvent::ModeChanged { .. } => HostedProgramUpdate::default(),
         }
@@ -31653,32 +31866,39 @@ enum TimelineReveal {
     Failed,
 }
 
-struct SidebarTaskPhase {
-    label: &'static str,
-    attention: crate::runtime_shell::ShellSidebarAttention,
+fn git_status_letter(status: crate::application::DesktopGitFileStatus) -> &'static str {
+    use crate::application::DesktopGitFileStatus as Status;
+    match status {
+        Status::Modified => "M",
+        Status::Added => "A",
+        Status::Deleted => "D",
+        Status::Renamed => "R",
+        Status::Copied => "C",
+        Status::Conflicted => "U",
+        Status::Untracked => "?",
+        Status::Ignored => "!",
+    }
 }
 
 fn sidebar_task_phase(
     product_status: ProductTaskStatus,
     runtime_phase: &str,
     failed_until_submit: bool,
-) -> Option<SidebarTaskPhase> {
+) -> Option<crate::runtime_shell::ShellSidebarAttention> {
     use crate::runtime_shell::ShellSidebarAttention;
-    let (label, attention) = match runtime_phase {
-        "queued" => ("排队中", ShellSidebarAttention::Waiting),
-        "starting" => ("启动中", ShellSidebarAttention::Quiet),
-        "running" => ("处理中", ShellSidebarAttention::Quiet),
-        "waiting_approval" => ("等待权限", ShellSidebarAttention::Waiting),
-        "waiting_interaction" => ("等待回复", ShellSidebarAttention::Waiting),
-        "cancelling" => ("正在停止", ShellSidebarAttention::Waiting),
-        _ if failed_until_submit => ("失败", ShellSidebarAttention::Failed),
+    Some(match runtime_phase {
+        "starting" | "running" => ShellSidebarAttention::Running,
+        "queued" | "waiting_approval" | "waiting_interaction" | "cancelling" => {
+            ShellSidebarAttention::Waiting
+        }
+        _ if failed_until_submit => ShellSidebarAttention::Failed,
         _ => match product_status {
-            ProductTaskStatus::Waiting => ("等待中", ShellSidebarAttention::Waiting),
-            ProductTaskStatus::Blocked => ("已阻塞", ShellSidebarAttention::Waiting),
+            ProductTaskStatus::Waiting | ProductTaskStatus::Blocked => {
+                ShellSidebarAttention::Waiting
+            }
             _ => return None,
         },
-    };
-    Some(SidebarTaskPhase { label, attention })
+    })
 }
 
 fn extend_timeline_until_cursor(
@@ -31747,6 +31967,35 @@ fn extend_timeline_until_event(
     } else {
         TimelineReveal::Missing
     }
+}
+
+pub(crate) fn product_settings_model() -> Result<SettingsModel, nana_ui::SettingsError> {
+    SettingsModel::new(
+        "appearance",
+        [
+            SettingsTab::new("appearance", "外观").icon(Icon::Palette),
+            SettingsTab::new("project", "项目").icon(Icon::Folder),
+            SettingsTab::new("provider", "模型服务").icon(Icon::Cpu),
+            SettingsTab::new("agent", "Agent").icon(Icon::Bot),
+            SettingsTab::new("quota", "用量与额度").icon(Icon::Chart),
+            SettingsTab::new("extensions", "技能")
+                .icon(Icon::Puzzle)
+                .full_page(true),
+            SettingsTab::new("plugin-packages", "插件")
+                .icon(Icon::Package)
+                .full_page(true),
+            SettingsTab::new("plugin-hooks", "Hooks")
+                .icon(Icon::Puzzle)
+                .full_page(true),
+            SettingsTab::new("plugin-mcp", "MCP")
+                .icon(Icon::Cpu)
+                .full_page(true),
+            SettingsTab::new("remote", "远程控制").icon(Icon::MonitorPlay),
+            SettingsTab::new("desktop", "桌面").icon(Icon::Workspace),
+            SettingsTab::new("data", "数据迁移").icon(Icon::Package),
+            SettingsTab::new("about", "关于").icon(Icon::About),
+        ],
+    )
 }
 
 fn timeline_content_extent(session: &TaskSessionView, includes_load_earlier_control: bool) -> f32 {
@@ -34409,19 +34658,25 @@ mod tests {
     #[test]
     fn sidebar_task_phase_keeps_failure_until_a_live_phase_or_submit() {
         use crate::runtime_shell::ShellSidebarAttention;
-        let failed = sidebar_task_phase(ProductTaskStatus::Running, "idle", true).unwrap();
-        assert_eq!(failed.label, "失败");
-        assert_eq!(failed.attention, ShellSidebarAttention::Failed);
-        let running = sidebar_task_phase(ProductTaskStatus::Running, "running", true).unwrap();
-        assert_eq!(running.label, "处理中");
-        assert_eq!(running.attention, ShellSidebarAttention::Quiet);
-        let waiting = sidebar_task_phase(ProductTaskStatus::Waiting, "idle", false).unwrap();
-        assert_eq!(waiting.label, "等待中");
-        assert_eq!(waiting.attention, ShellSidebarAttention::Waiting);
-        let blocked = sidebar_task_phase(ProductTaskStatus::Blocked, "idle", false).unwrap();
-        assert_eq!(blocked.label, "已阻塞");
-        assert!(sidebar_task_phase(ProductTaskStatus::Running, "idle", false).is_none());
-        assert!(sidebar_task_phase(ProductTaskStatus::Done, "idle", false).is_none());
+        let phase = sidebar_task_phase;
+        assert_eq!(
+            phase(ProductTaskStatus::Running, "idle", true),
+            Some(ShellSidebarAttention::Failed)
+        );
+        assert_eq!(
+            phase(ProductTaskStatus::Running, "running", true),
+            Some(ShellSidebarAttention::Running)
+        );
+        assert_eq!(
+            phase(ProductTaskStatus::Waiting, "idle", false),
+            Some(ShellSidebarAttention::Waiting)
+        );
+        assert_eq!(
+            phase(ProductTaskStatus::Blocked, "idle", false),
+            Some(ShellSidebarAttention::Waiting)
+        );
+        assert!(phase(ProductTaskStatus::Running, "idle", false).is_none());
+        assert!(phase(ProductTaskStatus::Done, "idle", false).is_none());
     }
 
     #[test]

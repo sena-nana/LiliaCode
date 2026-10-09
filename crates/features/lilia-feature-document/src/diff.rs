@@ -51,6 +51,122 @@ impl DocumentDiff {
     pub fn is_empty(&self) -> bool {
         self.hunks.is_empty()
     }
+
+    /// Splits a unified patch (`git diff` output) into one diff per file, in
+    /// patch order. The path is the new side's, or the old side's for a
+    /// deletion. Malformed hunk headers end that file's hunks rather than
+    /// guessing line numbers.
+    pub fn parse_unified(patch: &str) -> Vec<(String, DocumentDiff)> {
+        let mut files: Vec<(String, DocumentDiff)> = Vec::new();
+        let mut old_path: Option<String> = None;
+        let mut lines: Option<(usize, usize)> = None;
+        for line in patch.lines() {
+            if line.starts_with("diff --git ") {
+                old_path = None;
+                lines = None;
+                continue;
+            }
+            if let Some(path) = line.strip_prefix("--- ") {
+                old_path = patch_path(path, "a/");
+                lines = None;
+                continue;
+            }
+            if let Some(path) = line.strip_prefix("+++ ") {
+                let path = patch_path(path, "b/").or_else(|| old_path.clone());
+                if let Some(path) = path {
+                    files.push((path, DocumentDiff { hunks: Vec::new() }));
+                }
+                lines = None;
+                continue;
+            }
+            if line.starts_with("@@") {
+                lines = None;
+                let Some((_, diff)) = files.last_mut() else {
+                    continue;
+                };
+                let Some(header) = parse_hunk_header(line) else {
+                    continue;
+                };
+                lines = Some((header.old_start, header.new_start));
+                diff.hunks.push(header);
+                continue;
+            }
+            let (Some((old_line, new_line)), Some((_, diff))) = (lines.as_mut(), files.last_mut())
+            else {
+                continue;
+            };
+            let Some(hunk) = diff.hunks.last_mut() else {
+                continue;
+            };
+            let (kind, text) = match line.as_bytes().first() {
+                Some(b'+') => (DiffLineKind::Added, &line[1..]),
+                Some(b'-') => (DiffLineKind::Removed, &line[1..]),
+                Some(b' ') => (DiffLineKind::Context, &line[1..]),
+                Some(b'\\') => continue,
+                None => (DiffLineKind::Context, ""),
+                _ => continue,
+            };
+            let (old, new) = match kind {
+                DiffLineKind::Added => (None, Some(*new_line)),
+                DiffLineKind::Removed => (Some(*old_line), None),
+                DiffLineKind::Context => (Some(*old_line), Some(*new_line)),
+            };
+            if old.is_some() {
+                *old_line += 1;
+            }
+            if new.is_some() {
+                *new_line += 1;
+            }
+            hunk.lines.push(DiffLine {
+                kind,
+                old_line: old,
+                new_line: new,
+                text: text.to_owned(),
+            });
+        }
+        files
+    }
+
+    /// Lines this diff adds and removes.
+    pub fn line_counts(&self) -> (usize, usize) {
+        self.hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .fold((0, 0), |(added, removed), line| match line.kind {
+                DiffLineKind::Added => (added + 1, removed),
+                DiffLineKind::Removed => (added, removed + 1),
+                DiffLineKind::Context => (added, removed),
+            })
+    }
+}
+
+fn patch_path(raw: &str, prefix: &str) -> Option<String> {
+    let raw = raw.split('\t').next().unwrap_or(raw).trim();
+    if raw == "/dev/null" {
+        return None;
+    }
+    Some(raw.strip_prefix(prefix).unwrap_or(raw).to_owned())
+}
+
+fn parse_hunk_header(line: &str) -> Option<DiffHunk> {
+    let ranges = line.strip_prefix("@@ ")?.split(" @@").next()?;
+    let mut parts = ranges.split_whitespace();
+    let (old_start, old_len) = parse_range(parts.next()?.strip_prefix('-')?)?;
+    let (new_start, new_len) = parse_range(parts.next()?.strip_prefix('+')?)?;
+    Some(DiffHunk {
+        old_start,
+        old_len,
+        new_start,
+        new_len,
+        lines: Vec::new(),
+    })
+}
+
+fn parse_range(range: &str) -> Option<(usize, usize)> {
+    match range.split_once(',') {
+        Some((start, len)) => Some((start.parse().ok()?, len.parse().ok()?)),
+        None => Some((range.parse().ok()?, 1)),
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -246,6 +362,67 @@ fn replacement_hunk(old: &[&str], new: &[&str]) -> Vec<DiffHunk> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_patch() -> String {
+        [
+            "diff --git a/src/lib.rs b/src/lib.rs",
+            "index 1111111..2222222 100644",
+            "--- a/src/lib.rs",
+            "+++ b/src/lib.rs",
+            "@@ -1,3 +1,4 @@",
+            " fn main() {",
+            "-    old();",
+            "+    new();",
+            "+    more();",
+            " }",
+            "diff --git a/gone.txt b/gone.txt",
+            "deleted file mode 100644",
+            "--- a/gone.txt",
+            "+++ /dev/null",
+            "@@ -1 +0,0 @@",
+            "-bye",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn unified_patches_split_into_per_file_diffs_with_line_numbers() {
+        let files = DocumentDiff::parse_unified(&sample_patch());
+        assert_eq!(
+            files
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            ["src/lib.rs", "gone.txt"]
+        );
+        let (_, lib) = &files[0];
+        assert_eq!(lib.line_counts(), (2, 1));
+        let hunk = &lib.hunks[0];
+        assert_eq!((hunk.old_start, hunk.new_start), (1, 1));
+        assert_eq!(
+            hunk.lines
+                .iter()
+                .map(|line| (line.kind, line.old_line, line.new_line))
+                .collect::<Vec<_>>(),
+            [
+                (DiffLineKind::Context, Some(1), Some(1)),
+                (DiffLineKind::Removed, Some(2), None),
+                (DiffLineKind::Added, None, Some(2)),
+                (DiffLineKind::Added, None, Some(3)),
+                (DiffLineKind::Context, Some(3), Some(4)),
+            ]
+        );
+        assert_eq!(files[1].1.line_counts(), (0, 1));
+    }
+
+    #[test]
+    fn malformed_hunk_headers_drop_their_lines() {
+        let files = DocumentDiff::parse_unified(
+            &["--- a/x", "+++ b/x", "@@ broken @@", "+ignored"].join("\n"),
+        );
+        assert_eq!(files.len(), 1);
+        assert!(files[0].1.is_empty());
+    }
 
     #[test]
     fn reports_added_removed_lines_with_context() {

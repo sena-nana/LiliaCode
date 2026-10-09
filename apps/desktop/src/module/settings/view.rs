@@ -6,11 +6,10 @@ use crate::runtime_shell::{emit, IntentSink, ShellActionRow, ShellIntent};
 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
 use nana_ui::runtime::{
     AboutMetadata, AboutSection, Activate, AppContext, AppearanceSection, Button, DocumentId,
-    DonutChart, DonutSlice, Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity,
-    FormField, FrameworkError, LengthSpec, NodeStyle, QrCode, SearchDropdown, SearchDropdownEvent,
-    SearchDropdownOption, SemanticColorRole, SettingsBack, SettingsCard, SettingsPage, SettingsRow,
-    SettingsSidebar, SettingsTabSelected, StableNodeId, Stack, Switch, Text, TextChanged,
-    TextInput, TimeSeriesChart, ToggleChanged,
+    Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity, FormField, FrameworkError,
+    QrCode, SearchDropdown, SearchDropdownEvent, SearchDropdownOption, SettingsBack, SettingsCard,
+    SettingsPage, SettingsRow, SettingsSidebar, SettingsTabSelected, StableNodeId, Stack, Switch,
+    Text, TextChanged, TextInput, ToggleChanged,
 };
 use nana_ui::{
     AppearanceEvent, AppearanceSettings, ButtonKind, ControlSize, SettingsModel, SettingsState,
@@ -62,8 +61,6 @@ pub struct SettingsSnapshot {
     pub custom_agent_instruction: String,
     pub quota_days_label: String,
     pub quota_backend_label: String,
-    pub quota_values: Vec<f64>,
-    pub quota_axis_labels: Vec<String>,
     pub quota_daily: Vec<lilia_feature_usage::QuotaUsageDailyBucket>,
     pub quota_project_slices: Vec<(String, f64)>,
     pub quota_conversation_slices: Vec<(String, f64)>,
@@ -92,8 +89,12 @@ pub(crate) struct SettingsView {
     pub(crate) settings_page: Entity<SettingsPage>,
     pub(crate) appearance: Entity<AppearanceSection>,
     pub(crate) appearance_page: Entity<Stack>,
-    pub(crate) sidebar_mode: Entity<Dropdown>,
+    sidebar_mode: crate::runtime_layout::Bound<String>,
+    pub(crate) sidebar_mode_control: Entity<nana_ui::runtime::SegmentedControl>,
+    /// Grouped, then unified.
+    pub(crate) sidebar_mode_options: [Entity<nana_ui::runtime::SegmentedOption>; 2],
     pub(crate) about: Entity<AboutSection>,
+    about_page: Entity<Stack>,
     pub(crate) product_settings: Entity<Stack>,
     pub(crate) product_body: Entity<Text>,
     pub(crate) product_error: Entity<Text>,
@@ -115,8 +116,8 @@ pub(crate) struct SettingsView {
     card_body: Entity<Stack>,
     toolbar: Entity<Stack>,
     pub(crate) settings_card: Entity<SettingsCard>,
-    pub(crate) quota_chart: Option<Entity<TimeSeriesChart>>,
-    pub(crate) quota_donuts: HashMap<String, Entity<DonutChart>>,
+    pub(crate) quota_chart: Option<Entity<nana_ui::runtime::Chart>>,
+    pub(crate) quota_donuts: HashMap<String, Entity<nana_ui::runtime::Chart>>,
     pub(crate) form_switches: HashMap<String, Entity<Switch>>,
     pub(crate) extensions: crate::runtime_extensions::ExtensionBrowser,
 }
@@ -167,7 +168,7 @@ impl SettingsView {
                 )
                 .entity_ref(appearance)
                 .on(move |event: &AppearanceEvent| {
-                    emit(&appearance_sink, ShellIntent::Appearance(*event))
+                    emit(&appearance_sink, ShellIntent::Appearance(event.clone()))
                 }),
                 appearance,
             )
@@ -175,17 +176,22 @@ impl SettingsView {
         let (_, about) = context.mount_view_detached(document_id, move || {
             let about = entity_ref::<AboutSection>();
             with_refs(
-                widget(AboutSection::new(
-                    AboutMetadata::new("LiliaCode", env!("CARGO_PKG_VERSION"))
-                        .description("本机工作区"),
-                ))
+                widget(AboutSection::new(AboutMetadata::new(
+                    "LiliaCode",
+                    env!("CARGO_PKG_VERSION"),
+                )))
                 .entity_ref(about),
                 about,
             )
         })?;
         let product_settings = mount_view!(Stack, Stack::column(16.0).max_width(760.0));
         let card_body = mount_view!(Stack, Stack::column(8.0));
-        let toolbar = mount_view!(Stack, Stack::bar(8.0).wrap(true));
+        let toolbar = mount_view!(
+            Stack,
+            Stack::bar(8.0)
+                .wrap(true)
+                .justify(nana_ui::runtime::JustifySpec::End)
+        );
         let provider_sink = Arc::clone(&sink);
         let (_, provider) = context.mount_view_detached(document_id, move || {
             let provider = entity_ref::<SearchDropdown>();
@@ -297,32 +303,47 @@ impl SettingsView {
         context.append_child(product_settings, settings_card)?;
         context.append_child(settings_card, card_body)?;
         let sidebar_sink = Arc::clone(&sink);
-        let (_, sidebar_mode) = context.mount_view_detached(document_id, move || {
-            let sidebar_mode = entity_ref::<Dropdown>();
-            with_refs(
-                widget(sidebar_mode_dropdown(&settings.sidebar_display_mode))
-                    .entity_ref(sidebar_mode)
-                    .on(move |event: &DropdownEvent<Arc<str>>| {
-                        if let DropdownEvent::Select(value) = event {
-                            emit(
-                                &sidebar_sink,
-                                ShellIntent::SetSidebarDisplayMode(value.to_string()),
-                            );
-                        }
-                    }),
-                sidebar_mode,
-            )
-        })?;
+        let sidebar_mode = crate::runtime_layout::Bound::new();
+        let install_mode = sidebar_mode.clone();
+        let initial_mode = settings.sidebar_display_mode.clone();
+        let (_, (sidebar_switch, sidebar_mode_options)) =
+            context.mount_view_detached(document_id, move || {
+                let mode = install_mode.install(nana_ui::runtime::view::signal(initial_mode));
+                let control = entity_ref::<nana_ui::runtime::SegmentedControl>();
+                let options = [entity_ref(), entity_ref()];
+                let option = |value: &'static str, label: &'static str, index: usize| {
+                    let sink = Arc::clone(&sidebar_sink);
+                    nana_ui::runtime::view::segmented_option(label)
+                        .selected(move || mode.with(|mode| mode == value))
+                        .on_select(move || {
+                            emit(&sink, ShellIntent::SetSidebarDisplayMode(value.to_owned()))
+                        })
+                        .entity_ref(options[index])
+                };
+                with_refs(
+                    widget(nana_ui::runtime::SegmentedControl::new().label("侧边栏样式"))
+                        .entity_ref(control)
+                        .children((
+                            option("grouped", "按项目分组", 0),
+                            option("unified", "统一列表", 1),
+                        )),
+                    (control, options),
+                )
+            })?;
         let sidebar_mode_row = mount_view!(
             SettingsRow,
             SettingsRow::new("侧边栏样式")
-                .stacked(true)
-                .control_child(sidebar_mode.stable_id())
+                .hint("按项目分组，或把所有对话排成一个列表。")
+                .control_child(sidebar_switch.stable_id())
         );
-        context.append_child(sidebar_mode_row, sidebar_mode)?;
+        context.append_child(sidebar_mode_row, sidebar_switch)?;
+        let sidebar_card = mount_view!(SettingsCard, SettingsCard::new("侧边栏"));
+        context.append_child(sidebar_card, sidebar_mode_row)?;
+        let about_page = mount_view!(Stack, Stack::column(16.0).max_width(760.0));
+        context.append_child(about_page, about)?;
         let appearance_page = mount_view!(Stack, Stack::column(16.0).max_width(760.0));
         context.append_child(appearance_page, appearance)?;
-        context.append_child(appearance_page, sidebar_mode_row)?;
+        context.append_child(appearance_page, sidebar_card)?;
         let settings_page = mount_view!(
             SettingsPage,
             SettingsPage::new(settings.model.clone(), settings.state.clone())
@@ -347,7 +368,10 @@ impl SettingsView {
             appearance,
             appearance_page,
             sidebar_mode,
+            sidebar_mode_control: sidebar_switch,
+            sidebar_mode_options,
             about,
+            about_page,
             product_settings,
             product_body,
             product_error,
@@ -388,9 +412,6 @@ impl SettingsView {
             context.update_component(self.provider, |field, _| {
                 field.close();
             })?;
-            context.update_component(self.sidebar_mode, |field, _| {
-                field.opened = false;
-            })?;
             context.update_component(self.worktree_mode, |field, _| {
                 field.opened = false;
             })?;
@@ -401,13 +422,14 @@ impl SettingsView {
             sidebar.state = settings.state.clone();
         })?;
         context.update_component(self.appearance, |section, _| {
-            section.theme = theme;
+            section.theme_id = crate::desktop::builtin_theme_id(theme);
             section.appearance = settings.appearance.clone();
             section.platform_hint = None;
             section.material_status = Some(Arc::from(settings.material_status.as_str()));
         })?;
         let tab = settings.state.active_tab().as_str();
-        let (_heading, body, error, show_project, actions) = settings_tab_copy(settings);
+        let (_heading, body, error, show_project, mut actions) = settings_tab_copy(settings);
+        actions.sort_by_key(|action| action.primary);
         context.update_component(self.product_body, |text, _| {
             *text = Text::new(body.clone());
         })?;
@@ -427,13 +449,9 @@ impl SettingsView {
                 String::new()
             });
         })?;
-        context.update_component(self.sidebar_mode, |field, _| {
-            field.selection =
-                DropdownSelection::Single(Some(Arc::from(settings.sidebar_display_mode.as_str())));
-            if tab != "appearance" {
-                field.opened = false;
-            }
-        })?;
+        self.sidebar_mode
+            .signal()
+            .set_if_changed(settings.sidebar_display_mode.clone());
         context.update_component(self.worktree_mode, |field, _| {
             field.selection =
                 DropdownSelection::Single(Some(Arc::from(settings.project_worktree_mode.as_str())));
@@ -452,7 +470,7 @@ impl SettingsView {
         } else {
             match tab {
                 "appearance" => self.appearance_page.stable_id(),
-                "about" => self.about.stable_id(),
+                "about" => self.about_page.stable_id(),
                 _ => self.product_settings.stable_id(),
             }
         };
@@ -498,9 +516,6 @@ impl SettingsView {
             action_order.push(button.stable_id());
         }
         reconcile_children(context, self.toolbar.stable_id(), &action_order)?;
-        if !action_order.is_empty() {
-            card_order.push(self.toolbar.stable_id());
-        }
         context.update_component(self.provider, |field, _| {
             field.value = settings
                 .providers
@@ -522,6 +537,9 @@ impl SettingsView {
             card_order.push(self.provider_field.stable_id());
         }
         self.append_settings_forms(context, document_id, settings, &mut keep, &mut card_order)?;
+        if !action_order.is_empty() {
+            card_order.push(self.toolbar.stable_id());
+        }
         if settings.remote_pairing_uri.is_empty() {
             if let Some(chart) = self.remote_qr.take() {
                 let _ = context.remove_view(chart);
@@ -750,36 +768,32 @@ impl SettingsView {
             }
             "quota" => {
                 use nana_ui::runtime::view::{entity_ref, widget, with_refs};
+                let trend = crate::ui::charts::token_trend(&settings.quota_daily, 248.0);
                 let chart = if let Some(chart) = self.quota_chart {
-                    context.update_component(chart, |view, _| {
-                        *view = crate::runtime_shell::quota::trend(&settings.quota_daily, 960.0);
-                    })?;
+                    context.update_component(chart, |view, _| replace_chart(view, trend))?;
                     chart
                 } else {
-                    let trend = crate::runtime_shell::quota::trend(&settings.quota_daily, 960.0);
                     let (_, chart) = context.mount_view_detached(document_id, move || {
-                        let chart = entity_ref::<TimeSeriesChart>();
+                        let chart = entity_ref::<nana_ui::runtime::Chart>();
                         with_refs(widget(trend).entity_ref(chart), chart)
                     })?;
                     self.quota_chart = Some(chart);
                     chart
                 };
                 order.push(chart.stable_id());
-                for (key, slices) in [
-                    ("project", &settings.quota_project_slices),
-                    ("conversation", &settings.quota_conversation_slices),
-                    ("tool", &settings.quota_tool_slices),
+                for (key, name, slices) in [
+                    ("project", "项目", &settings.quota_project_slices),
+                    ("conversation", "对话", &settings.quota_conversation_slices),
+                    ("tool", "工具", &settings.quota_tool_slices),
                 ] {
+                    let ring = crate::ui::charts::share_ring(name, slices, 160.0);
                     let donut = if let Some(chart) = self.quota_donuts.get(key).copied() {
-                        context.update_component(chart, |view, _| {
-                            *view = quota_donut_chart(slices);
-                        })?;
+                        context.update_component(chart, |view, _| replace_chart(view, ring))?;
                         chart
                     } else {
-                        let donut_view = quota_donut_chart(slices);
                         let (_, chart) = context.mount_view_detached(document_id, move || {
-                            let chart = entity_ref::<DonutChart>();
-                            with_refs(widget(donut_view).entity_ref(chart), chart)
+                            let chart = entity_ref::<nana_ui::runtime::Chart>();
+                            with_refs(widget(ring).entity_ref(chart), chart)
                         })?;
                         self.quota_donuts.insert(key.to_owned(), chart);
                         chart
@@ -1002,49 +1016,13 @@ struct SettingsAction {
     intent: ShellIntent,
 }
 
-fn quota_donut_chart(slices: &[(String, f64)]) -> DonutChart {
-    let mut style = NodeStyle::default();
-    let layout = std::sync::Arc::make_mut(&mut style.layout);
-    layout.width = Some(LengthSpec::Px(160.0));
-    layout.height = Some(LengthSpec::Px(160.0));
-    layout.flex_shrink = Some(0.0);
-    let total: f64 = slices.iter().map(|(_, value)| *value).sum();
-    DonutChart::new(
-        slices
-            .iter()
-            .zip(QUOTA_DONUT_COLORS)
-            .map(|((_, value), color)| DonutSlice {
-                value: *value,
-                color,
-            }),
-    )
-    .labels(slices.iter().map(|(name, _)| name.as_str()))
-    .label(
-        slices
-            .iter()
-            .map(|(name, value)| {
-                format!(
-                    "{name}: {value:.0} ({:.1}%)",
-                    if total > 0.0 {
-                        value / total * 100.0
-                    } else {
-                        0.0
-                    }
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("；"),
-    )
-    .style(style)
+/// Swaps in a rebuilt chart while keeping the user's hover, legend and zoom,
+/// so the chart animates to the new data instead of starting over.
+fn replace_chart(view: &mut nana_ui::runtime::Chart, next: nana_ui::runtime::Chart) {
+    view.set_option(next.option);
+    view.label = next.label;
+    view.style = next.style;
 }
-
-const QUOTA_DONUT_COLORS: [SemanticColorRole; 5] = [
-    SemanticColorRole::Accent,
-    SemanticColorRole::Success,
-    SemanticColorRole::Warning,
-    SemanticColorRole::Text,
-    SemanticColorRole::Muted,
-];
 
 fn clone_parent_label(path: &str) -> String {
     if path.trim().is_empty() {
@@ -1069,15 +1047,6 @@ fn worktree_mode_dropdown(selected: &str) -> Dropdown {
             DropdownOption::new("current", "当前工作区"),
             DropdownOption::new("create", "新建工作树"),
             DropdownOption::new("existing", "选择现有工作树"),
-        ])
-}
-
-fn sidebar_mode_dropdown(selected: &str) -> Dropdown {
-    Dropdown::single(Some(selected.to_owned()))
-        .size(ControlSize::Small)
-        .options([
-            DropdownOption::new("grouped", "按项目分组"),
-            DropdownOption::new("unified", "统一列表"),
         ])
 }
 
@@ -1499,13 +1468,14 @@ mod tests {
     }
 
     #[test]
-    fn appearance_sidebar_choice_dispatches_the_display_mode() {
+    fn appearance_sidebar_choice_dispatches_and_follows_the_display_mode() {
         let mut context = AppContext::new();
         let document = DocumentId::new(324).unwrap();
-        let snapshot = settings("appearance");
+        let mut snapshot = settings("appearance");
+        snapshot.sidebar_display_mode = "grouped".into();
         let received = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::clone(&received);
-        let view = SettingsView::mount(
+        let mut view = SettingsView::mount(
             &mut context,
             document,
             &snapshot,
@@ -1513,57 +1483,35 @@ mod tests {
             Arc::new(move |event| events.lock().unwrap().push(event)),
         )
         .unwrap();
+        let [grouped, unified] = view.sidebar_mode_options;
+        let selected = |context: &AppContext| {
+            [grouped, unified]
+                .map(|option| context.read(option, |option| option.selected()).unwrap())
+        };
+        assert_eq!(selected(&context), [true, false]);
+
         context
-            .update_component(view.sidebar_mode, |_, cx| {
-                cx.emit(DropdownEvent::<Arc<str>>::Select(Arc::from("unified")))
+            .update_component(unified, |_, cx| {
+                cx.emit(nana_ui::runtime::SegmentedOptionChosen)
             })
             .unwrap();
         assert!(matches!(
             received.lock().unwrap().last(),
             Some(ShellIntent::SetSidebarDisplayMode(mode)) if mode == "unified"
         ));
-    }
 
-    #[test]
-    fn leaving_appearance_closes_the_sidebar_mode_dropdown() {
-        let mut context = AppContext::new();
-        let document = DocumentId::new(325).unwrap();
-        let appearance = settings("appearance");
-        let mut view = SettingsView::mount(
-            &mut context,
-            document,
-            &appearance,
-            ThemeMode::Light,
-            Arc::new(|_| {}),
-        )
-        .unwrap();
+        snapshot.sidebar_display_mode = "unified".into();
         view.sync(
             &mut context,
             document,
-            &appearance,
+            &snapshot,
             ThemeMode::Light,
             true,
             960.0,
         )
         .unwrap();
-        context
-            .update_component(view.sidebar_mode, |field, _| {
-                field.opened = true;
-            })
-            .unwrap();
-        let project = settings("project");
-        view.sync(
-            &mut context,
-            document,
-            &project,
-            ThemeMode::Light,
-            true,
-            960.0,
-        )
-        .unwrap();
-        assert!(!context
-            .read(view.sidebar_mode, |field| field.opened)
-            .unwrap());
+        context.flush_reactive().unwrap();
+        assert_eq!(selected(&context), [false, true]);
     }
 
     #[test]

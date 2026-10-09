@@ -20,18 +20,16 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "accesskit"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "438a7081a65b95c668db56591a4fef9bc5dad275f448bd6223fc6949d823db38"
+version = "0.25.1"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "uuid",
 ]
 
 [[package]]
 name = "accesskit_atspi_common"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9d47ad644916f6cb7e432a5ca0dbd7cc78281a9772881057bb72d4aadb93257"
+version = "0.21.0"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -43,9 +41,8 @@ dependencies = [
 
 [[package]]
 name = "accesskit_consumer"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc882fa0c9c24c53649e256311b51046cf36eca9a8f7e54ff4ef682160b0cb27"
+version = "0.39.1"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "hashbrown 0.17.1",
@@ -53,9 +50,8 @@ dependencies = [
 
 [[package]]
 name = "accesskit_macos"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3f278988416e5fb600f24d0cfffe31a249ebbff980fb9c5a3b5fbed2c579f73"
+version = "0.27.1"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -67,9 +63,8 @@ dependencies = [
 
 [[package]]
 name = "accesskit_unix"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "665c9079b7325a8168a6793437a172dda44b19a05af8ed52d7e32abaada996fe"
+version = "0.24.0"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_atspi_common",
@@ -85,9 +80,8 @@ dependencies = [
 
 [[package]]
 name = "accesskit_windows"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a59e8d7160cbac991c1345c99153783ab96423644ccb1f20617cf80c97596aa1"
+version = "0.35.1"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -720,6 +714,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "calendrical_calculations"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5abbd6eeda6885048d357edc66748eea6e0268e3dd11f326fff5bd248d779c26"
+dependencies = [
+ "core_maths",
+ "displaydoc",
+]
+
+[[package]]
 name = "calloop"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1132,6 +1136,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "either"
+version = "1.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
+
+[[package]]
 name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1310,6 +1320,18 @@ name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
+
+[[package]]
+name = "fixed_decimal"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79c3c892f121fff406e5dd6b28c1b30096b95111c30701a899d4f2b18da6d1bd"
+dependencies = [
+ "displaydoc",
+ "ryu",
+ "smallvec",
+ "writeable",
+]
 
 [[package]]
 name = "flate2"
@@ -2115,6 +2137,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9d4a992a9fe83130f41ceacceac3bb116a4355dfc9c8d6ecea4f1e4b4c6caf"
 
 [[package]]
+name = "icu_calendar"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58655df2f728e46e4eee80bddebefacf52ec3e77cdb925014b47c5a5905eb55c"
+dependencies = [
+ "calendrical_calculations",
+ "displaydoc",
+ "icu_calendar_data",
+ "icu_locale_core",
+ "icu_locale_fallback",
+ "icu_provider",
+ "ixdtf",
+ "tinystr",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_calendar_data"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc00caaa3fb3201ff7a18aa458e8c3ab042b9da154cfdf948bdde3936c31c36e"
+
+[[package]]
 name = "icu_collections"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2129,6 +2174,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "icu_datetime"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c44df99c4c5297b05653d1a1629f13bdc9fd4044acfbbaf30b15194a1eed4cd6"
+dependencies = [
+ "displaydoc",
+ "fixed_decimal",
+ "icu_calendar",
+ "icu_datetime_data",
+ "icu_decimal",
+ "icu_locale_core",
+ "icu_locale_fallback",
+ "icu_pattern",
+ "icu_plurals",
+ "icu_provider",
+ "icu_time",
+ "potential_utf",
+ "tinystr",
+ "writeable",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_datetime_data"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb5555f6e4b42233f58564351ce16d73e9e6ebfce6bdcf29875d0cfc554d6a8"
+
+[[package]]
+name = "icu_decimal"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb8f655bba2d0c0459e43a5b0e6cd3cd388109898fb3d85d048165e8b0abd08"
+dependencies = [
+ "displaydoc",
+ "fixed_decimal",
+ "icu_decimal_data",
+ "icu_locale_core",
+ "icu_locale_fallback",
+ "icu_plurals",
+ "icu_provider",
+ "writeable",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_decimal_data"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4c887fc7d4c297cf3f9436864af9e3dba7f8be9415a6c2a7f392f3b1636298c"
+
+[[package]]
 name = "icu_locale_core"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2136,10 +2233,31 @@ checksum = "d56e28588da92eee5c3201a6eff33fabdd49b62269c8938d4ff050ce4d900deb"
 dependencies = [
  "displaydoc",
  "litemap",
+ "serde",
  "tinystr",
  "writeable",
  "zerovec",
 ]
+
+[[package]]
+name = "icu_locale_fallback"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "251af8e57c9400e3eb58242fe5b8b1152b2a64fdf4cf632f923c38ccee6f2fa9"
+dependencies = [
+ "icu_locale_core",
+ "icu_locale_fallback_data",
+ "icu_provider",
+ "potential_utf",
+ "tinystr",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_locale_fallback_data"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "decf2a22ec8fa68f1a0c1129a3f8583f8f8bc24e8b9ccbe98ead99f62a4dc3a8"
 
 [[package]]
 name = "icu_normalizer"
@@ -2160,6 +2278,38 @@ name = "icu_normalizer_data"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1563da1ed3e0b3bf3d74c9b85917ac9c56464d2f57242270c09c9e752f8021a0"
+
+[[package]]
+name = "icu_pattern"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b3db611446bd92c246b03e4aa0bafa71ddb194af431ddbb42b9d70e4bfce1a0"
+dependencies = [
+ "displaydoc",
+ "either",
+ "serde",
+ "writeable",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_plurals"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e475e6766ef87b1d3c1f97be6363995b0bfaeddbc789671615df598a97ff0593"
+dependencies = [
+ "fixed_decimal",
+ "icu_locale_fallback",
+ "icu_plurals_data",
+ "icu_provider",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_plurals_data"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1251aa39a95e1333888e499b1263e1c196447a28948acf5bdabd82c046f153bf"
 
 [[package]]
 name = "icu_properties"
@@ -2190,12 +2340,38 @@ checksum = "d27bbb9d3abbefac45d55f647c9de1d44aafcd1186eb91879afef17c396c3e73"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
+ "serde",
+ "stable_deref_trait",
  "writeable",
  "yoke",
  "zerofrom",
  "zerotrie",
  "zerovec",
 ]
+
+[[package]]
+name = "icu_time"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af37e1c3b9f3ab564b619fdf4b22de169f6381eb0f7048e3ca454290c438126b"
+dependencies = [
+ "calendrical_calculations",
+ "displaydoc",
+ "icu_calendar",
+ "icu_locale_core",
+ "icu_provider",
+ "icu_time_data",
+ "ixdtf",
+ "serde",
+ "zerotrie",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_time_data"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9e21be527807cda7562cbfbdb04179f9cca46c12691d6a8073ffae6cfd7aeec"
 
 [[package]]
 name = "idna"
@@ -2320,6 +2496,12 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "ixdtf"
+version = "0.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d3667095d64c3ecffc96463a21157b04bf3e252f6e8d5750b20c02e33c194e3"
 
 [[package]]
 name = "jni"
@@ -3865,7 +4047,7 @@ dependencies = [
 [[package]]
 name = "nana-app-icon"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "flate2",
  "image",
@@ -3875,7 +4057,7 @@ dependencies = [
 [[package]]
 name = "nana-diagnostics"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -3883,7 +4065,7 @@ dependencies = [
 [[package]]
 name = "nana-frame-exchange"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "nana-gpu",
  "wgpu",
@@ -3892,16 +4074,24 @@ dependencies = [
 [[package]]
 name = "nana-gpu"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "nana-diagnostics",
  "wgpu",
 ]
 
 [[package]]
+name = "nana-icons-tabler"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
+dependencies = [
+ "nana-ui-core",
+]
+
+[[package]]
 name = "nana-js-engine"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "serde_json",
 ]
@@ -3909,7 +4099,7 @@ dependencies = [
 [[package]]
 name = "nana-svg-raster"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "resvg",
  "tiny-skia",
@@ -3918,7 +4108,7 @@ dependencies = [
 [[package]]
 name = "nana-text"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "fontdb 0.24.0",
  "harfrust",
@@ -3935,7 +4125,7 @@ dependencies = [
 [[package]]
 name = "nana-ui"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3949,8 +4139,10 @@ dependencies = [
  "nana-diagnostics",
  "nana-frame-exchange",
  "nana-gpu",
+ "nana-icons-tabler",
  "nana-svg-raster",
  "nana-text",
+ "nana-ui-charts",
  "nana-ui-core",
  "nana-ui-platform",
  "nana-ui-runtime",
@@ -3968,9 +4160,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nana-ui-charts"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
+dependencies = [
+ "bytemuck",
+ "nana-ui-core",
+]
+
+[[package]]
 name = "nana-ui-core"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "nana-diagnostics",
  "serde",
@@ -3980,7 +4181,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-devtools"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "image",
  "nana-gpu",
@@ -3988,6 +4189,7 @@ dependencies = [
  "nana-ui",
  "nana-ui-core",
  "nana-ui-scene",
+ "png",
  "pollster 1.0.1",
  "wgpu",
 ]
@@ -3995,7 +4197,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-input"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "nana-diagnostics",
  "nana-ui-core",
@@ -4004,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-platform"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "arboard",
  "jni 0.21.1",
@@ -4021,14 +4223,23 @@ dependencies = [
 [[package]]
 name = "nana-ui-runtime"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "fancy-regex 0.16.2",
+ "fixed_decimal",
  "futures-core",
  "hashbrown 0.16.1",
+ "icu_calendar",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale_core",
+ "icu_plurals",
+ "icu_provider",
+ "icu_time",
  "mermaid-svg",
  "nana-diagnostics",
  "nana-text",
+ "nana-ui-charts",
  "nana-ui-core",
  "nana-ui-input",
  "nana-ui-view-schema",
@@ -4043,29 +4254,32 @@ dependencies = [
  "two-face",
  "unicode-segmentation",
  "unicode-width",
+ "writeable",
 ]
 
 [[package]]
 name = "nana-ui-scene"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "i_overlay",
  "lyon_tessellation",
  "nana-diagnostics",
+ "nana-ui-charts",
  "nana-ui-core",
  "nana-ui-runtime",
+ "unicode-segmentation",
 ]
 
 [[package]]
 name = "nana-ui-view-schema"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 
 [[package]]
 name = "nana-window"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=cbb590e5c7ba8ebb2dadae0ec022746c91041228#cbb590e5c7ba8ebb2dadae0ec022746c91041228"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=b57ccd92d16208ad98f69fe39c892b1593159ded#b57ccd92d16208ad98f69fe39c892b1593159ded"
 dependencies = [
  "ashpd",
  "async-channel",
@@ -4084,8 +4298,10 @@ dependencies = [
  "raw-window-handle",
  "url",
  "wayland-backend",
+ "webview2-com",
  "window-vibrancy",
  "windows",
+ "windows-numerics",
  "windows-sys 0.61.2",
  "x11-dl",
  "zbus",
@@ -4895,6 +5111,8 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d83eb9bc6d8e5cf568e7a1101d60ee05e81ed50ea106026f3d18deeb046d7661"
 dependencies = [
+ "serde_core",
+ "writeable",
  "zerovec",
 ]
 
@@ -6426,6 +6644,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1e27c91459209c2986af3dcf603a5a74a4368754ce37414f59acc971167f643"
 dependencies = [
  "displaydoc",
+ "serde_core",
  "zerovec",
 ]
 
@@ -8182,6 +8401,9 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+dependencies = [
+ "either",
+]
 
 [[package]]
 name = "x11-dl"
@@ -8470,6 +8692,7 @@ dependencies = [
  "displaydoc",
  "yoke",
  "zerofrom",
+ "zerovec",
 ]
 
 [[package]]
@@ -8478,6 +8701,7 @@ version = "0.11.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb0464e17806c1d976d5cba29399c7f08e516e279e2ba493f63123b5fca67dd8"
 dependencies = [
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",

@@ -239,6 +239,7 @@ pub const TASK_SESSION_SUMMARY: &str = "lilia.task-session.summary";
 pub const TASK_SESSION_TIMELINE: &str = "lilia.task-session.timeline";
 pub const TASK_SESSION_TIMELINE_LOAD_EARLIER: &str = "lilia.task-session.timeline.load-earlier";
 pub const TASK_SESSION_TIMELINE_LATEST: &str = "lilia.task-session.timeline.latest";
+pub const TASK_SESSION_TIMELINE_SEARCH: &str = "lilia.task-session.timeline.search";
 pub const TASK_SESSION_INSPECTOR: &str = "lilia.task-session.inspector";
 pub const TASK_SESSION_INSPECTOR_TOGGLE: &str = "lilia.task-session.inspector.toggle";
 pub const TASK_SESSION_INSPECTOR_CLOSE: &str = "lilia.task-session.inspector.close";

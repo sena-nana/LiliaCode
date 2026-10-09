@@ -14,11 +14,11 @@ use nana_ui::runtime::view::{
 };
 use nana_ui::runtime::{
     ActionMenu, ActionMenuItem, Activate, AppContext, Button, Card, ComponentView, DocumentId,
-    DonutChart, DonutSlice, Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity,
-    FrameworkError, IconButton, IconGlyph, JustifySpec, KeyInput, LengthSpec, PopoverToggled,
-    SemanticColorRole, StableNodeId, Stack, TextArea, TextAtomSpan, TextChanged, TextInput,
+    Dropdown, DropdownEvent, DropdownOption, DropdownSelection, Entity, FrameworkError, IconButton,
+    IconGlyph, JustifySpec, LengthSpec, PopoverToggled, StableNodeId, Stack, TextArea,
+    TextAtomSpan, TextChanged, TextInput,
 };
-use nana_ui::{ButtonKind, ControlSize, Icon, PopoverPlacement, UI_METRICS};
+use nana_ui::{ButtonKind, ControlSize, Icon, KeyInput, PopoverPlacement, UI_METRICS};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 const PLUS_SLOT_SIZE: f32 = UI_METRICS.icon_button_size;
@@ -191,6 +191,9 @@ struct ComposerKeyState {
     content: String,
     candidates: Vec<ComposerInputAction>,
     active: usize,
+    highlight: Bound<usize>,
+    first_visible: usize,
+    window: Bound<usize>,
     can_send: bool,
     locked: bool,
     pending_blocks_send: bool,
@@ -232,6 +235,9 @@ impl ComposerBinding {
     ) {
         if self.key.content != content || self.key.candidates != candidates {
             self.key.active = 0;
+            self.key.highlight.set(0);
+            self.key.first_visible = 0;
+            self.key.window.set(0);
             self.key.submitted = false;
         }
         self.key.content = content.to_owned();
@@ -259,6 +265,20 @@ impl ComposerBinding {
     }
 }
 
+/// 补全最多同时露出的行数；方向键越过窗口边缘时窗口跟着移一行。
+const COMPLETION_VISIBLE_ROWS: usize = 8;
+
+fn completion_window_follow(active: usize, first: usize, count: usize) -> usize {
+    let span = COMPLETION_VISIBLE_ROWS.min(count);
+    if active < first {
+        active
+    } else if active >= first + span {
+        active + 1 - span
+    } else {
+        first.min(count.saturating_sub(span))
+    }
+}
+
 pub(crate) fn bind_composer_keys(
     context: &mut AppContext,
     editor: Entity<TextArea>,
@@ -266,7 +286,7 @@ pub(crate) fn bind_composer_keys(
     binding: Arc<Mutex<ComposerBinding>>,
 ) -> Result<(), FrameworkError> {
     context.on_view_key(editor, move |_, key: &KeyInput| {
-        if !key.pressed
+        if !key.is_pressed()
             || key.modifiers.shift
             || key.modifiers.control
             || key.modifiers.meta
@@ -275,16 +295,21 @@ pub(crate) fn bind_composer_keys(
             return false;
         }
         let mut binding = binding.lock().unwrap();
-        let action = match key.key.as_ref() {
+        let action = match key.logical.0.as_ref() {
             "ArrowDown" | "ArrowUp"
                 if !binding.key.candidates.is_empty() && !binding.key.locked =>
             {
                 let count = binding.key.candidates.len();
-                binding.key.active = if key.key.as_ref() == "ArrowDown" {
+                binding.key.active = if key.logical.0.as_ref() == "ArrowDown" {
                     (binding.key.active + 1) % count
                 } else {
                     (binding.key.active + count - 1) % count
                 };
+                let active = binding.key.active;
+                binding.key.highlight.set(active);
+                let first = completion_window_follow(active, binding.key.first_visible, count);
+                binding.key.first_visible = first;
+                binding.key.window.set(first);
                 return true;
             }
             "Enter" | "Tab" if !binding.key.candidates.is_empty() => {
@@ -334,34 +359,74 @@ pub(crate) fn composer_is_focused(context: &AppContext, composer: Entity<TextAre
         .is_some_and(|node| context.world().focused(node.document) == Some(composer.stable_id()))
 }
 
-fn composer_completion_entries(
-    snapshot: &ComposerViewSnapshot,
-) -> Vec<(String, String, ComposerInputAction)> {
+fn completion_entries(snapshot: &ComposerViewSnapshot) -> Vec<CompletionEntry> {
+    let task = &snapshot.composer_task_id;
+    let entry = |id: String, label: String, hint: String, icon, action| CompletionEntry {
+        key: task_key(task, &id),
+        id,
+        label,
+        hint,
+        icon,
+        action,
+    };
     snapshot
         .slash_items
         .iter()
         .map(|item| {
-            (
+            entry(
                 format!("slash-{}", item.name),
-                item.label.clone(),
+                format!("/{}", item.name),
+                if item.label == item.name {
+                    String::new()
+                } else {
+                    item.label.clone()
+                },
+                Icon::Sparkles,
                 ComposerInputAction::ApplySlash(item.name.clone()),
             )
         })
         .chain(snapshot.mention_items.iter().map(|item| {
-            (
+            entry(
                 format!("mention-{}", item.id),
                 item.label.clone(),
+                if item.id == item.label {
+                    String::new()
+                } else {
+                    item.id.clone()
+                },
+                Icon::File,
                 ComposerInputAction::SelectMention(item.id.clone()),
             )
         }))
         .chain(snapshot.reference_items.iter().map(|item| {
-            (
+            entry(
                 format!("reference-result-{}", item.id),
                 item.label.clone(),
+                String::new(),
+                Icon::MessageSquarePlus,
                 ComposerInputAction::SelectConversationReference(item.id.clone()),
             )
         }))
         .collect()
+}
+
+/// 补全浮在输入卡上方，盖住时间线底部而不挤动它。
+fn completion_card() -> Stack {
+    Stack::column(1.0)
+        .surface(nana_ui::runtime::SemanticColorRole::Surface)
+        .outline(nana_ui::runtime::SemanticColorRole::Border, 1.0)
+        .radius_px(crate::runtime_layout::COMPOSER_CARD_RADIUS)
+        .padding(4.0)
+        .with_layout(|layout| {
+            layout.position = nana_ui::runtime::PositionSpec::Absolute;
+            layout.offset_left = Some(LengthSpec::Px(0.0));
+            layout.width = Some(LengthSpec::Percent(100.0));
+            layout.offset_bottom = Some(LengthSpec::CalcPercentOffset {
+                percent: 100.0,
+                offset_px: 6.0,
+            });
+            layout.z_index = Some(10);
+        })
 }
 
 pub(crate) fn composer_atom_chips(
@@ -429,10 +494,7 @@ fn composer_model_dropdown(snapshot: &ComposerViewSnapshot) -> Dropdown {
     layout.min_width = Some(LengthSpec::Px(96.0));
     layout.max_width = Some(LengthSpec::Percent(100.0));
     layout.flex_shrink = Some(1.0);
-    layout.border_width = Some(0.0);
-    field.style.border = None;
-    field.style.background = None;
-    field
+    field.bare_trigger(true)
 }
 
 fn composer_review_dropdown(selected: &str) -> Dropdown {
@@ -478,10 +540,7 @@ fn composer_reasoning_dropdown(selected: &str, disabled: bool) -> Dropdown {
     let layout = Arc::make_mut(&mut field.style.layout);
     layout.width = Some(LengthSpec::Px(74.0));
     layout.min_width = Some(LengthSpec::Px(74.0));
-    layout.border_width = Some(0.0);
-    field.style.border = None;
-    field.style.background = None;
-    field
+    field.bare_trigger(true)
 }
 
 fn composer_attach_button() -> IconButton {
@@ -561,32 +620,6 @@ pub(crate) fn context_usage_control(
         used_tokens.to_string()
     };
     (label, percent)
-}
-
-fn usage_ring(percent: i32) -> DonutChart {
-    let used = f64::from(percent.clamp(0, 100));
-    let mut chart = DonutChart::new([
-        DonutSlice {
-            value: used,
-            color: SemanticColorRole::Accent,
-        },
-        DonutSlice {
-            value: (100.0 - used).max(0.0),
-            color: SemanticColorRole::BorderSoft,
-        },
-    ])
-    .cutout(0.62)
-    .label(format!("上下文 {used:.0}%"));
-    let layout = Arc::make_mut(&mut chart.style.layout);
-    let edge = LengthSpec::Px(22.0);
-    layout.width = Some(edge);
-    layout.height = Some(edge);
-    layout.min_width = Some(edge);
-    layout.min_height = Some(edge);
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(0.0);
-    layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
-    chart
 }
 
 fn dispatch(sink: &IntentSink, binding: &Arc<Mutex<ComposerBinding>>, action: ComposerInputAction) {
@@ -773,6 +806,8 @@ struct CompletionEntry {
     key: String,
     id: String,
     label: String,
+    hint: String,
+    icon: Icon,
     action: ComposerInputAction,
 }
 
@@ -828,18 +863,6 @@ fn worktree_entries(snapshot: &ComposerViewSnapshot) -> Vec<MenuEntry> {
                 *id == snapshot.worktree_selection,
                 ComposerInputAction::Worktree((*id).to_owned()),
             )
-        })
-        .collect()
-}
-
-fn completion_entries(snapshot: &ComposerViewSnapshot) -> Vec<CompletionEntry> {
-    composer_completion_entries(snapshot)
-        .into_iter()
-        .map(|(id, label, action)| CompletionEntry {
-            key: task_key(&snapshot.composer_task_id, &id),
-            id,
-            label,
-            action,
         })
         .collect()
 }
@@ -920,22 +943,38 @@ fn menu_surface(
 fn completion_row(
     item: CompletionEntry,
     entries: Signal<Vec<CompletionEntry>>,
+    highlight: Signal<usize>,
+    window: Signal<usize>,
     sink: IntentSink,
     binding: Arc<Mutex<ComposerBinding>>,
 ) -> impl IntoView {
     let id = item.id.clone();
+    let shown_id = item.id.clone();
     let action = item.action;
-    widget(ActionMenuItem::new(item.label))
-        .bind(move |view| {
-            if let Some(label) = entries.with(|rows| {
-                rows.iter()
-                    .find(|row| row.id == id)
-                    .map(|row| row.label.clone())
-            }) {
-                view.label = Arc::from(label);
-            }
-        })
-        .on(move |_event: &Activate| dispatch(&sink, &binding, action.clone()))
+    widget(
+        ActionMenuItem::new(item.label)
+            .hint(item.hint)
+            .leading(item.icon),
+    )
+    .visible(move || {
+        let first = window.get();
+        entries
+            .with(|rows| rows.iter().position(|row| row.id == shown_id))
+            .is_some_and(|index| (first..first + COMPLETION_VISIBLE_ROWS).contains(&index))
+    })
+    .bind(move |view| {
+        if let Some((index, label, hint)) = entries.with(|rows| {
+            rows.iter()
+                .enumerate()
+                .find(|(_, row)| row.id == id)
+                .map(|(index, row)| (index, row.label.clone(), row.hint.clone()))
+        }) {
+            view.label = Arc::from(label);
+            view.hint = (!hint.is_empty()).then(|| Arc::from(hint));
+            view.active = index == highlight.get();
+        }
+    })
+    .on(move |_event: &Activate| dispatch(&sink, &binding, action.clone()))
 }
 
 struct LiveSlots {
@@ -1004,7 +1043,7 @@ fn extra_row(row: ExtraRow, chrome: Chrome) -> AnyView {
             let binding = Arc::clone(&chrome.binding);
             widget(Stack::row(4.0).shrink(0.0))
                 .children((
-                    widget(usage_ring(percent)),
+                    widget(crate::ui::charts::usage_ring(percent)),
                     prompt_button_widget(
                         &label,
                         enabled,
@@ -1234,7 +1273,7 @@ fn bind_prompt_controls(
 ) -> (
     Option<Entity<Button>>,
     Option<Entity<Button>>,
-    Option<Entity<DonutChart>>,
+    Option<Entity<nana_ui::runtime::Chart>>,
 ) {
     let mut optimize = None;
     let mut compact = None;
@@ -1328,7 +1367,7 @@ pub struct ComposerView {
     pub(crate) interrupt: Option<Entity<IconButton>>,
     pub(crate) optimize_prompt: Option<Entity<Button>>,
     pub(crate) compact_context: Option<Entity<Button>>,
-    pub(crate) context_ring: Option<Entity<DonutChart>>,
+    pub(crate) context_ring: Option<Entity<nana_ui::runtime::Chart>>,
     pub(crate) optimize_target: String,
     pub(crate) compact_target: String,
     last_failed_revision: Option<u64>,
@@ -1474,6 +1513,13 @@ impl ComposerView {
             let reasoning_id = reasoning_id_slot.install(signal(snapshot.reasoning.clone()));
             let rows = extra_rows_slot.install(signal(extra_rows(snapshot)));
             let completion = completion_slot_signal.install(signal(completion_entries(snapshot)));
+            let (highlight, window) = {
+                let binding = view_binding.lock().unwrap();
+                (
+                    binding.key.highlight.install(signal(0usize)),
+                    binding.key.window.install(signal(0usize)),
+                )
+            };
             let review_selected = review_selection_slot.install(signal(
                 snapshot
                     .review_target
@@ -1567,44 +1613,43 @@ impl ComposerView {
                         completion_row(
                             item,
                             completion,
+                            highlight,
+                            window,
                             Arc::clone(&completion_sink),
                             Arc::clone(&completion_binding),
                         )
                     },
                 )
-                .gap(1.0);
-            let dock = widget(composer_card()).entity_ref(dock_ref).children((
-                widget(flatten_composer_textarea(TextArea::new(
-                    snapshot.composer.clone(),
-                )))
-                .entity_ref(composer_ref)
-                .placeholder(placeholder)
-                .disabled(disabled)
-                .bind(move |area| {
-                    area.atom_spans = atoms.get();
-                    let layout = Arc::make_mut(&mut area.style.layout);
-                    layout.height = Some(LengthSpec::Px(height.get()));
-                })
-                .on_input(move |event: &TextChanged| {
-                    text.set(event.value.to_string());
-                    edit_composer(&editor_binding, &editor_sink, event.value.to_string());
-                }),
-                widget(
-                    Stack::row(6.0)
-                        .width(LengthSpec::Percent(100.0))
-                        .justify(JustifySpec::End)
-                        .shrink(0.0),
-                )
-                .entity_ref(actions_ref)
-                .children((
-                    widget(composer_send_button(true))
-                        .entity_ref(send_ref)
-                        .disabled(send_off)
-                        .on_activate(move || {
-                            dispatch(&send_sink, &send_binding, ComposerInputAction::Submit)
-                        }),
-                    interrupt,
-                )),
+                .container(widget(completion_card()));
+            let editor = widget(flatten_composer_textarea(TextArea::new(
+                snapshot.composer.clone(),
+            )))
+            .entity_ref(composer_ref)
+            .placeholder(placeholder)
+            .disabled(disabled)
+            .bind(move |area| {
+                area.atom_spans = atoms.get();
+                let layout = Arc::make_mut(&mut area.style.layout);
+                layout.height = Some(LengthSpec::Px(height.get()));
+            })
+            .on_input(move |event: &TextChanged| {
+                text.set(event.value.to_string());
+                edit_composer(&editor_binding, &editor_sink, event.value.to_string());
+            });
+            let send_actions = widget(
+                Stack::row(6.0)
+                    .align(nana_ui::runtime::AlignSpec::Center)
+                    .shrink(0.0),
+            )
+            .entity_ref(actions_ref)
+            .children((
+                widget(composer_send_button(true))
+                    .entity_ref(send_ref)
+                    .disabled(send_off)
+                    .on_activate(move || {
+                        dispatch(&send_sink, &send_binding, ComposerInputAction::Submit)
+                    }),
+                interrupt,
             ));
             let review = widget(Stack::row(6.0))
                 .entity_ref(review_slot_ref)
@@ -1695,7 +1740,8 @@ impl ComposerView {
                 }
             });
             let toolbar = widget(
-                Stack::bar(8.0)
+                Stack::bar(6.0)
+                    .align(nana_ui::runtime::AlignSpec::Center)
                     .justify(JustifySpec::SpaceBetween)
                     .wrap(true),
             )
@@ -1722,16 +1768,23 @@ impl ComposerView {
                             }),
                         model,
                         reasoning,
+                        send_actions,
                     )),
             ));
+            let dock = widget(composer_card())
+                .entity_ref(dock_ref)
+                .children((editor, toolbar));
             with_refs(
                 widget(
                     Stack::column(8.0)
                         .align(nana_ui::runtime::AlignSpec::Stretch)
-                        .width(LengthSpec::Percent(100.0)),
+                        .width(LengthSpec::Percent(100.0))
+                        .with_layout(|layout| {
+                            layout.position = nana_ui::runtime::PositionSpec::Relative;
+                        }),
                 )
                 .entity_ref(stage_ref)
-                .children((completion_each, review, dock, toolbar)),
+                .children((completion_each, review, dock)),
                 (
                     (
                         stage_ref,
@@ -1908,13 +1961,19 @@ impl ComposerView {
             || failed_resync;
         self.composer_generation = composer_generation;
         if write_composer {
-            *self.composer_binding.lock().unwrap() = ComposerBinding::new(
+            let mut binding = self.composer_binding.lock().unwrap();
+            let highlight = binding.key.highlight.clone();
+            let window = binding.key.window.clone();
+            *binding = ComposerBinding::new(
                 snapshot.window_id,
                 snapshot.composer_task_id.clone(),
                 snapshot.composer_revision,
                 snapshot.composer.clone(),
                 snapshot.composer_turn_id.clone(),
             );
+            binding.key.highlight = highlight;
+            binding.key.window = window;
+            drop(binding);
             self.composer_text.set(snapshot.composer.clone());
             context.update_component(self.composer, |area, _| {
                 if area.state.value != snapshot.composer {
@@ -2051,9 +2110,9 @@ impl ComposerView {
         context: &mut AppContext,
         snapshot: &ComposerViewSnapshot,
     ) -> Result<(), FrameworkError> {
-        // The outlined card intentionally contains only the editor and its
-        // submit/stop action. Suggestions, review controls, and the small
-        // action toolbar are siblings in `stage`, outside the card.
+        // The card holds the editor and, under it, one toolbar row: menus and
+        // prompt tools on the left, model controls and submit/stop on the
+        // right. Suggestions and review controls stack above the card.
         let review_children = match snapshot.review_target.as_deref() {
             None => Vec::new(),
             Some("changes") => vec![
@@ -2090,12 +2149,13 @@ impl ComposerView {
                 self.browser_open.stable_id(),
                 self.model.stable_id(),
                 self.reasoning.stable_id(),
+                self.composer_actions.stable_id(),
             ],
         )?;
         reconcile_children(
             context,
             self.composer_dock.stable_id(),
-            &[self.composer.stable_id(), self.composer_actions.stable_id()],
+            &[self.composer.stable_id(), self.composer_toolbar.stable_id()],
         )?;
         reconcile_children(context, self.composer_actions.stable_id(), &[second])?;
         let mut stage = Vec::with_capacity(4);
@@ -2106,7 +2166,6 @@ impl ComposerView {
             stage.push(self.review_slot.stable_id());
         }
         stage.push(self.composer_dock.stable_id());
-        stage.push(self.composer_toolbar.stable_id());
         reconcile_children(context, self.stage.stable_id(), &stage)
     }
 }
@@ -2713,6 +2772,14 @@ mod tests {
         for name in ["ArrowDown", "ArrowUp", "ArrowUp"] {
             assert!(tap(&mut input, &mut context, name, false, false).prevent_default);
         }
+        context.flush_reactive().unwrap();
+        let highlighted = |context: &AppContext, id: &str| {
+            context
+                .read(view.completion_items[id], |item| item.active)
+                .unwrap()
+        };
+        assert!(highlighted(&context, "reference-result-reference-task"));
+        assert!(!highlighted(&context, "slash-review"));
         assert!(tap(&mut input, &mut context, "Enter", false, false).prevent_default);
         assert!(tap(&mut input, &mut context, "Enter", false, true).prevent_default);
         {
@@ -2752,6 +2819,50 @@ mod tests {
                 ..
             } if id == "src/lib.rs"
         ));
+    }
+
+    #[test]
+    fn a_long_completion_list_shows_eight_rows_around_the_highlight() {
+        let mut snapshot = snapshot(nana_ui_platform::WindowId(42), "task");
+        snapshot.composer_plus_open = false;
+        snapshot.composer_permission_menu_open = false;
+        snapshot.mention_items.clear();
+        snapshot.reference_items.clear();
+        snapshot.slash_items = (0..10)
+            .map(|index| ComposerSlashItem {
+                name: format!("c{index}"),
+                label: format!("命令 {index}"),
+            })
+            .collect();
+        let (mut context, document, view, _events) = mount_focused(&snapshot);
+        let mut input = ScriptedInput::bind(&mut context, document);
+        let shown = |context: &AppContext, index: usize| {
+            context
+                .world()
+                .is_overlay_reachable(view.completion_items[&format!("slash-c{index}")].stable_id())
+        };
+        context.flush_reactive().unwrap();
+        assert!((0..8).all(|index| shown(&context, index)));
+        assert!(!shown(&context, 8));
+
+        tap(&mut input, &mut context, "ArrowUp", false, false);
+        context.flush_reactive().unwrap();
+        assert!(!shown(&context, 1));
+        assert!((2..10).all(|index| shown(&context, index)));
+
+        for _ in 0..3 {
+            tap(&mut input, &mut context, "ArrowUp", false, false);
+        }
+        context.flush_reactive().unwrap();
+        assert!((2..10).all(|index| shown(&context, index)));
+
+        tap(&mut input, &mut context, "ArrowDown", false, false);
+        tap(&mut input, &mut context, "ArrowDown", false, false);
+        tap(&mut input, &mut context, "ArrowDown", false, false);
+        tap(&mut input, &mut context, "ArrowDown", false, false);
+        context.flush_reactive().unwrap();
+        assert!(shown(&context, 0));
+        assert!(!shown(&context, 9));
     }
 
     #[test]
@@ -2841,7 +2952,12 @@ mod tests {
                 ("50%".into(), false)
             );
             assert_eq!(
-                context.read(ring, |chart| chart.slices[0].value).unwrap(),
+                context
+                    .read(ring, |chart| match &chart.option.series[0] {
+                        nana_ui::runtime::chart::Series::Pie(pie) => pie.data[0].value,
+                        _ => f64::NAN,
+                    })
+                    .unwrap(),
                 50.0
             );
             assert_eq!(

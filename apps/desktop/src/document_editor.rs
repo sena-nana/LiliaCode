@@ -137,6 +137,10 @@ pub struct DocumentEditorViewState {
     /// view event whose authoritative buffer is still the right reload source.
     pub external_conflict: bool,
     pub read_only: bool,
+    /// The text as last loaded or saved: what a review of unsaved changes
+    /// compares against. Unknown for a buffer that was already dirty when
+    /// this view first saw it.
+    pub saved_text: Option<std::sync::Arc<str>>,
     pub conflict_message: Option<String>,
     pub status_message: Option<String>,
     pub diagnostics_state: DesktopDocumentDiagnosticsState,
@@ -164,6 +168,8 @@ impl DocumentEditorViewState {
             unapplied_edit: false,
             external_conflict: false,
             read_only: snapshot.read_only,
+            saved_text: (!snapshot.buffer.is_dirty())
+                .then(|| std::sync::Arc::from(snapshot.buffer.text.as_str())),
             conflict_message: None,
             status_message: None,
             diagnostics_state: DesktopDocumentDiagnosticsState::Idle,
@@ -182,6 +188,9 @@ impl DocumentEditorViewState {
             self.read_only = snapshot.read_only;
             return;
         }
+        if self.document_id != snapshot.id {
+            self.saved_text = None;
+        }
         self.document_id = snapshot.id;
         self.path_label = snapshot.canonical_path.display().to_string();
         self.language_label = snapshot
@@ -196,6 +205,9 @@ impl DocumentEditorViewState {
         }
         self.revision = snapshot.buffer.revision;
         self.dirty = snapshot.buffer.is_dirty();
+        if !self.dirty && self.saved_text.as_deref() != Some(snapshot.buffer.text.as_str()) {
+            self.saved_text = Some(std::sync::Arc::from(snapshot.buffer.text.as_str()));
+        }
         self.read_only = snapshot.read_only;
         if self.editor.text() != snapshot.buffer.text {
             self.editor.set_text(&snapshot.buffer.text);
@@ -294,6 +306,39 @@ mod tests {
             end_character,
         ));
         assert_eq!(editor.text(), text);
+    }
+
+    #[test]
+    fn review_baseline_follows_loads_and_saves_but_not_unsaved_edits() {
+        let revision =
+            |value: u64| -> BufferRevision { serde_json::from_value(value.into()).unwrap() };
+        let snapshot =
+            |text: &str, revision: BufferRevision, saved: BufferRevision| DocumentSnapshot {
+                id: DocumentId::new(1),
+                canonical_path: "document.rs".into(),
+                language: None,
+                buffer: BufferSnapshot {
+                    id: BufferId::new(1),
+                    text: text.to_owned(),
+                    revision,
+                    saved_revision: saved,
+                },
+                read_only: false,
+                disk_fingerprint: 0,
+            };
+        let mut state =
+            DocumentEditorViewState::from_snapshot(&snapshot("loaded", revision(0), revision(0)));
+        assert_eq!(state.saved_text.as_deref(), Some("loaded"));
+
+        state.sync_from_snapshot(&snapshot("edited", revision(1), revision(0)));
+        assert_eq!(state.saved_text.as_deref(), Some("loaded"));
+
+        state.sync_from_snapshot(&snapshot("edited", revision(1), revision(1)));
+        assert_eq!(state.saved_text.as_deref(), Some("edited"));
+
+        let restored =
+            DocumentEditorViewState::from_snapshot(&snapshot("unsaved", revision(3), revision(2)));
+        assert_eq!(restored.saved_text, None);
     }
 
     #[test]

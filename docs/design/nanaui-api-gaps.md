@@ -58,6 +58,32 @@
 
 | 原生内容区域 | 本地联调已有 `NativeContent`、`NativeContentRegion`、`WindowsComposition` | 正式 pin 尚未发布裁剪、可见性、焦点和合成宿主合同 | 平台宿主暂依赖本地联调，正式构建仍阻塞 |
 
+## 视图层重做补齐的接口（NanaUI `150bd172e`）
+
+| 接口 | 用途 |
+| --- | --- |
+| `Toast::timeout(Duration)` | 到时发出 `ToastDismissed`。由组件动画计时，只唤醒宿主一次 |
+| `PointerHoverChanged` | 指针进出节点子树，只发给挂了处理函数的节点。用于悬停露出消息操作 |
+| `DiffView::review_actions(false)` | 只读审阅；增删行按语义色着色 |
+| `Button::content_align` | 列表行按钮内容左对齐 |
+| `Spinner::label_visible(false)` | 侧栏运行指示只画转圈，可访问名保留 |
+| `Dropdown::bare_trigger(true)` | Composer 工具条里的模型、推理强度用无底色触发器 |
+| Markdown 代码块面板 | 围栏代码画成带内边距的面板，不再逐段洗色 |
+
+随后补齐（NanaUI `b57ccd92d`）：
+
+| 接口 | 用途 |
+| --- | --- |
+| `FocusWithinChanged` | 键盘焦点进出节点子树，规则同 `PointerHoverChanged`。监听者正在更新时延后送达。用于让悬停露出的消息操作也能被 Tab 到 |
+| `UiWorld::text_selection_bounds` | `NativeMarkdown` / `SelectableRichText` 选区在窗口里的外接矩形，计入滚动和变换。用于把选区工具条锚在选区上 |
+
+不再需要的：
+- 按光标锚定的补全弹层：Composer 补全改为贴着输入卡浮出，见 `desktop-interaction-redesign.md`。
+- `ScrollView` 原生标记：滚动地图留在应用侧，是可 Tab 的按钮。
+
+仍缺：
+- `Dropdown` 宽度设为 `Shrink` 时只按文字测量，没算下拉箭头，文字会被截断。Composer 工具条里的模型和推理强度下拉只能定宽，文字和箭头之间留白偏大。
+
 ## 第一批对 Lilia 的约束
 
 1. 新容器用 `Stack` 预设，不手写 `LayoutStyle` 布局字段。

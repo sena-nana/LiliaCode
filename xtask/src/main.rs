@@ -71,6 +71,6 @@ fn verify() -> Result {
 fn usage() -> XtaskError {
     XtaskError::failure(
         "usage",
-        "usage: cargo xtask <verify|boundary-check|pin-check|agent-debug [--no-capture|--matrix|--profile browser-agent [--no-build]]|screenshot [--out <png>|--matrix]|performance|release windows --tag <v...>|installer-smoke --tag <v...> [--path <installer>]|android doctor|android test|android build|android smoke|icons [source]>",
+        "usage: cargo xtask <verify|boundary-check|pin-check|agent-debug [--no-capture|--matrix|--profile browser-agent [--no-build]]|screenshot [--matrix] [--out-dir <dir>]|performance|release windows --tag <v...>|installer-smoke --tag <v...> [--path <installer>]|android doctor|android test|android build|android smoke|icons [source]>",
     )
 }

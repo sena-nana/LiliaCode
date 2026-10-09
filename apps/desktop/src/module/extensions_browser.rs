@@ -431,7 +431,7 @@ fn append_extension_panel(
                     "安装插件",
                     action(ExtensionsMessage::InstallPlugin),
                 )
-                .enabled(!module.plugin_source_input().trim().is_empty()),
+                .enabled(!module.busy() && !module.plugin_source_input().trim().is_empty()),
             );
         }
         if detail {

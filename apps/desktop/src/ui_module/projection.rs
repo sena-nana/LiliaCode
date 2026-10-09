@@ -29,7 +29,7 @@ projection!(AutomationProjection {
 
 projection!(ComposerProjection {
     composer: crate::module::composer::view::ComposerViewSnapshot => composer,
-    error: Option<String> => error,
+    toast: Option<ShellToast> => toast,
 });
 
 projection!(DocumentsProjection {

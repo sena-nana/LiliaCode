@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use nana_ui::runtime::view::{entity_ref, widget, with_refs, El, Signal};
+use nana_ui::runtime::view::{widget, El, Signal};
 use nana_ui::runtime::{
-    AlignSpec, AppContext, Button, Card, Chip, DocumentId, Entity, FrameworkError, IconButton,
-    JustifySpec, LengthSpec, SemanticColorRole, StableNodeId, Stack, Text, TextArea,
+    AlignSpec, AppContext, Button, Card, FrameworkError, IconButton, JustifySpec, LengthSpec,
+    SemanticColorRole, StableNodeId, Stack, Text, TextArea,
 };
 use nana_ui::{ButtonKind, CardKind, ControlSize, Icon, UI_METRICS};
 
@@ -14,6 +14,12 @@ use nana_ui::{ButtonKind, CardKind, ControlSize, Icon, UI_METRICS};
 #[derive(Clone)]
 pub(crate) struct Bound<T: 'static> {
     slot: Arc<Mutex<Option<Signal<T>>>>,
+}
+
+impl<T: 'static> Default for Bound<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: 'static> Bound<T> {
@@ -85,15 +91,6 @@ pub(crate) fn reconcile_children(
     context.reconcile_children(parent, &ordered).map(|_| ())
 }
 
-pub(crate) fn form_text_input(value: impl Into<String>) -> nana_ui::runtime::TextInput {
-    let input = nana_ui::runtime::TextInput::new(value);
-    let layout = Stack::from_layout(input.style.layout.clone())
-        .height(LengthSpec::Px(40.0))
-        .node_style()
-        .layout;
-    input.layout(layout)
-}
-
 pub(crate) fn composer_card() -> Card {
     let mut card = Card::new()
         .kind(CardKind::Outlined)
@@ -132,76 +129,6 @@ pub(crate) fn headline_slot(active: bool) -> Stack {
     }
 }
 
-pub(crate) fn headline_offset_space() -> Stack {
-    Stack::column(0.0)
-        .height(LengthSpec::Viewport {
-            axis: nana_ui_core::ViewportAxis::Height,
-            value: 16.0,
-        })
-        .shrink(0.0)
-}
-
-pub(crate) fn mount_empty_headline(
-    context: &mut AppContext,
-    document: DocumentId,
-    title: String,
-) -> Result<(Entity<Stack>, Entity<Text>, Entity<Stack>), FrameworkError> {
-    let (_, (slot, heading, actions)) = context.mount_view_detached(document, move || {
-        let slot = entity_ref::<Stack>();
-        let group = entity_ref::<Stack>();
-        let heading = entity_ref::<Text>();
-        let actions = entity_ref::<Stack>();
-        let offset = entity_ref::<Stack>();
-        with_refs(
-            widget(headline_slot(!title.trim().is_empty()))
-                .entity_ref(slot)
-                .children((
-                    widget(
-                        Stack::column(14.0)
-                            .align(AlignSpec::Center)
-                            .max_width(680.0)
-                            .width(LengthSpec::CalcPercentOffset {
-                                percent: 100.0,
-                                offset_px: -48.0,
-                            }),
-                    )
-                    .entity_ref(group)
-                    .children((
-                        widget(conversation_headline(title)).entity_ref(heading),
-                        widget(
-                            Stack::bar(6.0)
-                                .justify(JustifySpec::Center)
-                                .max_width(560.0)
-                                .min_height(LengthSpec::Px(24.0))
-                                .wrap(true),
-                        )
-                        .entity_ref(actions),
-                    )),
-                    widget(headline_offset_space()).entity_ref(offset),
-                )),
-            (slot, heading, actions),
-        )
-    })?;
-    Ok((slot, heading, actions))
-}
-
-pub(crate) fn sync_conversation_body(
-    context: &mut AppContext,
-    body: StableNodeId,
-    heading: Option<StableNodeId>,
-    error: Option<StableNodeId>,
-    timeline: StableNodeId,
-    earlier: Option<StableNodeId>,
-) -> Result<(), FrameworkError> {
-    let mut order = Vec::with_capacity(3);
-    order.extend(error);
-    order.push(heading.unwrap_or(timeline));
-    if heading.is_none() {
-        order.extend(earlier);
-    }
-    context.reconcile_children(body, &order).map(|_| ())
-}
-
 pub(crate) fn trigger_slot(width: f32, height: f32) -> Stack {
     Stack::row(0.0)
         .align(AlignSpec::Center)
@@ -228,7 +155,7 @@ pub(crate) fn pending_interaction_card() -> Card {
 }
 
 pub(crate) fn pending_actions_row() -> Stack {
-    Stack::bar(6.0).wrap(true)
+    Stack::bar(6.0).wrap(true).justify(JustifySpec::End)
 }
 
 pub(crate) fn inspector_header_bar() -> Stack {
@@ -292,23 +219,9 @@ pub(crate) fn pill_button(label: &str, kind: ButtonKind) -> Button {
     button
 }
 
-pub(crate) fn token_chip(label: impl Into<String>, selected: bool) -> Chip {
-    Chip::new(label.into()).selected(selected)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn token_chip_projects_selected_state() {
-        let idle = token_chip("Plan", false);
-        assert!(!idle.selected);
-        assert_eq!(idle.label.as_ref(), "Plan");
-        let on = token_chip("Goal", true);
-        assert!(on.selected);
-        assert_eq!(on.label.as_ref(), "Goal");
-    }
 
     #[test]
     fn composer_card_is_outlined() {

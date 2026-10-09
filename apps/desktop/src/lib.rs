@@ -25,6 +25,8 @@ mod kernel_host;
 mod markdown_images;
 mod module;
 mod navigation;
+#[cfg(test)]
+mod offscreen_tests;
 mod pending_import;
 mod project_files_panel;
 mod provider_ai_settings;
@@ -46,6 +48,7 @@ mod task_session;
 mod terminal_view;
 mod text_editor_state;
 mod todo_panel;
+mod ui;
 mod ui_module;
 mod updater;
 mod windows_identity;
